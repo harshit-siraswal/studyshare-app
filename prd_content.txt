@@ -1,0 +1,306 @@
+MyStudySpace
+Android Application
+Product Requirements Document
+
+
+Table of Contents
+1. Executive Summary
+2. User Experience Design
+3. Core Feature Requirements
+4. Non-Functional Requirements
+5. Technical Constraints
+6. Development Timeline & Milestones
+7. Risk Management
+8. Success Metrics & KPIs
+9. Appendices
+
+1. Executive Summary
+1.1 Product Vision
+MyStudySpace Android app extends the successful web platform to mobile devices, providing students with seamless access to academic resources, chat rooms, and study tools on-the-go. The app leverages native Android capabilities to deliver push notifications, offline access, and optimized performance for the mobile-first student demographic.
+1.2 Business Objectives
+Increase platform engagement by 40% through mobile accessibility
+Capture the 75% of students who prefer mobile-first experiences
+Enable offline resource access for students with limited connectivity
+Improve notification engagement rates from 12% (web) to 45% (push)
+Support multi-college expansion with native performance
+1.3 Target Users
+Primary Audience:
+Undergraduate students (18-22 years) with verified college email addresses
+Students preferring mobile devices for academic resource access
+Active participants in college chat rooms and study groups
+Secondary Audience:
+Faculty members and teaching assistants sharing course materials
+Read-only users exploring platform content before registration
+1.4 Success Metrics
+
+2. User Experience Design
+2.1 Design Philosophy
+The Android app maintains the web platform's dark-first aesthetic with teal and purple accents while optimizing for thumb-zone navigation, gesture controls, and one-handed operation. The design prioritizes content discovery, quick actions, and persistent access to the study timer.
+2.2 Material Design 3 Implementation
+Color System (Dynamic Theming):
+Primary: Teal (#4DD6C9) - CTAs, focus states, active indicators
+Secondary: Purple (#A77BF3) - Break timer, secondary actions
+Surface: Dark background (#0A0E17) with elevation overlays
+Error: Red (#DC3545) for destructive actions
+Support dynamic color extraction from wallpaper (Android 12+)
+Typography:
+Display: Roboto 32sp for headlines
+Title: Roboto Medium 20sp for card titles
+Body: Roboto Regular 16sp for content
+Label: Roboto Medium 14sp for buttons
+Monospace: JetBrains Mono for timer display
+Motion & Transitions:
+Shared element transitions for resource cards to detail view
+Spring animations (stiffness: 300) for interactive elements
+Fade through for screen transitions (300ms duration)
+Predictive back gesture with edge swipe preview
+2.3 Navigation Architecture
+Bottom Navigation Bar (Primary Navigation):
+
+Floating Action Button (FAB):
+Position: Bottom-right corner (persistent across screens)
+Function: Quick access to Study Timer
+States: Collapsed (timer icon), Expanded (timer controls)
+Color: Primary (teal) for focus mode, Accent (purple) for break mode
+2.4 Screen Flows
+Onboarding Flow:
+1. Splash Screen (2s) - MyStudySpace logo with loading animation
+2. College Selection - Visual cards for KIET, IIIT Bhagalpur, IIIT Sonepat, ABES, Delhi University
+3. Authentication - Google Sign-In with Firebase (one-tap if available)
+4. Permission Requests - Push notifications, storage (for offline downloads)
+5. Quick Tour (optional) - 3-slide introduction to key features
+Resource Discovery Flow:
+1. Home Feed - Curated resources with filters (Semester, Branch, Subject, Type)
+2. Resource Card Tap - Animated transition to detail view
+3. Resource Detail - Full metadata, preview, download/view, vote, comment
+4. In-App Viewer - PDF viewer with annotations, video player with playback controls
+
+3. Core Feature Requirements
+3.1 Authentication & Authorization
+User Story:
+As a student, I want to sign in with my college email so that I can access verified-user features like uploading and commenting.
+Requirements:
+Firebase Authentication integration with Google Sign-In
+Email domain validation (@kiet.edu, @iiitbh.ac.in, etc.) for verified status
+Biometric authentication (fingerprint, face unlock) for returning users
+Secure token storage in Android Keystore
+Read-only access for non-verified emails with upgrade prompt
+Automatic session refresh with Firebase Auth
+Sign-out with confirmation dialog and data cleanup
+Acceptance Criteria:
+User can complete Google Sign-In within 10 seconds
+Verified status is displayed with gold badge in profile
+Biometric unlock works on compatible devices (Android 9+)
+App remains logged in for 30 days without re-authentication
+Read-only users see 'Upgrade to Verified' banner on restricted actions
+3.2 Resource Management
+User Story:
+As a student, I want to browse, filter, and download study materials so that I can find relevant resources for my courses quickly.
+Features:
+Resource Feed:
+Infinite scroll with pagination (20 items per page)
+Two tabs: 'For You' (algorithm-based), 'Following' (from followed users)
+Pull-to-refresh for latest content
+Shimmer loading placeholders
+Advanced Filters:
+Bottom sheet with chip selection
+Semester (1-8), Branch (CS, IT, ECE, etc.), Subject, Type (Notes, Video, PYQ)
+Applied filters displayed as removable chips below search bar
+Filter persistence across app sessions
+Resource Cards:
+Material 3 elevated cards with color-coded badges
+Title, author (clickable profile link), upvote count, bookmark status
+Type indicator with icon (📄 Notes, 🎬 Video, 📝 PYQ)
+Quick actions: Upvote, Downvote, Bookmark, Share
+In-App PDF Viewer:
+AndroidPdfViewer library with zoom, pan, page navigation
+Night mode toggle for reduced eye strain
+Page thumbnails sidebar
+Annotation support (highlight, notes) saved locally
+Video Player:
+ExoPlayer for streaming with adaptive bitrate
+Playback speed control (0.5x, 1x, 1.5x, 2x)
+Picture-in-Picture (PiP) mode
+Resume playback from last position
+Quality selection (auto, 480p, 720p, 1080p)
+Offline Downloads:
+WorkManager for background tasks
+Download queue with priority settings
+Wi-Fi only download option
+Storage space warning (show available space before download)
+Downloaded resources accessible offline in 'Saved' tab
+3.3 Chat Rooms
+User Story:
+As a student, I want to join and participate in topic-based chat rooms so that I can discuss doubts and collaborate with peers.
+Features:
+Chat Rooms List:
+Categorized by subject and type
+Public rooms (open join), Private rooms (join code required)
+Member count, last message preview, unread badge
+Room search with fuzzy matching
+Real-Time Messaging:
+Supabase Realtime subscriptions
+Text messages with markdown support
+Image sharing (compressed to <5MB)
+Link preview generation
+Message reactions (emoji picker)
+Long-press menu: Reply, Copy, Delete (own messages)
+Room Management:
+For room creators only
+Edit room name and description
+Regenerate join code
+Ban/unban members with reason
+Delete room with confirmation
+3.4 Study Timer
+User Story:
+As a student, I want to use a Pomodoro-style timer so that I can maintain focused study sessions with regular breaks.
+Features:
+Floating Timer Widget:
+Persistent across app screens
+Collapsed state: Timer badge on FAB (shows remaining time)
+Expanded state: Full controls (Start, Pause, Reset, Settings)
+Drag-to-reposition (save position preference)
+Timer Modes:
+Focus Mode - 25 minutes (customizable 15-60 min) with teal theme
+Break Mode - 5 minutes (customizable 1-15 min) with purple theme
+Auto-transition between focus and break
+Long break (15 min) after 4 focus sessions
+Notifications & Alarms:
+Foreground service notification (shows timer, controls)
+Alarm on timer completion (vibration + sound)
+Configurable alarm sound and volume
+Do Not Disturb mode integration (silence other notifications during focus)
+Analytics & Insights:
+Local storage with optional cloud sync
+Daily/weekly/monthly session count and total focus time
+Streak tracking (consecutive days with study sessions)
+Charts: Bar graph (daily focus time), Line graph (weekly trend)
+Export data as CSV
+
+4. Non-Functional Requirements
+4.1 Performance
+4.2 Security & Privacy
+Data Encryption - TLS 1.3 for all network communications
+Secure Storage - Android Keystore for auth tokens, EncryptedSharedPreferences for sensitive data
+Certificate Pinning - Pin Supabase and Cloudinary certificates
+ProGuard/R8 - Code obfuscation for release builds
+Runtime Permissions - Request only when needed with explanation dialogs
+Privacy Policy - Accessible in Settings with acceptance tracking
+No Third-Party Trackers - Use Firebase Analytics with anonymized IDs only
+4.3 Offline Functionality
+Cached Data - Room database for resources, chat messages (last 24 hours)
+Downloaded Resources - Accessible without network in 'Saved' tab
+Offline Indicators - Banner showing 'You're offline' with retry button
+Queue Actions - Upvotes, comments, uploads queued and synced when online
+Timer Works Offline - Study timer fully functional without network
+4.4 Accessibility
+TalkBack Support - All UI elements have contentDescription attributes
+Font Scaling - Support system font sizes up to 200%
+Color Contrast - WCAG AA compliance (4.5:1 for text)
+Touch Targets - Minimum 48dp for all interactive elements
+Dark Mode - Default theme with light mode option
+Haptic Feedback - Vibration on important actions (optional)
+
+5. Technical Constraints
+5.1 Platform Requirements
+5.2 Backend Integration
+The Android app must integrate with the existing MyStudySpace backend infrastructure without modifications to server-side code. All communication occurs through REST APIs and Supabase Realtime.
+API Base URLs:
+Production: https://mystudyspace.me/api
+Supabase: https://[project-id].supabase.co
+Cloudinary: https://res.cloudinary.com/[cloud-name]
+Rate Limits:
+Default: 100 requests/minute per IP
+Write operations: 30 requests/minute
+Auth: 5 requests/minute
+5.3 Third-Party Dependencies
+
+6. Development Timeline & Milestones
+6.1 Phase 1: Foundation (Weeks 1-3)
+Project setup with Jetpack Compose + Material 3
+Firebase Authentication integration
+Supabase client configuration
+Navigation architecture (Bottom Nav + Compose Navigation)
+Design system implementation (colors, typography, components)
+Onboarding flow (Splash, College Selection, Auth)
+6.2 Phase 2: Core Features (Weeks 4-7)
+Resource feed with infinite scroll and filters
+Resource detail view with PDF/video viewers
+Bookmark and voting functionality
+Upload flow with camera, gallery, file picker
+User profiles with contributions tracking
+Chat rooms list and room creation
+6.3 Phase 3: Advanced Features (Weeks 8-10)
+Real-time messaging with Supabase Realtime
+Study timer with FAB integration
+Push notifications with FCM
+Offline downloads with WorkManager
+Room management (edit, ban, delete)
+Search functionality across resources and rooms
+6.4 Phase 4: Polish & Testing (Weeks 11-12)
+Performance optimization (LazyColumn, image caching)
+Accessibility improvements (TalkBack, font scaling)
+Edge case handling and error states
+Unit and integration tests
+Beta testing with focus group (50 users)
+Bug fixes and refinements
+6.5 Phase 5: Launch (Week 13)
+Play Store listing optimization (screenshots, description)
+Release build with ProGuard/R8 obfuscation
+Internal testing track on Play Console
+Staged rollout (10% → 50% → 100%)
+Monitor crash reports and user feedback
+Post-launch hotfixes if needed
+
+7. Risk Management
+
+8. Success Metrics & KPIs
+8.1 User Acquisition
+App Installs: 5,000 in first month, 20,000 in 3 months
+Install-to-Registration Rate: > 60% (verified or read-only)
+Verified User Conversion: > 70% of registrations
+Daily Active Users (DAU): 2,500 by month 3
+Monthly Active Users (MAU): 10,000 by month 3
+DAU/MAU Ratio: > 25% (sticky app)
+8.2 Engagement
+Average Session Duration: > 8 minutes
+Sessions per Day: > 3 sessions/user
+Resource Views: > 50,000/month by month 3
+Resource Downloads: > 10,000/month by month 3
+Chat Messages Sent: > 100,000/month by month 3
+Study Timer Usage: > 50% of DAU use timer weekly
+8.3 Retention
+Day 1 Retention: > 40%
+Day 7 Retention: > 25%
+Day 30 Retention: > 15%
+Churn Rate: < 10% monthly
+8.4 Quality
+App Store Rating: > 4.2 stars
+Crash-Free Users: > 99.5%
+ANR Rate: < 0.5%
+App Size: < 50MB initial download
+API Response Time (p95): < 500ms
+
+9. Appendices
+9.1 Glossary
+API - Application Programming Interface
+DAU - Daily Active Users
+FAB - Floating Action Button
+FCM - Firebase Cloud Messaging
+MAU - Monthly Active Users
+PiP - Picture-in-Picture
+PYQ - Previous Year Questions
+RLS - Row Level Security (Supabase)
+SDK - Software Development Kit
+9.2 References
+MyStudySpace Web Platform: https://mystudyspace.me
+Material Design 3: https://m3.material.io
+Android Developer Guide: https://developer.android.com
+Firebase Documentation: https://firebase.google.com/docs
+Supabase Documentation: https://supabase.com/docs
+Jetpack Compose: https://developer.android.com/jetpack/compose
+9.3 Document History
+
+Generated for MyStudySpace Android App Development
+
+CONFIDENTIAL - For Internal Use Only

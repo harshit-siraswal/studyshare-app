@@ -1,0 +1,202 @@
+﻿
+signing_report.txt:58
+:SHA1: D2:8B:5B:43:78
+:C3:DE:60:8A:96:76:38
+:AD:9D:2D:FD:B2:C0:86
+:33
+signing_report.txt:67
+:SHA1: D2:8B:5B:43:78
+:C3:DE:60:8A:96:76:38
+:AD:9D:2D:FD:B2:C0:86
+:33
+signing_report.txt:76
+:SHA1: D2:8B:5B:43:78
+:C3:DE:60:8A:96:76:38
+:AD:9D:2D:FD:B2:C0:86
+:33
+signing_report.txt:85
+:SHA1: D2:8B:5B:43:78
+:C3:DE:60:8A:96:76:38
+:AD:9D:2D:FD:B2:C0:86
+:33
+signing_report.txt:96
+:SHA1: D2:8B:5B:43:78
+:C3:DE:60:8A:96:76:38
+:AD:9D:2D:FD:B2:C0:86
+:33
+signing_report.txt:10
+7:SHA1: D2:8B:5B:43:7
+8:C3:DE:60:8A:96:76:3
+8:AD:9D:2D:FD:B2:C0:8
+6:33
+signing_report.txt:11
+8:SHA1: D2:8B:5B:43:7
+8:C3:DE:60:8A:96:76:3
+8:AD:9D:2D:FD:B2:C0:8
+6:33
+signing_report.txt:12
+9:SHA1: D2:8B:5B:43:7
+8:C3:DE:60:8A:96:76:3
+8:AD:9D:2D:FD:B2:C0:8
+6:33
+signing_report.txt:14
+0:SHA1: D2:8B:5B:43:7
+8:C3:DE:60:8A:96:76:3
+8:AD:9D:2D:FD:B2:C0:8
+6:33
+signing_report.txt:15
+1:SHA1: D2:8B:5B:43:7
+8:C3:DE:60:8A:96:76:3
+8:AD:9D:2D:FD:B2:C0:8
+6:33
+signing_report.txt:16
+2:SHA1: D2:8B:5B:43:7
+8:C3:DE:60:8A:96:76:3
+8:AD:9D:2D:FD:B2:C0:8
+6:33
+signing_report.txt:17
+3:SHA1: D2:8B:5B:43:7
+8:C3:DE:60:8A:96:76:3
+8:AD:9D:2D:FD:B2:C0:8
+6:33
+signing_report.txt:18
+4:SHA1: D2:8B:5B:43:7
+8:C3:DE:60:8A:96:76:3
+8:AD:9D:2D:FD:B2:C0:8
+6:33
+signing_report.txt:19
+5:SHA1: D2:8B:5B:43:7
+8:C3:DE:60:8A:96:76:3
+8:AD:9D:2D:FD:B2:C0:8
+6:33
+signing_report.txt:20
+6:SHA1: D2:8B:5B:43:7
+8:C3:DE:60:8A:96:76:3
+8:AD:9D:2D:FD:B2:C0:8
+6:33
+signing_report.txt:21
+7:SHA1: D2:8B:5B:43:7
+8:C3:DE:60:8A:96:76:3
+8:AD:9D:2D:FD:B2:C0:8
+6:33
+
+
+
+C:\Users\ASUS\Desktop
+\mystudyspace-app\flu
+tter_application_1\bu
+ild_log.txt:630:[    
+    ] :app:checkKotli
+nGradlePluginConfigur
+ationErrors (Thread[#
+6781,Execution 
+worker Thread 
+6,5,main]) started.
+C:\Users\ASUS\Desktop
+\mystudyspace-app\flu
+tter_application_1\bu
+ild_log.txt:631:[    
+    ] > Task :app:che
+ckKotlinGradlePluginC
+onfigurationErrors
+C:\Users\ASUS\Desktop
+\mystudyspace-app\flu
+tter_application_1\bu
+ild_log.txt:632:[    
+    ] Caching 
+disabled for task ':a
+pp:checkKotlinGradleP
+luginConfigurationErr
+ors' because:
+C:\Users\ASUS\Desktop
+\mystudyspace-app\flu
+tter_application_1\bu
+ild_log.txt:634:[    
+    ] Task ':app:chec
+kKotlinGradlePluginCo
+nfigurationErrors' 
+is not up-to-date 
+because:
+C:\Users\ASUS\Desktop
+\mystudyspace-app\flu
+tter_application_1\bu
+ild_log.txt:712:[    
+    ] [  +12 ms] C:\U
+sers\ASUS\.antigravit
+y\extensions\flutter\
+bin\cache\dart-sdk\bi
+n\dartaotruntime.exe 
+C:\Users\ASUS\.antigr
+avity\extensions\flut
+ter\bin\cache\dart-sd
+k\bin\snapshots\front
+end_server_aot.dart.s
+napshot --sdk-root C:
+\Users\ASUS\.antigrav
+ity\extensions\flutte
+r\bin\cache\artifacts
+\engine\common\flutte
+r_patched_sdk_product
+/ --target=flutter --
+no-print-incremental-
+dependencies -DFLUTTE
+R_VERSION=3.38.6 -DFL
+UTTER_CHANNEL=stable 
+-DFLUTTER_GIT_URL=htt
+ps://github.com/flutt
+er/flutter.git -DFLUT
+TER_FRAMEWORK_REVISIO
+N=8b87286849 -DFLUTTE
+R_ENGINE_REVISION=78f
+c3012e4 -DFLUTTER_DAR
+T_VERSION=3.10.7 -DFL
+UTTER_APP_FLAVOR= -Dd
+art.vm.profile=false 
+-Ddart.vm.product=tru
+e --delete-tostring-p
+ackage-uri=dart:ui --
+delete-tostring-packa
+ge-uri=package:flutte
+r --aot --tfa 
+--target-os android 
+--packages C:\Users\A
+SUS\Desktop\mystudysp
+ace-app\flutter_appli
+cation_1\.dart_tool\p
+ackage_config.json 
+--output-dill C:\User
+s\ASUS\Desktop\mystud
+yspace-app\flutter_ap
+plication_1\.dart_too
+l\flutter_build\d016f
+c9d0ebda1f5da6ae9ac79
+667b11\app.dill 
+--depfile C:\Users\AS
+US\Desktop\mystudyspa
+ce-app\flutter_applic
+ation_1\.dart_tool\fl
+utter_build\d016fc9d0
+ebda1f5da6ae9ac79667b
+11\kernel_snapshot_pr
+ogram.d --source file
+:///C:/Users/ASUS/Des
+ktop/mystudyspace-app
+/flutter_application_
+1/.dart_tool/flutter_
+build/dart_plugin_reg
+istrant.dart 
+--source package:flut
+ter/src/dart_plugin_r
+egistrant.dart -Dflut
+ter.dart_plugin_regis
+trant=file:///C:/User
+s/ASUS/Desktop/mystud
+yspace-app/flutter_ap
+plication_1/.dart_too
+l/flutter_build/dart_
+plugin_registrant.dar
+t --verbosity=error p
+ackage:flutter_applic
+ation_1/main.dart
+
+

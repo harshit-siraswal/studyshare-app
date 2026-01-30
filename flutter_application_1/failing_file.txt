@@ -1,0 +1,21 @@
+﻿
+[        ] 
+Unsupported 
+operation: 
+Unsupported invalid 
+type InvalidType(<inv
+alid>) 
+(InvalidType). 
+Encountered while 
+compiling file:///C:/
+Users/ASUS/Desktop/my
+studyspace-app/flutte
+r_application_1/lib/s
+creens/chatroom/disco
+ver_rooms_screen.dart
+, which contains the 
+type: FunctionType(<i
+nvalid> Function(Buil
+dContext)).
+
+

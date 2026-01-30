@@ -1,0 +1,164 @@
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:file_picker/file_picker.dart';
+import '../../config/theme.dart';
+import '../../services/backend_api_service.dart';
+import '../../services/cloudinary_service.dart';
+
+class EditProfileScreen extends StatefulWidget {
+  final String initialName;
+  final String? initialPhotoUrl;
+  final String? initialBio;
+
+  const EditProfileScreen({
+    super.key,
+    required this.initialName,
+    required this.initialPhotoUrl,
+    required this.initialBio,
+  });
+
+  @override
+  State<EditProfileScreen> createState() => _EditProfileScreenState();
+}
+
+class _EditProfileScreenState extends State<EditProfileScreen> {
+  final _api = BackendApiService();
+  late final TextEditingController _nameController;
+  late final TextEditingController _bioController;
+  PlatformFile? _pickedImage;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.initialName);
+    _bioController = TextEditingController(text: widget.initialBio ?? '');
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _bioController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickPhoto() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.image,
+      withData: true,
+    );
+    if (result != null && result.files.isNotEmpty) {
+      setState(() => _pickedImage = result.files.first);
+    }
+  }
+
+  Future<void> _save() async {
+    if (_saving) return;
+    final name = _nameController.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Name cannot be empty')),
+      );
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      String? photoUrl = widget.initialPhotoUrl;
+      if (_pickedImage != null) {
+        photoUrl = await CloudinaryService.uploadFile(_pickedImage!);
+      }
+
+      final res = await _api.updateProfile(
+        displayName: name,
+        bio: _bioController.text.trim(),
+        profilePhotoUrl: photoUrl,
+        context: context,
+      );
+      Navigator.pop(context, res['profile']);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to update profile: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = isDark ? AppTheme.darkBackground : const Color(0xFFF8FAFC);
+
+    return Scaffold(
+      backgroundColor: bg,
+      appBar: AppBar(
+        backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
+        elevation: 0,
+        title: Text('Edit Profile', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+        actions: [
+          TextButton(
+            onPressed: _saving ? null : _save,
+            child: _saving
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                : Text('Save', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Center(
+              child: GestureDetector(
+                onTap: _saving ? null : _pickPhoto,
+                child: Stack(
+                  alignment: Alignment.bottomRight,
+                  children: [
+                    CircleAvatar(
+                      radius: 48,
+                      backgroundColor: AppTheme.primary.withOpacity(0.2),
+                      backgroundImage: _pickedImage?.bytes != null
+                          ? MemoryImage(_pickedImage!.bytes!)
+                          : (widget.initialPhotoUrl != null ? NetworkImage(widget.initialPhotoUrl!) : null) as ImageProvider?,
+                      child: (widget.initialPhotoUrl == null && _pickedImage?.bytes == null)
+                          ? Text(nameInitial(_nameController.text), style: GoogleFonts.inter(fontSize: 28, fontWeight: FontWeight.bold, color: AppTheme.primary))
+                          : null,
+                    ),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: const BoxDecoration(color: AppTheme.primary, shape: BoxShape.circle),
+                      child: const Icon(Icons.edit_rounded, color: Colors.white, size: 18),
+                    )
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            TextField(
+              controller: _nameController,
+              enabled: !_saving,
+              decoration: InputDecoration(
+                labelText: 'Name',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _bioController,
+              enabled: !_saving,
+              maxLines: 4,
+              decoration: InputDecoration(
+                labelText: 'Bio',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String nameInitial(String name) => name.isNotEmpty ? name[0].toUpperCase() : 'U';
+}
+

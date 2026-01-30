@@ -1,0 +1,920 @@
+MyStudySpace
+Android Application
+Technical Requirements Document
+
+
+Table of Contents
+1. System Architecture
+2. Technology Stack
+3. Application Structure
+4. Data Layer Architecture
+5. Network Layer
+6. Authentication & Security
+7. Feature Modules
+8. Performance Optimization
+9. Testing Strategy
+10. Deployment & CI/CD
+11. Monitoring & Analytics
+
+1. System Architecture
+1.1 High-Level Architecture
+The MyStudySpace Android app follows Clean Architecture principles with clear separation between UI, Domain, and Data layers. The architecture is built using Jetpack Compose for UI, Kotlin Coroutines for asynchronous operations, and Hilt for dependency injection.
+Architecture Layers:
+Presentation Layer → Domain Layer → Data Layer → External Services
+Presentation Layer: Jetpack Compose UI, ViewModels, UI States
+Domain Layer: Use Cases, Business Logic, Repository Interfaces
+Data Layer: Repository Implementations, Local DB, Remote API clients
+External Services: Firebase Auth, Supabase DB, Cloudinary Storage
+1.2 Module Structure
+1.3 Design Patterns
+MVVM (Model-View-ViewModel) for UI layer
+Repository Pattern for data abstraction
+Use Case Pattern for domain logic encapsulation
+Observer Pattern with Kotlin Flows for reactive data
+Dependency Injection with Hilt
+Singleton Pattern for API clients and database
+
+2. Technology Stack
+2.1 Core Technologies
+2.2 Jetpack Libraries
+2.3 Network & Backend
+Retrofit 2.11.0 - HTTP client with coroutines support
+OkHttp 4.12.0 - HTTP engine with interceptors
+Kotlinx Serialization - JSON parsing
+Supabase-kt 2.0.0 - Realtime database client
+Firebase Auth SDK 21.1.0 - Authentication
+Firebase Messaging 23.4.0 - Push notifications
+2.4 Media & Storage
+Coil 2.5.0 - Image loading and caching
+ExoPlayer 2.19.1 - Video playback with adaptive streaming
+AndroidPdfViewer 3.2.0-beta.1 - PDF rendering
+Cloudinary SDK - Image upload and transformation
+2.5 Testing Libraries
+JUnit 4 - Unit testing framework
+Truth - Fluent assertions
+Mockk - Mocking library for Kotlin
+Turbine - Flow testing library
+Robolectric - Android unit testing
+Espresso - UI testing
+Compose UI Test - Compose-specific UI testing
+
+3. Application Structure
+3.1 Package Organization
+com.mystudyspace.android/
+├── app/
+│   ├── MyStudySpaceApp.kt (Application class)
+│   ├── MainActivity.kt (Single activity)
+│   └── navigation/ (NavHost setup)
+├── core/
+│   ├── ui/
+│   │   ├── components/ (Reusable composables)
+│   │   ├── theme/ (Colors, typography, shapes)
+│   │   └── utils/ (UI helpers)
+│   ├── data/
+│   │   ├── local/ (Room database)
+│   │   ├── remote/ (API clients)
+│   │   ├── repository/ (Repository implementations)
+│   │   └── model/ (Data models)
+│   └── domain/
+│       ├── model/ (Domain models)
+│       ├── repository/ (Repository interfaces)
+│       └── usecase/ (Business logic)
+├── feature/
+│   ├── auth/ (Authentication)
+│   ├── resources/ (Resource management)
+│   ├── chat/ (Chat rooms)
+│   ├── timer/ (Study timer)
+│   ├── profile/ (User profiles)
+│   └── notices/ (Announcements)
+└── di/ (Hilt modules)
+3.2 Navigation Graph
+NavHost Routes:
+splash → college_selection → auth → home
+home (contains bottom nav destinations)
+resource_detail/{resourceId}
+pdf_viewer/{fileUrl}
+video_player/{videoUrl}
+chat_room/{roomId}
+profile/{userId}
+settings
+upload
+3.3 State Management
+Each feature uses a ViewModel to manage UI state. States are represented as sealed classes or data classes and exposed as StateFlows for Compose to observe.
+Example State Pattern:
+sealed class ResourceState {
+    object Loading : ResourceState()
+    data class Success(val resources: List<Resource>) : ResourceState()
+    data class Error(val message: String) : ResourceState()
+}
+
+class ResourceViewModel @Inject constructor(
+    private val getResourcesUseCase: GetResourcesUseCase
+) : ViewModel() {
+    
+    private val _state = MutableStateFlow<ResourceState>(ResourceState.Loading)
+    val state: StateFlow<ResourceState> = _state.asStateFlow()
+    
+    fun loadResources(filters: ResourceFilters) {
+        viewModelScope.launch {
+            getResourcesUseCase(filters)
+                .catch { _state.value = ResourceState.Error(it.message ?: "Unknown error") }
+                .collect { _state.value = ResourceState.Success(it) }
+        }
+    }
+}
+
+4. Data Layer Architecture
+4.1 Room Database Schema
+4.2 Repository Pattern
+Repositories act as single source of truth, abstracting data sources from the domain layer. They implement cache-first strategies where appropriate.
+interface ResourceRepository {
+    fun getResources(filters: ResourceFilters): Flow<Result<List<Resource>>>
+    suspend fun getResourceById(id: String): Result<Resource>
+    suspend fun uploadResource(resource: CreateResourceRequest): Result<Resource>
+    suspend fun voteResource(id: String, vote: Vote): Result<Unit>
+    suspend fun bookmarkResource(id: String): Result<Unit>
+}
+
+class ResourceRepositoryImpl @Inject constructor(
+    private val remoteDataSource: ResourceRemoteDataSource,
+    private val localDataSource: ResourceLocalDataSource,
+    private val networkMonitor: NetworkMonitor
+) : ResourceRepository {
+    
+    override fun getResources(filters: ResourceFilters): Flow<Result<List<Resource>>> = flow {
+        // Cache-first strategy
+        val cachedData = localDataSource.getResources(filters)
+        if (cachedData.isNotEmpty()) {
+            emit(Result.success(cachedData))
+        }
+        
+        if (networkMonitor.isOnline()) {
+            val remoteData = remoteDataSource.getResources(filters)
+            localDataSource.saveResources(remoteData)
+            emit(Result.success(remoteData))
+        }
+    }
+}
+4.3 Data Synchronization
+Cache Invalidation: Resources cached for 30 minutes, chat messages for 24 hours
+Offline Queue: Failed actions stored and retried when network returns
+Conflict Resolution: Server state always wins for conflicts
+Periodic Sync: WorkManager syncs bookmarks and profile every 12 hours
+Selective Sync: Only changed data synced to reduce bandwidth
+
+5. Network Layer
+5.1 API Client Configuration
+@Module
+@InstallIn(SingletonComponent::class)
+object NetworkModule {
+    
+    @Provides
+    @Singleton
+    fun provideOkHttpClient(
+        authInterceptor: AuthInterceptor,
+        loggingInterceptor: HttpLoggingInterceptor
+    ): OkHttpClient = OkHttpClient.Builder()
+        .addInterceptor(authInterceptor)
+        .addInterceptor(loggingInterceptor)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(30, TimeUnit.SECONDS)
+        .certificatePinner(
+            CertificatePinner.Builder()
+                .add("mystudyspace.me", "sha256/...")
+                .add("*.supabase.co", "sha256/...")
+                .build()
+        )
+        .build()
+    
+    @Provides
+    @Singleton
+    fun provideRetrofit(okHttpClient: OkHttpClient): Retrofit = Retrofit.Builder()
+        .baseUrl("https://mystudyspace.me/api/")
+        .client(okHttpClient)
+        .addConverterFactory(Json.asConverterFactory("application/json".toMediaType()))
+        .build()
+}
+5.2 API Endpoints
+5.3 Error Handling
+sealed class ApiError {
+    data class NetworkError(val exception: IOException) : ApiError()
+    data class HttpError(val code: Int, val message: String) : ApiError()
+    data class UnknownError(val throwable: Throwable) : ApiError()
+}
+
+suspend fun <T> safeApiCall(apiCall: suspend () -> T): Result<T> {
+    return try {
+        Result.success(apiCall())
+    } catch (e: IOException) {
+        Result.failure(ApiError.NetworkError(e))
+    } catch (e: HttpException) {
+        Result.failure(ApiError.HttpError(e.code(), e.message()))
+    } catch (e: Exception) {
+        Result.failure(ApiError.UnknownError(e))
+    }
+}
+5.4 Supabase Realtime Integration
+class ChatRealtimeService @Inject constructor(
+    private val supabaseClient: SupabaseClient
+) {
+    fun subscribeToRoom(roomId: String): Flow<ChatMessage> = callbackFlow {
+        val channel = supabaseClient.realtime.channel("room_$roomId")
+        
+        channel.on(RealtimeChannel.INSERT) { message ->
+            val chatMessage = message.decodeAs<ChatMessage>()
+            trySend(chatMessage)
+        }
+        
+        channel.subscribe()
+        
+        awaitClose { channel.unsubscribe() }
+    }
+}
+
+6. Authentication & Security
+6.1 Firebase Authentication Flow
+1. User taps "Sign in with Google"
+2. Google Sign-In SDK presents account picker
+3. User selects account and authorizes
+4. Firebase SDK receives ID token
+5. App sends token to backend /auth/verify
+6. Backend validates with Firebase Admin SDK
+7. Backend checks email domain for verification
+8. Backend returns session token
+9. App stores token in Android Keystore
+10. Subsequent requests include token in Authorization header
+6.2 Token Management
+class TokenManager @Inject constructor(
+    private val keyStore: KeyStore,
+    private val encryptedPrefs: EncryptedSharedPreferences
+) {
+    suspend fun saveToken(token: String) {
+        val encryptedToken = encryptToken(token)
+        encryptedPrefs.edit {
+            putString(KEY_AUTH_TOKEN, encryptedToken)
+        }
+    }
+    
+    suspend fun getToken(): String? {
+        val encryptedToken = encryptedPrefs.getString(KEY_AUTH_TOKEN, null)
+        return encryptedToken?.let { decryptToken(it) }
+    }
+    
+    suspend fun refreshToken() {
+        val currentUser = Firebase.auth.currentUser
+        currentUser?.getIdToken(true)?.await()?.token?.let { newToken ->
+            saveToken(newToken)
+        }
+    }
+    
+    private fun encryptToken(token: String): String {
+        // Use Android Keystore for encryption
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, getSecretKey())
+        return Base64.encodeToString(cipher.doFinal(token.toByteArray()), Base64.DEFAULT)
+    }
+}
+6.3 Biometric Authentication
+class BiometricAuthManager @Inject constructor(
+    private val context: Context
+) {
+    fun isBiometricAvailable(): Boolean {
+        val biometricManager = BiometricManager.from(context)
+        return biometricManager.canAuthenticate(BIOMETRIC_STRONG) == BiometricManager.BIOMETRIC_SUCCESS
+    }
+    
+    suspend fun authenticateWithBiometric(): Result<Unit> = suspendCoroutine { continuation ->
+        val executor = ContextCompat.getMainExecutor(context)
+        val biometricPrompt = BiometricPrompt(
+            context as FragmentActivity,
+            executor,
+            object : BiometricPrompt.AuthenticationCallback() {
+                override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
+                    continuation.resume(Result.success(Unit))
+                }
+                
+                override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
+                    continuation.resume(Result.failure(Exception(errString.toString())))
+                }
+            }
+        )
+        
+        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+            .setTitle("Unlock MyStudySpace")
+            .setSubtitle("Use your fingerprint or face to sign in")
+            .setNegativeButtonText("Use password")
+            .build()
+        
+        biometricPrompt.authenticate(promptInfo)
+    }
+}
+6.4 Security Best Practices
+Never log sensitive data (tokens, passwords, PII)
+Use HTTPS-only for all network requests
+Validate SSL certificates with certificate pinning
+Store credentials in Android Keystore, not SharedPreferences
+Obfuscate code with R8/ProGuard in release builds
+Sanitize user input to prevent XSS in chat messages
+Implement rate limiting on client side (prevent abuse)
+Clear sensitive data on logout
+Use scoped storage for downloaded files (Android 10+)
+Request runtime permissions only when needed with rationale
+
+7. Feature Modules
+7.1 Resource Management Module
+Components:
+ResourceFeedScreen - Lazy column with infinite scroll
+ResourceFilterSheet - Bottom sheet for filter selection
+ResourceCard - Composable displaying resource metadata
+ResourceDetailScreen - Full details with actions
+PdfViewerScreen - PDF rendering with zoom/pan
+VideoPlayerScreen - ExoPlayer integration with controls
+UploadScreen - Multi-source file picker with metadata form
+ViewModels:
+ResourceFeedViewModel - Manages feed state, filters, pagination
+ResourceDetailViewModel - Handles voting, bookmarking, comments
+UploadViewModel - Manages upload process and progress
+7.2 Chat Module
+Components:
+ChatRoomsScreen - List of available rooms
+ChatRoomScreen - Message list with input bar
+MessageBubble - Individual message composable
+RoomSettingsSheet - Edit, ban, delete options
+CreateRoomDialog - Room creation form
+Real-time Synchronization:
+Uses Supabase Realtime to subscribe to room channels. New messages trigger Flow emissions, updating the UI reactively. Offline messages are queued and sent when connection is restored.
+7.3 Study Timer Module
+Architecture:
+TimerService - Foreground service running timer
+TimerRepository - Manages timer state and sessions
+TimerViewModel - Exposes timer state to UI
+TimerFAB - Floating action button with timer badge
+TimerWidget - Home screen widget (optional)
+Foreground Service Implementation:
+class TimerService : Service() {
+    private var timeRemaining = 0L
+    private var isRunning = false
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_START -> startTimer()
+            ACTION_PAUSE -> pauseTimer()
+            ACTION_RESET -> resetTimer()
+        }
+        return START_STICKY
+    }
+    
+    private fun startTimer() {
+        isRunning = true
+        showNotification()
+        scope.launch {
+            while (isRunning && timeRemaining > 0) {
+                delay(1000)
+                timeRemaining -= 1000
+                updateNotification(timeRemaining)
+            }
+            if (timeRemaining == 0) {
+                playAlarm()
+                showCompletionNotification()
+            }
+        }
+    }
+    
+    private fun showNotification() {
+        val notification = NotificationCompat.Builder(this, TIMER_CHANNEL_ID)
+            .setContentTitle("Study Timer")
+            .setContentText(formatTime(timeRemaining))
+            .setSmallIcon(R.drawable.ic_timer)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setOngoing(true)
+            .addAction(R.drawable.ic_pause, "Pause", pausePendingIntent)
+            .addAction(R.drawable.ic_stop, "Stop", stopPendingIntent)
+            .build()
+        
+        startForeground(TIMER_NOTIFICATION_ID, notification)
+    }
+}
+
+8. Performance Optimization
+8.1 Jetpack Compose Optimization
+Use remember and derivedStateOf for computed values
+Apply key() in LazyColumn to prevent recomposition
+Use LaunchedEffect with proper keys to avoid re-launches
+Implement stable data classes (mark with @Stable)
+Use Modifier.drawWithCache for custom drawing
+Defer heavy composables with LazyLayoutState
+Use SubcomposeLayout for measured children
+8.2 Image Loading Optimization
+val imageLoader = ImageLoader.Builder(context)
+    .memoryCache {
+        MemoryCache.Builder(context)
+            .maxSizePercent(0.25) // 25% of app memory
+            .build()
+    }
+    .diskCache {
+        DiskCache.Builder()
+            .directory(context.cacheDir.resolve("image_cache"))
+            .maxSizeBytes(512 * 1024 * 1024) // 512 MB
+            .build()
+    }
+    .respectCacheHeaders(false) // Ignore server cache headers
+    .crossfade(true)
+    .build()
+
+// Usage in Compose
+@Composable
+fun ResourceImage(url: String) {
+    AsyncImage(
+        model = ImageRequest.Builder(LocalContext.current)
+            .data(url)
+            .crossfade(true)
+            .size(Size.ORIGINAL) // Full size
+            .transformations(RoundedCornersTransformation(8.dp.toPx()))
+            .build(),
+        contentDescription = null,
+        contentScale = ContentScale.Crop,
+        modifier = Modifier.fillMaxWidth()
+    )
+}
+8.3 Database Optimization
+Add indexes on frequently queried columns (user_id, room_id, created_at)
+Use LIMIT and OFFSET for pagination
+Batch inserts for multiple records
+Use Room's @Transaction for atomic operations
+Implement FTS (Full-Text Search) for search queries
+Vacuum database periodically to reclaim space
+Use Flow<List<T>> for reactive queries
+8.4 Background Task Optimization
+@HiltWorker
+class DownloadWorker @AssistedInject constructor(
+    @Assisted appContext: Context,
+    @Assisted workerParams: WorkerParameters,
+    private val downloadRepository: DownloadRepository
+) : CoroutineWorker(appContext, workerParams) {
+    
+    override suspend fun doWork(): Result {
+        val resourceId = inputData.getString(KEY_RESOURCE_ID) ?: return Result.failure()
+        
+        setForeground(createForegroundInfo())
+        
+        return try {
+            downloadRepository.downloadResource(resourceId) { progress ->
+                setProgress(workDataOf(KEY_PROGRESS to progress))
+            }
+            Result.success()
+        } catch (e: Exception) {
+            if (runAttemptCount < 3) {
+                Result.retry()
+            } else {
+                Result.failure()
+            }
+        }
+    }
+    
+    private fun createForegroundInfo(): ForegroundInfo {
+        val notification = NotificationCompat.Builder(applicationContext, DOWNLOAD_CHANNEL_ID)
+            .setContentTitle("Downloading resource")
+            .setProgress(100, 0, false)
+            .setSmallIcon(R.drawable.ic_download)
+            .build()
+        
+        return ForegroundInfo(DOWNLOAD_NOTIFICATION_ID, notification)
+    }
+}
+
+// Schedule download
+val downloadWork = OneTimeWorkRequestBuilder<DownloadWorker>()
+    .setInputData(workDataOf(KEY_RESOURCE_ID to resourceId))
+    .setConstraints(
+        Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.UNMETERED) // Wi-Fi only
+            .setRequiresStorageNotLow(true)
+            .build()
+    )
+    .build()
+
+WorkManager.getInstance(context).enqueue(downloadWork)
+
+9. Testing Strategy
+9.1 Unit Testing
+Test Pyramid:
+Unit Tests (70%) → Integration Tests (20%) → UI Tests (10%)
+Unit Test Coverage:
+ViewModels: Test state transitions, error handling
+Use Cases: Test business logic in isolation
+Repositories: Test with mocked data sources
+Utilities: Test helper functions and extensions
+Target: > 80% code coverage
+Example ViewModel Test:
+@ExperimentalCoroutinesTest
+class ResourceViewModelTest {
+    
+    @get:Rule
+    val instantExecutorRule = InstantTaskExecutorRule()
+    
+    private val testDispatcher = StandardTestDispatcher()
+    private val mockGetResourcesUseCase: GetResourcesUseCase = mockk()
+    private lateinit var viewModel: ResourceViewModel
+    
+    @Before
+    fun setup() {
+        Dispatchers.setMain(testDispatcher)
+        viewModel = ResourceViewModel(mockGetResourcesUseCase)
+    }
+    
+    @After
+    fun tearDown() {
+        Dispatchers.resetMain()
+    }
+    
+    @Test
+    fun `loadResources should update state to Success when use case returns data`() = runTest {
+        // Given
+        val resources = listOf(Resource(id = "1", title = "Test"))
+        coEvery { mockGetResourcesUseCase(any()) } returns flowOf(resources)
+        
+        // When
+        viewModel.loadResources(ResourceFilters.default())
+        testDispatcher.scheduler.advanceUntilIdle()
+        
+        // Then
+        val state = viewModel.state.value
+        assertThat(state).isInstanceOf(ResourceState.Success::class.java)
+        assertThat((state as ResourceState.Success).resources).isEqualTo(resources)
+    }
+    
+    @Test
+    fun `loadResources should update state to Error when use case throws exception`() = runTest {
+        // Given
+        val errorMessage = "Network error"
+        coEvery { mockGetResourcesUseCase(any()) } throws IOException(errorMessage)
+        
+        // When
+        viewModel.loadResources(ResourceFilters.default())
+        testDispatcher.scheduler.advanceUntilIdle()
+        
+        // Then
+        val state = viewModel.state.value
+        assertThat(state).isInstanceOf(ResourceState.Error::class.java)
+        assertThat((state as ResourceState.Error).message).isEqualTo(errorMessage)
+    }
+}
+9.2 Integration Testing
+Repository Tests: Test with real Room database (in-memory)
+API Client Tests: Test with MockWebServer
+End-to-End Flow Tests: Test complete user journeys
+Realtime Tests: Test Supabase subscriptions with test server
+9.3 UI Testing
+@RunWith(AndroidJUnit4::class)
+class ResourceFeedScreenTest {
+    
+    @get:Rule
+    val composeTestRule = createAndroidComposeRule<MainActivity>()
+    
+    @Test
+    fun resourceFeed_displaysResources_whenDataLoaded() {
+        // Given
+        val resources = listOf(
+            Resource(id = "1", title = "Data Structures Notes"),
+            Resource(id = "2", title = "Algorithms Video")
+        )
+        
+        composeTestRule.setContent {
+            ResourceFeedScreen(
+                state = ResourceState.Success(resources),
+                onResourceClick = {},
+                onFilterClick = {}
+            )
+        }
+        
+        // Then
+        composeTestRule.onNodeWithText("Data Structures Notes").assertExists()
+        composeTestRule.onNodeWithText("Algorithms Video").assertExists()
+    }
+    
+    @Test
+    fun resourceFeed_showsLoadingIndicator_whenLoading() {
+        composeTestRule.setContent {
+            ResourceFeedScreen(
+                state = ResourceState.Loading,
+                onResourceClick = {},
+                onFilterClick = {}
+            )
+        }
+        
+        composeTestRule.onNodeWithTag("loading_indicator").assertExists()
+    }
+    
+    @Test
+    fun resourceCard_triggersClickCallback_whenTapped() {
+        var clickedResourceId: String? = null
+        val resource = Resource(id = "1", title = "Test Resource")
+        
+        composeTestRule.setContent {
+            ResourceCard(
+                resource = resource,
+                onClick = { clickedResourceId = it }
+            )
+        }
+        
+        composeTestRule.onNodeWithText("Test Resource").performClick()
+        assertThat(clickedResourceId).isEqualTo("1")
+    }
+}
+
+10. Deployment & CI/CD
+10.1 Build Variants
+10.2 CI/CD Pipeline (GitHub Actions)
+Workflow Steps:
+1. Trigger: Push to main, develop, or PR
+2. Checkout code
+3. Set up JDK 17
+4. Cache Gradle dependencies
+5. Run unit tests
+6. Run lint checks
+7. Build APK/AAB
+8. Run instrumentation tests (Firebase Test Lab)
+9. Upload artifacts
+10. Deploy to Play Console (staging track)
+11. Notify team (Slack/Discord)
+GitHub Actions Config:
+name: Android CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up JDK 17
+      uses: actions/setup-java@v3
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: gradle
+    
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+    
+    - name: Run unit tests
+      run: ./gradlew test
+    
+    - name: Run lint
+      run: ./gradlew lint
+    
+    - name: Build release APK
+      run: ./gradlew assembleRelease
+    
+    - name: Upload APK
+      uses: actions/upload-artifact@v3
+      with:
+        name: app-release.apk
+        path: app/build/outputs/apk/release/app-release.apk
+    
+    - name: Deploy to Play Console
+      if: github.ref == 'refs/heads/main'
+      run: ./gradlew publishReleaseBundle
+      env:
+        PLAY_STORE_JSON_KEY: ${{ secrets.PLAY_STORE_JSON_KEY }}
+10.3 Play Store Release Process
+1. Internal Testing (Alpha): Dev team (10 users)
+2. Closed Testing (Beta): Focus group (50-100 users)
+3. Open Testing: Public beta (opt-in)
+4. Staged Rollout: 10% → 25% → 50% → 100%
+5. Monitor crash reports and ratings
+6. Hotfix if critical issues found
+7. Full rollout after 48 hours of stability
+
+11. Monitoring & Analytics
+11.1 Firebase Crashlytics
+// Initialize in Application class
+FirebaseCrashlytics.getInstance().setCrashlyticsCollectionEnabled(!BuildConfig.DEBUG)
+
+// Log non-fatal exceptions
+try {
+    riskyOperation()
+} catch (e: Exception) {
+    FirebaseCrashlytics.getInstance().recordException(e)
+}
+
+// Set custom keys for context
+FirebaseCrashlytics.getInstance().apply {
+    setCustomKey("user_id", currentUserId)
+    setCustomKey("college_id", currentCollegeId)
+    setCustomKey("screen", "ResourceDetail")
+}
+
+// Log breadcrumbs
+FirebaseCrashlytics.getInstance().log("User tapped resource: $resourceId")
+11.2 Firebase Analytics
+screen_view - Track screen navigation
+resource_view - Resource detail viewed
+resource_download - Resource downloaded
+chat_message_sent - Message sent in chat
+timer_completed - Study session completed
+search_performed - Search query executed
+upload_completed - Resource uploaded
+user_signed_in - Authentication event
+app_error - Error encountered
+Analytics Implementation:
+class AnalyticsLogger @Inject constructor(
+    private val firebaseAnalytics: FirebaseAnalytics
+) {
+    fun logScreenView(screenName: String) {
+        firebaseAnalytics.logEvent(FirebaseAnalytics.Event.SCREEN_VIEW) {
+            param(FirebaseAnalytics.Param.SCREEN_NAME, screenName)
+        }
+    }
+    
+    fun logResourceView(resourceId: String, resourceType: String) {
+        firebaseAnalytics.logEvent("resource_view") {
+            param("resource_id", resourceId)
+            param("resource_type", resourceType)
+            param("timestamp", System.currentTimeMillis())
+        }
+    }
+    
+    fun logTimerCompleted(duration: Long, mode: String) {
+        firebaseAnalytics.logEvent("timer_completed") {
+            param("duration_minutes", duration / 60000)
+            param("mode", mode) // "focus" or "break"
+        }
+    }
+}
+11.3 Performance Monitoring
+Firebase Performance Monitoring for app startup, network, and screen rendering
+Custom traces for critical user flows (login, upload, download)
+Network request monitoring (latency, success rate)
+Frame rendering metrics (slow frames, frozen frames)
+App size tracking for APK/AAB size regression
+11.4 User Feedback Collection
+In-app rating prompt after 5 successful sessions
+Feedback form in Settings with screenshot attachment
+Automatic bug report on crash with reproduction steps
+Beta tester feedback channel (Discord/Slack)
+Play Store review monitoring and response automation
+
+12. Appendix
+12.1 build.gradle.kts Configuration
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+    id("com.google.dagger.hilt.android")
+    id("com.google.gms.google-services")
+    id("com.google.firebase.crashlytics")
+    kotlin("kapt")
+    kotlin("plugin.serialization")
+}
+
+android {
+    namespace = "com.mystudyspace.android"
+    compileSdk = 34
+    
+    defaultConfig {
+        applicationId = "com.mystudyspace.android"
+        minSdk = 26
+        targetSdk = 34
+        versionCode = 1
+        versionName = "1.0.0"
+        
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+    
+    buildTypes {
+        debug {
+            isMinifyEnabled = false
+            applicationIdSuffix = ".debug"
+            versionNameSuffix = "-debug"
+        }
+        
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            signingConfig = signingConfigs.getByName("release")
+        }
+    }
+    
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
+    
+    composeOptions {
+        kotlinCompilerExtensionVersion = "1.5.8"
+    }
+    
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+    }
+}
+
+dependencies {
+    // Jetpack Compose
+    implementation(platform("androidx.compose:compose-bom:2024.01.00"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.activity:activity-compose:1.8.2")
+    implementation("androidx.navigation:navigation-compose:2.7.6")
+    
+    // Lifecycle & ViewModel
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
+    
+    // Coroutines
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    
+    // Hilt
+    implementation("com.google.dagger:hilt-android:2.50")
+    kapt("com.google.dagger:hilt-compiler:2.50")
+    implementation("androidx.hilt:hilt-navigation-compose:1.1.0")
+    
+    // Networking
+    implementation("com.squareup.retrofit2:retrofit:2.11.0")
+    implementation("com.jakewharton.retrofit:retrofit2-kotlinx-serialization-converter:1.0.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.6.2")
+    
+    // Firebase
+    implementation(platform("com.google.firebase:firebase-bom:32.7.0"))
+    implementation("com.google.firebase:firebase-auth-ktx")
+    implementation("com.google.firebase:firebase-crashlytics-ktx")
+    implementation("com.google.firebase:firebase-analytics-ktx")
+    implementation("com.google.firebase:firebase-messaging-ktx")
+    
+    // Supabase
+    implementation("io.github.jan-tennert.supabase:postgrest-kt:2.0.0")
+    implementation("io.github.jan-tennert.supabase:realtime-kt:2.0.0")
+    implementation("io.ktor:ktor-client-android:2.3.7")
+    
+    // Room
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    kapt("androidx.room:room-compiler:2.6.1")
+    
+    // DataStore
+    implementation("androidx.datastore:datastore-preferences:1.0.0")
+    
+    // WorkManager
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+    
+    // Image Loading
+    implementation("io.coil-kt:coil-compose:2.5.0")
+    
+    // Media
+    implementation("androidx.media3:media3-exoplayer:1.2.0")
+    implementation("androidx.media3:media3-ui:1.2.0")
+    implementation("com.github.barteksc:android-pdf-viewer:3.2.0-beta.1")
+    
+    // Testing
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("com.google.truth:truth:1.1.5")
+    testImplementation("io.mockk:mockk:1.13.9")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
+    testImplementation("app.cash.turbine:turbine:1.0.0")
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.5.1")
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-tooling")
+}
+12.2 Glossary
+AAB - Android App Bundle (Play Store distribution format)
+APK - Android Package (installable file)
+BOM - Bill of Materials (dependency version management)
+CI/CD - Continuous Integration / Continuous Deployment
+DAO - Data Access Object (Room database interface)
+DI - Dependency Injection
+DSL - Domain Specific Language (Kotlin for Gradle)
+FAB - Floating Action Button
+KSP - Kotlin Symbol Processing (annotation processor)
+MVVM - Model-View-ViewModel (architectural pattern)
+PiP - Picture-in-Picture
+TLS - Transport Layer Security
+12.3 Reference Links
+Android Developers: https://developer.android.com
+Jetpack Compose: https://developer.android.com/jetpack/compose
+Material Design 3: https://m3.material.io
+Kotlin Documentation: https://kotlinlang.org/docs
+Firebase Documentation: https://firebase.google.com/docs
+Supabase Kotlin Client: https://github.com/supabase-community/supabase-kt
+MyStudySpace Backend API: https://mystudyspace.me/api/docs
+
+Generated for MyStudySpace Android App Development
+
+CONFIDENTIAL - Technical Specification

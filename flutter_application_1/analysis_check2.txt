@@ -1,0 +1,35 @@
+Analyzing chatroom_screen.dart...                               
+
+   info - Don't use 'BuildContext's across async gaps - lib\screens\chatroom\chatroom_screen.dart:172:28 - use_build_context_synchronously
+  error - The argument for the named parameter 'body' was already specified - lib\screens\chatroom\chatroom_screen.dart:303:7 - duplicate_named_argument
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\chatroom\chatroom_screen.dart:311:46 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\chatroom\chatroom_screen.dart:337:42 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\chatroom\chatroom_screen.dart:359:41 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\chatroom\chatroom_screen.dart:395:91 - deprecated_member_use
+  error - The method 'PostCard' isn't defined for the type '_ChatRoomScreenState' - lib\screens\chatroom\chatroom_screen.dart:407:18 - undefined_method
+  error - The named parameter 'userEmail' is required, but there's no corresponding argument - lib\screens\chatroom\chatroom_screen.dart:417:41 - missing_required_argument
+  error - The named parameter 'roomId' isn't defined - lib\screens\chatroom\chatroom_screen.dart:419:21 - undefined_named_parameter
+  error - The named parameter 'currentUserEmail' isn't defined - lib\screens\chatroom\chatroom_screen.dart:420:21 - undefined_named_parameter
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\chatroom\chatroom_screen.dart:437:80 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\chatroom\chatroom_screen.dart:441:120 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\chatroom\chatroom_screen.dart:496:35 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\chatroom\chatroom_screen.dart:515:55 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\chatroom\chatroom_screen.dart:547:54 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\chatroom\chatroom_screen.dart:629:68 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\chatroom\chatroom_screen.dart:643:66 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\chatroom\chatroom_screen.dart:674:64 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\chatroom\chatroom_screen.dart:728:64 - deprecated_member_use
+warning - The declaration '_buildActionButton' isn't referenced - lib\screens\chatroom\chatroom_screen.dart:779:10 - unused_element
+   info - The local variable '_selectedFile' starts with an underscore - lib\screens\chatroom\chatroom_screen.dart:804:19 - no_leading_underscores_for_local_identifiers
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:859:49 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:864:56 - use_build_context_synchronously
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\chatroom\chatroom_screen.dart:936:55 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\chatroom\chatroom_screen.dart:954:55 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\chatroom\chatroom_screen.dart:1070:46 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\chatroom\chatroom_screen.dart:1072:65 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:1133:43 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:1134:43 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:1135:50 - use_build_context_synchronously
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\chatroom\chatroom_screen.dart:1167:42 - deprecated_member_use
+
+31 issues found. (ran in 1.8s)
