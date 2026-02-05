@@ -201,7 +201,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     borderRadius: BorderRadius.circular(40),
                     boxShadow: [
                       BoxShadow(
-                        color: page.gradient[0].withOpacity(0.4),
+                        color: page.gradient[0].withValues(alpha: 0.4),
                         blurRadius: 40,
                         offset: const Offset(0, 20),
                       ),
@@ -210,7 +210,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                   child: Icon(
                     page.icon,
                     size: 80,
-                    color: Colors.white,
+                    color: page.iconColor,
                   ),
                 ),
               );

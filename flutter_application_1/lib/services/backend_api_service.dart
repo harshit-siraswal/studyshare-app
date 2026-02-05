@@ -1,10 +1,8 @@
 import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import '../config/app_config.dart';
-import 'recaptcha_service.dart';
 
 /// Backend API client (same pattern as Studyspace/src/lib/api.ts).
 ///
@@ -104,6 +102,7 @@ class BackendApiService {
     required String collegeId,
     required BuildContext context,
     int? durationInDays,
+    List<String>? tags,
   }) async {
     return _requestJson(
       '/api/chat/rooms',
@@ -113,10 +112,24 @@ class BackendApiService {
         'description': description,
         'isPrivate': isPrivate,
         'collegeId': collegeId,
-        'durationDays': durationInDays,
+        'durationInDays': durationInDays,
+        if (tags != null) 'tags': tags,
       },
       contextForRecaptcha: context,
       recaptchaAction: 'create_chat_room',
+    );
+  }
+
+  /// Leave a chat room
+  Future<Map<String, dynamic>> leaveChatRoom({
+    required String roomId,
+    required BuildContext context,
+  }) async {
+    return _requestJson(
+      '/api/chat/rooms/$roomId/leave',
+      method: 'POST',
+      contextForRecaptcha: context,
+      recaptchaAction: 'leave_chat_room',
     );
   }
 
@@ -147,7 +160,22 @@ class BackendApiService {
     return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
-
+  /// Search chat rooms by query or tag
+  Future<List<Map<String, dynamic>>> searchChatRooms({
+    required String collegeId,
+    String? query,
+    String? tag,
+  }) async {
+    final queryParams = <String, String>{'collegeId': collegeId};
+    if (query != null && query.isNotEmpty) queryParams['q'] = query;
+    if (tag != null && tag.isNotEmpty) queryParams['tag'] = tag;
+    
+    final queryString = queryParams.entries.map((e) => '${e.key}=${Uri.encodeComponent(e.value)}').join('&');
+    
+    final data = await _requestJson('/api/chat/rooms/search?$queryString', method: 'GET');
+    final list = (data['rooms'] as List?) ?? const [];
+    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
 
   Future<Map<String, dynamic>> voteChatMessage({
     required String messageId,
@@ -251,10 +279,14 @@ class BackendApiService {
     return _requestJson('/api/votes/$resourceId', method: 'GET');
   }
 
+  Future<Map<String, dynamic>> getBookmarks() async {
+    return _requestJson('/api/bookmarks', method: 'GET');
+  }
+
   Future<Map<String, dynamic>> addBookmark({
     required String itemId,
     required String type, // 'resource' or 'notice'
-    required BuildContext context,
+    BuildContext? context,
   }) async {
     return _requestJson(
       '/api/bookmarks',
@@ -270,7 +302,7 @@ class BackendApiService {
 
   Future<void> removeBookmarkByItem({
     required String itemId,
-    required BuildContext context,
+    BuildContext? context,
   }) async {
     await _requestJson(
       '/api/bookmarks/item/$itemId',
@@ -293,8 +325,23 @@ class BackendApiService {
   }
 
   // ----------------------------
+  // Notices
+  // ----------------------------
+
+  Future<List<Map<String, dynamic>>> getNotices(String collegeId) async {
+    final data = await _requestJson('/api/notices?college_id=${Uri.encodeQueryComponent(collegeId)}', method: 'GET');
+    final list = (data['notices'] as List?) ?? const [];
+    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+  // ----------------------------
   // Notice comments
   // ----------------------------
+
+  Future<List<Map<String, dynamic>>> getNoticeComments(String noticeId) async {
+    final data = await _requestJson('/api/notices/$noticeId/comments', method: 'GET');
+    final list = (data['comments'] as List?) ?? const [];
+    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
 
   Future<Map<String, dynamic>> postNoticeComment({
     required String noticeId,
@@ -395,8 +442,21 @@ class BackendApiService {
   // Payments
   // ----------------------------
 
-  Future<Map<String, dynamic>> createPaymentOrder() async {
-    return _requestJson('/api/payments/order', method: 'POST');
+  Future<Map<String, dynamic>> createPaymentOrder({
+    required int amount,
+    required String planId,
+    BuildContext? context,
+  }) async {
+    return _requestJson(
+      '/api/payments/order', 
+      method: 'POST',
+      body: {
+        'amount': amount,
+        'planId': planId,
+      },
+      contextForRecaptcha: context,
+      recaptchaAction: 'create_payment_order',
+    );
   }
 
   Future<Map<String, dynamic>> verifyPayment({
@@ -426,6 +486,88 @@ class BackendApiService {
         'code': code,
         'collegeId': collegeId,
       },
+    );
+  }
+
+  Future<Map<String, dynamic>> getUserVotes(String roomId) async {
+    return _requestJson('/api/chat/rooms/$roomId/votes', method: 'GET');
+  }
+
+  // Reporting
+  Future<void> reportPost(String postId, String reason, String reporterId, {String type = 'post'}) async {
+    await _requestJson(
+      '/api/reports',
+      method: 'POST',
+      body: {
+        'postId': postId,
+        'reason': reason,
+        'reporterId': reporterId,
+        'reportType': type,
+      },
+    );
+  }
+  // ----------------------------
+  // Notifications & Follows
+  // ----------------------------
+
+  Future<List<Map<String, dynamic>>> getNotifications({int limit = 20, int offset = 0}) async {
+    final data = await _requestJson('/api/notifications?limit=$limit&offset=$offset', method: 'GET');
+    final list = (data['notifications'] as List?) ?? const [];
+    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  Future<void> markNotificationRead(int id) async {
+    await _requestJson('/api/notifications/$id/read', method: 'POST');
+  }
+
+  Future<void> markAllNotificationsRead() async {
+    await _requestJson('/api/notifications/read-all', method: 'POST');
+  }
+
+  // Follows
+  Future<void> sendFollowRequest(String targetId, BuildContext context) async {
+    await _requestJson(
+        '/api/follows/requests', 
+        method: 'POST', 
+        body: {'targetId': targetId},
+        contextForRecaptcha: context,
+        recaptchaAction: 'follow_user'
+    );
+  }
+
+  Future<void> acceptFollowRequest(int requestId) async {
+    await _requestJson('/api/follows/requests/$requestId/accept', method: 'POST');
+  }
+  
+  Future<void> rejectFollowRequest(int requestId) async {
+    await _requestJson('/api/follows/requests/$requestId/reject', method: 'POST');
+  }
+
+  // ----------------------------
+  // Push Notifications (FCM)
+  // ----------------------------
+
+  /// Register FCM token for push notifications
+  Future<void> registerFcmToken({
+    required String token,
+    required String platform, // 'ios' or 'android'
+  }) async {
+    await _requestJson(
+      '/api/notifications/fcm-token',
+      method: 'POST',
+      body: {
+        'token': token,
+        'platform': platform,
+      },
+    );
+  }
+
+  /// Delete FCM token (on logout)
+  Future<void> deleteFcmToken(String token) async {
+    await _requestJson(
+      '/api/notifications/fcm-token',
+      method: 'DELETE',
+      body: {'token': token},
     );
   }
 }

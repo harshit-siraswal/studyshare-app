@@ -67,26 +67,17 @@ class _NoticeCardState extends State<NoticeCard> {
           const SnackBar(content: Text('Notice saved to bookmarks')),
         );
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      debugPrint('Error toggling saved status: $e\n$stackTrace');
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
+        const SnackBar(content: Text('Something went wrong. Please try again.')),
       );
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
   
-  void _showComments() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => NoticeCommentsSheet(
-        noticeId: widget.notice['id'],
-        noticeTitle: widget.notice['title'] ?? 'Notice',
-      ),
-    );
-  }
+
 
 
 
@@ -111,7 +102,7 @@ class _NoticeCardState extends State<NoticeCard> {
         boxShadow: [
           if (!widget.isDark)
             BoxShadow(
-              color: Colors.black.withOpacity(0.02),
+              color: Colors.black.withValues(alpha: 0.02),
               blurRadius: 4,
               offset: const Offset(0, 2),
             ),
@@ -418,7 +409,9 @@ class _NoticeCardState extends State<NoticeCard> {
         [XFile(file.path)],
         text: 'Check out this notice on MyStudySpace!',
       );
-    } catch (e) {
+      
+      // Clean up temporary file
+      await file.delete();    } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to generate image: $e')),
@@ -427,197 +420,4 @@ class _NoticeCardState extends State<NoticeCard> {
   }
 }
 
-class NoticeCommentsSheet extends StatefulWidget {
-  final String noticeId;
-  final String noticeTitle;
-  
-  const NoticeCommentsSheet({super.key, required this.noticeId, required this.noticeTitle});
 
-  @override
-  State<NoticeCommentsSheet> createState() => _NoticeCommentsSheetState();
-}
-
-class _NoticeCommentsSheetState extends State<NoticeCommentsSheet> {
-  final SupabaseService _supabaseService = SupabaseService();
-  final AuthService _authService = AuthService();
-  final TextEditingController _commentController = TextEditingController();
-  
-  List<Map<String, dynamic>> _comments = [];
-  bool _isLoading = true;
-  bool _isPosting = false;
-  
-  @override
-  void initState() {
-    super.initState();
-    _loadComments();
-  }
-  
-  Future<void> _loadComments() async {
-    final comments = await _supabaseService.getNoticeComments(widget.noticeId);
-    if (mounted) {
-      setState(() {
-        _comments = comments;
-        _isLoading = false;
-      });
-    }
-  }
-  
-  Future<void> _postComment() async {
-    final text = _commentController.text.trim();
-    if (text.isEmpty) return;
-    
-    final email = _authService.userEmail;
-    if (email == null) return;
-    
-    setState(() => _isPosting = true);
-    
-    try {
-      await _supabaseService.addNoticeComment(
-        noticeId: widget.noticeId,
-        content: text,
-        userEmail: email,
-        userName: _authService.displayName ?? email.split('@')[0],
-      );
-      
-      _commentController.clear();
-      await _loadComments();
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-    } finally {
-      if (mounted) setState(() => _isPosting = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.75,
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: Column(
-        children: [
-          // Header
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Text(
-                  'Comments',
-                  style: GoogleFonts.inter(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : Colors.black,
-                  ),
-                ),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.pop(context),
-                  color: isDark ? Colors.white : Colors.black,
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1),
-          
-          // Comments List
-          Expanded(
-            child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
-                : _comments.isEmpty
-                    ? Center(child: Text('No comments yet', style: GoogleFonts.inter(color: Colors.grey)))
-                    : ListView.builder(
-                        padding: const EdgeInsets.all(16),
-                        itemCount: _comments.length,
-                        itemBuilder: (context, index) {
-                          final c = _comments[index];
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 16),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                CircleAvatar(
-                                  radius: 16,
-                                  backgroundColor: AppTheme.primary,
-                                  child: Text(
-                                    (c['user_name'] ?? 'U')[0].toUpperCase(),
-                                    style: GoogleFonts.inter(color: Colors.white, fontSize: 12),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        c['user_name'] ?? 'User',
-                                        style: GoogleFonts.inter(
-                                          fontWeight: FontWeight.w600,
-                                          fontSize: 13,
-                                          color: isDark ? Colors.white : Colors.black,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        c['content'] ?? '',
-                                        style: GoogleFonts.inter(
-                                          fontSize: 14,
-                                          color: isDark ? Colors.white70 : Colors.black87,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-          ),
-          
-          // Input
-          Container(
-            padding: EdgeInsets.only(
-              left: 16, 
-              right: 16, 
-              top: 12, 
-              // Account for both keyboard and system navigation
-              bottom: (MediaQuery.of(context).viewInsets.bottom > 0
-                  ? MediaQuery.of(context).viewInsets.bottom
-                  : MediaQuery.of(context).padding.bottom) + 12
-            ),
-            decoration: BoxDecoration(
-              border: Border(top: BorderSide(color: Colors.grey.withOpacity(0.2))),
-              color: isDark ? const Color(0xFF1E293B) : Colors.white,
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _commentController,
-                    style: GoogleFonts.inter(color: isDark ? Colors.white : Colors.black),
-                    decoration: InputDecoration(
-                      hintText: 'Add a comment...',
-                      hintStyle: GoogleFonts.inter(color: Colors.grey),
-                      border: InputBorder.none,
-                    ),
-                  ),
-                ),
-                IconButton(
-                  icon: _isPosting 
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                      : Icon(Icons.send_rounded, color: AppTheme.primary),
-                  onPressed: _isPosting ? null : _postComment,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}

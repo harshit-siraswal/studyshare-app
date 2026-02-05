@@ -1,13 +1,19 @@
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
+import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
+import 'package:audioplayers/audioplayers.dart';
 import '../../config/theme.dart';
 import '../../models/resource.dart';
+import '../notifications/notification_screen.dart';
+import '../../providers/theme_provider.dart';
 import '../../services/supabase_service.dart';
+import '../../services/download_service.dart';
 import '../../widgets/resource_card.dart';
-import '../../widgets/upload_resource_dialog.dart';
 import 'bookmarks_screen.dart';
 import 'syllabus_screen.dart';
+import 'resource_search_screen.dart';
 
 class StudyScreen extends StatefulWidget {
   final String collegeId;
@@ -34,16 +40,21 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
   late TabController _tabController;
 
   // Tab state
-  int _selectedTabIndex = 0;
+  // int _selectedTabIndex = 0; // Removed unused
   
   // For You resources
   List<Resource> _resources = [];
   bool _isLoading = true;
   bool _isLoadingMore = false;
+  final AudioPlayer _audioPlayer = AudioPlayer();
+
   
   // Following resources
   List<Resource> _followingResources = [];
   bool _isLoadingFollowing = true;
+
+  // Downloaded resources
+  List<Resource> _downloadedResources = [];
 
   // Filters
   String? _selectedSemester;
@@ -55,17 +66,13 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
   List<String> _semesters = [];
   List<String> _branches = [];
   List<String> _subjects = [];
-  final List<String> _types = ['All', 'Notes', 'Video', 'PYQ'];
+  final List<String> _types = ['All', 'Notes', 'Video', 'PYQ', 'Downloads'];
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);  // 3 tabs now
-    _tabController.addListener(() {
-      if (_tabController.indexIsChanging) {
-        setState(() => _selectedTabIndex = _tabController.index);
-      }
-    });
+    _tabController = TabController(length: 3, vsync: this);  // 3 tabs: For You, Following, Syllabus
+    // _tabController.addListener(() { ... }); // Removed
     _loadFilters();
     _loadResources();
     _loadFollowingFeed();
@@ -77,7 +84,19 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
     _searchController.dispose();
     _scrollController.dispose();
     _tabController.dispose();
+    _audioPlayer.dispose();
     super.dispose();
+  }
+
+  Future<void> _playRetroSound() async {
+    try {
+      // User requested a retro machine sound. 
+      // Ensure the file exists at assets/sounds/retro_scroll.mp3
+      await _audioPlayer.stop(); // Stop previous to prevent overlap buildup
+      await _audioPlayer.play(AssetSource('sounds/retro_scroll.mp3'), volume: 0.3);
+    } catch (e) {
+      debugPrint('Error playing sound: $e');
+    }
   }
 
   Future<void> _loadFollowingFeed() async {
@@ -122,6 +141,15 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
         _resources = [];
         _isLoading = true;
       });
+    }
+
+    // Handle Downloads Filter
+    if (_selectedType == 'Downloads') {
+      setState(() {
+        _resources = DownloadService().getAllDownloadedResources();
+        _isLoading = false;
+      });
+      return;
     }
 
     try {
@@ -176,16 +204,7 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
     }
   }
 
-  void _showFilterSheet() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.darkSurface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) => _buildFilterSheet(),
-    );
-  }
+  // Unused method removed
 
   @override
   Widget build(BuildContext context) {
@@ -194,7 +213,7 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: SafeArea(
-        bottom: false,
+        bottom: true,
         child: Padding(
           padding: EdgeInsets.zero,
           child: Column(
@@ -205,27 +224,30 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
             // Tab Bar for For You / Following
             _buildTabBar(isDark),
             
-            // Search bar (only for For You tab)
-            if (_selectedTabIndex == 0) _buildSearchBar(),
-            
-            // Quick filters (only for For You tab)
-            if (_selectedTabIndex == 0) _buildQuickFilters(),
-            
             // Tab content
             Expanded(
               child: TabBarView(
                 controller: _tabController,
                 children: [
                   // For You Tab
-                  RefreshIndicator(
-                    onRefresh: () => _loadResources(refresh: true),
-                    color: AppTheme.primary,
-                    child: _isLoading
-                        ? _buildLoadingSkeleton()
-                        : _resources.isEmpty
-                            ? _buildEmptyState()
-                            : _buildResourcesGrid(),
+                  Column(
+                    children: [
+                       _buildSearchBar(),
+                       _buildQuickFilters(),
+                       Expanded(
+                         child: RefreshIndicator(
+                            onRefresh: () => _loadResources(refresh: true),
+                            color: AppTheme.primary,
+                            child: _isLoading
+                                ? _buildLoadingSkeleton()
+                                : _resources.isEmpty
+                                    ? _buildEmptyState()
+                                    : _buildResourcesGrid(),
+                          ),
+                       ),
+                    ],
                   ),
+                  
                   // Following Tab
                   RefreshIndicator(
                     onRefresh: _loadFollowingFeed,
@@ -253,13 +275,13 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       decoration: BoxDecoration(
         color: isDark ? AppTheme.darkCard : Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(30),
         border: Border.all(color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder),
       ),
       child: TabBar(
         controller: _tabController,
         indicator: BoxDecoration(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(25),
           color: AppTheme.primary,
         ),
         indicatorSize: TabBarIndicatorSize.tab,
@@ -283,7 +305,7 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.people_outline_rounded, size: 64, color: AppTheme.textMuted.withOpacity(0.5)),
+          Icon(Icons.people_outline_rounded, size: 64, color: AppTheme.textMuted.withValues(alpha: 0.5)),
           const SizedBox(height: 16),
           Text(
             'No resources from people you follow',
@@ -292,7 +314,7 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
           const SizedBox(height: 8),
           Text(
             'Follow students to see their uploads here',
-            style: GoogleFonts.inter(fontSize: 13, color: AppTheme.textMuted.withOpacity(0.7)),
+            style: GoogleFonts.inter(fontSize: 13, color: AppTheme.textMuted.withValues(alpha: 0.7)),
           ),
         ],
       ),
@@ -395,7 +417,7 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
                         width: 48,
                         height: 48,
                         decoration: BoxDecoration(
-                          color: (dept['color'] as Color).withOpacity(0.1),
+                          color: (dept['color'] as Color).withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Center(
@@ -431,7 +453,7 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: AppTheme.primary.withOpacity(0.1),
+              color: AppTheme.primary.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
@@ -470,9 +492,9 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: AppTheme.primary.withOpacity(0.1),
+                  color: AppTheme.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: AppTheme.primary.withOpacity(0.3)),
+                  border: Border.all(color: AppTheme.primary.withValues(alpha: 0.3)),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -522,7 +544,12 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
           ),
           // Notification bell
           IconButton(
-            onPressed: () {},
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const NotificationScreen()),
+              );
+            },
             icon: Icon(
               Icons.notifications_outlined,
               color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
@@ -535,200 +562,446 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
 
   Widget _buildSearchBar() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
-    // Check if any filter is active
-    final hasActiveFilters = _selectedType != null || _selectedSubject != null;
-    
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+    final hasActiveFilters = (_selectedSemester != null && _selectedSemester != 'All') ||
+        (_selectedBranch != null && _selectedBranch != 'All') ||
+        _selectedSubject != null ||
+        (_selectedType != null && _selectedType != 'All');
+
+    return GestureDetector(
+      onTap: () {
+         Navigator.of(context).push(
+           PageRouteBuilder(
+             pageBuilder: (context, animation, secondaryAnimation) => ResourceSearchScreen(
+               collegeId: widget.collegeId,
+               userEmail: widget.userEmail,
+             ),
+             transitionsBuilder: (context, animation, secondaryAnimation, child) {
+               const begin = Offset(0.0, 0.05); 
+               const end = Offset.zero;
+               const curve = Curves.easeOutCubic;
+               var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+               return FadeTransition(
+                 opacity: animation,
+                 child: SlideTransition(position: animation.drive(tween), child: child),
+               );
+             },
+             transitionDuration: const Duration(milliseconds: 200),
+           ),
+         );
+      },
       child: Container(
+        height: 50,
+        margin: const EdgeInsets.symmetric(horizontal: 20),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF2F2F7), // iOS system gray
-          borderRadius: BorderRadius.circular(28), // More rounded, pill-like
-        ),
-        child: TextField(
-          controller: _searchController,
-          style: GoogleFonts.inter(
-            color: isDark ? Colors.white : Colors.black,
-            fontWeight: FontWeight.w400,
-            fontSize: 16,
+          color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+          borderRadius: BorderRadius.circular(30), // Rounded
+          border: Border.all(
+            color: isDark ? Colors.white24 : Colors.black12,
+            width: 0.5,
           ),
-          onSubmitted: (_) => _loadResources(refresh: true),
-          onChanged: (_) => setState(() {}), // Refresh to show/hide clear button
-          decoration: InputDecoration(
-            hintText: 'Search resources...',
-            hintStyle: GoogleFonts.inter(
-              color: isDark ? Colors.grey[500] : Colors.grey[600],
-              fontWeight: FontWeight.w400,
-              fontSize: 16,
+          boxShadow: [
+             if (!isDark)
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.search,
+              color: isDark ? Colors.grey : Colors.black54,
+              size: 22,
             ),
-            prefixIcon: Padding(
-              padding: const EdgeInsets.only(left: 16, right: 8),
-              child: Icon(
-                Icons.search_rounded,
-                color: isDark ? Colors.grey[500] : Colors.grey[600],
-                size: 22,
+            const SizedBox(width: 12),
+            Text(
+              'Search resources...',
+              style: GoogleFonts.inter(
+                color: isDark ? const Color(0xFF8E8E93) : Colors.grey.shade400,
+                fontSize: 16,
               ),
             ),
-            prefixIconConstraints: const BoxConstraints(minWidth: 46),
-            suffixIcon: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Clear button (when text exists)
-                if (_searchController.text.isNotEmpty)
-                  GestureDetector(
-                    onTap: () {
-                      _searchController.clear();
-                      setState(() {});
-                      _loadResources(refresh: true);
-                    },
-                    child: Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(
-                        color: isDark ? Colors.grey[700] : Colors.grey[400],
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        Icons.close_rounded,
-                        color: isDark ? Colors.grey[300] : Colors.white,
-                        size: 14,
-                      ),
-                    ),
-                  ),
-                const SizedBox(width: 8),
-                // Filter button (inside the search bar)
-                GestureDetector(
-                  onTap: _showFilterSheet,
-                  child: Container(
-                    margin: const EdgeInsets.only(right: 8),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: hasActiveFilters 
-                          ? AppTheme.primary 
-                          : (isDark ? Colors.grey[800] : Colors.grey[300]),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.tune_rounded,
-                          color: hasActiveFilters ? Colors.white : (isDark ? Colors.grey[400] : Colors.grey[700]),
-                          size: 18,
-                        ),
-                        if (hasActiveFilters) ...[
-                          const SizedBox(width: 4),
-                          Text(
-                            '${(_selectedType != null ? 1 : 0) + (_selectedSubject != null ? 1 : 0)}',
-                            style: GoogleFonts.inter(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
+            const Spacer(),
+            const Spacer(),
+            // Filter Icon Button
+            GestureDetector(
+              onTap: _showFilterOptionsSheet,
+              child: Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: hasActiveFilters ? AppTheme.primary : (isDark ? Colors.grey[800] : Colors.grey[200]),
+                  shape: BoxShape.circle,
                 ),
-              ],
+                child: Icon(
+                  Icons.tune_rounded,
+                  color: hasActiveFilters ? Colors.white : (isDark ? Colors.grey[400] : Colors.grey[600]),
+                  size: 18,
+                ),
+              ),
             ),
-            border: InputBorder.none,
-            enabledBorder: InputBorder.none,
-            focusedBorder: InputBorder.none,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 16),
-          ),
+          ],
         ),
       ),
     );
   }
 
+  // Horizontal list of resource type filters
   Widget _buildQuickFilters() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
-    return Column(
-      children: [
-        // Type filters row
-        SizedBox(
-          height: 44,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            children: [
-              for (final type in _types)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: Text(type),
-                    selected: _selectedType == type || (_selectedType == null && type == 'All'),
-                    onSelected: (selected) {
-                      setState(() {
-                        _selectedType = selected ? type : null;
-                      });
+    return Container(
+      height: 44,
+      margin: const EdgeInsets.only(top: 12, bottom: 8),
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        itemCount: _types.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final type = _types[index];
+          final isSelected = _selectedType == type || (_selectedType == null && type == 'All');
+          return GestureDetector(
+            onTap: () {
+              setState(() {
+                _selectedType = type == 'All' ? null : type;
+                _loadResources(refresh: true);
+              });
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: isSelected ? AppTheme.primary : (isDark ? const Color(0xFF2C2C2E) : Colors.grey.shade100),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: isSelected ? AppTheme.primary : (isDark ? Colors.white24 : Colors.grey.shade300),
+                  width: 0.5,
+                ),
+              ),
+              child: Text(
+                type,
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+                  color: isSelected ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  void _showFilterOptionsSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent, // Use transparent to handle rounded corners
+      isScrollControlled: true,
+      builder: (context) => _buildFilterSheetContent(),
+    );
+  }
+
+  Widget _buildFilterSheetContent() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
+    final titleColor = isDark ? Colors.white : Colors.black;
+    final subTitleColor = isDark ? Colors.grey : Colors.black54;
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.75,
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        children: [
+          // Handle
+          Center(
+            child: Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40, 
+              height: 4,
+              decoration: BoxDecoration(
+                color: isDark ? Colors.grey[800] : Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+          
+          // Title / Header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  'Filters',
+                  style: GoogleFonts.inter(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: titleColor,
+                  ),
+                ),
+                TextButton(
+                  onPressed: () {
+                    // Reset all
+                    setState(() {
+                      _selectedSemester = null;
+                      _selectedBranch = null;
+                      _selectedSubject = null;
+                      _selectedType = null;
                       _loadResources(refresh: true);
+                    });
+                    Navigator.pop(context);
+                  },
+                  child: Text(
+                    'Reset',
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.error,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          const Divider(height: 1),
+          
+          // Scrollable Content
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Semester - Dropdown Select
+                  Text('Semester', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: subTitleColor)),
+                  const SizedBox(height: 12),
+                  _buildFilterDropdown(
+                    value: _selectedSemester ?? 'All',
+                    items: _semesters,
+                    onChanged: (val) {
+                      setState(() {
+                        _selectedSemester = val == 'All' ? null : val;
+                        _loadResources(refresh: true);
+                      });
+                      (context as Element).markNeedsBuild();
                     },
-                    selectedColor: AppTheme.primary.withOpacity(0.2),
-                    backgroundColor: isDark ? AppTheme.darkCard : Colors.white,
-                    labelStyle: GoogleFonts.inter(
-                      color: _selectedType == type || (_selectedType == null && type == 'All')
-                          ? AppTheme.primary
-                          : isDark ? Colors.white : AppTheme.lightTextPrimary, // Fixed: use dark text for light mode
-                      fontWeight: FontWeight.w500,
-                    ),
-                    side: BorderSide(
-                      color: _selectedType == type || (_selectedType == null && type == 'All')
-                          ? AppTheme.primary
-                          : isDark ? Colors.white24 : AppTheme.lightBorder, // Visible border in dark mode
-                    ),
+                    isDark: isDark,
                   ),
-                ),
-              // Subject filter button
-              if (_subjects.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: GestureDetector(
-                    onTap: _showSubjectPicker,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: _selectedSubject != null 
-                            ? AppTheme.primary.withOpacity(0.2) 
-                            : isDark ? AppTheme.darkCard : Colors.white,
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: _selectedSubject != null 
-                              ? AppTheme.primary 
-                              : isDark ? Colors.white24 : AppTheme.lightBorder,
-                        ),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            _selectedSubject ?? 'Subject',
-                            style: GoogleFonts.inter(
-                              color: _selectedSubject != null 
-                                  ? AppTheme.primary 
-                                  : isDark ? Colors.white : AppTheme.textPrimary, // High contrast
-                              fontWeight: FontWeight.w500,
-                              fontSize: 14,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          Icon(
-                            Icons.arrow_drop_down,
-                            size: 18,
-                            color: _selectedSubject != null ? AppTheme.primary : (isDark ? Colors.white70 : AppTheme.textMuted),
-                          ),
-                        ],
-                      ),
-                    ),
+                    
+                  const SizedBox(height: 24),
+
+                  // Branch - Dropdown Select
+                  Text('Branch', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: subTitleColor)),
+                  const SizedBox(height: 12),
+                  _buildFilterDropdown(
+                    value: _selectedBranch ?? 'All',
+                    items: _branches,
+                    onChanged: (val) {
+                      setState(() {
+                        _selectedBranch = val == 'All' ? null : val;
+                        _loadResources(refresh: true);
+                        _loadSubjects();
+                      });
+                      (context as Element).markNeedsBuild();
+                    },
+                    isDark: isDark,
                   ),
-                ),
-            ],
+                    
+                   const SizedBox(height: 24),
+                   
+                   // Subject - Dropdown Select (always visible, disabled if no branch)
+                   Text('Subject', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: subTitleColor)),
+                   const SizedBox(height: 12),
+                   _buildFilterDropdown(
+                     value: _selectedSubject ?? 'Select...',
+                     items: _subjects.isEmpty ? ['Select a branch first'] : _subjects,
+                     onChanged: _selectedBranch == null || _selectedBranch == 'All' ? null : (val) {
+                       setState(() {
+                         _selectedSubject = val == 'All' ? null : val;
+                         _loadResources(refresh: true);
+                       });
+                       (context as Element).markNeedsBuild();
+                     },
+                     isDark: isDark,
+                     enabled: _selectedBranch != null && _selectedBranch != 'All',
+                   ),
+                ],
+              ),
+            ),
+          ),
+          
+          // Apply Button Area
+          Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: bgColor,
+              border: Border(top: BorderSide(color: isDark ? Colors.white10 : Colors.black12)),
+            ),
+            child: ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primary,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(double.infinity, 50),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                elevation: 0,
+              ),
+              child: Text(
+                'Show Results',
+                style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCompactFilterChip(String label, bool isSelected, Function(bool) onSelected) {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      return ChoiceChip(
+        label: Text(label),
+        selected: isSelected,
+        onSelected: onSelected,
+        selectedColor: AppTheme.primary.withValues(alpha: 0.2),
+        backgroundColor: isDark ? const Color(0xFF2C2C2E) : Colors.white,
+        labelStyle: GoogleFonts.inter(
+          fontSize: 12,
+          color: isSelected ? AppTheme.primary : (isDark ? Colors.white : Colors.black87),
+          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
+        ),
+        side: BorderSide(
+          color: isSelected ? AppTheme.primary : (isDark ? Colors.white24 : Colors.grey.shade300),
+          width: 0.5,
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+        visualDensity: VisualDensity.compact,
+      );
+  }
+
+  Widget _buildFilterDropdown({
+    required String value,
+    required List<String> items,
+    required Function(String)? onChanged,
+    required bool isDark,
+    bool enabled = true,
+  }) {
+    return GestureDetector(
+      onTap: enabled && onChanged != null ? () {
+        _showPickerSheet(
+          title: 'Select',
+          items: items,
+          selectedValue: value,
+          onSelected: onChanged,
+          isDark: isDark,
+        );
+      } : null,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF2C2C2E) : Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isDark ? Colors.white24 : Colors.grey.shade300,
+            width: 0.5,
           ),
         ),
-      ],
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              value,
+              style: GoogleFonts.inter(
+                fontSize: 15,
+                color: enabled 
+                    ? (isDark ? Colors.white : Colors.black87)
+                    : (isDark ? Colors.grey : Colors.grey.shade500),
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            Icon(
+              Icons.keyboard_arrow_down_rounded,
+              color: enabled 
+                  ? (isDark ? Colors.white70 : Colors.black54)
+                  : (isDark ? Colors.grey.shade700 : Colors.grey.shade400),
+              size: 22,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showPickerSheet({
+    required String title,
+    required List<String> items,
+    required String selectedValue,
+    required Function(String) onSelected,
+    required bool isDark,
+  }) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.5,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Handle
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: isDark ? Colors.grey[800] : Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            // Items list
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: items.length,
+                itemBuilder: (context, index) {
+                  final item = items[index];
+                  final isSelected = item == selectedValue;
+                  return ListTile(
+                    title: Text(
+                      item,
+                      style: GoogleFonts.inter(
+                        fontSize: 16,
+                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                        color: isSelected ? AppTheme.primary : (isDark ? Colors.white : Colors.black87),
+                      ),
+                    ),
+                    trailing: isSelected 
+                        ? const Icon(Icons.check_rounded, color: AppTheme.primary, size: 20)
+                        : null,
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      onSelected(item);
+                    },
+                  );
+                },
+              ),
+            ),
+            SizedBox(height: MediaQuery.of(context).padding.bottom + 8),
+          ],
+        ),
+      ),
     );
   }
 
@@ -802,27 +1075,63 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
   }
 
   Widget _buildResourcesGrid() {
-    return RefreshIndicator(
-      onRefresh: () async => _loadResources(refresh: true),
-      color: AppTheme.primary,
-      child: ListView.builder(
-        controller: _scrollController,
-        padding: const EdgeInsets.all(16),
-        itemCount: _resources.length + (_isLoadingMore ? 2 : 0),
-        itemBuilder: (context, index) {
-          if (index >= _resources.length) {
-            return _buildLoadingCard();
-          }
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: ResourceCard(
-              resource: _resources[index],
-              userEmail: widget.userEmail,
-              onVoteChanged: () => _loadResources(),
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    
+    return Stack(
+      children: [
+        ListWheelScrollView.useDelegate(
+          controller: _scrollController,
+          itemExtent: 220, // Fixed height for cards
+          perspective: 0.003,
+          diameterRatio: 2.0, // Adjusts the curve
+          physics: const FixedExtentScrollPhysics(),
+          onSelectedItemChanged: (index) {
+            _playRetroSound();
+            // Optional: trigger load more if needed
+          },
+          childDelegate: ListWheelChildBuilderDelegate(
+            builder: (context, index) {
+              if (_resources.isEmpty) return null;
+              final resource = _resources[index % _resources.length];
+              
+              return Center(
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  child: ResourceCard(
+                    resource: resource,
+                    userEmail: widget.userEmail,
+                    onVoteChanged: () => _loadResources(),
+                  ),
+                ),
+              );
+            },
+            childCount: null, // Infinite loop
+          ),
+        ),
+        
+        // Gradient Fade at Bottom
+        Positioned(
+          bottom: 0,
+          left: 0,
+          right: 0,
+          height: 140, // Height of the fade
+          child: IgnorePointer(
+            child: Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    (isDark ? AppTheme.darkBackground : AppTheme.lightBackground).withOpacity(0.0),
+                    (isDark ? AppTheme.darkBackground : AppTheme.lightBackground),
+                  ],
+                  stops: const [0.0, 0.8],
+                ),
+              ),
             ),
-          );
-        },
-      ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -861,7 +1170,7 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
           Icon(
             Icons.folder_open_rounded,
             size: 80,
-            color: AppTheme.textMuted.withOpacity(0.3),
+            color: AppTheme.textMuted.withValues(alpha: 0.3),
           ),
           const SizedBox(height: 16),
           Text(
@@ -875,7 +1184,7 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
           const SizedBox(height: 8),
           Text(
             'Try adjusting your filters or search',
-            style: GoogleFonts.inter(color: AppTheme.textMuted.withOpacity(0.7)),
+            style: GoogleFonts.inter(color: AppTheme.textMuted.withValues(alpha: 0.7)),
           ),
           const SizedBox(height: 24),
           ElevatedButton.icon(
@@ -897,138 +1206,49 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
     );
   }
 
-  Widget _buildFilterSheet() {
-    return StatefulBuilder(
-      builder: (context, setModalState) {
-        return Container(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    'Filters',
-                    style: GoogleFonts.inter(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const Spacer(),
-                  TextButton(
-                    onPressed: () {
-                      setModalState(() {
-                        _selectedSemester = null;
-                        _selectedBranch = null;
-                        _selectedSubject = null;
-                      });
-                      setState(() {});
-                    },
-                    child: const Text('Clear All'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              
-              // Semester dropdown
-              _buildDropdown(
-                label: 'Semester',
-                value: _selectedSemester,
-                items: _semesters,
-                onChanged: (value) {
-                  setModalState(() => _selectedSemester = value);
-                  setState(() => _selectedSemester = value);
-                },
-              ),
-              const SizedBox(height: 16),
-              
-              // Branch dropdown
-              _buildDropdown(
-                label: 'Branch',
-                value: _selectedBranch,
-                items: _branches,
-                onChanged: (value) {
-                  setModalState(() => _selectedBranch = value);
-                  setState(() => _selectedBranch = value);
-                  _loadSubjects();
-                },
-              ),
-              const SizedBox(height: 16),
-              
-              // Subject dropdown
-              if (_subjects.isNotEmpty)
-                _buildDropdown(
-                  label: 'Subject',
-                  value: _selectedSubject,
-                  items: _subjects,
-                  onChanged: (value) {
-                    setModalState(() => _selectedSubject = value);
-                    setState(() => _selectedSubject = value);
-                  },
-                ),
-              
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    _loadResources(refresh: true);
-                  },
-                  child: const Text('Apply Filters'),
-                ),
-              ),
-              const SizedBox(height: 16),
-            ],
+  // Legacy filter methods removed
+
+
+  void _loadDownloadedResources() {
+    setState(() {
+      _downloadedResources = DownloadService().getAllDownloadedResources();
+    });
+  }
+
+  Widget _buildDownloadsTab() {
+    if (_downloadedResources.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.offline_pin_rounded, size: 64, color: AppTheme.textMuted.withValues(alpha: 0.5)),
+            const SizedBox(height: 16),
+            Text(
+              'No downloads yet',
+              style: GoogleFonts.inter(fontSize: 16, color: AppTheme.textMuted),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Download notes to access them offline',
+              style: GoogleFonts.inter(fontSize: 13, color: AppTheme.textMuted.withValues(alpha: 0.7)),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: _downloadedResources.length,
+      itemBuilder: (context, index) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: ResourceCard(
+            resource: _downloadedResources[index],
+            userEmail: widget.userEmail,
           ),
         );
       },
-    );
-  }
-
-  Widget _buildDropdown({
-    required String label,
-    required String? value,
-    required List<String> items,
-    required void Function(String?) onChanged,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          label,
-          style: GoogleFonts.inter(
-            color: AppTheme.textMuted,
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          decoration: BoxDecoration(
-            color: AppTheme.darkCard,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppTheme.darkBorder),
-          ),
-          child: DropdownButton<String>(
-            value: value,
-            isExpanded: true,
-            hint: Text('Select $label', style: GoogleFonts.inter(color: AppTheme.textMuted)),
-            underline: const SizedBox(),
-            dropdownColor: AppTheme.darkCard,
-            items: items.map((item) {
-              return DropdownMenuItem(
-                value: item,
-                child: Text(item, style: GoogleFonts.inter(color: Colors.white)),
-              );
-            }).toList(),
-            onChanged: onChanged,
-          ),
-        ),
-      ],
     );
   }
 }

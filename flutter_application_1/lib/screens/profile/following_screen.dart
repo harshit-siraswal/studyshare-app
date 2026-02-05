@@ -7,10 +7,12 @@ import 'user_profile_screen.dart';
 
 class FollowingScreen extends StatefulWidget {
   final String userEmail;
+  final int initialTab;
 
   const FollowingScreen({
     super.key,
     required this.userEmail,
+    this.initialTab = 0,
   });
 
   @override
@@ -24,31 +26,38 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
   
   List<Map<String, dynamic>> _following = [];
   List<Map<String, dynamic>> _followers = [];
-  List<Map<String, dynamic>> _subscriptions = [];
   
   List<Map<String, dynamic>> _filteredFollowing = [];
   List<Map<String, dynamic>> _filteredFollowers = [];
-  List<Map<String, dynamic>> _filteredSubscriptions = [];
   
   bool _isLoading = true;
   String _sortBy = 'Recent';
+  String? _errorMessage;
   String _searchQuery = '';
-
   final List<String> _sortOptions = ['Recent', 'A-Z', 'Z-A'];
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 2, vsync: this, initialIndex: widget.initialTab);
+    _tabController.addListener(_handleTabSelection); // Add listener
     _loadData();
     _searchController.addListener(_onSearchChanged);
   }
 
   @override
   void dispose() {
+    _tabController.removeListener(_handleTabSelection); // Remove listener
     _tabController.dispose();
+    _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _handleTabSelection() {
+    if (_tabController.indexIsChanging) {
+      setState(() {}); // Rebuild to update count
+    }
   }
 
   void _onSearchChanged() {
@@ -58,22 +67,24 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
     });
   }
 
+  String _getUserDisplayName(Map<String, dynamic> user) {
+    return user['display_name'] ?? user['email']?.toString().split('@')[0] ?? '';
+  }
+
   void _applyFilters() {
     // Filter by search query
     _filteredFollowing = _filterList(_following);
     _filteredFollowers = _filterList(_followers);
-    _filteredSubscriptions = _filterList(_subscriptions);
+
     
     // Sort
-    _filteredFollowing = _sortList(_filteredFollowing);
     _filteredFollowers = _sortList(_filteredFollowers);
-    _filteredSubscriptions = _sortList(_filteredSubscriptions);
   }
 
   List<Map<String, dynamic>> _filterList(List<Map<String, dynamic>> list) {
     if (_searchQuery.isEmpty) return List.from(list);
     return list.where((user) {
-      final name = (user['display_name'] ?? user['email']?.toString().split('@')[0] ?? '').toLowerCase();
+      final name = _getUserDisplayName(user).toLowerCase();
       final email = (user['email'] ?? '').toString().toLowerCase();
       return name.contains(_searchQuery) || email.contains(_searchQuery);
     }).toList();
@@ -84,16 +95,16 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
     switch (_sortBy) {
       case 'A-Z':
         sorted.sort((a, b) {
-          final nameA = a['display_name'] ?? a['email']?.toString().split('@')[0] ?? '';
-          final nameB = b['display_name'] ?? b['email']?.toString().split('@')[0] ?? '';
-          return nameA.toString().toLowerCase().compareTo(nameB.toString().toLowerCase());
+          final nameA = _getUserDisplayName(a);
+          final nameB = _getUserDisplayName(b);
+          return nameA.toLowerCase().compareTo(nameB.toLowerCase());
         });
         break;
       case 'Z-A':
         sorted.sort((a, b) {
-          final nameA = a['display_name'] ?? a['email']?.toString().split('@')[0] ?? '';
-          final nameB = b['display_name'] ?? b['email']?.toString().split('@')[0] ?? '';
-          return nameB.toString().toLowerCase().compareTo(nameA.toString().toLowerCase());
+          final nameA = _getUserDisplayName(a);
+          final nameB = _getUserDisplayName(b);
+          return nameB.toLowerCase().compareTo(nameA.toLowerCase());
         });
         break;
       case 'Recent':
@@ -105,6 +116,10 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
   }
 
   Future<void> _loadData() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
     try {
       final following = await _supabaseService.getFollowing(widget.userEmail);
       final followers = await _supabaseService.getFollowers(widget.userEmail);
@@ -112,16 +127,22 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
       // For now, we'll use following as subscriptions placeholder
       final subscriptions = following.where((f) => f['is_subscribed'] == true).toList();
       
-      setState(() {
-        _following = following;
-        _followers = followers;
-        _subscriptions = subscriptions;
-        _applyFilters();
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _following = following;
+          _followers = followers;
+          _applyFilters();
+          _isLoading = false;
+        });
+      }
     } catch (e) {
-      setState(() => _isLoading = false);
-    }
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Unable to load data. Please check your connection and try again.';
+        });
+        debugPrint('Error loading following data: $e');
+      }    }
   }
 
   void _showSortOptions(BuildContext context, bool isDark) {
@@ -143,7 +164,7 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
                 width: 40,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: AppTheme.textMuted.withOpacity(0.3),
+                  color: AppTheme.textMuted.withValues(alpha: 0.3),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -218,7 +239,7 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
                 child: Container(
                   height: 44,
                   decoration: BoxDecoration(
-                    color: isDark ? Colors.black.withOpacity(0.3) : Colors.grey.shade100,
+                    color: isDark ? Colors.black.withValues(alpha: 0.3) : Colors.grey.shade100,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: TextField(
@@ -252,16 +273,16 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
                 indicatorWeight: 3,
                 labelStyle: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 13),
                 tabs: [
-                  Tab(text: 'Followers ${_followers.isNotEmpty ? "(${_followers.length})" : ""}'),
-                  Tab(text: 'Following ${_following.isNotEmpty ? "(${_following.length})" : ""}'),
-                  Tab(text: 'Subscriptions ${_subscriptions.isNotEmpty ? "(${_subscriptions.length})" : ""}'),
+                  Tab(text: 'Followers ${_filteredFollowers.isNotEmpty ? "(${_filteredFollowers.length})" : ""}'),
+                  Tab(text: 'Following ${_filteredFollowing.isNotEmpty ? "(${_filteredFollowing.length})" : ""}'),
                 ],
               ),
             ],
           ),
         ),
       ),
-      body: Column(
+      body: SafeArea(
+        child: Column(
         children: [
           // Sort bar
           Container(
@@ -281,7 +302,7 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
-                      color: isDark ? Colors.white.withOpacity(0.1) : Colors.grey.shade100,
+                      color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey.shade100,
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
@@ -312,11 +333,11 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
               children: [
                 _buildUserList(_filteredFollowers, isDark, 'followers'),
                 _buildUserList(_filteredFollowing, isDark, 'following'),
-                _buildUserList(_filteredSubscriptions, isDark, 'subscriptions'),
               ],
             ),
           ),
         ],
+      ),
       ),
     );
   }
@@ -327,8 +348,6 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
         return _filteredFollowers.length;
       case 1:
         return _filteredFollowing.length;
-      case 2:
-        return _filteredSubscriptions.length;
       default:
         return 0;
     }
@@ -337,6 +356,43 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
   Widget _buildUserList(List<Map<String, dynamic>> users, bool isDark, String type) {
     if (_isLoading) {
       return _buildLoadingSkeleton(isDark);
+    }
+
+    if (_errorMessage != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.error_outline_rounded, size: 48, color: AppTheme.error),
+              const SizedBox(height: 16),
+              Text(
+                'Something went wrong',
+                style: GoogleFonts.inter(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : const Color(0xFF1E293B),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _errorMessage!,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(color: AppTheme.textMuted),
+              ),              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: _loadData,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Try Again'),
+              ),
+            ],
+          ),
+        ),
+      );
     }
 
     if (users.isEmpty) {
@@ -409,7 +465,7 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
   }
 
   Widget _buildUserCard(Map<String, dynamic> user, bool isDark) {
-    final name = user['display_name'] ?? user['email']?.toString().split('@')[0] ?? 'User';
+    final name = _getUserDisplayName(user);
     final email = user['email'] ?? '';
     final hasNewPost = user['has_new_post'] == true;
     
@@ -424,7 +480,7 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
           boxShadow: [
             if (!isDark)
               BoxShadow(
-                color: Colors.black.withOpacity(0.04),
+                color: Colors.black.withValues(alpha: 0.04),
                 blurRadius: 10,
                 offset: const Offset(0, 2),
               ),
@@ -442,20 +498,19 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
                     gradient: LinearGradient(
                       colors: hasNewPost 
                           ? [AppTheme.primary, AppTheme.accent]
-                          : [AppTheme.primary.withOpacity(0.7), AppTheme.secondary],
+                          : [AppTheme.primary.withValues(alpha: 0.7), AppTheme.secondary],
                     ),
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Center(
                     child: Text(
-                      name[0].toUpperCase(),
+                      name.isNotEmpty ? name[0].toUpperCase() : '?',
                       style: GoogleFonts.inter(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
                       ),
-                    ),
-                  ),
+                    ),                  ),
                 ),
                 if (hasNewPost)
                   Positioned(
@@ -501,7 +556,7 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: AppTheme.primary.withOpacity(0.1),
+                            color: AppTheme.primary.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
@@ -533,7 +588,7 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: AppTheme.primary.withOpacity(0.1),
+                color: AppTheme.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(

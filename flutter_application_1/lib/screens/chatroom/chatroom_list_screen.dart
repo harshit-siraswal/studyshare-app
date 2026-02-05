@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
-import '../../config/theme.dart';
 import '../../services/supabase_service.dart';
 import '../../services/backend_api_service.dart';
+import '../../config/theme.dart'; // Added theme import if needed
+import '../profile/saved_posts_screen.dart';
+import '../../services/subscription_service.dart';
 import 'chatroom_screen.dart';
 import 'discover_rooms_screen.dart';
 
@@ -27,6 +29,9 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
   final SupabaseService _supabaseService = SupabaseService();
   final TextEditingController _searchController = TextEditingController();
   
+  final FocusNode _searchFocusNode = FocusNode();
+  bool _isSearchFocused = false;
+  
   List<Map<String, dynamic>> _rooms = [];
   List<Map<String, dynamic>> _filteredRooms = [];
   Set<String> _joinedRoomIds = {};
@@ -45,11 +50,20 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _supabaseService.attachContext(context);
     });
+    _searchFocusNode.addListener(_onSearchFocusChange);
     _loadRooms();
+  }
+
+  void _onSearchFocusChange() {
+    setState(() {
+      _isSearchFocused = _searchFocusNode.hasFocus;
+    });
   }
   
   @override
   void dispose() {
+    _searchFocusNode.removeListener(_onSearchFocusChange);
+    _searchFocusNode.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -69,7 +83,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
         setState(() {
           _rooms = joinedRooms;
           _filteredRooms = joinedRooms;
-          _joinedRoomIds = joinedIds;
+          _joinedRoomIds = joinedIds.toSet();
           _isLoading = false;
         });
       }
@@ -103,6 +117,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
     
     return Scaffold(
       backgroundColor: bgColor,
+      resizeToAvoidBottomInset: false, // Fix bottom actions/nav from jumping up
       body: SafeArea(
         bottom: false,
         child: Column(
@@ -140,6 +155,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
           Expanded(
             child: TextField(
               controller: _searchController,
+              focusNode: _searchFocusNode,
               onChanged: _filterRooms,
               style: GoogleFonts.inter(
                  color: isDark ? Colors.white : Colors.black,
@@ -152,55 +168,73 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                   fontSize: 16,
                 ),
                 prefixIcon: Icon(Icons.search, color: isDark ? Colors.grey : Colors.black54),
+                // Show clear button when focused
+                suffixIcon: _isSearchFocused 
+                    ? IconButton(
+                        icon: Icon(Icons.close, color: isDark ? Colors.grey : Colors.black54),
+                        onPressed: () {
+                          _searchController.clear();
+                          _filterRooms('');
+                          _searchFocusNode.unfocus();
+                        },
+                      ) 
+                    : null,
                 filled: true,
                 fillColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
                 contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 20),
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(30),
                   borderSide: BorderSide.none,
                 ),
                 enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(30),
                   borderSide: BorderSide.none,
                 ),
                 focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(30),
                   borderSide: isDark ? const BorderSide(color: Colors.white24) : const BorderSide(color: Colors.black12),
                 ),
               ),
             ),
           ),
-          const SizedBox(width: 12),
-          // Discover/Add Button
-          GestureDetector(
-            onTap: () async {
-               await Navigator.push(
-                 context,
-                 MaterialPageRoute(
-                   builder: (context) => DiscoverRoomsScreen(
-                      collegeId: widget.collegeId,
-                      collegeDomain: widget.collegeDomain,
-                      userEmail: widget.userEmail,
-                   ),
-                 ),
-               );
-               // Refresh list on return
-               _loadRooms();
-            },
-            child: Container(
-              height: 50,
-              width: 50,
-              decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-                shape: BoxShape.circle,
+          if (!_isSearchFocused) ...[
+            const SizedBox(width: 12),
+            // Saved Button
+            GestureDetector(
+              onTap: () => Navigator.push(
+                context, 
+                MaterialPageRoute(
+                  builder: (_) => SavedPostsScreen(userEmail: widget.userEmail),
+                ),
               ),
-              child: Icon(
-                Icons.add_rounded,
-                color: isDark ? Colors.white : Colors.black,
-                size: 28,
+              child: Container(
+                width: 48, 
+                height: 48,
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1C1C1E) : Colors.white, 
+                  borderRadius: BorderRadius.circular(30),
+                ),
+                child: Icon(
+                  Icons.bookmark_border_rounded, 
+                  color: isDark ? Colors.white : Colors.black,
+                ),
               ),
             ),
-          ),
+            const SizedBox(width: 12),
+            // Add Button
+            GestureDetector(
+              onTap: _navigateToDiscoverRooms,
+              child: Container(
+                width: 48, 
+                height: 48,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white : Colors.black, 
+                  borderRadius: BorderRadius.circular(30),
+                ),
+                child: Icon(Icons.add_rounded, color: isDark ? Colors.black : Colors.white),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -355,7 +389,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
             ListTile(
               leading: Container(
                 padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: Colors.blue.withOpacity(0.2), shape: BoxShape.circle),
+                decoration: BoxDecoration(color: Colors.blue.withValues(alpha: 0.2), shape: BoxShape.circle),
                 child: const Icon(Icons.add, color: Colors.blue),
               ),
               title: Text('Create Room', style: TextStyle(color: isDark ? Colors.white : Colors.black)),
@@ -364,7 +398,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
              ListTile(
               leading: Container(
                 padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: Colors.green.withOpacity(0.2), shape: BoxShape.circle),
+                decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.2), shape: BoxShape.circle),
                 child: const Icon(Icons.login, color: Colors.green),
               ),
               title: Text('Join Room', style: TextStyle(color: isDark ? Colors.white : Colors.black)),
@@ -417,12 +451,19 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
      );
   }
   
-  void _showCreateRoomDialog() {
+  void _showCreateRoomDialog() async {
       // Minimal implementation
       final isDark = Theme.of(context).brightness == Brightness.dark;
       final nameCtrl = TextEditingController();
       bool isPrivate = false;
+      bool isPermanent = false;
       
+      // Check premium status
+      final subService = SubscriptionService();
+      final isPremium = await subService.isPremium();
+      
+      if (!mounted) return;
+
       showDialog(
        context: context,
        builder: (context) => StatefulBuilder(
@@ -435,12 +476,42 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                TextField(
                  controller: nameCtrl,
                  style: TextStyle(color: isDark ? Colors.white : Colors.black),
-                 decoration: InputDecoration(hintText: 'Room Name', filled: true, fillColor: isDark ? Colors.black45 : Colors.grey.shade100, border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
+                 decoration: InputDecoration(
+                   hintText: 'Room Name', 
+                   filled: true, 
+                   fillColor: isDark ? Colors.black45 : Colors.grey.shade100, 
+                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)
+                 ),
                ),
                SwitchListTile(
                  title: Text('Private', style: TextStyle(color: isDark ? Colors.white : Colors.black)),
                  value: isPrivate,
                  onChanged: (v) => setDialogState(() => isPrivate = v),
+                 activeColor: isDark ? Colors.white : Colors.black,
+               ),
+               SwitchListTile(
+                 title: Row(
+                   children: [
+                     Text('Permanent Room', style: TextStyle(color: isDark ? Colors.white : Colors.black)),
+                     if (!isPremium) ...[
+                       const SizedBox(width: 8),
+                       Container(
+                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                         decoration: BoxDecoration(color: Colors.amber, borderRadius: BorderRadius.circular(4)),
+                         child: const Text('PRO', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black)),
+                       )
+                     ]
+                   ],
+                 ),
+                 subtitle: Text(
+                   isPremium ? 'Room will not expire' : 'Upgrade to create permanent rooms (7 days expiry for free)',
+                   style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.grey),
+                 ),
+                 value: isPermanent,
+                 onChanged: isPremium 
+                    ? (v) => setDialogState(() => isPermanent = v)
+                    : null, // Disabled for free users
+                 activeColor: isDark ? Colors.white : Colors.black,
                ),
              ],
            ),
@@ -449,8 +520,20 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
               TextButton(
                  onPressed: () async {
                     if(nameCtrl.text.isNotEmpty) {
-                        await _supabaseService.createChatRoom(name: nameCtrl.text, description: '', isPrivate: isPrivate, userEmail: widget.userEmail, collegeId: widget.collegeId);
-                        if(mounted) { Navigator.pop(context); _loadRooms(); }
+                        try {
+                           final duration = isPermanent ? -1 : 7;
+                           await _supabaseService.createChatRoom(
+                             name: nameCtrl.text, 
+                             description: '', 
+                             isPrivate: isPrivate, 
+                             userEmail: widget.userEmail, 
+                             collegeId: widget.collegeId,
+                             durationInDays: duration,
+                           );
+                           if(mounted) { Navigator.pop(context); _loadRooms(); }
+                        } catch (e) {
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+                        }
                     }
                  },
                  child: const Text('Create'),
@@ -474,7 +557,59 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
     );
   }
 
+  void _navigateToDiscoverRooms() {
+    Navigator.push(
+      context, 
+      MaterialPageRoute(
+        builder: (_) => DiscoverRoomsScreen(
+          collegeId: widget.collegeId,
+          collegeDomain: widget.collegeDomain,
+          userEmail: widget.userEmail,
+        ),
+      ),
+    );
+  }
+
   Widget _buildEmptyState(bool isDark) {
-    return Center(child: Text('No rooms found', style: TextStyle(color: isDark ? Colors.white54 : Colors.grey)));
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 64),
+      children: [
+        Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.chat_bubble_outline_rounded, size: 64, color: isDark ? Colors.white24 : Colors.grey.shade300),
+              const SizedBox(height: 16),
+              Text(
+                'No rooms joined yet', 
+                style: GoogleFonts.inter(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : Colors.black
+                )
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Join a room to start chatting!',
+                style: GoogleFonts.inter(color: isDark ? Colors.white54 : Colors.grey),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: _navigateToDiscoverRooms,
+                icon: const Icon(Icons.explore_outlined),
+                label: const Text('Discover Rooms'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: isDark ? Colors.white : Colors.black,
+                  foregroundColor: isDark ? Colors.black : Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                ),
+              )
+            ],
+          ),
+        ),
+      ],
+    );
   }
 }

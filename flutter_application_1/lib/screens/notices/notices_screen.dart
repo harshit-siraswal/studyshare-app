@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
 import '../../config/theme.dart';
@@ -78,248 +77,308 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
     }
   }
 
+  void _showNoticeSearch(bool isDark) {
+    final searchController = TextEditingController();
+    List<Map<String, dynamic>> searchResults = [];
+    
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) {
+          void performSearch(String query) {
+            if (query.isEmpty) {
+              setModalState(() => searchResults = []);
+              return;
+            }
+            final lowercaseQuery = query.toLowerCase();
+            setModalState(() {
+              searchResults = _filteredNotices.where((notice) {
+                final title = (notice['title'] as String? ?? '').toLowerCase();
+                final content = (notice['content'] as String? ?? '').toLowerCase();
+                return title.contains(lowercaseQuery) || content.contains(lowercaseQuery);
+              }).toList();
+            });
+          }
+
+          return Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+            child: Container(
+              height: MediaQuery.of(context).size.height * 0.75,
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                children: [
+                  // Handle
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.grey[800] : Colors.grey[300],
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  // Search field
+                  TextField(
+                    controller: searchController,
+                    autofocus: true,
+                    decoration: InputDecoration(
+                      hintText: 'Search notices...',
+                      hintStyle: GoogleFonts.inter(color: Colors.grey),
+                      prefixIcon: Icon(Icons.search, color: isDark ? Colors.white54 : Colors.grey),
+                      filled: true,
+                      fillColor: isDark ? const Color(0xFF2C2C2E) : Colors.grey.shade100,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    ),
+                    style: GoogleFonts.inter(color: isDark ? Colors.white : Colors.black),
+                    onChanged: performSearch,
+                  ),
+                  const SizedBox(height: 16),
+                  // Results
+                  Expanded(
+                    child: searchResults.isEmpty
+                        ? Center(
+                            child: Text(
+                              searchController.text.isEmpty
+                                  ? 'Type to search notices'
+                                  : 'No results found',
+                              style: GoogleFonts.inter(color: Colors.grey),
+                            ),
+                          )
+                        : ListView.builder(
+                            itemCount: searchResults.length,
+                            itemBuilder: (context, index) {
+                              final notice = searchResults[index];
+                              final deptId = notice['department'] as String? ?? 'general';
+                              final account = _departmentAccounts.firstWhere(
+                                (a) => a.id == deptId,
+                                orElse: () => _departmentAccounts.first,
+                              );
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 12),
+                                child: NoticeCard(
+                                  notice: notice,
+                                  account: account,
+                                  isDark: isDark,
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Set<String> _followedDepartments = {};
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _loadNotices();
+    _loadFollowedDepartments();
   }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    _searchController.dispose();
-    _searchFocusNode.dispose();
-    super.dispose();
-  }
-
-  Future<void> _loadNotices() async {
+  
+  Future<void> _loadFollowedDepartments() async {
+    final email = _supabaseService.currentUserEmail;
+    if (email == null) return;
+    
     try {
-      debugPrint('NoticesScreen: Loading notices for collegeId: ${widget.collegeId}');
-      final notices = await _supabaseService.getNotices(
-        collegeId: widget.collegeId,
-        startDate: _startDate,
-        endDate: _endDate,
-      );
-      debugPrint('NoticesScreen: Loaded ${notices.length} notices');
-      if (notices.isEmpty) {
-        debugPrint('NoticesScreen: No notices found - check if collegeId is correct');
+      final followedIds = await _supabaseService.getFollowedDepartmentIds(widget.collegeId, email);
+      if (mounted) {
+        setState(() {
+          _followedDepartments = followedIds.toSet();
+        });
       }
-      setState(() {
-        _notices = notices;
-        _filteredNotices = notices;
-        _isLoading = false;
-      });
-    } catch (e, stackTrace) {
-      debugPrint('NoticesScreen ERROR: $e');
-      debugPrint('Stack trace: $stackTrace');
-      setState(() => _isLoading = false);
+    } catch (e) {
+      debugPrint('Error loading followed departments: $e');
     }
   }
 
-  void _filterByDepartment(String? deptId) {
-    setState(() {
-      _selectedDepartment = deptId;
-      _applyFilters();
-    });
-  }
+  Future<void> _toggleDepartmentFollow(String deptId) async {
+    final email = _supabaseService.currentUserEmail;
+    if (email == null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please log in to follow')));
+        return;
+    }
 
-  void _searchNotices(String query) {
-    setState(() {
-      _applyFilters(searchQuery: query);
-    });
-  }
-
-  void _applyFilters({String? searchQuery}) {
-    String query = searchQuery ?? _searchController.text;
-    String? deptId = _selectedDepartment;
+    final isFollowing = _followedDepartments.contains(deptId);
     
-    _filteredNotices = _notices.where((notice) {
-      // Department filter
-      if (deptId != null) {
-        final noticeDept = notice['department']?.toString().toLowerCase() ?? '';
-        if (noticeDept != deptId.toLowerCase()) {
-          return false;
-        }
+    // Optimistic update
+    setState(() {
+      if (isFollowing) {
+        _followedDepartments.remove(deptId);
+      } else {
+        _followedDepartments.add(deptId);
       }
-      
-      // Search filter - search across content text
-      if (query.isNotEmpty) {
-        final searchLower = query.toLowerCase();
-        final title = notice['title']?.toString().toLowerCase() ?? '';
-        final content = notice['content']?.toString().toLowerCase() ?? '';
-        final description = notice['description']?.toString().toLowerCase() ?? '';
-        
-        if (!title.contains(searchLower) && 
-            !content.contains(searchLower) && 
-            !description.contains(searchLower)) {
-          return false;
-        }
+    });
+
+    try {
+      if (isFollowing) {
+        await _supabaseService.unfollowDepartment(deptId, email);
+      } else {
+        await _supabaseService.followDepartment(deptId, widget.collegeId, email);
       }
-      
-      return true;
-    }).toList();
+    } catch (e) {
+      // Revert on error
+      if (mounted) {
+        setState(() {
+          if (isFollowing) {
+            _followedDepartments.add(deptId);
+          } else {
+            _followedDepartments.remove(deptId);
+          }
+        });
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to update follow status')));
+      }
+    }
   }
 
 
+  Future<void> _loadNotices() async {
+    if (!mounted) return;
+    setState(() => _isLoading = true);
+
+    try {
+      final notices = await _supabaseService.getNotices(collegeId: widget.collegeId);
+      
+      // Filter by date range if set
+      List<Map<String, dynamic>> filtered = notices;
+      if (_startDate != null && _endDate != null) {
+        filtered = notices.where((notice) {
+          final createdAt = notice['created_at'];
+          if (createdAt == null) return true;
+          final date = DateTime.tryParse(createdAt.toString());
+          if (date == null) return true;
+          return date.isAfter(_startDate!.subtract(const Duration(days: 1))) &&
+                 date.isBefore(_endDate!.add(const Duration(days: 1)));
+        }).toList();
+      }
+      
+      if (mounted) {
+        setState(() {
+          _notices = notices;
+          _filteredNotices = filtered;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading notices: $e');
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+    final bgColor = isDark ? Colors.black : const Color(0xFFF2F2F7);
+
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
+      backgroundColor: bgColor,
       body: SafeArea(
-        bottom: false,
-        child: GestureDetector(
-          onTap: () => FocusScope.of(context).unfocus(),
-          child: Column(
-            children: [
-              // Header - Clean title only
-              _buildHeader(isDark),
-              
-              // Always-visible iOS-style search bar with integrated filter
-              _buildSearchBar(isDark),
-              
-              // Tab bar (For You / Departments)
-              _buildTabBar(isDark),
-              
-              // Content
-              Expanded(
-                child: TabBarView(
-                  controller: _tabController,
-                  children: [
-                    // For You - All notices feed
-                    _buildNoticesFeed(isDark),
-                    
-                    // Departments - List of department accounts
-                    _buildDepartmentsTab(isDark),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHeader(bool isDark) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
-      child: Row(
-        children: [
-          Text(
-            'Notices',
-            style: GoogleFonts.inter(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSearchBar(bool isDark) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 4),
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF2F2F7), // iOS system gray
-          borderRadius: BorderRadius.circular(28), // Pill shape
-        ),
-        child: Row(
+        child: Column(
           children: [
-            // Search field
-            Expanded(
-              child: TextField(
-                controller: _searchController,
-                focusNode: _searchFocusNode,
-                onChanged: _searchNotices,
-                style: GoogleFonts.inter(
-                  color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
-                  fontWeight: FontWeight.w500,
-                  fontSize: 15,
-                ),
-                decoration: InputDecoration(
-                  hintText: 'Search notices...',
-                  hintStyle: GoogleFonts.inter(
-                    color: isDark ? Colors.white38 : Colors.grey.shade500,
-                    fontWeight: FontWeight.w400,
-                    fontSize: 15,
+            // Header
+            Container(
+              color: bgColor,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                  Text(
+                    'Notices', 
+                    style: GoogleFonts.inter(
+                      fontSize: 24, 
+                      fontWeight: FontWeight.bold, 
+                      color: isDark ? Colors.white : Colors.black
+                    )
                   ),
-                  prefixIcon: Icon(
-                    Icons.search_rounded,
-                    color: isDark ? Colors.white54 : Colors.grey.shade500,
-                    size: 20,
+                  const Spacer(),
+                  IconButton(
+                    icon: Icon(Icons.search_rounded, color: isDark ? Colors.white : Colors.black),
+                    onPressed: () => _showNoticeSearch(isDark),
                   ),
-                  suffixIcon: _searchController.text.isNotEmpty
-                      ? IconButton(
-                          onPressed: () {
-                            _searchController.clear();
-                            _applyFilters();
-                            setState(() {});
-                          },
-                          icon: Container(
-                            padding: const EdgeInsets.all(2),
-                            decoration: BoxDecoration(
-                              color: isDark ? Colors.white24 : Colors.grey.shade400,
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(
-                              Icons.close_rounded,
-                              color: isDark ? Colors.white : Colors.white,
-                              size: 14,
-                            ),
-                          ),
-                        )
-                      : null,
-                  border: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                ),
+                  IconButton(
+                    icon: Icon(Icons.calendar_today_rounded, color: isDark ? Colors.white : Colors.black),
+                    onPressed: _showDateFilter,
+                  ),
+                ],
               ),
             ),
             
-            // Integrated date filter button
-            Container(
-              margin: const EdgeInsets.only(right: 4),
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(20),
-                  onTap: _showDateFilter,
-                  onLongPress: _startDate != null ? () {
-                    setState(() {
-                      _startDate = null;
-                      _endDate = null;
-                      _isLoading = true;
-                    });
-                    _loadNotices();
-                  } : null,
-                  child: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: _startDate != null 
-                          ? AppTheme.primary.withOpacity(0.15)
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Icon(
-                      _startDate != null 
-                          ? Icons.calendar_month_rounded
-                          : Icons.calendar_today_rounded,
-                      color: _startDate != null 
-                          ? AppTheme.primary 
-                          : (isDark ? Colors.white54 : Colors.grey.shade500),
-                      size: 20,
-                    ),
+            // Tabs
+            TabBar(
+              controller: _tabController,
+              labelColor: isDark ? Colors.white : Colors.black,
+              unselectedLabelColor: Colors.grey,
+              indicatorColor: AppTheme.primary,
+              tabs: const [
+                Tab(text: 'Latest Updates'),
+                Tab(text: 'Departments'),
+              ],
+            ),
+            
+            // Content
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  // Tab 1: Notices List
+                  RefreshIndicator(
+                    onRefresh: _loadNotices,
+                    child: _isLoading 
+                      ? _buildLoadingSkeleton(isDark)
+                      : _filteredNotices.isEmpty 
+                          ? _buildEmptyState(isDark)
+                          : ListView.builder(
+                              padding: const EdgeInsets.all(16),
+                              itemCount: _filteredNotices.length,
+                              itemBuilder: (context, index) {
+                                final notice = _filteredNotices[index];
+                                // Attempt to map to department, fallback to General
+                                // Depending on notice schema, it might have 'department' key
+                                final deptId = notice['department'] as String? ?? 'general';
+                                final account = _departmentAccounts.firstWhere(
+                                  (a) => a.id == deptId,
+                                  orElse: () => _departmentAccounts.first, 
+                                );
+
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 16),
+                                  child: NoticeCard(
+                                    notice: notice,
+                                    account: account,
+                                    isDark: isDark,
+                                  ),
+                                );
+                              },
+                            ),
                   ),
-                ),
+                  
+                  // Tab 2: Departments List
+                  ListView.builder(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    itemCount: _departmentAccounts.length,
+                    itemBuilder: (context, index) {
+                      final account = _departmentAccounts[index];
+                      // We need notice count - mocked or fetched?
+                      // For now mock or 0
+                      return _buildDepartmentAccountTile(account, 0, isDark, index);
+                    },
+                  ),
+                ],
               ),
             ),
           ],
@@ -328,90 +387,13 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
     );
   }
 
-  Widget _buildTabBar(bool isDark) {
-    return Container(
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(
-            color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
-            width: 1,
-          ),
-        ),
-      ),
-      child: TabBar(
-        controller: _tabController,
-        labelColor: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
-        unselectedLabelColor: isDark ? AppTheme.darkTextMuted : AppTheme.lightTextMuted,
-        indicatorColor: AppTheme.primary,
-        indicatorWeight: 3,
-        labelStyle: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 15),
-        unselectedLabelStyle: GoogleFonts.inter(fontWeight: FontWeight.w500, fontSize: 15),
-        tabs: const [
-          Tab(text: 'For You'),
-          Tab(text: 'Departments'),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildNoticesFeed(bool isDark) {
-    if (_isLoading) {
-      return _buildLoadingSkeleton(isDark);
-    }
-    
-    if (_filteredNotices.isEmpty) {
-      return _buildEmptyState(isDark);
-    }
-    
-    return RefreshIndicator(
-      onRefresh: _loadNotices,
-      color: AppTheme.primary,
-      child: ListView.separated(
-        padding: const EdgeInsets.only(top: 0),
-        itemCount: _filteredNotices.length,
-        separatorBuilder: (context, index) => Divider(
-          height: 1,
-          color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
-        ),
-        itemBuilder: (context, index) {
-          final notice = _filteredNotices[index];
-          final deptId = notice['department']?.toString().toLowerCase() ?? 'general';
-          final account = _departmentAccounts.firstWhere(
-            (a) => a.id == deptId,
-            orElse: () => _departmentAccounts[0],
-          );
-          
-          return NoticeCard(
-            notice: notice,
-            account: account,
-            isDark: isDark,
-          );
-        },
-      ),
-    );
-  }
-
-
-
-  Widget _buildDepartmentsTab(bool isDark) {
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      itemCount: _departmentAccounts.length,
-      itemBuilder: (context, index) {
-        final account = _departmentAccounts[index];
-        final noticeCount = _notices.where((n) => 
-          n['department']?.toString().toLowerCase() == account.id
-        ).length;
-        
-        return _buildDepartmentAccountTile(account, noticeCount, isDark, index);
-      },
-    );
-  }
 
   Widget _buildDepartmentAccountTile(DepartmentAccount account, int noticeCount, bool isDark, int index) {
+    final isFollowing = _followedDepartments.contains(account.id);
+
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
-      duration: Duration(milliseconds: 200 + (index * 50)),
+      duration: Duration(milliseconds: 200 + index * 50),
       curve: Curves.easeOut,
       builder: (context, value, child) {
         return Opacity(
@@ -423,12 +405,12 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
         );
       },
       child: InkWell(
-        onTap: () {
-          // Navigate to department account page
-          Navigator.push(
+        onTap: () async {
+          // Navigate to department account page and refresh on return
+          await Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => dept_screen.DepartmentAccountScreen(
+               builder: (context) => dept_screen.DepartmentAccountScreen(
                 account: DepartmentAccount(
                   id: account.id,
                   name: account.name,
@@ -440,6 +422,7 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
               ),
             ),
           );
+          _loadFollowedDepartments(); // Refresh state on return
         },
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -506,7 +489,7 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
                         Icon(Icons.people_outline_rounded, size: 14, color: isDark ? AppTheme.darkTextMuted : AppTheme.lightTextMuted),
                         const SizedBox(width: 2),
                         Text(
-                          '${noticeCount * 12} followers', // Placeholder: Can wire to getDepartmentFollowerCount
+                          '${noticeCount * 12} followers', 
                           style: GoogleFonts.inter(
                             fontSize: 12,
                             color: isDark ? AppTheme.darkTextMuted : AppTheme.lightTextMuted,
@@ -519,18 +502,22 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
               ),
               
               // Follow button
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  color: account.color,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  'Follow',
-                  style: GoogleFonts.inter(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
+              GestureDetector(
+                onTap: () => _toggleDepartmentFollow(account.id),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: isFollowing ? Colors.transparent : account.color,
+                    border: isFollowing ? Border.all(color: account.color, width: 1.5) : null,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    isFollowing ? 'Following' : 'Follow',
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: isFollowing ? account.color : Colors.white,
+                    ),
                   ),
                 ),
               ),
@@ -593,35 +580,82 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
     );
   }
 
-  Widget _buildEmptyState(bool isDark) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+
+
+  void _clearDateFilter() {
+    setState(() {
+      _startDate = null;
+      _endDate = null;
+    });
+    _loadNotices();
+  }
+
+  Widget _buildDateFilterHeader(bool isDark) {
+    if (_startDate == null || _endDate == null) return const SizedBox.shrink();
+
+    final startStr = "${_startDate!.day}/${_startDate!.month}/${_startDate!.year}";
+    final endStr = "${_endDate!.day}/${_endDate!.month}/${_endDate!.year}";
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      color: isDark ? Colors.white10 : Colors.grey.shade200,
+      child: Row(
         children: [
-          Icon(
-            Icons.notifications_off_outlined,
-            size: 64,
-            color: isDark ? AppTheme.darkTextMuted : AppTheme.lightTextMuted,
-          ),
-          const SizedBox(height: 16),
+          Icon(Icons.filter_list_rounded, size: 16, color: AppTheme.primary),
+          const SizedBox(width: 8),
           Text(
-            'No notices yet',
+            "Filtering: $startStr - $endStr",
             style: GoogleFonts.inter(
-              fontSize: 18,
+              fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+              color: isDark ? Colors.white : Colors.black87,
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Check back later for updates',
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              color: isDark ? AppTheme.darkTextMuted : AppTheme.lightTextMuted,
+          const Spacer(),
+          GestureDetector(
+            onTap: _clearDateFilter,
+            child: Text(
+              'Clear',
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: Colors.redAccent
+              ),
             ),
-          ),
+          )
         ],
       ),
+    );
+  }
+  Widget _buildEmptyState(bool isDark) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 64),
+      children: [
+         Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.mark_email_unread_outlined, size: 64, color: isDark ? Colors.white24 : Colors.grey.shade300),
+              const SizedBox(height: 16),
+              Text(
+                'No notices found', 
+                style: GoogleFonts.inter(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : Colors.black
+                )
+              ),
+              const SizedBox(height: 8),
+              if (_startDate != null)
+                Text(
+                  'Try clearing the date filter',
+                  style: GoogleFonts.inter(color: isDark ? Colors.white54 : Colors.grey),
+                ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

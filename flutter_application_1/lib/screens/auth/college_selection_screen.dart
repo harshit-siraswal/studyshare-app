@@ -39,16 +39,20 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
   Future<void> _loadColleges() async {
     try {
       final colleges = await _supabaseService.getColleges();
-      setState(() {
-        _colleges = colleges;
-        _filteredColleges = colleges;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _colleges = colleges;
+          _filteredColleges = colleges;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
-      setState(() {
-        _error = 'Failed to load colleges. Please try again.';
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _error = 'Failed to load colleges. Please try again.';
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -105,7 +109,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
-                            color: AppTheme.primary.withOpacity(0.25),
+                            color: AppTheme.primary.withValues(alpha: 0.25),
                             blurRadius: 20,
                             offset: const Offset(0, 8),
                           ),
@@ -214,7 +218,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
             Icon(
               Icons.error_outline_rounded,
               size: 64,
-              color: AppTheme.error.withOpacity(0.5),
+              color: AppTheme.error.withValues(alpha: 0.5),
             ),
             const SizedBox(height: 16),
             Text(
@@ -246,7 +250,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
             Icon(
               Icons.search_off_rounded,
               size: 64,
-              color: AppTheme.textMuted.withOpacity(0.5),
+              color: AppTheme.textMuted.withValues(alpha: 0.5),
             ),
             const SizedBox(height: 16),
             Text(
@@ -260,7 +264,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
             Text(
               'Try a different search term',
               style: GoogleFonts.inter(
-                color: AppTheme.textMuted.withOpacity(0.7),
+                color: AppTheme.textMuted.withValues(alpha: 0.7),
               ),
             ),
           ],
@@ -281,8 +285,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
   Widget _buildCollegeCard(College college, bool isDark, int index) {
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
-      duration: Duration(milliseconds: 200 + (index * 50)),
-      curve: Curves.easeOut,
+      duration: Duration(milliseconds: 200 + (index.clamp(0, 10) * 50)),      curve: Curves.easeOut,
       builder: (context, value, child) {
         return Transform.translate(
           offset: Offset(0, 20 * (1 - value)),
@@ -350,7 +353,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                             vertical: 4,
                           ),
                           decoration: BoxDecoration(
-                            color: AppTheme.primary.withOpacity(0.1),
+                            color: AppTheme.primary.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
@@ -404,16 +407,25 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
     );
   }
 
-  void _showRequestCollegeDialog(bool isDark) {
-    showModalBottomSheet(
+  Future<void> _showRequestCollegeDialog(bool isDark) async {
+    final nameController = TextEditingController();
+    final domainController = TextEditingController();
+
+    await showModalBottomSheet(
       context: context,
       backgroundColor: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
+      isScrollControlled: true, // Better for keyboards
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (context) {
         return Padding(
-          padding: const EdgeInsets.all(24),
+          padding: EdgeInsets.only(
+            left: 24, 
+            right: 24, 
+            top: 24, 
+            bottom: MediaQuery.of(context).viewInsets.bottom + 24 // Handle keyboard
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -433,6 +445,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
               ),
               const SizedBox(height: 24),
               TextField(
+                controller: nameController,
                 style: GoogleFonts.inter(
                   color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
                 ),
@@ -457,6 +470,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
               ),
               const SizedBox(height: 16),
               TextField(
+                controller: domainController,
                 style: GoogleFonts.inter(
                   color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
                 ),
@@ -484,13 +498,19 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: () {
+                    final name = nameController.text.trim();
+                    final domain = domainController.text.trim();
+                    
                     Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Request submitted! We\'ll review it soon.'),
-                        backgroundColor: AppTheme.success,
-                      ),
-                    );
+                    
+                    if (name.isNotEmpty && domain.isNotEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Request submitted for $name! We\'ll review it soon.'),
+                            backgroundColor: AppTheme.success,
+                          ),
+                        );
+                    }
                   },
                   child: Text(
                     'Submit Request',
@@ -498,11 +518,14 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 16),
             ],
           ),
         );
       },
     );
+
+    // Dispose controllers after sheet is closed
+    nameController.dispose();
+    domainController.dispose();
   }
 }

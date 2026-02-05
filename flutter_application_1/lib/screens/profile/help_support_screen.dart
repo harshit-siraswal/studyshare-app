@@ -25,6 +25,31 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
     'Other',
   ];
 
+  InputDecoration _buildInputDecoration({required String hintText, required bool isDark}) {
+    return InputDecoration(
+      hintText: hintText,
+      hintStyle: TextStyle(color: AppTheme.textMuted),
+      filled: true,
+      fillColor: isDark ? AppTheme.darkCard : Colors.white,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(
+          color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+        ),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(
+          color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+        ),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: AppTheme.primary),
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _subjectController.dispose();
@@ -60,7 +85,7 @@ Sent from ${AppConfig.appName} v${AppConfig.appVersion}
 
       final emailUri = Uri(
         scheme: 'mailto',
-        path: 'harshit.pal.8.d.sdpsmzn@gmail.com',
+        path: AppConfig.supportEmail,
         query: _encodeQueryParameters({
           'subject': '[$_selectedCategory] $subject - ${AppConfig.appName} Feedback',
           'body': emailBody,
@@ -78,7 +103,7 @@ Sent from ${AppConfig.appName} v${AppConfig.appVersion}
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Thank you for your feedback!'),
+              content: Text('Email client opened - please send the email to complete your feedback.'),
               backgroundColor: Colors.green,
             ),
           );
@@ -86,19 +111,20 @@ Sent from ${AppConfig.appName} v${AppConfig.appVersion}
       } else {
         // Fallback: show email address to copy manually
         if (mounted) {
-          _showEmailFallbackDialog(emailBody);
+          _showEmailFallbackDialog();
         }
       }
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('Error launching email: $e\n$st'); // Log error
       if (mounted) {
-        _showEmailFallbackDialog('');
+        _showEmailFallbackDialog();
       }
     } finally {
       if (mounted) setState(() => _isSubmitting = false);
     }
   }
 
-  void _showEmailFallbackDialog(String body) {
+  void _showEmailFallbackDialog() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     showDialog(
       context: context,
@@ -120,11 +146,11 @@ Sent from ${AppConfig.appName} v${AppConfig.appVersion}
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppTheme.primary.withOpacity(0.1),
+                color: AppTheme.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: SelectableText(
-                'harshit.pal.8.d.sdpsmzn@gmail.com',
+                AppConfig.supportEmail,
                 style: GoogleFonts.inter(
                   color: AppTheme.primary,
                   fontWeight: FontWeight.w600,
@@ -143,14 +169,13 @@ Sent from ${AppConfig.appName} v${AppConfig.appVersion}
     );
   }
 
-  String? _encodeQueryParameters(Map<String, String> params) {
+  String _encodeQueryParameters(Map<String, String> params) {
     return params.entries
         .map((e) => '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}')
         .join('&');
   }
 
-  @override
-  Widget build(BuildContext context) {
+  @override  Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     
     return Scaffold(
@@ -192,7 +217,7 @@ Sent from ${AppConfig.appName} v${AppConfig.appVersion}
                     width: 56,
                     height: 56,
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
+                      color: Colors.white.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: const Icon(
@@ -219,7 +244,7 @@ Sent from ${AppConfig.appName} v${AppConfig.appVersion}
                           'Report issues or suggest new features',
                           style: GoogleFonts.inter(
                             fontSize: 13,
-                            color: Colors.white.withOpacity(0.9),
+                            color: Colors.white.withValues(alpha: 0.9),
                           ),
                         ),
                       ],
@@ -284,27 +309,9 @@ Sent from ${AppConfig.appName} v${AppConfig.appVersion}
             TextField(
               controller: _subjectController,
               style: GoogleFonts.inter(color: isDark ? Colors.white : Colors.black),
-              decoration: InputDecoration(
+              decoration: _buildInputDecoration(
                 hintText: 'Brief description of your issue',
-                hintStyle: TextStyle(color: AppTheme.textMuted),
-                filled: true,
-                fillColor: isDark ? AppTheme.darkCard : Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(
-                    color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
-                  ),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(
-                    color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
-                  ),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: AppTheme.primary),
-                ),
+                isDark: isDark,
               ),
             ),
             
@@ -323,27 +330,9 @@ Sent from ${AppConfig.appName} v${AppConfig.appVersion}
               controller: _messageController,
               maxLines: 6,
               style: GoogleFonts.inter(color: isDark ? Colors.white : Colors.black),
-              decoration: InputDecoration(
+              decoration: _buildInputDecoration(
                 hintText: 'Describe your issue or suggestion in detail...',
-                hintStyle: TextStyle(color: AppTheme.textMuted),
-                filled: true,
-                fillColor: isDark ? AppTheme.darkCard : Colors.white,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(
-                    color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
-                  ),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(
-                    color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
-                  ),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: AppTheme.primary),
-                ),
+                isDark: isDark,
               ),
             ),
             
@@ -388,7 +377,7 @@ Sent from ${AppConfig.appName} v${AppConfig.appVersion}
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: AppTheme.primary.withOpacity(0.1),
+                color: AppTheme.primary.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -397,7 +386,7 @@ Sent from ${AppConfig.appName} v${AppConfig.appVersion}
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'You can also reach us at harshit.pal.8.d.sdpsmzn@gmail.com',
+                      'You can also reach us at ${AppConfig.supportEmail}',
                       style: GoogleFonts.inter(
                         fontSize: 13,
                         color: AppTheme.primary,

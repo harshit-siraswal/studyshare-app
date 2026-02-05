@@ -30,6 +30,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -37,6 +39,7 @@ dependencies:
   supabase_flutter: ^2.12.0
   firebase_core: ^4.3.0
   firebase_auth: ^6.1.3
+  firebase_messaging: ^16.1.1
   google_sign_in: ^6.2.2
   go_router: ^17.0.1
   flutter_riverpod: ^3.1.0
@@ -59,16 +62,28 @@ dependencies:
   connectivity_plus: ^7.0.0
   permission_handler: ^12.0.1
   webview_flutter: ^4.13.0
-  razorpay_flutter: 1.3.7
-  razorpay_web: 1.5.0
+  razorpay_flutter: ^1.4.0
   dio: ^5.9.1
+  flutter_staggered_animations: ^1.1.1
   hive: ^2.2.3
   hive_flutter: ^1.1.0
   open_file: ^3.5.11
   # Timer notification
   flutter_local_notifications: ^18.0.1
+  syncfusion_flutter_pdfviewer: ^32.1.25
+  flutter_cache_manager: ^3.4.1
+  # razorpay_web: ^3.0.0
   # Timer notification
 
+
+  device_info_plus: ^12.3.0
+  package_info_plus: ^9.0.0
+  universal_io: ^2.3.1
+  giphy_picker: ^3.0.2
+  provider: ^6.1.5+1
+  timeago: ^3.7.1
+  system_alert_window: ^2.0.7
+  audioplayers: ^6.5.1
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -103,6 +118,7 @@ flutter:
   # Assets for the application
   assets:
     - assets/images/
+    - assets/sounds/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
@@ -129,5 +145,6 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
 
 

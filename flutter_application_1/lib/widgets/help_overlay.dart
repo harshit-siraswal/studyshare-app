@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../config/theme.dart';
 
 class HelpOverlay extends StatefulWidget {
   final VoidCallback onDismiss;
@@ -118,7 +117,7 @@ class _HelpOverlayState extends State<HelpOverlay> with SingleTickerProviderStat
                         borderRadius: BorderRadius.circular(24),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.3),
+                            color: Colors.black.withValues(alpha: 0.3),
                             blurRadius: 20,
                             offset: const Offset(0, 10),
                           ),
@@ -128,41 +127,60 @@ class _HelpOverlayState extends State<HelpOverlay> with SingleTickerProviderStat
                         crossAxisAlignment: CrossAxisAlignment.start,
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          // Title
-                          Text(
-                            step.title,
-                            style: GoogleFonts.inter(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                            ),
+                          // Title with Icon
+                          Row(
+                            children: [
+                              Icon(step.icon, color: Colors.white, size: 24),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  step.title,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(height: 8),
-                          
-                          // Description
+                          const SizedBox(height: 8),                          // Description
                           Text(
                             step.description,
                             style: GoogleFonts.inter(
                               fontSize: 14,
-                              color: Colors.white.withOpacity(0.8),
+                              color: Colors.white.withValues(alpha: 0.8),
                               height: 1.5,
                             ),
                           ),
                           const SizedBox(height: 24),
                           
-                          // Footer: Counter + Button
+                          // Footer: Counter + Buttons
                           Row(
                             children: [
                               Text(
                                 '${_currentStep + 1}/${_steps.length}',
                                 style: GoogleFonts.inter(
-                                  color: Colors.white.withOpacity(0.5),
+                                  color: Colors.white.withValues(alpha: 0.5),
                                   fontSize: 14,
                                   fontWeight: FontWeight.w500,
                                 ),
                               ),
                               const Spacer(),
                               
+                              // Back Button
+                              if (_currentStep > 0)
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 8),
+                                  child: TextButton(
+                                    onPressed: _previousStep,
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: Colors.white,
+                                    ),
+                                    child: const Text('Back'),
+                                  ),
+                                ),
+
                               // Next / Finish Button
                               OutlinedButton(
                                 onPressed: _nextStep,
@@ -207,12 +225,12 @@ class _HelpOverlayState extends State<HelpOverlay> with SingleTickerProviderStat
           boxShadow: [
             BoxShadow(
               // Simple highlighter effect
-              color: Colors.white.withOpacity(0.1),
+              color: Colors.white.withValues(alpha: 0.1),
               blurRadius: 30,
               spreadRadius: 10,
             ),
           ],
-          border: Border.all(color: Colors.white.withOpacity(0.5), width: 2),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.5), width: 2),
         ),
       ),
     );

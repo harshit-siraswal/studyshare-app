@@ -52,13 +52,20 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
           .toList();
       semesters.sort();
       
-      setState(() {
-        _syllabusItems = items;
-        _availableSemesters = semesters;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _syllabusItems = items;
+          _availableSemesters = semesters;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to load syllabus. Please try again.')),
+        );
+      }
     }
   }
 
@@ -178,7 +185,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
         setState(() => _selectedSemester = value);
       },
       backgroundColor: isDark ? AppTheme.darkCard : Colors.white,
-      selectedColor: widget.departmentColor.withOpacity(0.2),
+      selectedColor: widget.departmentColor.withValues(alpha: 0.2),
       checkmarkColor: widget.departmentColor,
       labelStyle: GoogleFonts.inter(
         fontSize: 13,
@@ -222,7 +229,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
           Icon(
             Icons.menu_book_outlined,
             size: 64,
-            color: AppTheme.textMuted.withOpacity(0.5),
+            color: AppTheme.textMuted.withValues(alpha: 0.5),
           ),
           const SizedBox(height: 16),
           Text(
@@ -304,7 +311,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: widget.departmentColor.withOpacity(0.1),
+                  color: widget.departmentColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
@@ -337,7 +344,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: widget.departmentColor.withOpacity(0.1),
+                              color: widget.departmentColor.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(

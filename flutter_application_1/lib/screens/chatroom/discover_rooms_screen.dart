@@ -5,7 +5,9 @@ import '../../config/theme.dart';
 import '../../services/supabase_service.dart';
 
 import '../../services/backend_api_service.dart';
-import 'chatroom_screen.dart';
+import '../../widgets/advanced_search_bar.dart';
+import '../../widgets/room_card.dart';
+import '../common/search_screen.dart';
 
 class DiscoverRoomsScreen extends StatefulWidget {
   final String collegeId;
@@ -25,11 +27,8 @@ class DiscoverRoomsScreen extends StatefulWidget {
 
 class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
   final SupabaseService _supabaseService = SupabaseService();
-  final TextEditingController _searchController = TextEditingController();
   
   List<Map<String, dynamic>> _rooms = [];
-  List<Map<String, dynamic>> _filteredRooms = [];
-  Set<String> _joinedRoomIds = {};
   bool _isLoading = true;
 
   @override
@@ -43,7 +42,6 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
 
   @override
   void dispose() {
-    _searchController.dispose();
     super.dispose();
   }
 
@@ -55,14 +53,16 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
       );
       final joinedIds = await _supabaseService.getUserRoomIds(widget.userEmail);
       
-      // Filter strictly for public rooms
-      final publicRooms = rooms.where((r) => r['is_private'] != true).toList();
+      // Filter strictly for public rooms AND not joined
+      final publicRooms = rooms.where((r) {
+        final isPrivate = r['is_private'] == true; // Handles null as false (public)
+        final roomId = r['id']?.toString() ?? '';
+        return !isPrivate && !joinedIds.contains(roomId);
+      }).toList();
       
       if (mounted) {
         setState(() {
           _rooms = publicRooms;
-          _filteredRooms = publicRooms;
-          _joinedRoomIds = joinedIds;
           _isLoading = false;
         });
       }
@@ -71,14 +71,7 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
     }
   }
 
-  void _filterRooms(String query) {
-    setState(() {
-      _filteredRooms = _rooms.where((room) {
-        final name = room['name']?.toString().toLowerCase() ?? '';
-        return name.contains(query.toLowerCase());
-      }).toList();
-    });
-  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -115,53 +108,59 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-            child: TextField(
-              controller: _searchController,
-              onChanged: _filterRooms,
-              style: TextStyle(color: isDark ? Colors.white : Colors.black),
-              decoration: InputDecoration(
-                hintText: 'Search rooms...',
-                prefixIcon: Icon(Icons.search, color: isDark ? Colors.grey : Colors.black54),
-                filled: true,
-                fillColor: cardColor,
-                contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 20),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: isDark ? const BorderSide(color: Colors.white24) : const BorderSide(color: Colors.black12),
-                ),
-              ),
+            child: AdvancedSearchBar(
+              onTap: () {
+                 Navigator.of(context).push(
+                   PageRouteBuilder(
+                     transitionDuration: const Duration(milliseconds: 500),
+                     pageBuilder: (context, animation, secondaryAnimation) {
+                       return FadeTransition(
+                         opacity: animation,
+                         child: SearchScreen(
+                           allRooms: _rooms,
+                           userEmail: widget.userEmail,
+                           collegeId: widget.collegeId,
+                           collegeDomain: widget.collegeDomain,
+                         ),
+                       );
+                     },
+                   ),
+                 ).then((_) {
+                   // Optional: Reload rooms explicitly if needed
+                   // _loadRooms();
+                 });
+              },
             ),
           ),
+
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
-                : _filteredRooms.isEmpty
+                : _rooms.isEmpty
                     ? Center(child: Text('No public rooms found', style: TextStyle(color: isDark ? Colors.white54 : Colors.grey)))
                     : GridView.builder(
                         padding: const EdgeInsets.all(20),
                         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 2,
-                          childAspectRatio: 0.85, // Taller cards for more info
+                          childAspectRatio: 0.85, // Adjusted for RoomCard content
                           crossAxisSpacing: 16,
                           mainAxisSpacing: 16,
                         ),
-                        itemCount: _filteredRooms.length,
+                        itemCount: _rooms.length,
                         itemBuilder: (context, index) {
-                          return _buildRoomCard(_filteredRooms[index], isDark, cardColor);
+                          return RoomCard(
+                            room: _rooms[index],
+                            userEmail: widget.userEmail,
+                            collegeDomain: widget.collegeDomain,
+                            onReturn: _loadRooms,
+                          );
                         },
                       ),
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton(
+        heroTag: 'fab_main',
         onPressed: _showCreateRoomDialog,
         backgroundColor: AppTheme.primary,
         child: const Icon(Icons.add, color: Colors.white),
@@ -169,110 +168,6 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
     );
   }
 
-  Widget _buildRoomCard(Map<String, dynamic> room, bool isDark, Color cardColor) {
-    final isJoined = _joinedRoomIds.contains(room['id']?.toString());
-    final memberCount = room['members_count'] ?? 0; // Assuming backend sends this or we default to 0
-    final createdAtStr = room['created_at'];
-    String timeAgo = '';
-    if (createdAtStr != null) {
-      final created = DateTime.parse(createdAtStr);
-      final diff = DateTime.now().difference(created);
-      if (diff.inDays > 0) timeAgo = '${diff.inDays}d ago';
-      else if (diff.inHours > 0) timeAgo = '${diff.inHours}h ago';
-      else timeAgo = 'Just now';
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(
-                  room['name'] ?? 'Untitled',
-                  style: GoogleFonts.inter(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : Colors.black,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (timeAgo.isNotEmpty)
-                Text(
-                  timeAgo,
-                  style: TextStyle(fontSize: 10, color: isDark ? Colors.white38 : Colors.black38),
-                ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '${memberCount} members',
-            style: TextStyle(fontSize: 12, color: AppTheme.primary),
-          ),
-          const SizedBox(height: 8),
-          Expanded(
-            child: Text(
-              room['description'] ?? 'No description',
-              style: TextStyle(
-                fontSize: 12,
-                color: isDark ? Colors.white60 : Colors.black54,
-                height: 1.4,
-              ),
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          const SizedBox(height: 12),
-
-            SizedBox(
-            width: double.infinity,
-            height: 36,
-            child: ElevatedButton(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => ChatRoomScreen(
-                      roomId: room['id'].toString(),
-                      roomName: room['name'] ?? 'Untitled',
-                      description: room['description'] ?? '',
-                      userEmail: widget.userEmail,
-                      collegeDomain: widget.collegeDomain,
-                    ),
-                  ),
-                ).then((_) => _loadRooms()); // Refresh on return
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: isJoined ? Colors.transparent : (isDark ? Colors.white10 : Colors.black12),
-                elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                padding: EdgeInsets.zero,
-                side: isJoined ? BorderSide(color: isDark ? Colors.greenAccent.withOpacity(0.5) : Colors.green.withOpacity(0.5)) : BorderSide.none,
-              ),
-              child: Text(
-                isJoined ? 'Open' : 'View',
-                style: TextStyle(
-                  color: isJoined ? (isDark ? Colors.greenAccent : Colors.green) : (isDark ? Colors.white : Colors.black),
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // Removed _joinRoom as we now navigate to detail screen
 
 
   void _showJoinRoomDialog() {
@@ -306,7 +201,9 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
                           _loadRooms(); 
                         }
                     } catch(e) {
-                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                        }
                     }
                 }
              }, 
@@ -320,7 +217,9 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
   void _showCreateRoomDialog() {
       final isDark = Theme.of(context).brightness == Brightness.dark;
       final nameCtrl = TextEditingController();
-      final descCtrl = TextEditingController(); // Added description controller
+      final descCtrl = TextEditingController();
+      final tagCtrl = TextEditingController();
+      List<String> selectedTags = [];
       bool isPrivate = false;
       
       showDialog(
@@ -328,64 +227,212 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
        builder: (context) => StatefulBuilder(
          builder: (context, setDialogState) => AlertDialog(
            backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-           title: Text('Create Room', style: TextStyle(color: isDark ? Colors.white : Colors.black)),
-           content: Column(
-             mainAxisSize: MainAxisSize.min,
+           title: Row(
+             mainAxisAlignment: MainAxisAlignment.spaceBetween,
              children: [
-               TextField(
-                 controller: nameCtrl,
-                 style: TextStyle(color: isDark ? Colors.white : Colors.black),
-                 decoration: InputDecoration(
-                   hintText: 'Room Name', 
-                   filled: true, 
-                   fillColor: isDark ? Colors.black45 : Colors.grey.shade100, 
-                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)
-                 ),
-               ),
-               const SizedBox(height: 12),
-               TextField( // Added Description Field
-                 controller: descCtrl,
-                 style: TextStyle(color: isDark ? Colors.white : Colors.black),
-                 maxLines: 3,
-                 decoration: InputDecoration(
-                   hintText: 'Description', 
-                   filled: true, 
-                   fillColor: isDark ? Colors.black45 : Colors.grey.shade100, 
-                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)
-                 ),
-               ),
-               const SizedBox(height: 8),
-               SwitchListTile(
-                 title: Text('Private', style: TextStyle(color: isDark ? Colors.white : Colors.black)),
-                 value: isPrivate,
-                 onChanged: (v) => setDialogState(() => isPrivate = v),
+               Text('Create Room', style: TextStyle(color: isDark ? Colors.white : Colors.black)),
+               IconButton(
+                 icon: Icon(Icons.info_outline_rounded, size: 20, color: isDark ? Colors.white70 : Colors.black54),
+                 onPressed: () {
+                   showDialog(
+                     context: context,
+                     builder: (ctx) => AlertDialog(
+                       backgroundColor: isDark ? const Color(0xFF2C2C2E) : Colors.white,
+                       title: Text('About Tags', style: TextStyle(color: isDark ? Colors.white : Colors.black)),
+                       content: Text(
+                         'Tags help other students find your room.\n\nAdd at least one tag like #placement, #hackathon, #dsa, etc.\n\nTags will be displayed on the room card.',
+                         style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+                       ),
+                       actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Got it'))],
+                     ),
+                   );
+                 },
                ),
              ],
+           ),
+           content: SizedBox(
+             width: double.maxFinite,
+             child: SingleChildScrollView(
+               child: Column(
+                 mainAxisSize: MainAxisSize.min,
+                 crossAxisAlignment: CrossAxisAlignment.start,
+                 children: [
+                   TextField(
+                     controller: nameCtrl,
+                     style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                     decoration: InputDecoration(
+                       hintText: 'Room Name', 
+                       filled: true, 
+                       fillColor: isDark ? Colors.black45 : Colors.grey.shade100, 
+                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)
+                     ),
+                   ),
+                   const SizedBox(height: 12),
+                   TextField(
+                     controller: descCtrl,
+                     style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                     maxLines: 2,
+                     decoration: InputDecoration(
+                       hintText: 'Description', 
+                       filled: true, 
+                       fillColor: isDark ? Colors.black45 : Colors.grey.shade100, 
+                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)
+                     ),
+                   ),
+                   const SizedBox(height: 16),
+                   
+                   // TAGS SECTION
+                   // TAGS SECTION
+                   Text('Tags (Required)', style: TextStyle(color: isDark ? Colors.white70 : Colors.black54, fontSize: 13, fontWeight: FontWeight.bold)),
+                   const SizedBox(height: 8),
+                   Row(
+                     children: [
+                       Expanded(
+                         child: TextField(
+                           controller: tagCtrl,
+                           style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                           decoration: InputDecoration(
+                             hintText: 'Add a tag (e.g. #dsa)', 
+                             isDense: true,
+                             filled: true, 
+                             fillColor: isDark ? Colors.black45 : Colors.grey.shade100, 
+                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none)
+                           ),
+                           onSubmitted: (val) {
+                             if (val.trim().isNotEmpty) {
+                               setDialogState(() {
+                                 selectedTags.add(val.trim().startsWith('#') ? val.trim() : '#${val.trim()}');
+                                 tagCtrl.clear();
+                               });
+                             }
+                           },
+                         ),
+                       ),
+                       IconButton(
+                         icon: const Icon(Icons.add_circle_outline),
+                         color: AppTheme.primary,
+                         onPressed: () {
+                           if (tagCtrl.text.trim().isNotEmpty) {
+                             setDialogState(() {
+                               selectedTags.add(tagCtrl.text.trim().startsWith('#') ? tagCtrl.text.trim() : '#${tagCtrl.text.trim()}');
+                               tagCtrl.clear();
+                             });
+                           }
+                         },
+                       ),
+                     ],
+                   ),
+                   const SizedBox(height: 8),
+                   Wrap(
+                     spacing: 8,
+                     runSpacing: 4,
+                     children: [
+                       ...selectedTags.map((tag) => Chip(
+                         label: Text(tag, style: const TextStyle(fontSize: 12)),
+                         onDeleted: () => setDialogState(() => selectedTags.remove(tag)),
+                         backgroundColor: AppTheme.primary.withValues(alpha: 0.1),
+                         deleteIconColor: AppTheme.primary,
+                         side: BorderSide.none,
+                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                       )),
+                       if (selectedTags.isEmpty)
+                         Padding(
+                           padding: const EdgeInsets.symmetric(vertical: 4),
+                           child: Text('Suggestions: ', style: TextStyle(color: isDark ? Colors.white54 : Colors.grey, fontSize: 12)),
+                         ),
+                       if (selectedTags.isEmpty) ...['#placement', '#hackathon', '#dsa'].map((t) => 
+                         GestureDetector(
+                           onTap: () => setDialogState(() => selectedTags.add(t)),
+                           child: Container(
+                             margin: const EdgeInsets.only(right: 8),
+                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                             decoration: BoxDecoration(
+                               color: isDark ? Colors.white10 : Colors.grey.shade200,
+                               borderRadius: BorderRadius.circular(12),
+                             ),
+                             child: Text(t, style: TextStyle(color: isDark ? Colors.white70 : Colors.black87, fontSize: 12)),
+                           ),
+                         )
+                       ),
+                     ],
+                   ),
+                   const SizedBox(height: 12),
+
+                   Text('Visibility', style: TextStyle(color: isDark ? Colors.white70 : Colors.black54, fontSize: 13, fontWeight: FontWeight.bold)),
+                   const SizedBox(height: 8),
+                   Row(
+                     children: [
+                       ChoiceChip(
+                         label: const Text('Public'),
+                         selected: !isPrivate,
+                         onSelected: (selected) {
+                           if (selected) setDialogState(() => isPrivate = false);
+                         },
+                         selectedColor: AppTheme.primary,
+                         labelStyle: TextStyle(
+                           color: !isPrivate ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
+                           fontWeight: !isPrivate ? FontWeight.bold : FontWeight.normal,
+                         ),
+                         backgroundColor: isDark ? Colors.black45 : Colors.grey.shade100,
+                         side: BorderSide.none,
+                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                       ),
+                       const SizedBox(width: 12),
+                       ChoiceChip(
+                         label: const Text('Private'),
+                         selected: isPrivate,
+                         onSelected: (selected) {
+                           if (selected) setDialogState(() => isPrivate = true);
+                         },
+                         selectedColor: AppTheme.primary,
+                         labelStyle: TextStyle(
+                           color: isPrivate ? Colors.white : (isDark ? Colors.white70 : Colors.black87),
+                           fontWeight: isPrivate ? FontWeight.bold : FontWeight.normal,
+                         ),
+                         backgroundColor: isDark ? Colors.black45 : Colors.grey.shade100,
+                         side: BorderSide.none,
+                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                       ),
+                     ],
+                   ),
+                 ],
+               ),
+             ),
            ),
            actions: [
               TextButton(onPressed: ()=>Navigator.pop(context), child: const Text('Cancel')),
               TextButton(
                  onPressed: () async {
-                    if(nameCtrl.text.isNotEmpty) {
-                        try {
-                           final res = await _supabaseService.createChatRoom(
-                             name: nameCtrl.text, 
-                             description: descCtrl.text, // Pass description
-                             isPrivate: isPrivate, 
-                             userEmail: widget.userEmail, 
-                             collegeId: widget.collegeId
-                           );
-                           if(mounted) { 
-                             Navigator.pop(context); 
-                             _loadRooms();
-                             if (res['joinCode'] != null) {
-                                Clipboard.setData(ClipboardData(text: res['joinCode'].toString()));
-                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Room Created! Code copied: ${res['joinCode']}')));
-                             }
-                           }
-                        } catch (e) {
-                           ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-                        }
+                    if (nameCtrl.text.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Room name is required')));
+                      return;
+                    }
+                    if (selectedTags.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please add at least one tag')));
+                      return;
+                    }
+                    
+                    try {
+                       final res = await _supabaseService.createChatRoom(
+                         name: nameCtrl.text, 
+                         description: descCtrl.text, 
+                         isPrivate: isPrivate, 
+                         userEmail: widget.userEmail, 
+                         collegeId: widget.collegeId,
+                         tags: selectedTags,
+                       );
+                       if(mounted) { 
+                         Navigator.pop(context); 
+                         _loadRooms();
+                         if (res['joinCode'] != null) {
+                            Clipboard.setData(ClipboardData(text: res['joinCode'].toString()));
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Room Created! Code copied: ${res['joinCode']}')));
+                         }
+                       }
+                    } catch (e) {
+                       if (mounted) {
+                         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                       }
                     }
                  },
                  child: const Text('Create'),

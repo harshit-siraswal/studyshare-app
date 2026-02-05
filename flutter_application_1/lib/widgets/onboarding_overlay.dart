@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:async'; // For unawaited
 import '../config/theme.dart';
 
 /// Onboarding overlay widget for first-time user guided tour.
@@ -92,13 +93,92 @@ class _OnboardingOverlayState extends State<OnboardingOverlay>
   }
 
   void _completeOnboarding() {
-    OnboardingOverlay.setOnboardingComplete();
+    // Fire and forget
+    unawaited(OnboardingOverlay.setOnboardingComplete()); 
     setState(() => _isVisible = false);
     widget.onComplete?.call();
   }
 
+
+
+  Rect? _spotlightRect;
+
+  @override
+  void didUpdateWidget(OnboardingOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    
+    // Check bounds since the steps list might have shrunk
+    if (widget.steps.isEmpty) {
+      if (_currentStep != 0) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) setState(() => _currentStep = 0);
+        });
+      }
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _updateSpotlight(); // clear spotlight
+      });
+      return; 
+    }
+    
+    if (_currentStep >= widget.steps.length) {
+      // Clamp
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) setState(() => _currentStep = widget.steps.length - 1);
+      });
+      // We can't access widget.steps[_currentStep] yet safely if we just scheduled a setState
+      // But _updateSpotlight uses _currentStep, so we should update it after frame
+      _updateSpotlight(); 
+      return;
+    }
+
+    // Now safe to access widget.steps[_currentStep]
+    if (_currentStep < oldWidget.steps.length) {
+      if (widget.steps[_currentStep].targetKey != oldWidget.steps[_currentStep].targetKey) {
+        _updateSpotlight();
+      }
+    } else {
+      _updateSpotlight();
+    }
+  }
+  void _updateSpotlight() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      
+      final targetKey = widget.steps[_currentStep].targetKey;
+      if (targetKey == null) {
+        setState(() => _spotlightRect = null);
+        return;
+      }
+      
+      final renderBox = targetKey.currentContext?.findRenderObject() as RenderBox?;
+      if (renderBox == null) {
+         setState(() => _spotlightRect = null);
+         return;
+      }
+
+      final position = renderBox.localToGlobal(Offset.zero);
+      final size = renderBox.size;
+      
+      // Add padding around the spotlight
+      const padding = 8.0;
+      final rect = Rect.fromLTWH(
+        position.dx - padding,
+        position.dy - padding,
+        size.width + padding * 2,
+        size.height + padding * 2,
+      );
+      
+      setState(() => _spotlightRect = rect);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    // Schedule spotlight update if needed
+    if (_isVisible && widget.steps.isNotEmpty && _spotlightRect == null && widget.steps[_currentStep].targetKey != null) {
+      _updateSpotlight();
+    }
+    
     if (!_isVisible || widget.steps.isEmpty) {
       return widget.child;
     }
@@ -115,14 +195,21 @@ class _OnboardingOverlayState extends State<OnboardingOverlay>
           child: GestureDetector(
             onTap: _nextStep,
             child: Container(
-              color: Colors.black.withOpacity(0.75),
+              color: Colors.black.withValues(alpha: 0.75),
             ),
           ),
         ),
         
         // Spotlight cutout if target key is provided
-        if (currentStepData.targetKey != null)
-          _buildSpotlight(currentStepData.targetKey!),
+        if (_spotlightRect != null)
+          Positioned.fill(
+            child: CustomPaint(
+              painter: SpotlightPainter(
+                spotlightRect: _spotlightRect!,
+                borderRadius: 16,
+              ),
+            ),
+          ),
         
         // Tooltip card
         Positioned(
@@ -165,31 +252,6 @@ class _OnboardingOverlayState extends State<OnboardingOverlay>
     );
   }
 
-  Widget _buildSpotlight(GlobalKey targetKey) {
-    final renderBox = targetKey.currentContext?.findRenderObject() as RenderBox?;
-    if (renderBox == null) return const SizedBox.shrink();
-
-    final position = renderBox.localToGlobal(Offset.zero);
-    final size = renderBox.size;
-    
-    // Add padding around the spotlight
-    const padding = 8.0;
-    final spotlightRect = Rect.fromLTWH(
-      position.dx - padding,
-      position.dy - padding,
-      size.width + padding * 2,
-      size.height + padding * 2,
-    );
-
-    return Positioned.fill(
-      child: CustomPaint(
-        painter: SpotlightPainter(
-          spotlightRect: spotlightRect,
-          borderRadius: 16,
-        ),
-      ),
-    );
-  }
 
   Widget _buildTooltipCard(OnboardingStep step, bool isDark) {
     return Container(
@@ -199,7 +261,7 @@ class _OnboardingOverlayState extends State<OnboardingOverlay>
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.2),
+            color: Colors.black.withValues(alpha: 0.2),
             blurRadius: 20,
             offset: const Offset(0, 8),
           ),
@@ -339,7 +401,7 @@ class SpotlightPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = Colors.black.withOpacity(0.75);
+    final paint = Paint()..color = Colors.black.withValues(alpha: 0.75);
     
     // Draw the dark overlay with a cutout
     final path = Path()
@@ -363,9 +425,9 @@ class SpotlightPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant SpotlightPainter oldDelegate) {
-    return spotlightRect != oldDelegate.spotlightRect;
-  }
-}
+    return spotlightRect != oldDelegate.spotlightRect ||
+           borderRadius != oldDelegate.borderRadius;
+  }}
 
 /// Default onboarding steps for MyStudySpace
 List<OnboardingStep> getDefaultOnboardingSteps() {

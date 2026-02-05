@@ -1,20 +1,8 @@
-import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:google_fonts/google_fonts.dart';
-import 'package:url_launcher/url_launcher.dart';
-import '../../config/theme.dart';
 
-// Safe platform check that works on all platforms
-bool get isDesktop {
-  if (kIsWeb) return false;
-  try {
-    // ignore: avoid_dynamic calls
-    final platform = TargetPlatform.values;
-    return true; // Will only reach here on mobile/desktop
-  } catch (e) {
-    return false;
-  }
-}
+import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
+import '../../config/theme.dart';
 
 class PDFViewerScreen extends StatefulWidget {
   final String url;
@@ -31,179 +19,130 @@ class PDFViewerScreen extends StatefulWidget {
 }
 
 class _PDFViewerScreenState extends State<PDFViewerScreen> {
-  bool _isLoading = true;
-  bool _openedInBrowser = false;
+  late PdfViewerController _pdfViewerController;
+  final GlobalKey<SfPdfViewerState> _pdfViewerKey = GlobalKey();
+  
+  // Search state
+  PdfTextSearchResult _searchResult = PdfTextSearchResult();
+  final TextEditingController _searchController = TextEditingController();
+  bool _showSearchBar = false;
+  bool _isSearching = false;
 
   @override
   void initState() {
+    _pdfViewerController = PdfViewerController();
     super.initState();
-    _handlePDF();
   }
 
-  Future<void> _handlePDF() async {
-    // Always open in browser - safest cross-platform approach
-    await _openInBrowser();
-    setState(() {
-      _isLoading = false;
-      _openedInBrowser = true;
-    });
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
-  Future<void> _openInBrowser() async {
-    try {
-      final uri = Uri.parse(widget.url);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
+  void _handleSearch(String query) {
+    if (query.isEmpty) return;
+    setState(() => _isSearching = true);
+    
+    _searchResult = _pdfViewerController.searchText(query);
+    
+    _searchResult.addListener(() {
+      if (mounted) {
+        setState(() {});
       }
-    } catch (e) {
-      debugPrint('Error opening URL: $e');
-    }
+    });
+    
+    if (mounted) setState(() => _isSearching = false);
+  }
+
+  void _clearSearch() {
+    setState(() {
+      _showSearchBar = false;
+      _searchController.clear();
+      _searchResult.clear();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textColor = isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
-    final secondaryColor = isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary;
-    final bgColor = isDark ? AppTheme.darkBackground : AppTheme.lightBackground;
-    final cardColor = isDark ? AppTheme.darkCard : Colors.white;
-    
+    final textColor = isDark ? Colors.white : Colors.black;
+
     return Scaffold(
-      backgroundColor: bgColor,
       appBar: AppBar(
         backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(
-            Icons.arrow_back_ios_rounded,
-            color: textColor,
-          ),
+          icon: Icon(Icons.arrow_back_ios_rounded, color: textColor),
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text(
-          widget.title,
-          style: GoogleFonts.inter(
-            fontWeight: FontWeight.w600,
-            fontSize: 16,
-            color: textColor,
-          ),
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        title: _showSearchBar
+            ? TextField(
+                controller: _searchController,
+                autofocus: true,
+                style: GoogleFonts.inter(color: textColor),
+                decoration: InputDecoration(
+                  hintText: 'Find in document...',
+                  hintStyle: GoogleFonts.inter(color: Colors.grey),
+                  border: InputBorder.none,
+                ),
+                onSubmitted: _handleSearch,
+              )
+            : Text(
+                widget.title,
+                style: GoogleFonts.inter(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 16,
+                  color: textColor,
+                ),
+              ),
         actions: [
-          IconButton(
-            onPressed: _openInBrowser,
-            icon: Icon(Icons.open_in_browser_rounded, color: secondaryColor),
-            tooltip: 'Open in browser',
-          ),
+          if (_showSearchBar) ...[
+            Center(
+              child: Text(
+                '${_searchResult.currentInstanceIndex}/${_searchResult.totalInstanceCount}',
+                style: GoogleFonts.inter(color: textColor, fontSize: 12),
+              ),
+            ),
+            IconButton(
+              icon: Icon(Icons.keyboard_arrow_up_rounded, color: textColor),
+              onPressed: () {
+                _searchResult.previousInstance();
+              },
+            ),
+            IconButton(
+              icon: Icon(Icons.keyboard_arrow_down_rounded, color: textColor),
+              onPressed: () {
+                _searchResult.nextInstance();
+              },
+            ),
+            IconButton(
+              icon: Icon(Icons.close_rounded, color: textColor),
+              onPressed: _clearSearch,
+            ),
+          ] else
+            IconButton(
+              icon: Icon(Icons.search_rounded, color: textColor),
+              onPressed: () {
+                setState(() => _showSearchBar = true);
+              },
+            ),
         ],
       ),
-      body: _buildBody(isDark, textColor, secondaryColor, cardColor),
-    );
-  }
-
-  Widget _buildBody(bool isDark, Color textColor, Color secondaryColor, Color cardColor) {
-    if (_isLoading) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const CircularProgressIndicator(color: AppTheme.primary),
-            const SizedBox(height: 16),
-            Text(
-              'Opening PDF...',
-              style: GoogleFonts.inter(color: secondaryColor),
-            ),
-          ],
-        ),
-      );
-    }
-
-    // Show confirmation that PDF was opened
-    return Center(
-      child: Container(
-        margin: const EdgeInsets.all(24),
-        padding: const EdgeInsets.all(32),
-        decoration: BoxDecoration(
-          color: cardColor,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: AppTheme.success.withOpacity(0.1),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.check_circle_rounded,
-                size: 48,
-                color: AppTheme.success,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Text(
-              'PDF Opened',
-              style: GoogleFonts.inter(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: textColor,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              widget.title,
-              style: GoogleFonts.inter(
-                fontSize: 14,
-                color: secondaryColor,
-              ),
-              textAlign: TextAlign.center,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'The PDF has been opened in your browser',
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                color: secondaryColor,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.arrow_back_rounded, size: 18),
-                  label: const Text('Go Back'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: secondaryColor,
-                    side: BorderSide(color: secondaryColor.withOpacity(0.3)),
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                ElevatedButton.icon(
-                  onPressed: _openInBrowser,
-                  icon: const Icon(Icons.refresh_rounded, size: 18),
-                  label: const Text('Open Again'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
+      body: SfPdfViewer.network(
+        widget.url,
+        key: _pdfViewerKey,
+        controller: _pdfViewerController,
+        onDocumentLoaded: (PdfDocumentLoadedDetails details) {
+          debugPrint('PDF Loaded: ${details.document.pages.count} pages');
+        },
+        onDocumentLoadFailed: (PdfDocumentLoadFailedDetails details) {
+          debugPrint('PDF Load Failed: ${details.error}');
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to load PDF: ${details.description}')),
+          );
+        },
       ),
     );
   }
 }
-

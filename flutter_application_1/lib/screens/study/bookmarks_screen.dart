@@ -39,10 +39,14 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
         _isLoading = false;
       });
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to load bookmarks')),
+        );
+        setState(() => _isLoading = false);
+      }
     }
   }
-
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -103,7 +107,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> {
           Icon(
             Icons.bookmark_border_rounded,
             size: 64,
-            color: AppTheme.textMuted.withOpacity(0.5),
+            color: AppTheme.textMuted.withValues(alpha: 0.5),
           ),
           const SizedBox(height: 16),
           Text(

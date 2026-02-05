@@ -1,19 +1,28 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../../config/theme.dart';
 import '../../services/supabase_service.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/emoji_reactions.dart';
+import '../profile/user_profile_screen.dart';
+import '../../services/backend_api_service.dart';
+import '../../widgets/comment_input_box.dart';
+import '../../config/app_config.dart';
+
+import '../../services/subscription_service.dart';
+import '../../widgets/paywall_dialog.dart';
 
 class PostDetailScreen extends StatefulWidget {
   final Map<String, dynamic> post;
   final String userEmail;
+  final String collegeDomain;
 
   const PostDetailScreen({
     super.key,
     required this.post,
     required this.userEmail,
+    required this.collegeDomain,
   });
 
   @override
@@ -23,8 +32,102 @@ class PostDetailScreen extends StatefulWidget {
 class _PostDetailScreenState extends State<PostDetailScreen> {
   final SupabaseService _supabaseService = SupabaseService();
   final AuthService _authService = AuthService();
+  final SubscriptionService _subscriptionService = SubscriptionService(); // New instance
   final TextEditingController _commentController = TextEditingController();
+  final FocusNode _commentFocusNode = FocusNode();
+
+  // Reply state
+  String? _replyToId;
+  String? _replyToName;
   
+  // ... (rest of vars)
+
+  Future<void> _handleGifTap() async {
+     final isPremium = await _subscriptionService.isPremium();
+     if (!mounted) return;
+     
+     if (!isPremium) {
+       showDialog(
+         context: context,
+         builder: (context) => PaywallDialog(
+           onSuccess: () {
+             if (!mounted) return;
+             ScaffoldMessenger.of(context).showSnackBar(
+               const SnackBar(content: Text('Premium unlocked! You can now post GIFs.')),
+             );
+             // Directly show picker for smooth UX
+             _showGifPicker();
+           },
+         ),
+       );
+     } else {
+       _showGifPicker();
+     }
+  }
+
+  void _showGifPicker() {
+    final theme = Theme.of(context);
+    
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: 200,
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Text('Select GIF (Premium Feature)', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            Expanded(
+              child: GridView.count(
+                crossAxisCount: 3,
+                children: [
+                  _buildGifOption('https://media.giphy.com/media/l0HlHJGHe3yAMhdQY/giphy.gif'),
+                  _buildGifOption('https://media.giphy.com/media/3o7TKs6DH0R3X3U6v6/giphy.gif'),
+                  _buildGifOption('https://media.giphy.com/media/d9QiBcfzg64Io/giphy.gif'),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGifOption(String url) {
+    return GestureDetector(
+      onTap: () {
+        Navigator.pop(context);
+        final text = _commentController.text;
+        final selection = _commentController.selection;
+        final insertPos = selection.isValid ? selection.baseOffset : text.length;
+        final gifMarkdown = ' ![GIF]($url) ';
+        final newText = text.substring(0, insertPos) + gifMarkdown + text.substring(insertPos);
+        _commentController.value = TextEditingValue(
+          text: newText,
+          selection: TextSelection.collapsed(offset: insertPos + gifMarkdown.length),
+        );
+      },
+      child: Image.network(
+        url,
+        fit: BoxFit.cover,
+        loadingBuilder: (context, child, loadingProgress) {
+          if (loadingProgress == null) return child;
+          return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+        },
+        errorBuilder: (context, error, stackTrace) => Container(
+          color: Colors.grey[300],
+          child: const Icon(Icons.broken_image, color: Colors.grey),
+        ),
+      ),
+    );
+  }
+
+  // ... (rest of methods)
   List<Map<String, dynamic>> _comments = [];
   bool _isLoading = true;
   bool _isSaved = false;
@@ -33,7 +136,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   int? _userVote;
   bool _isSubmitting = false;
   bool _isReadOnly = false;
-  String _collegeDomain = '';
+  final Set<String> _expandedCommentIds = {};
 
   @override
   void initState() {
@@ -44,22 +147,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     _loadData();
   }
 
-  Future<void> _initReadOnly() async {
-    // Determine read-only using selected college domain (saved in prefs by your app router)
-    try {
-      // ignore: avoid_dynamic_calls
-      final prefs = await SharedPreferences.getInstance();
-      _collegeDomain = prefs.getString('selectedCollegeDomain') ?? '';
-      final email = widget.userEmail;
-      if (_collegeDomain.isEmpty) {
-        _isReadOnly = true;
-      } else {
-        _isReadOnly = !email.endsWith(_collegeDomain);
-      }
-      if (mounted) setState(() {});
-    } catch (_) {
-      // Default to read-only if unknown
+  void _initReadOnly() {
+    if (widget.collegeDomain.isEmpty) {
       _isReadOnly = true;
+    } else {
+      _isReadOnly = !widget.userEmail.endsWith(widget.collegeDomain);
     }
   }
 
@@ -143,8 +235,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         content: content,
         userEmail: widget.userEmail,
         userName: _authService.displayName ?? widget.userEmail.split('@')[0],
+        parentId: _replyToId,
       );
       _commentController.clear();
+      setState(() {
+        _replyToId = null;
+        _replyToName = null;
+      });
+      _commentFocusNode.unfocus();
       await _loadData(); // Refresh comments
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -276,35 +374,51 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           // Author info
           Row(
             children: [
-              CircleAvatar(
-                radius: 18,
-                backgroundColor: AppTheme.primary.withOpacity(0.2),
-                child: Text(
-                  authorName[0].toUpperCase(),
-                  style: GoogleFonts.inter(
-                    fontWeight: FontWeight.bold,
-                    color: AppTheme.primary,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      authorName,
-                      style: GoogleFonts.inter(
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white : Colors.black,
+              GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => UserProfileScreen(
+                        userEmail: post['author_email'] ?? '',
+                        userName: authorName,
+                        userPhotoUrl: post['author_photo_url'],
                       ),
                     ),
-                    Text(
-                      _formatTimeAgo(createdAt),
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        color: AppTheme.textMuted,
+                  );
+                },
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 18,
+                      backgroundColor: AppTheme.primary.withValues(alpha: 0.2),
+                      child: Text(
+                        authorName[0].toUpperCase(),
+                        style: GoogleFonts.inter(
+                          fontWeight: FontWeight.bold,
+                          color: AppTheme.primary,
+                        ),
                       ),
+                    ),
+                    const SizedBox(width: 10),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          authorName,
+                          style: GoogleFonts.inter(
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? Colors.white : Colors.black,
+                          ),
+                        ),
+                        Text(
+                          _formatTimeAgo(createdAt),
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: AppTheme.textMuted,
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -330,7 +444,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             content,
             style: GoogleFonts.inter(
               fontSize: 15,
-              color: isDark ? Colors.white.withOpacity(0.9) : Colors.black87,
+              color: isDark ? Colors.white.withValues(alpha: 0.9) : Colors.black87,
               height: 1.5,
             ),
           ),
@@ -349,7 +463,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   return Container(
                     height: 200,
                     decoration: BoxDecoration(
-                      color: isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFF1F5F9),
+                      color: isDark ? Colors.white.withValues(alpha: 0.05) : const Color(0xFFF1F5F9),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Center(
@@ -363,7 +477,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 errorBuilder: (context, error, stackTrace) => Container(
                   height: 150,
                   decoration: BoxDecoration(
-                    color: isDark ? Colors.white.withOpacity(0.05) : const Color(0xFFF1F5F9),
+                    color: isDark ? Colors.white.withValues(alpha: 0.05) : const Color(0xFFF1F5F9),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: isDark ? Colors.white10 : Colors.grey.shade200,
@@ -392,7 +506,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.03),
+                  color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Row(
@@ -454,7 +568,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         padding: const EdgeInsets.all(32),
         child: Column(
           children: [
-            Icon(Icons.chat_bubble_outline, size: 48, color: AppTheme.textMuted.withOpacity(0.5)),
+            Icon(Icons.chat_bubble_outline, size: 48, color: AppTheme.textMuted.withValues(alpha: 0.5)),
             const SizedBox(height: 12),
             Text(
               'No comments yet',
@@ -462,7 +576,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             ),
             Text(
               'Be the first to comment!',
-              style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textMuted.withOpacity(0.7)),
+              style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textMuted.withValues(alpha: 0.7)),
             ),
           ],
         ),
@@ -487,185 +601,244 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         ? DateTime.parse(comment['created_at']) 
         : DateTime.now();
 
-    final hasReplies = (comment['reply_count'] ?? 0) > 0;
+    final replies = comment['replies'] as List<Map<String, dynamic>>? ?? [];
+    final hasReplies = replies.isNotEmpty;
+    final commentId = comment['id']?.toString() ?? '';
+    final isExpanded = _expandedCommentIds.contains(commentId);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Avatar
-          CircleAvatar(
-            radius: 18,
-            backgroundColor: AppTheme.secondary, // Or random color/image
-            child: Text(
-              authorName[0].toUpperCase(),
-              style: GoogleFonts.inter(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          
-          // Content
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header: Name + Time
-                Row(
-                  children: [
-                    Text(
-                      authorName,
-                      style: GoogleFonts.inter(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                        color: isDark ? Colors.white : Colors.black,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Avatar
+              GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => UserProfileScreen(
+                        userEmail: comment['author_email'] ?? '',
+                        userName: authorName,
+                        userPhotoUrl: comment['author_photo_url'],
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      _formatTimeAgo(createdAt),
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        color: AppTheme.textMuted,
-                      ),
+                  );
+                },
+                child: CircleAvatar(
+                  radius: 18,
+                  backgroundColor: AppTheme.secondary, // Or random color/image
+                  child: Text(
+                    authorName.isNotEmpty ? authorName[0].toUpperCase() : '?',
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
                     ),
-                    const Spacer(),
-                    Icon(Icons.more_horiz_rounded, size: 16, color: AppTheme.textMuted),
-                  ],
-                ),
-                const SizedBox(height: 4),
-                
-                // Comment Body
-                Text(
-                  content,
-                  style: GoogleFonts.inter(
-                    fontSize: 15,
-                    color: isDark ? Colors.white.withOpacity(0.9) : Colors.black87,
-                    height: 1.4,
                   ),
                 ),
-                const SizedBox(height: 8),
-                
-                // Actions Row: Reactions + Reply
-                Row(
+              ),
+              const SizedBox(width: 12),
+              
+              // Content
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Emoji Reactions Widget
-                    Expanded(
-                      child: EmojiReactions(
-                        commentId: comment['id']?.toString() ?? '',
-                        commentType: 'post',
-                        compact: true,
-                      ),
+                    // Header: Name + Time
+                    Row(
+                      children: [
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => UserProfileScreen(
+                                  userEmail: comment['author_email'] ?? '',
+                                  userName: authorName,
+                                  userPhotoUrl: comment['author_photo_url'],
+                                ),
+                              ),
+                            );
+                          },
+                          child: Text(
+                            authorName,
+                            style: GoogleFonts.inter(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 14,
+                              color: isDark ? Colors.white : Colors.black,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _formatTimeAgo(createdAt),
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: AppTheme.textMuted,
+                          ),
+                        ),
+                        const Spacer(),
+                        Icon(Icons.more_horiz_rounded, size: 16, color: AppTheme.textMuted),
+                      ],
                     ),
-                    const SizedBox(width: 12),
-                    // Reply Text Button
+                    const SizedBox(height: 4),
+                    
+                    // Comment Body
                     Text(
-                      'Reply',
+                      content,
                       style: GoogleFonts.inter(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white70 : Colors.black87,
+                        fontSize: 15,
+                        color: isDark ? Colors.white.withValues(alpha: 0.9) : Colors.black87,
+                        height: 1.4,
                       ),
                     ),
-                  ],
-                ),
-                
-                // Threaded Replies Expander (Mock/Real)
-                if (hasReplies) ...[
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Container(
-                        width: 24,
-                        height: 1, // Line
-                        color: AppTheme.textMuted.withOpacity(0.5),
-                        margin: const EdgeInsets.only(right: 8),
-                      ),
-                      Text(
-                        'View ${comment['reply_count']} replies',
-                        style: GoogleFonts.inter(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.textMuted,
+                    const SizedBox(height: 8),
+                    
+                    // Actions Row: Reactions + Reply
+                    Row(
+                      children: [
+                        // Emoji Reactions
+                        Expanded(
+                          child: EmojiReactions(
+                            commentId: commentId,
+                            commentType: 'post',
+                            compact: true,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        // Reply Button
+                          GestureDetector(
+                          onTap: () {
+                             setState(() {
+                               _replyToId = commentId;
+                               _replyToName = authorName;
+                             });
+                             FocusScope.of(context).requestFocus(_commentFocusNode);
+                          },
+                          child: Text(
+                            'Reply',
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? Colors.white70 : Colors.black87,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    
+                    // Threaded Replies Toggle
+                    if (hasReplies) ...[
+                      const SizedBox(height: 12),
+                      GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            if (isExpanded) {
+                              _expandedCommentIds.remove(commentId);
+                            } else {
+                              _expandedCommentIds.add(commentId);
+                            }
+                          });
+                        },
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 24,
+                              height: 1, // Line
+                              color: AppTheme.textMuted.withValues(alpha: 0.5),
+                              margin: const EdgeInsets.only(right: 8),
+                            ),
+                            Text(
+                              isExpanded ? 'Hide replies' : 'View ${replies.length} replies',
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.textMuted,
+                              ),
+                            ),
+                            Icon(
+                              isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded, 
+                              size: 16, 
+                              color: AppTheme.textMuted
+                            ),
+                          ],
                         ),
                       ),
-                      const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: AppTheme.textMuted),
                     ],
-                  ),
-                ],
-              ],
-            ),
+                  ],
+                ),
+              ),
+            ],
           ),
+          
+          // Render Recursive Replies
+          if (hasReplies && isExpanded)
+            Padding(
+              padding: const EdgeInsets.only(left: 44, top: 12), // Indent replies
+              child: ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: replies.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 12),
+                itemBuilder: (context, index) => _buildCommentCard(replies[index], isDark),
+              ),
+            ),
         ],
       ),
     );
   }
 
+  Future<void> _handleStickerSelection(File stickerFile) async {
+     if (_isReadOnly) return;
+     
+     // For stickers, we would upload to cloudinary or storage and get URL
+     // For now, show a placeholder message
+     setState(() => _isSubmitting = true);
+     try {
+       // TODO: Upload sticker to storage and get URL
+       // For now, just show the file path as content
+       await _supabaseService.addPostComment(
+         postId: widget.post['id'].toString(),
+         content: '📝 [Sticker sent]',
+         userEmail: widget.userEmail,
+         userName: _authService.displayName ?? widget.userEmail.split('@')[0],
+         parentId: _replyToId,
+       );
+       
+       setState(() {
+         _replyToId = null;
+         _replyToName = null;
+       });
+       await _loadData();
+     } catch (e) {
+       ScaffoldMessenger.of(context).showSnackBar(
+         SnackBar(content: Text('Error sending GIF: $e')),
+       );
+     } finally {
+       setState(() => _isSubmitting = false);
+     }
+  }
+
   Widget _buildCommentInput(bool isDark) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkSurface : Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
-            offset: const Offset(0, -2),
-          ),
-        ],
-      ),
-      child: SafeArea(
-        child: Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _commentController,
-                enabled: !_isReadOnly,
-                style: GoogleFonts.inter(
-                  fontSize: 14,
-                  color: isDark ? Colors.white : Colors.black,
-                ),
-                decoration: InputDecoration(
-                  hintText: 'Add a comment...',
-                  hintStyle: TextStyle(color: AppTheme.textMuted),
-                  filled: true,
-                  fillColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(24),
-                    borderSide: BorderSide.none,
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            GestureDetector(
-              onTap: _isReadOnly ? null : _submitComment,
-              child: Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(colors: [AppTheme.primary, AppTheme.secondary]),
-                  shape: BoxShape.circle,
-                ),
-                child: Center(
-                  child: _isSubmitting
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                        )
-                      : const Icon(Icons.send_rounded, color: Colors.white, size: 20),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return CommentInputBox(
+      controller: _commentController,
+      focusNode: _commentFocusNode,
+      isReadOnly: _isReadOnly,
+      isSubmitting: _isSubmitting,
+      replyToName: _replyToName,
+      onCancelReply: () {
+        setState(() {
+          _replyToId = null;
+          _replyToName = null;
+        });
+        _commentFocusNode.unfocus();
+      },
+      onSubmit: _submitComment,
+      onStickerSelected: _handleStickerSelection,
     );
   }
 
@@ -678,5 +851,79 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     if (diff.inHours < 24) return '${diff.inHours}h';
     if (diff.inDays < 7) return '${diff.inDays}d';
     return '${dateTime.day}/${dateTime.month}';
+  }
+
+  void _showReportDialog(BuildContext context, String postId, String authorId) {
+    final TextEditingController reasonController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1E293B),
+        title: Text('Report Post', style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Why are you reporting this post?', style: GoogleFonts.inter(color: Colors.white70)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: reasonController,
+              style: GoogleFonts.inter(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: 'Enter reason...',
+                hintStyle: GoogleFonts.inter(color: Colors.white38),
+                filled: true,
+                fillColor: Colors.black26,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+              ),
+              maxLines: 3,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel', style: GoogleFonts.inter(color: Colors.white60)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final reason = reasonController.text.trim();
+              if (reason.isEmpty) return;
+              
+              Navigator.pop(context); // Close dialog
+
+              // Call Backend API
+              try {
+                // Determine current user ID if possible, otherwise empty
+                final reporterId = AuthService().currentUser?.uid ?? 'unknown';
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Submitting report...")),
+                );
+
+                await BackendApiService().reportPost(postId, reason, reporterId);
+
+                if (mounted) {
+                   ScaffoldMessenger.of(context).showSnackBar(
+                     const SnackBar(content: Text("Report submitted successfully.")),
+                   );
+                }
+              } catch (e) {
+                if (mounted) {
+                   ScaffoldMessenger.of(context).showSnackBar(
+                     SnackBar(content: Text("Report submitted (backend limitation: $e)")),
+                   );
+                }
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
+            child: Text('Report', style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
   }
 }

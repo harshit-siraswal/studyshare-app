@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'dart:io';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/theme.dart';
 import '../models/resource.dart';
@@ -9,6 +10,7 @@ import '../services/download_service.dart';
 import '../services/subscription_service.dart';
 import '../widgets/paywall_dialog.dart';
 import 'package:open_file/open_file.dart';
+import '../screens/profile/user_profile_screen.dart';
 
 class ResourceCard extends StatefulWidget {
   final Resource resource;
@@ -129,8 +131,7 @@ class _ResourceCardState extends State<ResourceCard> {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Downloading...')));
       await ds.downloadResource(
         widget.resource.fileUrl, 
-        widget.resource.id, 
-        widget.resource.title
+        widget.resource, 
       );
       setState(() {}); // refresh icon
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Download Complete!')));
@@ -157,11 +158,17 @@ class _ResourceCardState extends State<ResourceCard> {
       return;
     }
 
+    final downloadService = DownloadService();
+    final localPath = downloadService.getLocalPath(widget.resource.id);
+    final url = (localPath != null && File(localPath).existsSync()) 
+        ? localPath 
+        : widget.resource.fileUrl;
+
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => PdfViewerScreen(
-          pdfUrl: widget.resource.fileUrl,
+          pdfUrl: url,
           title: widget.resource.title,
           resourceId: widget.resource.id,
         ),
@@ -206,7 +213,7 @@ class _ResourceCardState extends State<ResourceCard> {
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: _getTypeColor().withOpacity(0.1),
+                  color: _getTypeColor().withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
@@ -241,7 +248,7 @@ class _ResourceCardState extends State<ResourceCard> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: _getTypeColor().withOpacity(0.1),
+                            color: _getTypeColor().withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
@@ -259,11 +266,27 @@ class _ResourceCardState extends State<ResourceCard> {
                     
                     // Author
                     if (widget.resource.uploadedByName != null)
-                      Text(
-                        'by ${widget.resource.uploadedByName}',
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: AppTheme.textMuted,
+                      GestureDetector(
+                        onTap: () {
+                          // Navigate to User Profile
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => UserProfileScreen(
+                                userEmail: widget.resource.uploadedByEmail,
+                                userName: widget.resource.uploadedByName,
+                              ),
+                            ),
+                          );
+                        },
+                        child: Text(
+                          'by ${widget.resource.uploadedByName}',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: AppTheme.textMuted,
+                            decoration: TextDecoration.underline,
+                            decorationColor: AppTheme.textMuted,
+                          ),
                         ),
                       ),
                     const SizedBox(height: 4),
@@ -290,8 +313,8 @@ class _ResourceCardState extends State<ResourceCard> {
                             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                             decoration: BoxDecoration(
                               color: isDark 
-                                  ? Colors.white.withOpacity(0.05) 
-                                  : Colors.black.withOpacity(0.03),
+                                  ? Colors.white.withValues(alpha: 0.05) 
+                                  : Colors.black.withValues(alpha: 0.03),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Row(
@@ -386,7 +409,7 @@ class _ResourceCardState extends State<ResourceCard> {
       child: Container(
         padding: const EdgeInsets.all(4),
         decoration: BoxDecoration(
-          color: isActive ? color.withOpacity(0.15) : Colors.transparent,
+          color: isActive ? color.withValues(alpha: 0.15) : Colors.transparent,
           borderRadius: BorderRadius.circular(6),
         ),
         child: Icon(
@@ -512,7 +535,7 @@ class _PDFViewerDialog extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(24),
                       decoration: BoxDecoration(
-                        color: AppTheme.primary.withOpacity(0.1),
+                        color: AppTheme.primary.withValues(alpha: 0.1),
                         shape: BoxShape.circle,
                       ),
                       child: Icon(

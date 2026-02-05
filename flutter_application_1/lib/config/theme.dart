@@ -201,7 +201,7 @@ class AppTheme {
       // Chip theme
       chipTheme: ChipThemeData(
         backgroundColor: lightSurface,
-        selectedColor: primary.withOpacity(0.1),
+        selectedColor: primary.withValues(alpha: 0.1),
         labelStyle: GoogleFonts.inter(color: lightTextSecondary, fontSize: 13),
         side: const BorderSide(color: lightBorder),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -353,7 +353,7 @@ class AppTheme {
       // Chip theme
       chipTheme: ChipThemeData(
         backgroundColor: darkCard,
-        selectedColor: primary.withOpacity(0.2),
+        selectedColor: primary.withValues(alpha: 0.2),
         labelStyle: GoogleFonts.inter(color: darkTextSecondary, fontSize: 13),
         side: const BorderSide(color: darkBorder),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -383,13 +383,14 @@ class AppTheme {
   // ============ HELPER FUNCTIONS ============
   
   /// Get the appropriate text color based on theme
-  static Color getTextColor(BuildContext context, {bool primary = true, bool muted = false}) {
+  static Color getTextColor(BuildContext context, {bool isPrimary = true, bool muted = false}) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     if (muted) return isDark ? darkTextMuted : lightTextMuted;
-    if (primary) return isDark ? darkTextPrimary : lightTextPrimary;
+    if (isPrimary) return isDark ? darkTextPrimary : lightTextPrimary;
+    return isDark ? darkTextSecondary : lightTextSecondary;
     return isDark ? darkTextSecondary : lightTextSecondary;
   }
-  
+
   /// Get the appropriate card color based on theme
   static Color getCardColor(BuildContext context) {
     return Theme.of(context).brightness == Brightness.dark ? darkCard : lightCard;

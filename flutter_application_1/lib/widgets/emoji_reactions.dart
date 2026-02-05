@@ -10,12 +10,16 @@ class EmojiReactions extends StatefulWidget {
   final String commentId;
   final String commentType; // 'notice' or 'post'
   final bool compact; // If true, show minimal UI
+  final SupabaseService? supabaseService;
+  final AuthService? authService;
   
   const EmojiReactions({
     super.key,
     required this.commentId,
     required this.commentType,
     this.compact = false,
+    this.supabaseService,
+    this.authService,
   });
 
   @override
@@ -23,8 +27,8 @@ class EmojiReactions extends StatefulWidget {
 }
 
 class _EmojiReactionsState extends State<EmojiReactions> {
-  final SupabaseService _supabaseService = SupabaseService();
-  final AuthService _authService = AuthService();
+  late final SupabaseService _supabaseService;
+  late final AuthService _authService;
   
   // Available emoji reactions
   static const List<String> _availableEmojis = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
@@ -37,6 +41,8 @@ class _EmojiReactionsState extends State<EmojiReactions> {
   @override
   void initState() {
     super.initState();
+    _supabaseService = widget.supabaseService ?? SupabaseService();
+    _authService = widget.authService ?? AuthService();
     _loadReactions();
   }
 
@@ -58,6 +64,7 @@ class _EmojiReactionsState extends State<EmojiReactions> {
         });
       }
     } catch (e) {
+      debugPrint('Failed to load reactions: $e');
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -75,7 +82,7 @@ class _EmojiReactionsState extends State<EmojiReactions> {
         emoji: emoji,
       );
       
-      // Optimistically update UI
+      // Update UI after successful toggle
       if (mounted) {
         setState(() {
           if (added) {
@@ -92,7 +99,7 @@ class _EmojiReactionsState extends State<EmojiReactions> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to react: $e')),
+          const SnackBar(content: Text('Failed to add reaction. Please try again.')),
         );
       }
     }
@@ -130,11 +137,11 @@ class _EmojiReactionsState extends State<EmojiReactions> {
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
                     color: hasReacted
-                        ? AppTheme.primary.withOpacity(0.15)
+                        ? AppTheme.primary.withValues(alpha: 0.15)
                         : (isDark ? const Color(0xFF334155) : Colors.grey.shade100),
                     borderRadius: BorderRadius.circular(16),
                     border: hasReacted
-                        ? Border.all(color: AppTheme.primary.withOpacity(0.5), width: 1)
+                        ? Border.all(color: AppTheme.primary.withValues(alpha: 0.5), width: 1)
                         : null,
                   ),
                   child: Row(
@@ -241,7 +248,7 @@ class _EmojiReactionsState extends State<EmojiReactions> {
                     height: 48,
                     decoration: BoxDecoration(
                       color: hasReacted
-                          ? AppTheme.primary.withOpacity(0.2)
+                          ? AppTheme.primary.withValues(alpha: 0.2)
                           : (isDark ? const Color(0xFF334155) : Colors.grey.shade100),
                       borderRadius: BorderRadius.circular(12),
                       border: hasReacted

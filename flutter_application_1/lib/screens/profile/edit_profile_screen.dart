@@ -69,20 +69,36 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         photoUrl = await CloudinaryService.uploadFile(_pickedImage!);
       }
 
+      if (!mounted) return;
       final res = await _api.updateProfile(
         displayName: name,
         bio: _bioController.text.trim(),
         profilePhotoUrl: photoUrl,
         context: context,
       );
+      
+      if (!mounted) return;
       Navigator.pop(context, res['profile']);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to update profile: $e')),
-      );
+      debugPrint('Error updating profile: $e'); // Log full error
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to update profile')), // Generic message
+        );
+      }
     } finally {
       if (mounted) setState(() => _saving = false);
     }
+  }
+
+  ImageProvider? get _avatarImage {
+    if (_pickedImage?.bytes != null) {
+      return MemoryImage(_pickedImage!.bytes!);
+    }
+    if (widget.initialPhotoUrl != null) {
+      return NetworkImage(widget.initialPhotoUrl!);
+    }
+    return null;
   }
 
   @override
@@ -117,11 +133,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   children: [
                     CircleAvatar(
                       radius: 48,
-                      backgroundColor: AppTheme.primary.withOpacity(0.2),
-                      backgroundImage: _pickedImage?.bytes != null
-                          ? MemoryImage(_pickedImage!.bytes!)
-                          : (widget.initialPhotoUrl != null ? NetworkImage(widget.initialPhotoUrl!) : null) as ImageProvider?,
-                      child: (widget.initialPhotoUrl == null && _pickedImage?.bytes == null)
+                      backgroundColor: AppTheme.primary.withValues(alpha: 0.2),
+                      backgroundImage: _avatarImage,
+                      child: _avatarImage == null
                           ? Text(nameInitial(_nameController.text), style: GoogleFonts.inter(fontSize: 28, fontWeight: FontWeight.bold, color: AppTheme.primary))
                           : null,
                     ),

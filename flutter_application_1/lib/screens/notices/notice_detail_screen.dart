@@ -8,12 +8,14 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:photo_view/photo_view_gallery.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+// Stickers handled via file_picker in CommentInputBox
 import '../../config/theme.dart';
 import '../../services/supabase_service.dart';
 import '../../services/auth_service.dart';
 import '../../models/department_account.dart';
 import '../../widgets/emoji_reactions.dart';
 import '../profile/user_profile_screen.dart';
+import '../../widgets/comment_input_box.dart'; // Added
 
 class NoticeDetailScreen extends StatefulWidget {
   final Map<String, dynamic> notice;
@@ -64,14 +66,22 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
       final prefs = await SharedPreferences.getInstance();
       final domain = prefs.getString('selectedCollegeDomain') ?? '';
       final email = _authService.userEmail ?? '';
-      if (domain.isEmpty) {
+      
+      // If no domain set or no email, user can still comment if they're authenticated
+      if (email.isEmpty) {
         _isReadOnly = true;
+      } else if (domain.isEmpty) {
+        // If no domain selected but user is logged in, allow commenting
+        _isReadOnly = false;
       } else {
-        _isReadOnly = !email.endsWith(domain);
+        // Check if email ends with @domain or just domain
+        final domainToCheck = domain.startsWith('@') ? domain : '@$domain';
+        _isReadOnly = !email.toLowerCase().endsWith(domainToCheck.toLowerCase());
       }
       if (mounted) setState(() {});
     } catch (_) {
-      _isReadOnly = true;
+      // On error, allow commenting if user is authenticated
+      _isReadOnly = _authService.userEmail == null;
     }
   }
   
@@ -108,7 +118,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     final email = _authService.userEmail;
     if (email == null) return;
     
-    final saved = await _supabaseService.isNoticeSaved(widget.notice['id'], email);
+    final saved = await _supabaseService.isNoticeSaved(widget.notice['id'].toString(), email);
     if (mounted) {
       setState(() => _isSaved = saved);
     }
@@ -123,10 +133,10 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     
     try {
       if (_isSaved) {
-        await _supabaseService.unsaveNotice(widget.notice['id'], email);
+        await _supabaseService.unsaveNotice(widget.notice['id'].toString(), email);
         if (mounted) setState(() => _isSaved = false);
       } else {
-        await _supabaseService.saveNotice(widget.notice['id'], email);
+        await _supabaseService.saveNotice(widget.notice['id'].toString(), email);
         if (mounted) {
           setState(() => _isSaved = true);
           ScaffoldMessenger.of(context).showSnackBar(
@@ -141,7 +151,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
 
   Future<void> _loadComments() async {
     try {
-      final comments = await _supabaseService.getNoticeComments(widget.notice['id']);
+      final comments = await _supabaseService.getNoticeComments(widget.notice['id'].toString());
       if (mounted) {
         setState(() {
           _comments = comments;
@@ -203,7 +213,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
 
     try {
       await _supabaseService.addNoticeComment(
-        noticeId: widget.notice['id'],
+        noticeId: widget.notice['id'].toString(),
         content: text,
         userEmail: email,
         userName: _authService.displayName ?? email.split('@')[0],
@@ -421,7 +431,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                     child: Center(
                       child: Column(
                         children: [
-                          Icon(Icons.chat_bubble_outline, size: 48, color: secondaryColor.withOpacity(0.5)),
+                          Icon(Icons.chat_bubble_outline, size: 48, color: secondaryColor.withValues(alpha: 0.5)),
                           const SizedBox(height: 16),
                           Text(
                             'No comments yet.\nBe the first to start the discussion!',
@@ -441,7 +451,10 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
           ),
           
           // Comment Input Area
-          _buildInputArea(isDark, textColor, secondaryColor),
+          SafeArea(
+            top: false,
+            child: _buildInputArea(isDark, textColor, secondaryColor),
+          ),
         ],
       ),
     );
@@ -452,72 +465,97 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
       children: [
         CircleAvatar(
           backgroundColor: widget.account.color,
+          radius: 20,
           child: Text(
             widget.account.avatarLetter,
-            style: GoogleFonts.inter(
-              fontWeight: FontWeight.bold,
-              color: Colors.white,
-            ),
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
           ),
         ),
         const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    widget.account.name,
-                    style: GoogleFonts.inter(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 15,
-                      color: textColor,
-                    ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  widget.account.name,
+                  style: GoogleFonts.inter(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                    color: textColor,
                   ),
-                  const SizedBox(width: 4),
-                  Icon(Icons.verified_rounded, size: 14, color: AppTheme.primary),
-                ],
+                ),
+                const SizedBox(width: 4),
+                Icon(Icons.verified, size: 14, color: AppTheme.primary),
+              ],
+            ),
+            Text(
+              _formatTimeAgo(createdAt),
+              style: GoogleFonts.inter(
+                color: secondaryColor,
+                fontSize: 12,
               ),
-              Text(
-                _formatTimeAgo(createdAt),
-                style: GoogleFonts.inter(fontSize: 12, color: secondaryColor),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ],
     );
   }
 
   Widget _buildMediaGallery() {
+    if (_mediaUrls.isEmpty) return const SizedBox.shrink();
+
+    if (_mediaUrls.length == 1) {
+      return GestureDetector(
+        onTap: () => _openGallery(0),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: Hero(
+            tag: 'media_${_mediaUrls[0]}',
+            child: CachedNetworkImage(
+              imageUrl: _mediaUrls[0],
+              fit: BoxFit.cover,
+              width: double.infinity,
+              placeholder: (context, url) => Container(
+                height: 200,
+                color: Colors.grey.withOpacity(0.1),
+                child: const Center(child: CircularProgressIndicator()),
+              ),
+              errorWidget: (context, url, error) => Container(
+                height: 200,
+                color: Colors.grey.withOpacity(0.1),
+                child: const Icon(Icons.error),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return SizedBox(
       height: 200,
-      child: ListView.separated(
+      child: ListView.builder(
         scrollDirection: Axis.horizontal,
         itemCount: _mediaUrls.length,
-        separatorBuilder: (context, index) => const SizedBox(width: 8),
         itemBuilder: (context, index) {
-          return GestureDetector(
-            onTap: () => _openGallery(index),
-            child: Hero(
-              tag: 'media_${_mediaUrls[index]}',
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: GestureDetector(
+              onTap: () => _openGallery(index),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(12),
-                child: CachedNetworkImage(
-                  imageUrl: _mediaUrls[index],
-                  height: 200,
-                  width: 200,
-                  fit: BoxFit.cover,
-                  placeholder: (context, url) => Container(
+                child: Hero(
+                  tag: 'media_${_mediaUrls[index]}',
+                  child: CachedNetworkImage(
+                    imageUrl: _mediaUrls[index],
+                    height: 200,
                     width: 200,
-                    color: Colors.grey.withOpacity(0.1),
-                    child: const Center(child: CircularProgressIndicator()),
-                  ),
-                  errorWidget: (context, url, _) => Container(
-                    width: 200,
-                    color: Colors.grey.withOpacity(0.1),
-                    child: const Icon(Icons.broken_image, color: Colors.grey),
+                    fit: BoxFit.cover,
+                    placeholder: (context, url) => Container(
+                      width: 200,
+                      color: Colors.grey.withOpacity(0.1),
+                      child: const Center(child: CircularProgressIndicator()),
+                    ),
                   ),
                 ),
               ),
@@ -528,127 +566,112 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     );
   }
 
-  Widget _buildCommentTree(Map<String, dynamic> comment, bool isDark, Color textColor, Color secondaryColor, {double depth = 0}) {
-    final replies = comment['replies'] as List<dynamic>? ?? [];
+  Widget _buildCommentTree(Map<String, dynamic> comment, bool isDark, Color textColor, Color secondaryColor) {
+    // Check if this comment is a reply (should be handled by recursion if nested, 
+    // but assuming flat list with parent_id or nested structure from backend)
+    // For now assuming backend returns flat list and we might need to build tree? 
+    // Or backend returns nested 'replies'?
+    // Based on `getNoticeComments` RPC, usually it sends flat list or we need to check.
+    // If usage map(c => _buildCommentTree) suggests flat list of top level threads?
+    // Let's assume `replies` field exists or we just show flat for now if simple.
+    
+    // Check for replies array
+    final replies = (comment['replies'] as List?)?.cast<Map<String, dynamic>>() ?? [];
     
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // The comment itself
-        _buildCommentItem(comment, isDark, textColor, secondaryColor, depth: depth),
-        
-        // Replies (indented)
+        _buildCommentItem(comment, isDark, textColor, secondaryColor),
         if (replies.isNotEmpty)
           Padding(
-            padding: EdgeInsets.only(left: 16 + depth * 4), // visual indentation
-            child: Container(
-              decoration: BoxDecoration(
-                border: Border(
-                  left: BorderSide(
-                    color: (isDark ? Colors.white : Colors.black).withOpacity(0.1),
-                    width: 2,
-                  ),
-                ),
-              ),
-              padding: const EdgeInsets.only(left: 12),
-              child: Column(
-                children: replies.map((r) => _buildCommentTree(
-                  r as Map<String, dynamic>, 
-                  isDark, 
-                  textColor, 
-                  secondaryColor,
-                  depth: depth + 1
-                )).toList(),
-              ),
+            padding: const EdgeInsets.only(left: 16, top: 8),
+            child: Column(
+              children: replies.map((r) => _buildCommentTree(r, isDark, textColor, secondaryColor)).toList(),
             ),
           ),
       ],
     );
   }
 
-  Widget _buildCommentItem(Map<String, dynamic> c, bool isDark, Color textColor, Color secondaryColor, {double depth = 0}) {
-    final userName = c['user_name'] ?? 'User';
-    final userEmail = c['user_email'] ?? '';
-    final commentId = c['id']?.toString() ?? '';
+  Widget _buildCommentItem(Map<String, dynamic> comment, bool isDark, Color textColor, Color secondaryColor) {
+    final senderName = comment['user_name'] ?? 'Unknown';
+    final content = comment['content'] ?? '';
+    final createdAt = comment['created_at'];
+    final commentId = comment['id'] ?? '';
+    final userEmail = comment['user_email'] ?? '';
     
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.only(bottom: 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Clickable Avatar
-          GestureDetector(
-            onTap: () => _openUserProfile(userEmail, userName),
-            child: CircleAvatar(
-              radius: 14,
-              backgroundColor: AppTheme.primary.withOpacity(0.2),
-              child: Text(
-                (userName.isNotEmpty ? userName[0] : 'U').toUpperCase(),
-                style: GoogleFonts.inter(color: AppTheme.primary, fontWeight: FontWeight.bold, fontSize: 12),
-              ),
+          CircleAvatar(
+            radius: 16,
+            backgroundColor: AppTheme.primary.withOpacity(0.2),
+            child: Text(
+              senderName.isNotEmpty ? senderName[0].toUpperCase() : '?',
+              style: TextStyle(fontSize: 12, color: AppTheme.primary, fontWeight: FontWeight.bold),
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    // Clickable Username
-                    GestureDetector(
-                      onTap: () => _openUserProfile(userEmail, userName),
-                      child: Text(
-                        userName,
-                        style: GoogleFonts.inter(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                          color: textColor,
-                        ),
+                    Text(
+                      senderName,
+                      style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        color: textColor,
                       ),
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      _formatTimeAgo(c['created_at']),
-                      style: GoogleFonts.inter(fontSize: 11, color: secondaryColor),
+                      _formatTimeAgo(createdAt),
+                      style: GoogleFonts.inter(fontSize: 10, color: secondaryColor),
                     ),
                   ],
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  c['content'] ?? '',
+                  content,
                   style: GoogleFonts.inter(
                     fontSize: 14,
-                    color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF334155),
-                    height: 1.4,
+                    color: textColor.withOpacity(0.9),
                   ),
                 ),
-                const SizedBox(height: 8),
-                
-                // Emoji Reactions
-                if (commentId.isNotEmpty)
-                  EmojiReactions(
-                    commentId: commentId,
-                    commentType: 'notice',
-                    compact: depth > 0, // Compact for nested replies
-                  ),
-                
                 const SizedBox(height: 4),
-                
-                // Reply control
-                InkWell(
-                  onTap: _isReadOnly ? null : () => _initiateReply(c['id'], userName),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
-                    child: Text(
-                      'Reply',
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: secondaryColor,
+                // Actions (Reply)
+                 Row(
+                  children: [
+                    GestureDetector(
+                      onTap: () => _initiateReply(commentId, senderName),
+                      child: Text(
+                        'Reply',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: secondaryColor,
+                        ),
                       ),
                     ),
-                  ),
+                    if (userEmail.isNotEmpty) ...[
+                        const SizedBox(width: 12),
+                        GestureDetector(
+                          onTap: () => _openUserProfile(userEmail, senderName),
+                          child: Text(
+                            'View Profile',
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              color: secondaryColor,
+                            ),
+                          ),
+                        ),
+                    ]
+                  ],
                 ),
               ],
             ),
@@ -658,104 +681,49 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     );
   }
 
+  Future<void> _handleStickerSelection(File stickerFile) async {
+     if (_isReadOnly) return;
+     
+     setState(() => _isPosting = true);
+     try {
+       // TODO: Upload sticker to storage and get URL
+       // For now, just show placeholder message
+       await _supabaseService.addNoticeComment(
+         noticeId: widget.notice['id'].toString(),
+         content: '📝 [Sticker sent]',
+         userEmail: _authService.userEmail!,
+         userName: _authService.displayName ??_authService.userEmail!.split('@')[0],
+         parentId: _replyToId,
+       );
+
+       _cancelReply();
+       await _loadComments();
+       
+       if (_replyToId == null && _scrollController.hasClients) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+       }
+     } catch (e) {
+       _showError('Failed to post sticker: $e');
+     } finally {
+       if (mounted) setState(() => _isPosting = false);
+     }
+  }
+
   Widget _buildInputArea(bool isDark, Color textColor, Color secondaryColor) {
-    // Account for both keyboard (viewInsets) and system navigation bar (padding)
-    final bottomPadding = MediaQuery.of(context).viewInsets.bottom > 0
-        ? MediaQuery.of(context).viewInsets.bottom
-        : MediaQuery.of(context).padding.bottom;
-    
-    return Container(
-      padding: EdgeInsets.only(
-        left: 16,
-        right: 16,
-        top: 12,
-        bottom: bottomPadding + 12
-      ),
-      decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkSurface : Colors.white,
-        border: Border(top: BorderSide(color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, -2),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Reply Banner
-          if (_replyToName != null)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8, left: 4),
-              child: Row(
-                children: [
-                  Icon(Icons.reply_rounded, size: 16, color: AppTheme.primary),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Replying to $_replyToName',
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.primary,
-                    ),
-                  ),
-                  const Spacer(),
-                  InkWell(
-                    onTap: _cancelReply,
-                    child: Icon(Icons.close_rounded, size: 18, color: secondaryColor),
-                  ),
-                ],
-              ),
-            ),
-            
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: isDark ? AppTheme.darkBackground : const Color(0xFFF1F5F9),
-                    borderRadius: BorderRadius.circular(24),
-                  ),
-                  child: TextField(
-                    controller: _commentController,
-                    focusNode: _commentFocusNode,
-                    enabled: !_isReadOnly,
-                    style: GoogleFonts.inter(color: textColor),
-                    maxLines: 4,
-                    minLines: 1,
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: InputDecoration(
-                      hintText: _replyToName != null ? 'Reply to $_replyToName...' : 'Add a comment...',
-                      hintStyle: GoogleFonts.inter(color: secondaryColor),
-                      border: InputBorder.none,
-                      isDense: true,
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Container(
-                decoration: BoxDecoration(
-                  color: AppTheme.primary,
-                  shape: BoxShape.circle,
-                ),
-                child: IconButton(
-                  onPressed: _isReadOnly ? null : (_isPosting ? null : _postComment),
-                  icon: _isPosting 
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.send_rounded, color: Colors.white, size: 20),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+    return CommentInputBox(
+      controller: _commentController,
+      focusNode: _commentFocusNode,
+      isReadOnly: _isReadOnly,
+      isSubmitting: _isPosting,
+      replyToName: _replyToName,
+      onCancelReply: _cancelReply,
+      onSubmit: _postComment,
+      onStickerSelected: _handleStickerSelection,
+      hintText: _replyToName != null ? 'Write your reply...' : 'Add a comment...',
     );
   }
 }

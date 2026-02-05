@@ -1,13 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'dart:math';
 import '../models/college.dart';
 import '../models/resource.dart';
 import 'backend_api_service.dart';
 import 'subscription_service.dart';
+import '../models/department_account.dart';
+
+class RoomLimitException implements Exception {
+  final String message;
+  RoomLimitException(this.message);
+  @override
+  String toString() => message;
+}
+
+enum FollowStatus {
+  notFollowing,
+  pending,
+  following,
+}
 
 class SupabaseService {
-  final SupabaseClient _client = Supabase.instance.client;
+  SupabaseClient get _client => Supabase.instance.client;
   final BackendApiService _api = BackendApiService();
 
   /// A BuildContext is required to run reCAPTCHA (invisible WebView) before privileged writes.
@@ -17,6 +30,8 @@ class SupabaseService {
   void attachContext(BuildContext context) {
     _ctx = context;
   }
+
+  String? get currentUserEmail => _client.auth.currentUser?.email;
 
   // ============ COLLEGES ============
   
@@ -33,7 +48,7 @@ class SupabaseService {
           .map((json) => College.fromJson(json))
           .toList();
     } catch (e) {
-      print('Error fetching colleges: $e');
+      debugPrint('Error fetching colleges: $e');
       rethrow;
     }
   }
@@ -53,7 +68,7 @@ class SupabaseService {
           .map((json) => College.fromJson(json))
           .toList();
     } catch (e) {
-      print('Error searching colleges: $e');
+      debugPrint('Error searching colleges: $e');
       rethrow;
     }
   }
@@ -72,7 +87,7 @@ class SupabaseService {
     int offset = 0,
   }) async {
     try {
-      print('SupabaseService.getResources: collegeId=$collegeId, semester=$semester, branch=$branch, type=$type');
+      debugPrint('SupabaseService.getResources: collegeId=$collegeId, semester=$semester, branch=$branch, type=$type');
       
       var query = _client
           .from('resources')
@@ -100,13 +115,13 @@ class SupabaseService {
           .order('created_at', ascending: false)
           .range(offset, offset + limit - 1);
       
-      print('SupabaseService.getResources: returned ${(response as List).length} resources');
+      debugPrint('SupabaseService.getResources: returned ${(response as List).length} resources');
       
       return (response as List)
           .map((json) => Resource.fromJson(json))
           .toList();
     } catch (e) {
-      print('Error fetching resources: $e');
+      debugPrint('Error fetching resources: $e');
       rethrow;
     }
   }
@@ -145,19 +160,338 @@ class SupabaseService {
           .map((json) => Resource.fromJson(json))
           .toList();
     } catch (e) {
-      print('Error fetching following feed: $e');
+      debugPrint('Error fetching following feed: $e');
       return [];
     }
   }
 
-  /// Get unique values for filters
-  Future<List<String>> getUniqueValues(String column, String collegeId) async {
+  /// Get follow status
+  Future<FollowStatus> getFollowStatus(String followerEmail, String followingEmail) async {
+    if (followerEmail == followingEmail) return FollowStatus.notFollowing;
+
+    try {
+      // Check if already following
+      final following = await _client
+          .from('follows')
+          .select()
+          .match({'follower_email': followerEmail, 'following_email': followingEmail})
+          .maybeSingle();
+      
+      if (following != null) return FollowStatus.following;
+
+      // Check for pending request - use 'users' table lookup if needed for IDs
+      // But currently we use emails in app.
+      // The backend 'follow_requests' table uses IDs (VARCHAR 128)
+      // We need to fetch User IDs first.
+      
+      final followerId = await getUserId(followerEmail);
+      final targetId = await getUserId(followingEmail);
+
+      if (followerId == null || targetId == null) return FollowStatus.notFollowing;
+
+      final request = await _client
+          .from('follow_requests')
+          .select('status')
+          .match({'requester_id': followerId, 'target_id': targetId, 'status': 'pending'})
+          .maybeSingle();
+
+      if (request != null) return FollowStatus.pending;
+
+      return FollowStatus.notFollowing;
+    } catch (e) {
+      debugPrint('Error getting follow status: $e');
+      return FollowStatus.notFollowing;
+    }
+  }
+
+  /// Send follow request
+  Future<void> sendFollowRequest(String followerEmail, String followingEmail) async {
+    try {
+      final followerId = await getUserId(followerEmail);
+      final targetId = await getUserId(followingEmail);
+
+      if (followerId == null || targetId == null) throw Exception('User ID not found');
+
+      // Create request
+      final request = await _client
+          .from('follow_requests')
+          .insert({
+            'requester_id': followerId,
+            'target_id': targetId,
+            'status': 'pending'
+          })
+          .select()
+          .single();
+
+      // Create notification for target user
+      await _createNotification(
+        userId: targetId,
+        type: 'follow_request',
+        title: 'New Follow Request',
+        message: 'Someone wants to follow you', // Ideally fetch name
+        actorId: followerId,
+        followRequestId: request['id'] as int,
+        isActionable: true,
+      );
+
+    } catch (e) {
+      debugPrint('Error sending follow request: $e');
+      rethrow;
+    }
+  }
+
+  /// Cancel follow request
+  Future<void> cancelFollowRequest(String followerEmail, String followingEmail) async {
+    try {
+      final followerId = await getUserId(followerEmail);
+      final targetId = await getUserId(followingEmail);
+
+      if (followerId == null || targetId == null) return;
+
+      await _client
+          .from('follow_requests')
+          .delete()
+          .match({'requester_id': followerId, 'target_id': targetId, 'status': 'pending'});
+          
+      // Cleanup notification manually if RLS allows or rely on backend cron.
+      // Ideally delete notification associated with this request
+    } catch (e) {
+      debugPrint('Error cancelling follow request: $e');
+      rethrow;
+    }
+  }
+
+  /// Accept follow request
+  Future<void> acceptFollowRequest(int requestId) async {
+    try {
+      // Fetch request details first
+      final request = await _client
+          .from('follow_requests')
+          .select()
+          .eq('id', requestId)
+          .single();
+      
+      final requesterId = request['requester_id'];
+      final targetId = request['target_id'];
+
+      // Get emails
+      final requesterEmail = await getUserEmail(requesterId);
+      final targetEmail = await getUserEmail(targetId);
+
+      if (requesterEmail == null || targetEmail == null) return;
+
+      // 1. Update request status
+      await _client
+          .from('follow_requests')
+          .update({'status': 'accepted'})
+          .eq('id', requestId);
+
+      // 2. Add to follows table
+      await _client
+          .from('follows')
+          .insert({'follower_email': requesterEmail, 'following_email': targetEmail});
+
+      // 3. Create Accepted Notification for requester
+      await _createNotification(
+        userId: requesterId,
+        type: 'follow_accepted',
+        title: 'Request Accepted',
+        message: 'You are now following this user',
+        actorId: targetId,
+      );
+
+    } catch (e) {
+      debugPrint('Error accepting follow request: $e');
+      rethrow;
+    }
+  }
+
+  /// Reject follow request
+  Future<void> rejectFollowRequest(int requestId) async {
+    try {
+      await _client
+          .from('follow_requests')
+          .update({'status': 'rejected'})
+          .eq('id', requestId);
+      
+      // Optionally delete the request record entirely or keep as history
+    } catch (e) {
+      debugPrint('Error rejecting follow request: $e');
+      rethrow;
+    }
+  }
+
+  // Leave a room
+  Future<void> leaveRoom(String roomId, String userEmail) async {
+    try {
+      await _client
+          .from('room_members')
+          .delete()
+          .match({'room_id': roomId, 'user_email': userEmail});
+    } catch (e) {
+      debugPrint('Error leaving room: $e');
+      throw e;
+    }
+  }
+
+  // Join a room (RPC)
+  Future<void> joinRoom(String roomId) async {
+    try {
+      final response = await _client.rpc('join_room', params: {
+        'room_id_input': roomId, // Note: param name must match SQL function arg
+      });
+      
+      // Check response if needed, but RPC usually throws on error if we don't catch inside SQL
+      // Our SQL returns a JSONB object, so we can check 'success'
+      if (response != null && response['success'] == false) {
+         throw response['error'] ?? 'Unknown error';
+      }
+    } catch (e) {
+      debugPrint('Error joining room: $e');
+      throw e;
+    }
+  }
+
+  // Delete a room (admin only)
+  Future<void> deleteRoom(String roomId) async {
+    try {
+      final response = await _client.rpc('delete_room', params: {
+        'room_id_input': roomId,
+      });
+      
+      if (response != null && response['success'] == false) {
+         throw response['error'] ?? 'Unknown error';
+      }
+    } catch (e) {
+      debugPrint('Error deleting room: $e');
+      throw e;
+    }
+  }
+
+  // Get user's room limits (how many joined/created, max allowed)
+  Future<Map<String, dynamic>> getRoomLimits() async {
+    try {
+      final response = await _client.rpc('get_user_room_limits');
+      return response ?? {
+        'joined_count': 0,
+        'created_count': 0,
+        'max_joined': 5,
+        'max_created': 3,
+        'can_join': true,
+        'can_create': true,
+      };
+    } catch (e) {
+      debugPrint('Error getting room limits: $e');
+      // Return defaults on error
+      return {
+        'joined_count': 0,
+        'created_count': 0,
+        'max_joined': 5,
+        'max_created': 3,
+        'can_join': true,
+        'can_create': true,
+      };
+    }
+  }
+
+  Future<void> unfollowUser(String followerEmail, String followingEmail) async {
+    try {
+      await _client
+          .from('follows')
+          .delete()
+          .match({'follower_email': followerEmail, 'following_email': followingEmail});
+    } catch (e) {
+      debugPrint('Error unfollowing user: $e');
+      rethrow;
+    }
+  }
+
+  // Helpers
+  Future<String?> getUserId(String email) async {
+    final res = await _client.from('users').select('id').eq('email', email).maybeSingle();
+    return res?['id'] as String?;
+  }
+
+  Future<String?> getUserEmail(String id) async {
+    final res = await _client.from('users').select('email').eq('id', id).maybeSingle();
+    return res?['email'] as String?;
+  }
+
+  Future<void> _createNotification({
+    required String userId,
+    required String type,
+    required String title,
+    required String message,
+    String? actorId,
+    int? followRequestId,
+    bool isActionable = false,
+  }) async {
+    await _client.from('notifications').insert({
+      'user_id': userId,
+      'type': type,
+      'title': title,
+      'message': message,
+      'actor_id': actorId,
+      'follow_request_id': followRequestId,
+      'is_actionable': isActionable,
+      'is_read': false, // Explicit
+    });
+  }
+
+  /// Check if following a user (Legacy check mostly, but useful)
+  Future<bool> isFollowing(String followerEmail, String followingEmail) async {
+      try {
+        final response = await _client
+            .from('follows')
+            .select()
+            .match({'follower_email': followerEmail, 'following_email': followingEmail})
+            .maybeSingle();
+        return response != null;
+      } catch (e) {
+        return false;
+      }
+  }
+
+  /// Get followers count
+  Future<int> getFollowersCount(String userEmail) async {
     try {
       final response = await _client
+          .from('follows') // Still using follows table
+          .count(CountOption.exact)
+          .eq('following_email', userEmail);
+      return response;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  /// Get following count
+  Future<int> getFollowingCount(String userEmail) async {
+    try {
+      final response = await _client
+          .from('follows')
+          .count(CountOption.exact)
+          .eq('follower_email', userEmail);
+      return response;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  /// Get unique values for filters
+  Future<List<String>> getUniqueValues(String column, String collegeId, {String? branch}) async {
+    try {
+      var query = _client
           .from('resources')
           .select(column)
           .eq('college_id', collegeId)
           .eq('status', 'approved');
+      
+      if (branch != null && branch.isNotEmpty) {
+        query = query.eq('branch', branch);
+      }
+
+      final response = await query;
       
       final values = (response as List)
           .map((row) => row[column]?.toString())
@@ -168,7 +502,7 @@ class SupabaseService {
       values.sort();
       return values.cast<String>();
     } catch (e) {
-      print('Error fetching unique values for $column: $e');
+      debugPrint('Error fetching unique values for $column: $e');
       return [];
     }
   }
@@ -190,12 +524,15 @@ class SupabaseService {
       // The backend handles the logic of toggling/updating and returns the new counts,
       // but here we just need to ensure the request succeeds.
     } catch (e) {
-      print('Error voting on resource: $e');
+      debugPrint('Error voting on resource: $e');
       rethrow;
     }
   }
 
-  /// Create a new resource (pending approval)
+
+
+
+
   Future<Map<String, dynamic>> createResource({
     required String collegeId,
     required String title,
@@ -212,241 +549,37 @@ class SupabaseService {
     String? topic,
   }) async {
     try {
-      // Route privileged write through backend (same as website).
       final ctx = _ctx;
       if (ctx == null) throw Exception('Security context not initialized');
-      final res = await _api.createResource({
+
+      final input = {
+        'collegeId': collegeId,
         'title': title.trim(),
         'type': type,
-        'description': description?.trim(),
-        'url': videoUrl,
-        'filePath': filePath,
-        'branch': branch,
         'semester': semester,
+        'branch': branch,
         'subject': subject,
-        if (chapter != null) 'chapter': chapter,
-        if (topic != null) 'topic': topic,
-      }, context: ctx);
-      return Map<String, dynamic>.from(res['resource'] ?? res);
+        'status': 'approved', 
+        'source': 'student',
+        'filePath': filePath, // Corrected from fileUrl
+        'url': videoUrl,      // Corrected from videoUrl
+        'description': description?.trim(),
+        'chapter': chapter,
+        'topic': topic,
+        'uploadedByName': uploadedByName,
+        'uploadedByEmail': uploadedByEmail,
+      };
+
+      debugPrint('Calling _api.createResource for college: $collegeId, type: $type');
+      
+      return await _api.createResource(input, context: ctx);
     } catch (e) {
+      debugPrint('Error in createResource: $e');
       throw Exception('Failed to upload resource: $e');
     }
   }
 
-  /// Get user's uploaded resources
-  Future<List<Resource>> getUserResources(String userEmail) async {
-    try {
-      final response = await _client
-          .from('resources')
-          .select()
-          .eq('uploaded_by_email', userEmail)
-          .order('created_at', ascending: false);
-      
-      return (response as List)
-          .map((json) => Resource.fromJson(json))
-          .toList();
-    } catch (e) {
-      print('Error fetching user resources: $e');
-      return [];
-    }
-  }
 
-  /// Get user profile stats
-  Future<Map<String, int>> getUserStats(String userEmail) async {
-    try {
-      final uploads = await _client
-          .from('resources')
-          .select('id')
-          .eq('uploaded_by_email', userEmail);
-      
-      final bookmarks = await _client
-          .from('bookmarks')
-          .select('id')
-          .eq('user_email', userEmail);
-      
-      return {
-        'uploads': (uploads as List).length,
-        'bookmarks': (bookmarks as List).length,
-      };
-    } catch (e) {
-      print('Error fetching user stats: $e');
-      return {'uploads': 0, 'bookmarks': 0};
-    }
-  }
-
-  // ============ BOOKMARKS ============
-  
-  /// Get user's bookmarks
-  Future<List<Resource>> getBookmarks(String userEmail, String collegeId) async {
-    try {
-      final response = await _client
-          .from('bookmarks')
-          .select('resource_id, resources(*)')
-          .eq('user_email', userEmail);
-      
-      return (response as List)
-          .where((row) => row['resources'] != null)
-          .map((row) => Resource.fromJson(row['resources']))
-          .toList();
-    } catch (e) {
-      print('Error fetching bookmarks: $e');
-      return [];
-    }
-  }
-
-  /// Check if resource is bookmarked
-  Future<bool> isBookmarked(String userEmail, String resourceId) async {
-    return _api.checkBookmark(resourceId);
-  }
-
-  /// Toggle bookmark
-  Future<bool> toggleBookmark(String userEmail, String resourceId) async {
-    try {
-      final ctx = _ctx;
-      if (ctx == null) throw Exception('Security context not initialized');
-
-      final isBookmarked = await _api.checkBookmark(resourceId);
-      
-      if (isBookmarked) {
-        await _api.removeBookmarkByItem(itemId: resourceId, context: ctx);
-        return false;
-      } else {
-        await _api.addBookmark(itemId: resourceId, type: 'resource', context: ctx);
-        return true;
-      }
-    } catch (e) {
-      print('Error toggling bookmark: $e');
-      rethrow;
-    }
-  }
-
-  /// Get notices for a college with optional date filtering
-  Future<List<Map<String, dynamic>>> getNotices({
-    required String collegeId,
-    int limit = 20,
-    int offset = 0,
-    DateTime? startDate,
-    DateTime? endDate,
-  }) async {
-    try {
-      print('SupabaseService.getNotices: collegeId=$collegeId, dateRange=$startDate-$endDate');
-      
-      // Build filter query first (filters must come before transforms)
-      var query = _client
-          .from('notices')
-          .select()
-          .eq('college_id', collegeId);
-      
-      if (startDate != null) {
-        query = query.gte('created_at', startDate.toIso8601String());
-      }
-      if (endDate != null) {
-        // Add one day to include the end date fully if it's at 00:00:00
-        final endOfDay = endDate.add(const Duration(days: 1)).subtract(const Duration(seconds: 1));
-        query = query.lte('created_at', endOfDay.toIso8601String());
-      }
-      
-      // Apply transforms after filters
-      final response = await query
-          .order('created_at', ascending: false)
-          .range(offset, offset + limit - 1);
-      
-      final result = List<Map<String, dynamic>>.from(response);
-      print('SupabaseService.getNotices: returned ${result.length} notices');
-      return result;
-    } catch (e) {
-      print('Error fetching notices: $e');
-      return [];
-    }
-  }
-
-  /// Get comments for a notice with thread structure
-  Future<List<Map<String, dynamic>>> getNoticeComments(String noticeId) async {
-    try {
-      // Fetch all comments for this notice
-      final response = await _client
-          .from('notice_comments')
-          .select('*')
-          .eq('notice_id', noticeId)
-          .order('created_at', ascending: true);
-      
-      final allComments = List<Map<String, dynamic>>.from(response);
-      
-      // Build thread structure
-      final Map<String, List<Map<String, dynamic>>> commentMap = {};
-      final List<Map<String, dynamic>> topLevelComments = [];
-      
-      // First pass: organize comments by parent_id
-      for (var comment in allComments) {
-        final parentId = comment['parent_id'] as String?;
-        if (parentId == null) {
-          // Top-level comment
-          comment['replies'] = [];
-          topLevelComments.add(comment);
-        } else {
-          // Reply comment
-          if (!commentMap.containsKey(parentId)) {
-            commentMap[parentId] = [];
-          }
-          commentMap[parentId]!.add(comment);
-        }
-      }
-      
-      // Second pass: attach replies to their parents
-      void attachReplies(Map<String, dynamic> comment) {
-        final commentId = comment['id'] as String;
-        if (commentMap.containsKey(commentId)) {
-          comment['replies'] = commentMap[commentId]!;
-          // Recursively attach replies to replies
-          for (var reply in comment['replies']) {
-            attachReplies(reply);
-          }
-        }
-      }
-      
-      for (var comment in topLevelComments) {
-        attachReplies(comment);
-      }
-      
-      return topLevelComments;
-    } catch (e) {
-      print('Error fetching notice comments: $e');
-      return [];
-    }
-  }
-
-  // ============ CHAT ROOMS ============
-  
-  Future<Set<String>> getUserRoomIds(String userEmail) async {
-    try {
-      final response = await _client
-          .from('room_members')
-          .select('room_id')
-          .eq('user_email', userEmail);
-      
-      return (response as List).map((e) => e['room_id'] as String).toSet();
-    } catch (e) {
-      print('Error fetching user room IDs: $e');
-      return {};
-    }
-  }
-
-  /// Get chat rooms for a college (all public rooms + rooms user is member of)
-  Future<List<Map<String, dynamic>>> getChatRooms(String userEmail, String collegeId) async {
-    try {
-      // Get all public rooms for this college
-      final roomsResponse = await _client
-          .from('chat_rooms')
-          .select('*')
-          .eq('college_id', collegeId)
-          .order('created_at', ascending: false);
-      
-      return List<Map<String, dynamic>>.from(roomsResponse);
-    } catch (e) {
-      print('Error fetching chat rooms: $e');
-      return [];
-    }
-  }
 
   /// Create a new chat room
   Future<Map<String, dynamic>> createChatRoom({
@@ -455,28 +588,54 @@ class SupabaseService {
     required bool isPrivate,
     required String userEmail,
     required String collegeId,
+    List<String>? tags,
+    int? durationInDays,
   }) async {
     try {
       final ctx = _ctx;
       if (ctx == null) throw Exception('Security context not initialized');
 
-      // Check for premium status
-      final subService = SubscriptionService();
-      final isPremium = await subService.isPremium();
-      final durationDays = isPremium ? -1 : null; // -1 for infinite
+      // Limits are now strictly enforced on backend.
+      // We pass the desired duration (-1 for permanent).
 
       final data = await _api.createChatRoom(
         name: name.trim(),
-        description: description.trim().isEmpty ? null : description.trim(),
+        description: description.trim().isEmpty == true ? null : description.trim(),
         isPrivate: isPrivate,
         collegeId: collegeId,
         context: ctx,
-        durationInDays: durationDays,
+        durationInDays: durationInDays,
+        tags: tags,
       );
       // backend returns { message, id, joinCode? }
       return {'id': data['id'], 'joinCode': data['joinCode'], 'message': data['message']};
     } catch (e) {
+      if (e is RoomLimitException) {
+        rethrow;
+      }
+      // Parse backend error message if possible
+      if (e.toString().contains('Room limit reached')) {
+         throw RoomLimitException(e.toString().replaceAll('Exception: ', '')); 
+      }
       throw Exception('Failed to create room: $e');
+    }
+  }
+
+  /// Get user's votes for a room
+  Future<Map<String, int>> getUserVotes(String roomId) async {
+    try {
+      final res = await _api.getUserVotes(roomId);
+      final votes = res['votes'] as Map<String, dynamic>? ?? {};
+      
+      final Map<String, int> result = {};
+      votes.forEach((key, value) {
+        if (value == 'up') result[key] = 1;
+        else if (value == 'down') result[key] = -1;
+      });
+      return result;
+    } catch (e) {
+      debugPrint('Error fetching user votes: $e');
+      return {};
     }
   }
 
@@ -510,38 +669,10 @@ class SupabaseService {
     }
   }
 
-  /// Leave a room
-  Future<void> leaveRoom(String roomId, String userEmail) async {
-    try {
-      // This might still fail if RLS blocks delete. 
-      // Ideally should be a backend endpoint, but Audit didn't specify one for 'leave'.
-      // We'll keep it as is for now or use a fallback if one exists.
-      await _client
-          .from('room_members')
-          .delete()
-          .match({'room_id': roomId, 'user_email': userEmail});
-      
-      // Decrement member count
-      await _client.rpc('decrement_room_members', params: {'room_id': roomId});
-    } catch (e) {
-      // Try fallback delete if match fails
-       final existing = await _client
-          .from('room_members')
-          .select('id')
-          .eq('room_id', roomId)
-          .eq('user_email', userEmail)
-          .maybeSingle();
-      
-      if (existing != null) {
-        await _client.from('room_members').delete().eq('id', existing['id']);
-        await _client.rpc('decrement_room_members', params: {'room_id': roomId});
-      }
-    }
-  }
 
-  String _generateRoomCode() {
-    return 'N/A'; // Backend handles this
-  }
+
+
+
 
   Future<void> joinChatRoom(String code, String userEmail, String collegeId) async {
     try {
@@ -550,7 +681,7 @@ class SupabaseService {
       
       await _api.joinChatRoom(code, userEmail, collegeId);
     } catch (e) {
-      print('Error joining chat room: $e');
+      debugPrint('Error joining chat room: $e');
       rethrow;
     }
   }
@@ -567,7 +698,7 @@ class SupabaseService {
       
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
-      print('Error fetching messages: $e');
+      debugPrint('Error fetching messages: $e');
       return [];
     }
   }
@@ -612,43 +743,110 @@ class SupabaseService {
         context: ctx,
       );
     } catch (e) {
-      print('Error sending message: $e');
+      debugPrint('Error sending message: $e');
       rethrow;
     }
   }
 
-  // ... (Notifications implementation skipped for brevity) ...
-  // Re-pasted below by surrounding context matching
 
-  // ============ REDDIT-STYLE ROOM POSTS (MESSAGES) ============
 
   /// Get posts for a room (Reddit-style)
   Future<List<Map<String, dynamic>>> getRoomPosts(String roomId, {int limit = 50, String sortBy = 'recent'}) async {
     try {
       final String orderColumn = sortBy == 'top' ? 'upvotes' : 'created_at';
       
+      // select with comment count from 'room_post_comments' (linked to 'room_messages' via message_id)
+      // Note: The foreign key on room_post_comments.message_id points to room_messages.id
       final response = await _client
           .from('room_messages')
-          .select()
+          .select('*, comment_count:room_post_comments(count)')
           .eq('room_id', roomId)
           .order(orderColumn, ascending: false)
           .range(0, limit - 1);
       
-      return List<Map<String, dynamic>>.from(response);
+      return (response as List).map((e) {
+        final data = Map<String, dynamic>.from(e);
+        // Fix count format
+        final countVal = data['comment_count'];
+        if (countVal is List && countVal.isNotEmpty) {
+           data['comment_count'] = countVal[0]['count'];
+        } else if (countVal is int) {
+           data['comment_count'] = countVal;
+        } else {
+           data['comment_count'] = 0;
+        }
+        return data;
+      }).toList();
     } catch (e) {
-      print('Error fetching room posts: $e');
+      debugPrint('Error fetching room posts: $e');
       return [];
     }
   }
 
   /// Get comments for a post
   Future<List<Map<String, dynamic>>> getPostComments(String postId) async {
+    List<Map<String, dynamic>> allComments = [];
+    
     try {
-      // Backend uses correct table/view or standard comments
-      final response = await _api.getChatComments(postId);
-      return response;
+      // Attempt 1: Direct Supabase Query (room_post_comments)
+      final response = await _client
+          .from('room_post_comments')
+          .select('*')
+          .eq('message_id', postId)
+          .order('created_at', ascending: true);
+          
+      allComments = List<Map<String, dynamic>>.from(response);
+      
+    } catch (directError) {
+      try {
+        // Attempt 2: API Fallback (Existing)
+        allComments = await _api.getChatComments(postId);
+      } catch (apiError) {
+        debugPrint('Error fetching post comments (Direct & API failed): $apiError');
+        return [];
+      }
+    }
+
+    try {
+      // Build thread structure (Client-side threading)
+      final Map<String, List<Map<String, dynamic>>> commentMap = {};
+      final List<Map<String, dynamic>> topLevelComments = [];
+      
+      // First pass: organize comments by parent_id
+      for (var comment in allComments) {
+        final parentId = comment['parentId'] as String? ?? comment['parent_id'] as String?;
+        // Ensure replies list exists
+        comment['replies'] = <Map<String, dynamic>>[];
+        
+        if (parentId == null) {
+          topLevelComments.add(comment);
+        } else {
+          if (!commentMap.containsKey(parentId)) {
+            commentMap[parentId] = [];
+          }
+          commentMap[parentId]!.add(comment);
+        }
+      }
+      
+      // Second pass: attach replies to their parents
+      void attachReplies(Map<String, dynamic> comment) {
+        final commentId = comment['id']?.toString();
+        if (commentId != null && commentMap.containsKey(commentId)) {
+          comment['replies'] = commentMap[commentId]!;
+          // Recursively attach replies to replies
+          for (var reply in comment['replies']) {
+            attachReplies(reply);
+          }
+        }
+      }
+      
+      for (var comment in topLevelComments) {
+        attachReplies(comment);
+      }
+      
+      return topLevelComments;
     } catch (e) {
-      print('Error fetching post comments via API: $e');
+      debugPrint('Error processing comment tree: $e');
       return [];
     }
   }
@@ -675,7 +873,7 @@ class SupabaseService {
         context: ctx,
       );
     } catch (e) {
-      print('Error creating post: $e');
+      debugPrint('Error creating post: $e');
       rethrow;
     }
   }
@@ -700,7 +898,7 @@ class SupabaseService {
         context: ctx,
       );
     } catch (e) {
-      print('Error adding comment: $e');
+      debugPrint('Error adding comment: $e');
       rethrow;
     }
   }
@@ -717,7 +915,7 @@ class SupabaseService {
         context: ctx,
       );
     } catch (e) {
-      print('Error voting on post: $e');
+      debugPrint('Error voting on post: $e');
     }
   }
 
@@ -746,7 +944,7 @@ class SupabaseService {
         context: ctx,
       );
     } catch (e) {
-      print('Error saving post: $e');
+      debugPrint('Error saving post: $e');
       rethrow;
     }
   }
@@ -768,7 +966,7 @@ class SupabaseService {
         context: ctx,
       );
     } catch (e) {
-      print('Error unsaving post: $e');
+      debugPrint('Error unsaving post: $e');
       rethrow;
     }
   }
@@ -779,7 +977,7 @@ class SupabaseService {
       final response = await _client
           .from('saved_posts')
           .select('id')
-          .eq('post_id', postId)
+          .eq('message_id', postId)
           .eq('user_email', userEmail)
           .maybeSingle();
       return response != null;
@@ -788,21 +986,48 @@ class SupabaseService {
     }
   }
 
+  /// Get all saved post IDs for a user (Batch Optimization)
+  Future<Set<String>> getSavedPostIds(String userEmail) async {
+    try {
+      final response = await _client
+          .from('saved_posts')
+          .select('message_id')
+          .eq('user_email', userEmail);
+      
+      return (response as List).map((e) => e['message_id'].toString()).toSet();
+    } catch (e) {
+      debugPrint('Error fetching saved post IDs: $e');
+      return {};
+    }
+  }
+
   /// Get all saved posts for a user
   Future<List<Map<String, dynamic>>> getSavedPosts(String userEmail) async {
     try {
       final response = await _client
           .from('saved_posts')
-          .select('post_id, room_messages(*)')
+          .select('message_id, room_messages(*, comment_count:room_post_comments(count))')
           .eq('user_email', userEmail)
           .order('created_at', ascending: false);
       
       return (response as List)
           .where((row) => row['room_messages'] != null)
-          .map((row) => Map<String, dynamic>.from(row['room_messages']))
+          .map((row) {
+             final data = Map<String, dynamic>.from(row['room_messages']);
+             // Fix count format
+             final countVal = data['comment_count'];
+             if (countVal is List && countVal.isNotEmpty) {
+                data['comment_count'] = countVal[0]['count'];
+             } else if (countVal is int) {
+                data['comment_count'] = countVal;
+             } else {
+                data['comment_count'] = 0;
+             }
+             return data;
+          })
           .toList();
     } catch (e) {
-      print('Error fetching saved posts: $e');
+      debugPrint('Error fetching saved posts: $e');
       return [];
     }
   }
@@ -838,7 +1063,7 @@ class SupabaseService {
       
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
-      print('Error fetching syllabus: $e');
+      debugPrint('Error fetching syllabus: $e');
       return [];
     }
   }
@@ -855,8 +1080,8 @@ class SupabaseService {
         'followed_at': DateTime.now().toIso8601String(),
       });
     } catch (e) {
-      print('Error following department: $e');
-      throw e;
+      debugPrint('Error following department: $e');
+      rethrow;
     }
   }
 
@@ -868,8 +1093,8 @@ class SupabaseService {
           .eq('department_id', departmentId)
           .eq('user_email', userEmail);
     } catch (e) {
-      print('Error unfollowing department: $e');
-      throw e;
+      debugPrint('Error unfollowing department: $e');
+      rethrow;
     }
   }
 
@@ -902,6 +1127,25 @@ class SupabaseService {
     }
   }
 
+  /// Get followed department IDs
+  Future<List<String>> getFollowedDepartmentIds(String collegeId, String userEmail) async {
+    try {
+      final response = await _client
+          .from('department_followers')
+          .select('department_id')
+          .eq('college_id', collegeId)
+          .eq('user_email', userEmail);
+      return (response as List)
+          .map((e) => e['department_id']?.toString())
+          .where((id) => id != null && id.isNotEmpty)
+          .cast<String>()
+          .toList();
+    } catch (e) {
+      debugPrint('Error getting followed departments: $e');
+      return [];
+    }
+  }
+
   // ============ NOTICE COMMENTS ============
 
   /// Add comment to notice
@@ -922,8 +1166,8 @@ class SupabaseService {
         context: ctx,
       );
     } catch (e) {
-      print('Error adding notice comment: $e');
-      throw e;
+      debugPrint('Error adding notice comment: $e');
+      rethrow;
     }
   }
 
@@ -936,8 +1180,8 @@ class SupabaseService {
       if (ctx == null) throw Exception('Security context not initialized');
       await _api.addBookmark(itemId: noticeId, type: 'notice', context: ctx);
     } catch (e) {
-      print('Error saving notice: $e');
-      throw e;
+      debugPrint('Error saving notice: $e');
+      rethrow;
     }
   }
 
@@ -948,8 +1192,8 @@ class SupabaseService {
       if (ctx == null) throw Exception('Security context not initialized');
       await _api.removeBookmarkByItem(itemId: noticeId, context: ctx);
     } catch (e) {
-      print('Error unsaving notice: $e');
-      throw e;
+      debugPrint('Error unsaving notice: $e');
+      rethrow;
     }
   }
 
@@ -964,38 +1208,132 @@ class SupabaseService {
   // ============ CHAT (RESTORED) ============
 
   // ============ MISSING METHODS (STUBS / SIMPLE IMPLEMENTATIONS) ============
-  Future<List<Map<String, dynamic>>> getFollowing(String userEmail) async => [];
-  Future<List<Map<String, dynamic>>> getFollowers(String userEmail) async => [];
-  Future<int> getFollowingCount(String userEmail) async => 0;
-  Future<int> getFollowersCount(String userEmail) async => 0;
+  // ============ USER FOLLOWS ============
+  
+  /// Get list of users fetching/following
+  /// Get list of users the current user follows
+  Future<List<Map<String, dynamic>>> getFollowing(String userEmail) async {
+    try {
+      // First get the user's firebase_uid from their email
+      final currentUser = await _client
+          .from('users')
+          .select('firebase_uid')
+          .eq('email', userEmail)
+          .single();
+      
+      final String currentUserId = currentUser['firebase_uid'];
+      
+      // Get follows where this user is the follower (status = accepted)
+      final follows = await _client
+          .from('follows')
+          .select('following_id')
+          .eq('follower_id', currentUserId)
+          .eq('status', 'accepted');
+      
+      final followingIds = (follows as List).map((e) => e['following_id'] as String).toList();
+      
+      if (followingIds.isEmpty) return [];
+
+      // Get user details for these firebase_uids
+      final users = await _client
+          .from('users')
+          .select('email, display_name, photo_url, college_id')
+          .filter('firebase_uid', 'in', followingIds);
+          
+      return List<Map<String, dynamic>>.from(users);
+    } catch (e) {
+      debugPrint('Error fetching following: $e');
+      return [];
+    }
+  }
+
+  /// Get list of users following the current user
+  Future<List<Map<String, dynamic>>> getFollowers(String userEmail) async {
+    try {
+      // First get the user's firebase_uid from their email
+      final currentUser = await _client
+          .from('users')
+          .select('firebase_uid')
+          .eq('email', userEmail)
+          .single();
+      
+      final String currentUserId = currentUser['firebase_uid'];
+      
+      // Get follows where this user is being followed (status = accepted)
+      final follows = await _client
+          .from('follows')
+          .select('follower_id')
+          .eq('following_id', currentUserId)
+          .eq('status', 'accepted');
+      
+      final followerIds = (follows as List).map((e) => e['follower_id'] as String).toList();
+      
+      if (followerIds.isEmpty) return [];
+
+      // Get user details for these firebase_uids
+      final users = await _client
+          .from('users')
+          .select('email, display_name, photo_url, college_id')
+          .filter('firebase_uid', 'in', followerIds);
+          
+      return List<Map<String, dynamic>>.from(users);
+    } catch (e) {
+      debugPrint('Error fetching followers: $e');
+      return [];
+    }
+  }
+
+
 
   /// List students for a college, based on email domain.
   ///
   /// Used by the "Explore Students" screen.
   /// It returns users whose email ends with the college's domain.
-  Future<List<Map<String, dynamic>>> getCollegeStudents(String collegeId) async {
+  /// collegeIdOrDomain can be either a college UUID id or the domain string directly
+  Future<List<Map<String, dynamic>>> getCollegeStudents(String collegeIdOrDomain) async {
     try {
-      // Fetch college domain
-      final college = await _client
-          .from('colleges')
-          .select('domain')
-          .eq('id', collegeId)
-          .maybeSingle();
+      String? domain;
+      
+      // Check if input looks like a UUID (college id) or a domain
+      final isUuid = RegExp(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$').hasMatch(collegeIdOrDomain);
+      
+      if (isUuid) {
+        // Fetch college domain by ID
+        final college = await _client
+            .from('colleges')
+            .select('domain')
+            .eq('id', collegeIdOrDomain)
+            .maybeSingle();
+        domain = college?['domain'] as String?;
+      } else {
+        // Input is already a domain (e.g., "kiet.edu")
+        domain = collegeIdOrDomain;
+      }
 
-      final domain = college == null ? null : college['domain'] as String?;
       if (domain == null || domain.isEmpty) {
+        debugPrint('No domain found for: $collegeIdOrDomain');
         return [];
       }
 
+      // Get current user email to exclude them
+      final currentUserEmail = _client.auth.currentUser?.email;
+
       final response = await _client
           .from('users')
-          .select('email, display_name')
+          .select('email, display_name, photo_url')
           .ilike('email', '%@$domain')
-          .order('created_at', ascending: false);
+          .order('created_at', ascending: false)
+          .limit(50);
 
-      return List<Map<String, dynamic>>.from(response);
+      // Filter out current user
+      final users = List<Map<String, dynamic>>.from(response);
+      if (currentUserEmail != null) {
+        users.removeWhere((u) => u['email'] == currentUserEmail);
+      }
+      
+      return users;
     } catch (e) {
-      print('Error fetching college students: $e');
+      debugPrint('Error fetching college students: $e');
       return [];
     }
   }
@@ -1030,8 +1368,43 @@ class SupabaseService {
         'total': response.length,
       };
     } catch (e) {
-      print('Error getting comment reactions: $e');
+      debugPrint('Error fetching comment reactions: $e');
       return {'reactions': {}, 'total': 0};
+    }
+  }
+
+  /// Toggle a reaction
+  Future<bool> toggleReaction({
+    required String commentId,
+    required String commentType,
+    required String userEmail,
+    required String emoji,
+  }) async {
+    try {
+      final exists = await _client
+          .from('comment_reactions')
+          .select('id')
+          .eq('comment_id', commentId)
+          .eq('comment_type', commentType)
+          .eq('user_email', userEmail)
+          .eq('emoji', emoji)
+          .maybeSingle() != null;
+
+      if (exists) {
+        await removeReaction(commentId: commentId, userEmail: userEmail, emoji: emoji);
+        return false;
+      } else {
+        await addReaction(
+          commentId: commentId, 
+          commentType: commentType, 
+          userEmail: userEmail, 
+          emoji: emoji,
+        );
+        return true;
+      }
+    } catch (e) {
+      debugPrint('Error toggling reaction: $e');
+      rethrow;
     }
   }
 
@@ -1050,7 +1423,7 @@ class SupabaseService {
         'emoji': emoji,
       });
     } catch (e) {
-      print('Error adding reaction: $e');
+      debugPrint('Error adding reaction: $e');
       rethrow;
     }
   }
@@ -1069,48 +1442,257 @@ class SupabaseService {
           .eq('user_email', userEmail)
           .eq('emoji', emoji);
     } catch (e) {
-      print('Error removing reaction: $e');
+      debugPrint('Error removing reaction: $e');
       rethrow;
     }
   }
 
-  /// Toggle a reaction (add if not exists, remove if exists)
-  Future<bool> toggleReaction({
-    required String commentId,
-    required String commentType,
-    required String userEmail,
-    required String emoji,
-  }) async {
+  Future<List<Map<String, dynamic>>> getNotices({required String collegeId}) async {
     try {
-      // Check if reaction exists
-      final existing = await _client
-          .from('comment_reactions')
+      final response = await _client
+          .from('notices')
           .select()
-          .eq('comment_id', commentId)
-          .eq('user_email', userEmail)
-          .eq('emoji', emoji)
-          .maybeSingle();
+          .eq('college_id', collegeId)
+          .order('created_at', ascending: false);
+      return List<Map<String, dynamic>>.from(response);
+    } catch (e) {
+      debugPrint('Error getting notices: $e');
+      return [];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getNoticeComments(String noticeId) async {
+    try {
+      // Fetch flat comments
+      final rawComments = await _api.getNoticeComments(noticeId);
       
-      if (existing != null) {
-        // Remove it
-        await removeReaction(
-          commentId: commentId,
-          userEmail: userEmail,
-          emoji: emoji,
-        );
-        return false; // Reaction removed
+      // Build thread structure (Client-side threading)
+      final Map<String, List<Map<String, dynamic>>> commentMap = {};
+      final List<Map<String, dynamic>> topLevelComments = [];
+      
+      // First pass: organize comments by parent_id
+      for (var comment in rawComments) {
+        final parentId = comment['parent_id']?.toString(); // Robust conversion
+        // Ensure replies list exists
+        comment['replies'] = <Map<String, dynamic>>[];
+        
+        if (parentId == null || parentId.isEmpty) { // Handle empty string same as null
+          topLevelComments.add(comment);
+        } else {
+          if (!commentMap.containsKey(parentId)) {
+            commentMap[parentId] = [];
+          }
+          commentMap[parentId]!.add(comment);
+        }
+      }
+      
+      // Second pass: attach replies to their parents
+      void attachReplies(Map<String, dynamic> comment) {
+        final commentId = comment['id']?.toString();
+        if (commentId != null && commentMap.containsKey(commentId)) {
+          comment['replies'] = commentMap[commentId]!;
+          // Recursively attach replies to replies
+          for (var reply in comment['replies']) {
+            attachReplies(reply);
+          }
+        }
+      }
+      
+      for (var comment in topLevelComments) {
+        attachReplies(comment);
+      }
+      
+      return topLevelComments;
+    } catch (e) {
+      debugPrint('Error getting notice comments: $e');
+      rethrow;
+    }
+  }
+
+
+
+  Future<List<String>> getUserRoomIds(String userEmail) async {
+    try {
+      final res = await _client
+          .from('room_members')
+          .select('room_id')
+          .eq('user_email', userEmail);
+      return (res as List).map((e) => e['room_id'] as String).toList();
+    } catch (e) {
+      debugPrint('Error getting joined rooms: $e');
+      return [];
+    }
+  }
+
+
+  Future<List<Resource>> getBookmarks(String userEmail, String collegeId) async {
+    try {
+      final response = await _api.getBookmarks();
+      final List<dynamic> bookmarks = response['bookmarks'] ?? [];
+      
+      // Filter to only resource bookmarks and convert to Resource objects
+      final resources = <Resource>[];
+      for (final bookmark in bookmarks) {
+        if (bookmark['type'] == 'resource' && bookmark['content'] != null) {
+          try {
+            resources.add(Resource.fromJson(bookmark['content']));
+          } catch (e) {
+            debugPrint('Error parsing bookmarked resource: $e');
+          }
+        }
+      }
+      return resources;
+    } catch (e) {
+      debugPrint('Error fetching bookmarks: $e');
+      return [];
+    }
+  }
+
+  Future<bool> isBookmarked(String userEmail, String resourceId) async {
+    try {
+      return await _api.checkBookmark(resourceId);
+    } catch (e) {
+      debugPrint('Error checking bookmark: $e');
+      return false;
+    }
+  }
+
+  Future<bool> toggleBookmark(String userEmail, String resourceId) async {
+    try {
+      // Check if already bookmarked
+      final isCurrentlyBookmarked = await _api.checkBookmark(resourceId);
+      
+      if (isCurrentlyBookmarked) {
+        // Remove bookmark
+        await _api.removeBookmarkByItem(itemId: resourceId, context: _ctx);
+        return false;
       } else {
-        // Add it
-        await addReaction(
-          commentId: commentId,
-          commentType: commentType,
-          userEmail: userEmail,
-          emoji: emoji,
+        // Add bookmark
+        await _api.addBookmark(
+          itemId: resourceId, 
+          type: 'resource', 
+          context: _ctx
         );
-        return true; // Reaction added
+        return true;
       }
     } catch (e) {
-      print('Error toggling reaction: $e');
+      debugPrint('Error toggling bookmark: $e');
+      rethrow;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getChatRooms(String userEmail, String collegeId) async {
+    try {
+      final response = await _client
+          .from('chat_rooms')
+          .select('*, member_count:room_members(count)')
+          .eq('college_id', collegeId)
+          .order('created_at', ascending: false);
+      
+      return (response as List).map((e) {
+        final data = Map<String, dynamic>.from(e);
+        // Fix count format if it comes as list
+        final countVal = data['member_count'];
+        if (countVal is List && countVal.isNotEmpty) {
+           data['member_count'] = countVal[0]['count'];
+        } else if (countVal is int) {
+           data['member_count'] = countVal;
+        } else {
+           data['member_count'] = 0;
+        }
+        return data;
+      }).toList();
+    } catch (e) {
+      debugPrint('Error fetching chat rooms: $e');
+      return [];
+    }
+  }
+
+  // ============ NOTICES ============
+
+  Future<Map<String, dynamic>?> getNotice(String id) async {
+    try {
+      final response = await _client
+          .from('notices')
+          .select()
+          .eq('id', id)
+          .maybeSingle();
+      return response;
+    } catch (e) {
+      debugPrint('Error fetching notice: $e');
+      return null;
+    }
+  }
+
+  Future<DepartmentAccount?> getDepartmentProfile(String departmentId) async {
+    try {
+      // Assuming 'departments' table exists or 'users' with role/type
+      // Adjust table name if needed based on schema.
+      // Based on notification service, department accounts might be in 'users' or separate 'departments'.
+      // If 'department_followers' links to 'department_id', likely a separate table or users.
+      
+      // Try 'users' first as many systems unify accounts
+      final response = await _client
+          .from('users')
+          .select()
+          .eq('id', departmentId)
+          .maybeSingle();
+      
+      if (response != null) {
+        return DepartmentAccount(
+          id: response['id'],
+          name: response['display_name'] ?? response['name'] ?? 'Department',
+          handle: response['username'] ?? '',
+          avatarLetter: (response['display_name'] ?? 'D')[0],
+          color: Colors.blue, // Default color
+          noticeCount: 0,
+        );
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Error fetching department profile: $e');
+      return null;
+    }
+  }
+
+  // ============ USER PROFILE ============
+  
+  /// Get user stats (upload count)
+  Future<Map<String, int>> getUserStats(String userEmail) async {
+    try {
+      final uploads = await _client
+          .from('resources')
+          .count(CountOption.exact)
+          .eq('uploaded_by_email', userEmail)
+          .eq('status', 'approved');
+      
+      return {'uploads': uploads};
+    } catch (e) {
+      debugPrint('Error fetching user stats: $e');
+      return {'uploads': 0};
+    }
+  }
+
+  /// Get all resources uploaded by a user
+  Future<List<Resource>> getUserResources(
+    String userEmail, {
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    try {
+      final response = await _client
+          .from('resources')
+          .select()
+          .eq('uploaded_by_email', userEmail)
+          .eq('status', 'approved')
+          .order('created_at', ascending: false)
+          .range(offset, offset + limit - 1);
+      
+      return (response as List)
+          .map((json) => Resource.fromJson(json))
+          .toList();
+    } catch (e) {
+      debugPrint('Error fetching user resources: $e');
       rethrow;
     }
   }

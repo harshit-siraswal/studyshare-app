@@ -23,4 +23,8 @@ class AppConfig {
   
   // Razorpay Live Key
   static const String razorpayKeyId = 'rzp_live_S9IWIDxf81JDDM';
+  // Support Email
+  static const String supportEmail = 'support@mystudyspace.me';
+  // Giphy API Key (Get from Giphy Developers Dashboard: developers.giphy.com)
+  static const String giphyApiKey = 'E2CYfJbrw5NGA8aUUN2d8nDn4Q6PoH77';
 }

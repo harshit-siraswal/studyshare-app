@@ -7,11 +7,12 @@ import '../../config/theme.dart';
 import '../../services/auth_service.dart';
 import '../study/study_screen.dart';
 import '../chatroom/chatroom_list_screen.dart';
-import '../chatroom/discover_rooms_screen.dart';
 import '../notices/notices_screen.dart';
 import '../profile/profile_screen.dart';
 import '../../widgets/upload_resource_dialog.dart';
 import '../../widgets/study_timer_widget.dart';
+import '../../widgets/global_timer_overlay.dart';
+import '../chatroom/discover_rooms_screen.dart';
 import '../../widgets/help_overlay.dart';
 import '../../providers/theme_provider.dart';
 import '../../services/supabase_service.dart';
@@ -42,21 +43,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final AuthService _authService = AuthService();
   final SupabaseService _supabaseService = SupabaseService();
   int _currentIndex = 0;
-  bool _showTimer = false;
   bool _showHelpOverlay = false;
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   
-  late AnimationController _timerAnimController;
 
   @override
   void initState() {
     super.initState();
-    _timerAnimController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 200), // Faster animation
-    );
+
     // Provide a context for reCAPTCHA flows used by SupabaseService -> BackendApiService
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _supabaseService.attachContext(context);
+
     });
     _checkHelpOverlay();
   }
@@ -81,11 +79,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
   }
 
-  @override
-  void dispose() {
-    _timerAnimController.dispose();
-    super.dispose();
-  }
 
   void _handleLogout() async {
     try {
@@ -107,37 +100,30 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void _showUpload() {
     showUploadDialog(
       context,
-      widget.collegeId,
+      widget.collegeDomain,
       _authService.userEmail ?? '',
     );
   }
 
-  void _toggleTimer() {
-    setState(() => _showTimer = !_showTimer);
-    if (_showTimer) {
-      _timerAnimController.forward();
-    } else {
-      _timerAnimController.reverse();
-    }
-  }
+
 
   Widget _getScreen(int index) {
     switch (index) {
       case 0:
         return StudyScreen(
-          collegeId: widget.collegeId,
+          collegeId: widget.collegeDomain,
           collegeName: widget.collegeName,
           userEmail: _authService.userEmail ?? '',
           onChangeCollege: widget.onChangeCollege,
         );
       case 1:
         return ChatroomListScreen(
-          collegeId: widget.collegeId,
+          collegeId: widget.collegeDomain,
           collegeDomain: widget.collegeDomain,
           userEmail: _authService.userEmail ?? '',
         );
       case 2:
-        return NoticesScreen(collegeId: widget.collegeId);
+        return NoticesScreen(collegeId: widget.collegeDomain);
       case 3:
         return ProfileScreen(
           collegeId: widget.collegeId,
@@ -149,7 +135,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         );
       default:
         return StudyScreen(
-          collegeId: widget.collegeId,
+          collegeId: widget.collegeDomain,
           collegeName: widget.collegeName,
           userEmail: _authService.userEmail ?? '',
           onChangeCollege: widget.onChangeCollege,
@@ -165,65 +151,56 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     
     final email = _authService.userEmail;
-    final isAllowed = email != null && widget.collegeDomain.isNotEmpty && email.endsWith(widget.collegeDomain);
 
     return Scaffold(
+      key: _scaffoldKey,
       backgroundColor: isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
+      resizeToAvoidBottomInset: false, // Prevent floating nav from rising with keyboard
       extendBody: true,
       extendBodyBehindAppBar: true,
+      // Drawer with timer - when closed, triggers wind swirl animation
+      onDrawerChanged: (isOpen) {
+        // Inform overlay about sidebar state to manage bubble visibility
+        GlobalTimerOverlay.setSidebarOpen(isOpen);
+        
+        if (!isOpen && GlobalTimerOverlay.timerController?.isRunning == true) {
+          // Drawer closed with timer running - trigger swirl animation
+          // Start position is center-left of screen (where drawer edge is)
+          final screenSize = MediaQuery.of(context).size;
+          GlobalTimerOverlay.triggerSwirl(Offset(0, screenSize.height / 2));
+        }
+      },
+      drawer: Drawer(
+        width: 280,
+        child: GlobalTimerOverlay.timerController != null
+            ? StudyTimerWidget(
+                controller: GlobalTimerOverlay.timerController!,
+                onMinimize: () {
+                  Navigator.pop(context); // Close drawer - this triggers onDrawerChanged
+                },
+              )
+            : const Center(child: CircularProgressIndicator()),
+      ),
+      drawerEdgeDragWidth: MediaQuery.of(context).size.width * 0.1,
       body: Stack(
         children: [
-          // Main content with swipe gesture to open timer - extends full screen
+          // Main content - padding adjusted to match floating nav height (72) + spacing (16) + system padding
           SafeArea(
             bottom: false,
-            child: GestureDetector(
-              onHorizontalDragEnd: (details) {
-                // Swipe right to open timer (if closed)
-                if (!_showTimer && details.primaryVelocity != null && details.primaryVelocity! > 200) {
-                  _toggleTimer();
-                }
-              },
-              child: Padding(
-                // Add bottom padding to prevent content from being hidden under floating nav
-                padding: EdgeInsets.only(bottom: 90 + bottomPadding),
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 200),
-                  child: _getScreen(_currentIndex),
-                ),
-              ),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              child: _getScreen(_currentIndex),
             ),
           ),
-          // Study Timer Panel (swipe-only; no fixed button)
-          AnimatedPositioned(
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeOut,
-            left: _showTimer ? 0 : -300,
-            top: 0,
-            bottom: 0,
-            child: SafeArea(
-              child: GestureDetector(
-                onHorizontalDragEnd: (details) {
-                  // Swipe left to close timer (if open)
-                  if (_showTimer && details.primaryVelocity != null && details.primaryVelocity! < -200) {
-                    _toggleTimer();
-                  }
-                },
-                child: const StudyTimerWidget(),
-              ),
-            ),
-          ),
-          // Dimmed overlay when timer is open
-          if (_showTimer)
-            Positioned.fill(
-              left: 280,
-              child: GestureDetector(
-                onTap: _toggleTimer,
-                child: Container(color: Colors.black.withOpacity(0.3)),
-              ),
-            ),
+          
+          // Timer is handled globally by GlobalTimerOverlay in main.dart
+
+          
           // Help Overlay (shows on first launch)
           if (_showHelpOverlay)
             HelpOverlay(onDismiss: _dismissHelpOverlay),
+
+
           
           // Floating Bottom Navigation Bar
           Positioned(
@@ -233,7 +210,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             child: _buildFloatingBottomNav(isDark),
           ),
           
-
+          // Animated FAB
+          _buildAnimatedFab(context, isDark, bottomPadding),
         ],
       ),
     );
@@ -242,28 +220,34 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   // Floating Bottom Navigation Bar with Frosted Glass Effect
   Widget _buildFloatingBottomNav(bool isDark) {
     // Colors for frosted glass effect
-    final glassBg = isDark 
-        ? Colors.black.withOpacity(0.6)
-        : Colors.white.withOpacity(0.75);
-    final borderColor = isDark 
-        ? Colors.white.withOpacity(0.1)
-        : Colors.black.withOpacity(0.05);
     
     return ClipRRect(
-      borderRadius: BorderRadius.circular(28),
+      borderRadius: BorderRadius.circular(36),
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25), // Stronger blur
         child: Container(
           height: 72,
           decoration: BoxDecoration(
-            color: glassBg,
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: borderColor, width: 1),
+            color: isDark ? Colors.black.withValues(alpha: 0.4) : Colors.white.withValues(alpha: 0.6), // More transparent
+            borderRadius: BorderRadius.circular(36),
+            border: Border.all(
+              color: isDark ? Colors.white.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.4), // Distinct subtle border
+              width: 1.5, // Slightly thicker for the "glass edge" look
+            ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(isDark ? 0.3 : 0.1),
-                blurRadius: 24,
-                offset: const Offset(0, 8),
+                color: Colors.black.withValues(alpha: isDark ? 0.5 : 0.2), // Deeper shadow for pop
+                blurRadius: 32, // Softer, larger shadow
+                offset: const Offset(0, 10),
+                spreadRadius: -4,
+              ),
+              // Inner light reflection simulation (top highlight)
+              if (isDark) BoxShadow(
+                color: Colors.white.withValues(alpha: 0.1),
+                blurRadius: 1,
+                offset: const Offset(0, 1),
+                spreadRadius: 0,
+                blurStyle: BlurStyle.inner, // Inset feel if supported, otherwise just a top border effect via border
               ),
             ],
           ),
@@ -280,46 +264,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ),
               ),
               
-              // Center FAB (integrated into the floating bar)
-              GestureDetector(
-                onTap: () {
-                  HapticFeedback.mediumImpact();
-                  final email = _authService.userEmail;
-                  final isAllowed = email != null && widget.collegeDomain.isNotEmpty && email.endsWith(widget.collegeDomain);
-                  
-                  if (isAllowed) {
-                    _showUpload();
-                  } else {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Upload is restricted to verified students.')),
-                    );
-                  }
-                },
-                child: Container(
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [AppTheme.primary, AppTheme.primaryDark],
-                    ),
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppTheme.primary.withOpacity(0.4),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.add_rounded,
-                    color: Colors.white,
-                    size: 28,
-                  ),
-                ),
-              ), 
+              const SizedBox(width: 56), 
               
               // Right side - 2 tabs
               Expanded(
@@ -351,9 +296,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         HapticFeedback.lightImpact();
         _onNavTapped(index);
       },
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(20),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
@@ -367,12 +312,91 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             Text(
               label,
               style: GoogleFonts.inter(
-                fontSize: 11,
+                fontSize: 10, // Reduced font size
                 fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
                 color: isActive ? activeColor : inactiveColor,
               ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAnimatedFab(BuildContext context, bool isDark, double bottomPadding) {
+    // Show on all tabs
+    // 0: Resources, 1: Rooms, 2: Notices, 3: Profile
+    
+    // Position Calculations (Centered by default per user request "remain at bottom bar")
+    // The user wants it to "remain at bottom bar", implying a fixed position?
+    // "at rooms section '+' should remain at bottom bar"
+    // "only when we open a particular room... that '+' comes to bottom right corner"
+    // This implies the FAB on HomeScreen should be static in the center (or wherever it is).
+    // The current code moves it left/right. Let's make it static center for all tabs.
+    // Wait, typically FAB is center-docked or bottom-right.
+    // The previous code had it center for Home, right for others.
+    // Let's stick to Center Docked for consistency if that's what "remain at bottom bar" implies,
+    // or maybe Bottom Right if that's the "bottom bar" location he refers to?
+    // "'+' should remain at bottom bar... only when we open... comes to bottom right corner of that room"
+    // This implies it is NOT at bottom right normally. So Center Docked is correct.
+    
+    final screenWidth = MediaQuery.of(context).size.width;
+    final double left = screenWidth / 2 - 28; // Always center
+    final double bottom = bottomPadding + 24; // Always docked
+
+    return Positioned(
+      left: left,
+      bottom: bottom,
+      child: Hero(
+        tag: 'fab_main', // Static tag
+        child: GestureDetector(
+          onTap: () {
+            HapticFeedback.mediumImpact();
+            // Handle actions based on index
+            if (_currentIndex == 0) {
+              // Resources: Upload
+              _showUpload();
+            } else if (_currentIndex == 1) {
+              // Rooms: Create/Discover
+              Navigator.push(context, MaterialPageRoute(builder: (_) => DiscoverRoomsScreen(
+                collegeId: widget.collegeDomain,
+                collegeDomain: widget.collegeDomain,
+                userEmail: _authService.userEmail!,
+              )));
+            } else if (_currentIndex == 2) {
+              // Notices: Restricted to Upload
+              _showUpload();
+            } else if (_currentIndex == 3) {
+              // Profile: Restricted to Upload
+              _showUpload();
+            }
+          },
+          child: Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [AppTheme.primary, AppTheme.primaryDark],
+              ),
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.primary.withValues(alpha: 0.4),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: const Icon(
+              Icons.add_rounded,
+              color: Colors.white,
+              size: 28,
+            ),
+          ),
         ),
       ),
     );

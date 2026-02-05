@@ -6,10 +6,15 @@ import '../../services/auth_service.dart';
 import '../../services/supabase_service.dart';
 import '../../services/backend_api_service.dart';
 import '../../providers/theme_provider.dart';
+import '../../models/resource.dart';
+import '../../widgets/resource_card.dart';
 import '../study/bookmarks_screen.dart';
 import 'following_screen.dart';
-import 'help_support_screen.dart';
 import 'edit_profile_screen.dart';
+import '../../widgets/paywall_dialog.dart';
+import '../../services/subscription_service.dart';
+import 'settings_screen.dart';
+import 'explore_students_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String collegeId;
@@ -33,11 +38,11 @@ class ProfileScreen extends StatefulWidget {
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProviderStateMixin {
+class _ProfileScreenState extends State<ProfileScreen> {
   final AuthService _authService = AuthService();
   final SupabaseService _supabaseService = SupabaseService();
   final BackendApiService _api = BackendApiService();
-  late AnimationController _controller;
+  final SubscriptionService _subscriptionService = SubscriptionService();
 
   bool _isLoggingOut = false;
   bool _profileLoading = true;
@@ -47,28 +52,24 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   
   // Real stats
   int _uploadCount = 0;
-  int _bookmarkCount = 0;
-  int _followingCount = 0;
   int _followersCount = 0;
+  int _followingCount = 0;
   bool _statsLoading = true;
+  
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 1500)
-    );
-    
     _loadStats();
     _loadProfile();
-    _controller.forward();
-  }
-  
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
   }
 
   Future<void> _loadProfile() async {
@@ -96,10 +97,8 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
       if (mounted) {
         setState(() {
           _uploadCount = stats['uploads'] ?? 0;
-          _bookmarkCount = stats['bookmarks'] ?? 0;
-          _followingCount = followingCount;
           _followersCount = followersCount;
-          _statsLoading = false;
+          _followingCount = followingCount;
         });
       }
     } catch (e) {
@@ -111,15 +110,7 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
   String get _displayName => _profileDisplayName ?? _authService.displayName ?? 'User';
   String? get _photoUrl => _profilePhotoUrl ?? _authService.photoUrl;
   
-  String get _role {
-    final email = _userEmail;
-    if (email.endsWith(widget.collegeDomain)) {
-      return 'VERIFIED STUDENT';
-    }
-    return 'READ ONLY';
-  }
   
-  bool get _isVerified => _role == 'VERIFIED STUDENT';
 
   Future<void> _handleLogout() async {
     setState(() => _isLoggingOut = true);
@@ -142,379 +133,562 @@ class _ProfileScreenState extends State<ProfileScreen> with SingleTickerProvider
     }
   }
 
-  void _showLogoutDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-        child: AlertDialog(
-          backgroundColor: AppTheme.darkSurface,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          title: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppTheme.error.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(Icons.logout_rounded, color: AppTheme.error, size: 20),
-              ),
-              const SizedBox(width: 12),
-              Text(
-                'Sign Out',
-                style: GoogleFonts.inter(
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white,
-                ),
-              ),
-            ],
-          ),
-          content: Text(
-            'Are you sure you want to sign out of your account?',
-            style: GoogleFonts.inter(color: AppTheme.textMuted),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: Text(
-                'Cancel',
-                style: GoogleFonts.inter(color: AppTheme.textMuted),
-              ),
-            ),
-            ElevatedButton(
-              onPressed: _isLoggingOut ? null : () {
-                Navigator.pop(context);
-                _handleLogout();
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.error,
-              ),
-              child: _isLoggingOut 
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                  )
-                : const Text('Sign Out'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+
 
   @override
   Widget build(BuildContext context) {
-    final isDark = true; // Force dark mode for Cyberpunk look
-    
+    // Determine if we are in dark mode based on system/theme provider
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final textColor = isDark ? Colors.white : Colors.black;
+    final subTextColor = isDark ? Colors.white70 : Colors.black54;
+
     return Scaffold(
-      backgroundColor: const Color(0xFF050510), // Deep space black
-      body: SafeArea(
-        bottom: false,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildAnimatedItem(0, _buildHeaderRow(isDark)),
-              const SizedBox(height: 40),
-              
-              // 1. Future/Cyberpunk Avatar Section
-              _buildAnimatedItem(1, Center(
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    // Outer Glow
-                    Container(
-                      width: 140,
-                      height: 140,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        automaticallyImplyLeading: false,
+        leading: null,
+        title: Text(
+          'My Profile',
+          style: GoogleFonts.inter(
+            color: textColor,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: Icon(Icons.settings_outlined, color: textColor),
+            onPressed: () async {
+               // Open Settings Screen
+               await Navigator.push(
+                 context,
+                 MaterialPageRoute(
+                   builder: (_) => SettingsScreen(
+                     onLogout: _handleLogout,
+                     userEmail: _userEmail,
+                     displayName: _profileDisplayName,
+                     photoUrl: _profilePhotoUrl,
+                     bio: _profileBio,
+                     themeProvider: widget.themeProvider,
+                   ),
+                 ),
+               );
+               // Refresh profile on return in case edits occurred
+               if (mounted) _loadProfile();
+            },
+          ),
+        ],
+      ),
+      body: _profileLoading 
+        ? const Center(child: CircularProgressIndicator())
+        : RefreshIndicator(
+            onRefresh: () async {
+              await _loadProfile();
+              await _loadStats();
+              setState(() {});
+            },
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Column(
+                children: [
+                   const SizedBox(height: 20),
+                   _buildProfileHeader(textColor, subTextColor),
+                   const SizedBox(height: 24),
+                   _buildStatsRow(textColor, subTextColor),
+                   const SizedBox(height: 24),
+                   
+                   // Explore Students Button
+                   Padding(
+                     padding: const EdgeInsets.symmetric(horizontal: 16),
+                     child: OutlinedButton.icon(
+                       onPressed: () {
+                         Navigator.push(
+                           context,
+                           MaterialPageRoute(
+                             builder: (_) => ExploreStudentsScreen(collegeId: widget.collegeId),
+                           ),
+                         );
+                       },
+                       icon: Icon(Icons.people_outline, color: textColor),
+                       label: Text('Find Classmates', style: GoogleFonts.inter(color: textColor)),
+                       style: OutlinedButton.styleFrom(
+                         padding: const EdgeInsets.symmetric(vertical: 12),
+                         side: BorderSide(color: subTextColor.withValues(alpha: 0.3)),
+                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                         minimumSize: const Size(double.infinity, 48),
+                       ),
+                     ),
+                   ),
+                   const SizedBox(height: 24),
+                   // Premium Badge / Status
+                   FutureBuilder<bool>(
+                     future: SubscriptionService().isPremium(),
+                     builder: (context, snapshot) {
+                       final isPremium = snapshot.data ?? false;
+                       return isPremium 
+                          ? _buildPremiumBadge() 
+                          : _buildUpgradeCard();
+                     },
+                   ),
+                   const SizedBox(height: 24),
+                   // Search & Filter
+                   _buildSearchBar(isDark),
+                   const SizedBox(height: 16),
+                   // Offline Toggle (Only if Premium, or disabled if Free)
+                   _buildOfflineToggle(textColor),
+                   const SizedBox(height: 16),
+                   // Contributions Header
+                   Align(
+                     alignment: Alignment.centerLeft,
+                     child: Text(
+                       'Contributions',
+                       style: GoogleFonts.inter(
+                         fontSize: 18,
+                         fontWeight: FontWeight.w600,
+                         color: textColor,
+                       ),
+                     ),
+                   ),
+                   const SizedBox(height: 10),
+                   _buildContributionsList(),
+                   const SizedBox(height: 40),
+                ],
+              ),
+            ),
+          ),
+    );
+  }
+
+
+  Widget _buildProfileHeader(Color textColor, Color subTextColor) {
+    return FutureBuilder<bool>(
+      future: _subscriptionService.isPremium(),
+      builder: (context, snapshot) {
+        final isPremium = snapshot.data ?? false;
+        
+        return Column(
+          children: [
+            Stack(
+              children: [
+                // Premium Glow/Ring
+                if (isPremium)
+                  Positioned.fill(
+                    child: Container(
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         boxShadow: [
-                           BoxShadow(color: const Color(0xFF00F0FF).withOpacity(0.4), blurRadius: 40, spreadRadius: -10),
-                           BoxShadow(color: const Color(0xFF7C3AED).withOpacity(0.4), blurRadius: 40, spreadRadius: -10, offset: const Offset(10, 10)),
+                          BoxShadow(
+                            color: const Color(0xFFFFD700).withValues(alpha: 0.5),
+                            blurRadius: 20,
+                            spreadRadius: 2,
+                          ),
                         ],
                       ),
                     ),
-                    // Rotating Ring (Animated Builder)
-                    AnimatedBuilder(
-                      animation: _controller,
-                      builder: (context, child) {
-                        return Transform.rotate(
-                          angle: _controller.value * 2 * 3.14159,
-                          child: SizedBox(
-                            width: 128,
-                            height: 128,
-                            child: CircularProgressIndicator(
-                              value: 0.75,
-                              strokeWidth: 4,
-                              backgroundColor: Colors.white10,
-                              valueColor: AlwaysStoppedAnimation<Color>(const Color(0xFF00F0FF)), // Cyan Neon
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                    // Avatar Image
-                    Container(
-                      width: 110,
-                      height: 110,
+                  ),
+                  
+                Container(
+                  width: 104, // Slightly larger for border
+                  height: 104,
+                  padding: const EdgeInsets.all(3), // Space for the ring
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: isPremium 
+                        ? const LinearGradient(
+                            colors: [Color(0xFFFFD700), Color(0xFFFFA500), Color(0xFFFFD700)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          )
+                        : null,
+                    color: isPremium ? null : Colors.transparent,
+                  ),
+                    child: Container(
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 2),
-                        image: _photoUrl != null
-                            ? DecorationImage(
-                                image: NetworkImage(_photoUrl!),
-                                fit: BoxFit.cover,
-                              )
-                            : null,
-                        color: Colors.black,
+                        border: Border.all(
+                          color: isPremium ? Colors.white : textColor.withValues(alpha: 0.1), 
+                          width: isPremium ? 2 : 1
+                        ),
+                        color: textColor.withValues(alpha: 0.05),
                       ),
-                      child: _photoUrl == null
-                          ? Center(
-                              child: Text(
-                                _displayName.isNotEmpty ? _displayName[0].toUpperCase() : 'U',
-                                style: GoogleFonts.orbitron(fontSize: 40, fontWeight: FontWeight.bold, color: Colors.white),
-                              ),
+                      child: ClipOval(
+                        child: _photoUrl != null
+                          ? Image.network(
+                              _photoUrl!,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return Center(
+                                  child: Text(
+                                    getInitials(_displayName),
+                                    style: GoogleFonts.inter(
+                                      fontSize: 32,
+                                      fontWeight: FontWeight.w600,
+                                      color: textColor,
+                                    ),
+                                  ),
+                                );
+                              },
                             )
-                          : null,
-                    ),
-                    // Level Badge
-                    Positioned(
-                      bottom: 0,
-                      child: Container(
-                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                         decoration: BoxDecoration(
-                           gradient: const LinearGradient(colors: [Color(0xFF00F0FF), Color(0xFF00A3FF)]),
-                           borderRadius: BorderRadius.circular(20),
-                           boxShadow: [
-                             BoxShadow(color: const Color(0xFF00F0FF).withOpacity(0.5), blurRadius: 10),
-                           ],
-                         ),
-                         child: Text('LVL 12', style: GoogleFonts.orbitron(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black)),
+                          : Center(
+                              child: Text(
+                                getInitials(_displayName),
+                                style: GoogleFonts.inter(
+                                  fontSize: 32,
+                                  fontWeight: FontWeight.w600,
+                                  color: textColor,
+                                ),
+                              ),
+                            ),
                       ),
                     ),
-                  ],
-                ),
-              )),
-              
-              const SizedBox(height: 24),
-              
-              // Name & Cyber Tag
-              _buildAnimatedItem(2, Center(
-                child: Column(
-                  children: [
-                    Text(
-                      _displayName,
-                      style: GoogleFonts.orbitron(
-                        fontSize: 26,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                        shadows: [Shadow(color: const Color(0xFF00F0FF).withOpacity(0.6), blurRadius: 15)],
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  ),
+                
+                Positioned(
+                  bottom: 0,
+                  right: 0,
+                  child: GestureDetector(
+                    onTap: () async {
+                       final updated = await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => EditProfileScreen(
+                            initialName: _displayName,
+                            initialPhotoUrl: _photoUrl,
+                            initialBio: _profileBio,
+                          ),
+                        ),
+                      );
+                      if (updated != null && mounted) {
+                        await _loadProfile();
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
-                        border: Border.all(color: const Color(0xFF7C3AED).withOpacity(0.5)),
-                        borderRadius: BorderRadius.circular(8),
-                        color: const Color(0xFF7C3AED).withOpacity(0.1),
+                        color: AppTheme.primary,
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2),
                       ),
-                      child: Text(
-                        'NETRUNNER', 
-                        style: GoogleFonts.inter(fontSize: 10, color: const Color(0xFF7C3AED), letterSpacing: 2),
-                      ),
-                    ),
-                  ],
-                ),
-              )),
-              
-              const SizedBox(height: 40),
-              
-              // 2. Neon Stats Grid
-              _buildAnimatedItem(3, _buildNeonStatsGrid()),
-              
-              const SizedBox(height: 30),
-              
-              // 3. Holographic Menu
-              _buildAnimatedItem(4, _buildHoloMenu()),
-              
-              const SizedBox(height: 40),
-              // Sign out
-              _buildAnimatedItem(5, Center(
-                child: TextButton.icon(
-                  onPressed: _isLoggingOut ? null : _showLogoutDialog,
-                  icon: Icon(Icons.logout, color: AppTheme.error.withOpacity(0.8), size: 20),
-                  label: Text(
-                    'Sign Out',
-                    style: GoogleFonts.inter(
-                      color: AppTheme.error.withOpacity(0.8),
-                      fontWeight: FontWeight.w600,
+                      child: const Icon(Icons.edit, size: 14, color: Colors.white),
                     ),
                   ),
                 ),
-              )),
-              const SizedBox(height: 20),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _displayName,
+                  style: GoogleFonts.inter(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    color: textColor,
+                  ),
+                ),
+                if (isPremium) ...[
+                   const SizedBox(width: 6),
+                   const Icon(Icons.verified, color: Color(0xFFFFD700), size: 20),
+                ],
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '@${_profileDisplayName?.replaceAll(" ", "").toLowerCase() ?? "user"}',
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                color: subTextColor,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _authService.userEmail ?? '', // Show Email
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: subTextColor,
+              ),
+            ),
+            const SizedBox(height: 4),
+             Text(
+              widget.collegeName,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                color: subTextColor,
+              ),
+            ),
+            if (_profileBio != null && _profileBio!.isNotEmpty) ...[
+               const SizedBox(height: 12),
+               Padding(
+                 padding: const EdgeInsets.symmetric(horizontal: 16),
+                 child: Text(
+                   _profileBio!,
+                   textAlign: TextAlign.center,
+                   style: GoogleFonts.inter(
+                     fontSize: 14,
+                     color: textColor,
+                   ),
+                 ),
+               ),
             ],
+          ],
+        );
+      }
+    );
+  }
+
+  Widget _buildStatsRow(Color textColor, Color subTextColor) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        _buildStatItem('Contributions', _uploadCount.toString(), textColor, subTextColor, () {
+          // Already on profile showing contributions, maybe scroll down?
+        }),
+        _buildStatItem('Followers', _followersCount.toString(), textColor, subTextColor, () async {
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => FollowingScreen(userEmail: _userEmail),
+            ),
+          );
+          if (mounted) _loadStats();
+        }),
+        _buildStatItem('Following', _followingCount.toString(), textColor, subTextColor, () async {
+           await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => FollowingScreen(userEmail: _userEmail),
+            ),
+          );
+          if (mounted) _loadStats();
+        }),
+      ],
+    );
+  }
+
+  Widget _buildStatItem(String label, String value, Color textColor, Color subTextColor, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Text(
+            value,
+            style: GoogleFonts.inter(
+               fontSize: 18,
+               fontWeight: FontWeight.bold,
+               color: textColor,
+            ),
           ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: GoogleFonts.inter(
+               fontSize: 12,
+               color: subTextColor,
+               fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPremiumBadge() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFD700).withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: const Color(0xFFFFD700), width: 1.5),
+      ),
+      child: Text(
+        'PREMIUM MEMBER',
+        style: GoogleFonts.inter(
+          color: const Color(0xFFD4AF37),
+          fontWeight: FontWeight.bold,
+          fontSize: 14,
+          letterSpacing: 1.2,
         ),
       ),
     );
   }
 
-  Widget _buildHeaderRow(bool isDark) {
+  Widget _buildUpgradeCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8E1),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFFFD54F)),
+      ),
+      child: Column(
+        children: [
+          Text(
+            'Unlock Pro Features!',
+            style: GoogleFonts.inter(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.black87,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Analytics & Offline Downloads',
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              color: Colors.black54,
+            ),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: () {
+               showModalBottomSheet(
+                 context: context, 
+                 isScrollControlled: true,
+                 backgroundColor: Colors.transparent,
+                 builder: (_) => PaywallDialog(
+                   onSuccess: () {
+                     // Refresh to show premium badge/ring if successful
+                     setState(() {});
+                   },
+                 ),
+               );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.black,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+            ),
+            child: const Text('Upgrade Now'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchBar(bool isDark) {
+    return TextField(
+      controller: _searchController,
+      onChanged: (val) {
+        setState(() {
+          _searchQuery = val.toLowerCase();
+        });
+      },
+      decoration: InputDecoration(
+        hintText: 'Search contributions...',
+        prefixIcon: const Icon(Icons.search),
+        filled: true,
+        fillColor: isDark ? Colors.grey[800] : Colors.grey[100],
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(30),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 20),
+      ),
+    );
+  }
+
+  Widget _buildOfflineToggle(Color textColor) {
     return Row(
       children: [
         Text(
-          'Profile',
+          'Premium',
           style: GoogleFonts.inter(
-            fontSize: 28,
-            fontWeight: FontWeight.w800,
-            color: isDark ? Colors.white : const Color(0xFF1E293B),
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: textColor,
           ),
         ),
         const Spacer(),
-        IconButton(
-          onPressed: () {
-             // Settings placeholder or nav
-          },
-          icon: Icon(Icons.settings_outlined, color: isDark ? Colors.white70 : Colors.black54),
-        ),
-        IconButton(
-          onPressed: () async {
-            if (_profileLoading) return;
-            final updated = await Navigator.push(
+        GestureDetector(
+          onTap: () {
+             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (_) => EditProfileScreen(
-                  initialName: _displayName,
-                  initialPhotoUrl: _photoUrl,
-                  initialBio: _profileBio,
+                builder: (_) => BookmarksScreen(
+                  userEmail: _userEmail,
+                  collegeId: widget.collegeId,
                 ),
               ),
             );
-            if (updated != null && mounted) {
-              await _loadProfile();
-            }
           },
-          icon: Icon(Icons.edit_outlined, color: isDark ? Colors.white70 : Colors.black54),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildNeonStatsGrid() {
-    return GridView.count(
-      crossAxisCount: 2,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 16,
-      crossAxisSpacing: 16,
-      childAspectRatio: 1.5,
-      children: [
-        _buildNeonStatCard('UPLOADS', _uploadCount.toString(), Icons.cloud_upload_outlined, const Color(0xFF00F0FF)),
-        _buildNeonStatCard('BOOKMARKS', _bookmarkCount.toString(), Icons.bookmark_outline, const Color(0xFFFF00FF)),
-        _buildNeonStatCard('FOLLOWERS', _followersCount.toString(), Icons.people_outline, const Color(0xFF00FF99)),
-        _buildNeonStatCard('REPUTATION', '95%', Icons.star_outline, const Color(0xFFFFD700)),
-      ],
-    );
-  }
-
-  Widget _buildNeonStatCard(String label, String value, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0A0F1F),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: color.withOpacity(0.2)),
-        boxShadow: [
-          BoxShadow(color: color.withOpacity(0.05), blurRadius: 10, spreadRadius: 0),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Icon(icon, color: color, size: 24),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Row(
             children: [
               Text(
-                value,
-                style: GoogleFonts.orbitron(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+                'My Bookmarks', // Updated from Save Offline to Bookmarks shortcut as per user request for functional profile
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  color: AppTheme.primary,
+                  fontWeight: FontWeight.w600
+                ),
               ),
-              Text(
-                label,
-                style: GoogleFonts.inter(fontSize: 10, color: Colors.white54, letterSpacing: 1),
-              ),
+              const SizedBox(width: 4),
+              Icon(Icons.arrow_forward_ios_rounded, size: 12, color: AppTheme.primary),
             ],
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHoloMenu() {
-    return Column(
-      children: [
-        _buildHoloMenuItem('My Profile details', Icons.person_outline),
-        const SizedBox(height: 12),
-        _buildHoloMenuItem('Payment Methods', Icons.credit_card),
-        const SizedBox(height: 12),
-        _buildHoloMenuItem('Notification Settings', Icons.notifications_none),
-         const SizedBox(height: 12),
-        _buildHoloMenuItem('Log Out', Icons.logout, isDestructive: true),
+        ),
       ],
     );
   }
 
-  Widget _buildHoloMenuItem(String title, IconData icon, {bool isDestructive = false}) {
-    return Container(
-       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-       decoration: BoxDecoration(
-         color: Colors.white.withOpacity(0.03),
-         borderRadius: BorderRadius.circular(12),
-         border: Border(left: BorderSide(color: isDestructive ? Colors.red : Colors.white24, width: 2)),
-       ),
-       child: Row(
-         children: [
-           Icon(icon, color: isDestructive ? Colors.red : Colors.white70, size: 20),
-           const SizedBox(width: 16),
-           Text(
-             title,
-             style: GoogleFonts.inter(
-               color: isDestructive ? Colors.red : Colors.white,
-               fontSize: 14,
-               fontWeight: FontWeight.w500
-             ),
-           ),
-           const Spacer(),
-           Icon(Icons.chevron_right, color: Colors.white24, size: 18),
-         ],
-       ),
+  Widget _buildContributionsList() {
+    return FutureBuilder<List<Resource>>(
+      future: _supabaseService.getUserResources(_userEmail),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        
+        if (snapshot.hasError) {
+          return Center(child: Text('Error loading contributions: ${snapshot.error}'));
+        }
+        
+        var resources = snapshot.data ?? [];
+        if (_searchQuery.isNotEmpty) {
+          resources = resources.where((r) => r.title.toLowerCase().contains(_searchQuery)).toList();
+        }
+
+        if (resources.isEmpty) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Text(
+                'No contributions yet. Start sharing knowledge!',
+                 style: GoogleFonts.inter(color: Colors.grey),
+              ),
+            ),
+          );
+        }
+
+        return ListView.separated(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: resources.length,
+          separatorBuilder: (_, __) => const SizedBox(height: 12),
+          itemBuilder: (context, index) {
+             final resource = resources[index];
+             return ResourceCard(
+               resource: resource,
+               userEmail: _authService.userEmail!,
+               onVoteChanged: () {
+                  // Optionally refresh stats or local state if needed
+                  setState(() {}); 
+               },
+             );
+          },
+        );
+      },
     );
   }
 
-  Widget _buildAnimatedItem(int index, Widget child) {
-    return SlideTransition(
-      position: Tween<Offset>(
-        begin: const Offset(0, 0.2),
-        end: Offset.zero,
-      ).animate(CurvedAnimation(
-        parent: _controller,
-        curve: Interval(index * 0.1, 1.0, curve: Curves.easeOutCubic),
-      )),
-      child: FadeTransition(
-        opacity: CurvedAnimation(
-          parent: _controller,
-          curve: Interval(index * 0.1, 1.0, curve: Curves.easeOut),
-        ),
-        child: child,
-      ),
-    );
+  String getInitials(String name) {
+    if (name.isEmpty) return 'U';
+    return name.trim().split(' ').map((e) => e[0]).take(2).join('').toUpperCase();
   }
 }

@@ -8,7 +8,7 @@ class AuthService {
   final firebase_auth.FirebaseAuth _auth = firebase_auth.FirebaseAuth.instance;
   // Only create GoogleSignIn for mobile platforms
   GoogleSignIn? _googleSignIn;
-  final SupabaseClient _supabase = Supabase.instance.client;
+  SupabaseClient get _supabase => Supabase.instance.client;
   
   AuthService() {
     // Only initialize GoogleSignIn on mobile (not web)

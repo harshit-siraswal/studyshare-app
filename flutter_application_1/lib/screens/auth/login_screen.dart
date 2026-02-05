@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../../config/theme.dart';
@@ -34,6 +33,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _isLoading = false;
   bool _obscurePassword = true;
   bool _showEmailVerification = false;
+  bool _isResendingVerification = false;
 
   @override
   void dispose() {
@@ -55,10 +55,7 @@ class _LoginScreenState extends State<LoginScreen> {
     
     setState(() => _isLoading = true);
     try {
-      debugPrint('Starting Google Sign-In...');
-      final result = await _authService.signInWithGoogle();
-      debugPrint('Google Sign-In result: ${result?.user?.email ?? "null"}');
-      
+      final result = await _authService.signInWithGoogle();      
       if (result == null) {
         if (mounted) {
           _showError('Google sign-in was cancelled');
@@ -66,8 +63,6 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
       // Navigation handled by StreamBuilder in main.dart
-      // Wait a moment for auth state to update
-      await Future.delayed(const Duration(milliseconds: 500));
     } catch (e, stackTrace) {
       debugPrint('Google Sign-In Error: $e');
       debugPrint('Stack trace: $stackTrace');
@@ -94,8 +89,7 @@ class _LoginScreenState extends State<LoginScreen> {
           _passwordController.text,
         );
         debugPrint('Email Sign-In completed');
-        // Wait for auth state to update
-        await Future.delayed(const Duration(milliseconds: 500));
+        // Navigation handled by StreamBuilder in main.dart
       } else {
         debugPrint('Starting Account Creation...');
         await _authService.createAccountWithEmail(
@@ -135,7 +129,9 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (e) {
       _showError(_authService.getErrorMessage(e));
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -197,7 +193,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     borderRadius: BorderRadius.circular(16),
                     boxShadow: [
                       BoxShadow(
-                        color: AppTheme.primary.withOpacity(0.3),
+                        color: AppTheme.primary.withValues(alpha: 0.3),
                         blurRadius: 20,
                         offset: const Offset(0, 8),
                       ),
@@ -229,10 +225,10 @@ class _LoginScreenState extends State<LoginScreen> {
                     vertical: 6,
                   ),
                   decoration: BoxDecoration(
-                    color: AppTheme.primary.withOpacity(0.1),
+                    color: AppTheme.primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color: AppTheme.primary.withOpacity(0.3),
+                      color: AppTheme.primary.withValues(alpha: 0.3),
                     ),
                   ),
                   child: Text(
@@ -284,7 +280,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               return 'Please enter your name';
                             }
                             return null;
-                          },
+                            },
                         ),
                         const SizedBox(height: 16),
                       ],
@@ -410,15 +406,17 @@ class _LoginScreenState extends State<LoginScreen> {
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: AppTheme.darkCard,
+                    color: Theme.of(context).brightness == Brightness.dark ? AppTheme.darkCard : AppTheme.lightCard,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppTheme.darkBorder),
+                    border: Border.all(
+                      color: Theme.of(context).brightness == Brightness.dark ? AppTheme.darkBorder : AppTheme.lightBorder,
+                    ),
                   ),
                   child: Row(
                     children: [
                       Icon(
                         Icons.info_outline_rounded,
-                        color: AppTheme.primary.withOpacity(0.7),
+                        color: AppTheme.primary.withValues(alpha: 0.7),
                         size: 20,
                       ),
                       const SizedBox(width: 12),
@@ -543,6 +541,16 @@ class _LoginScreenState extends State<LoginScreen> {
 
     return Scaffold(
       backgroundColor: bgColor,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back_rounded, color: isDark ? Colors.white : Colors.black),
+          onPressed: () {
+            setState(() => _showEmailVerification = false);
+          },
+        ),
+      ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -563,7 +571,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   borderRadius: BorderRadius.circular(30),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF0066FF).withOpacity(0.4),
+                      color: const Color(0xFF0066FF).withValues(alpha: 0.4),
                       blurRadius: 20,
                       offset: const Offset(0, 10),
                     ),
@@ -629,8 +637,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 height: 56,
                 child: ElevatedButton(
                   onPressed: () async {
-                    // Open email app logic would go here
-                    // For now checking status
                     await _authService.reloadUser();
                     if (_authService.isEmailVerified) {
                       // Handled by stream
@@ -643,7 +649,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
                   ),
                   child: Text(
-                    'Open email to approve',
+                    'I verified my email',
                     style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -654,27 +660,55 @@ class _LoginScreenState extends State<LoginScreen> {
               SizedBox(
                 width: double.infinity,
                 height: 56,
-                child: OutlinedButton(
-                  onPressed: () async {
-                    try {
-                      await _authService.resendVerificationEmail();
-                      _showSuccess('Verification email sent!');
-                    } catch (e) {
-                      _showError(_authService.getErrorMessage(e));
-                    }
-                  },
+                  child: OutlinedButton(
+                  onPressed: _isResendingVerification 
+                      ? null 
+                      : () async {
+                          setState(() => _isResendingVerification = true);
+                          try {
+                            await _authService.resendVerificationEmail();
+                            _showSuccess('Verification email sent!');
+                          } catch (e) {
+                            _showError(_authService.getErrorMessage(e));
+                          } finally {
+                            if (mounted) setState(() => _isResendingVerification = false);
+                          }
+                        },
                   style: OutlinedButton.styleFrom(
                     foregroundColor: isDark ? Colors.white : Colors.black,
                     side: BorderSide(color: isDark ? Colors.white24 : Colors.black12),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
                   ),
-                  child: Text(
-                    'Resend email',
-                    style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600),
-                  ),
+                  child: _isResendingVerification
+                      ? SizedBox(
+                          width: 20, 
+                          height: 20, 
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2, 
+                            color: isDark ? Colors.white : Colors.black,
+                          ),
+                        )
+                      : Text(
+                          'Resend email',
+                          style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.w600),
+                        ),
                 ),
               ),
               const SizedBox(height: 32),
+              
+              // Back/Change email option
+              TextButton(
+                onPressed: () {
+                  setState(() => _showEmailVerification = false);
+                },
+                child: Text(
+                  'Use a different email',
+                  style: GoogleFonts.inter(
+                    color: isDark ? Colors.grey[400] : Colors.grey[600],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
             ],
           ),
         ),

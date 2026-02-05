@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:math';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:async';
 import '../config/theme.dart';
@@ -172,12 +173,12 @@ class _BrandedLoaderState extends State<BrandedLoader>
             borderRadius: BorderRadius.circular(24),
             boxShadow: [
               BoxShadow(
-                color: AppTheme.primary.withOpacity(0.3 * _pulseAnimation.value),
+                color: AppTheme.primary.withValues(alpha: 0.3 * _pulseAnimation.value),
                 blurRadius: 30 * _pulseAnimation.value,
                 spreadRadius: 5 * _pulseAnimation.value,
               ),
               BoxShadow(
-                color: AppTheme.accent.withOpacity(0.2 * _pulseAnimation.value),
+                color: AppTheme.accent.withValues(alpha: 0.2 * _pulseAnimation.value),
                 blurRadius: 40 * _pulseAnimation.value,
                 spreadRadius: 10 * _pulseAnimation.value,
               ),
@@ -188,31 +189,34 @@ class _BrandedLoaderState extends State<BrandedLoader>
             child: AnimatedBuilder(
               animation: _rotateAnimation,
               builder: (context, child) {
-                return Transform.scale(
-                  scale: 0.9 + (0.1 * _pulseAnimation.value),
-                  child: Image.asset(
-                    'assets/icon/app_icon.png',
-                    width: 100,
-                    height: 100,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) {
-                      // Fallback to gradient icon if image fails
-                      return Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [AppTheme.primary, AppTheme.accent],
+                return Transform.rotate(
+                  angle: _rotateAnimation.value * 2 * pi,
+                  child: Transform.scale(
+                     scale: 0.9 + (0.1 * _pulseAnimation.value),
+                    child: Image.asset(
+                      'assets/icon/app_icon.png',
+                      width: 100,
+                      height: 100,
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        // Fallback to gradient icon if image fails
+                        return Container(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [AppTheme.primary, AppTheme.accent],
+                            ),
+                            borderRadius: BorderRadius.circular(24),
                           ),
-                          borderRadius: BorderRadius.circular(24),
-                        ),
-                        child: const Icon(
-                          Icons.auto_stories_rounded,
-                          size: 48,
-                          color: Colors.white,
-                        ),
-                      );
-                    },
+                          child: const Icon(
+                            Icons.auto_stories_rounded,
+                            size: 48,
+                            color: Colors.white,
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 );
               },
@@ -238,7 +242,7 @@ class _BrandedLoaderState extends State<BrandedLoader>
                   borderRadius: BorderRadius.circular(16),
                   boxShadow: [
                     BoxShadow(
-                      color: AppTheme.primary.withOpacity(0.2 * _pulseAnimation.value),
+                      color: AppTheme.primary.withValues(alpha: 0.2 * _pulseAnimation.value),
                       blurRadius: 16 * _pulseAnimation.value,
                       spreadRadius: 2 * _pulseAnimation.value,
                     ),

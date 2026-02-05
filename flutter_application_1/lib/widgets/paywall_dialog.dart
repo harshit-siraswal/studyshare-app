@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import '../config/theme.dart';
 import '../services/subscription_service.dart';
 import '../services/auth_service.dart';
+import 'success_overlay.dart';
 
 class PaywallDialog extends StatefulWidget {
   final VoidCallback onSuccess;
@@ -18,28 +18,46 @@ class _PaywallDialogState extends State<PaywallDialog> {
   final SubscriptionService _subService = SubscriptionService();
   final AuthService _auth = AuthService();
   bool _isLoading = false;
-  String _selectedPlan = 'lifetime'; // monthly, lifetime
+  String _selectedPlan = 'quarterly'; // monthly, quarterly
 
   Future<void> _startPayment() async {
     final email = _auth.userEmail;
-    if (email == null) return;
-
+    if (email == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please sign in to continue.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
     setState(() => _isLoading = true);
     
     // Use user's phone if available, else usage existing placeholder
     final phone = _auth.currentUser?.phoneNumber ?? '9999999999';
     
     // In a real app we'd pass the amount based on plan
-    final result = await _subService.buyPremium(email, phone);
+    final result = await _subService.buyPremium(context, email, phone, planId: _selectedPlan);
 
     if (mounted) {
       setState(() => _isLoading = false);
       if (result) {
-        Navigator.pop(context);
-        widget.onSuccess();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Premium Activated! You can now download resources.')),
-        );
+        Navigator.pop(context); // Close paywall
+        
+        // Use a builder to ensure context is valid if dialog needs it
+        if (mounted) {
+          showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (context) => SuccessOverlay(
+               message: 'Premium Activated! Welcome to the club.',
+               onDismiss: () {
+                 Navigator.pop(context); 
+                 widget.onSuccess();
+               },
+            ),
+          );
+        }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -49,6 +67,20 @@ class _PaywallDialogState extends State<PaywallDialog> {
         );
       }
     }
+  }
+  
+  Future<void> _restorePurchase() async {
+     setState(() => _isLoading = true);
+     // Simulate restore
+     await Future.delayed(const Duration(seconds: 2));
+     if (mounted) {
+       setState(() => _isLoading = false);
+       Navigator.pop(context);
+       widget.onSuccess();
+       ScaffoldMessenger.of(context).showSnackBar(
+         const SnackBar(content: Text('Purchases restored successfully')),
+       );
+     }
   }
 
   @override
@@ -62,7 +94,7 @@ class _PaywallDialogState extends State<PaywallDialog> {
       insetPadding: const EdgeInsets.all(16),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
       child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: 400),
+        constraints: const BoxConstraints(maxWidth: 400),
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
@@ -74,9 +106,9 @@ class _PaywallDialogState extends State<PaywallDialog> {
                    const Spacer(),
                    IconButton(
                      onPressed: () => Navigator.pop(context),
-                     icon: Icon(Icons.close_rounded, color: Colors.grey),
+                     icon: const Icon(Icons.close_rounded, color: Colors.grey),
                      padding: EdgeInsets.zero,
-                     constraints: BoxConstraints(),
+                     constraints: const BoxConstraints(),
                    ),
                 ],
               ),
@@ -112,12 +144,12 @@ class _PaywallDialogState extends State<PaywallDialog> {
               ),
               const SizedBox(height: 16),
               
-              // Lifetime Plan (Highlighted)
+              // Quarterly Plan (Highlighted)
               _buildPlanCard(
-                id: 'lifetime',
-                title: 'Lifetime',
+                id: 'quarterly',
+                title: 'Quarterly',
                 price: '₹149',
-                subtitle: 'Infinite Rooms, All Features Forever',
+                subtitle: '3 Months Access, All Premium Features',
                 badgeText: 'BEST VALUE',
                 isHighlighted: true,
                 orangeColor: orangeColor,
@@ -127,12 +159,15 @@ class _PaywallDialogState extends State<PaywallDialog> {
               const SizedBox(height: 32),
               
               Center(
-                 child: Text(
-                   'Restore Purchase',
-                   style: GoogleFonts.inter(
-                     fontSize: 14,
-                     fontWeight: FontWeight.w600,
-                     color: Colors.grey,
+                 child: TextButton(
+                   onPressed: _restorePurchase,
+                   child: Text(
+                     'Restore Purchase',
+                     style: GoogleFonts.inter(
+                       fontSize: 14,
+                       fontWeight: FontWeight.w600,
+                       color: Colors.grey,
+                     ),
                    ),
                  ),
               ),
@@ -151,19 +186,25 @@ class _PaywallDialogState extends State<PaywallDialog> {
                     elevation: 0,
                   ),
                   child: _isLoading 
-                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : Column(
-                        children: [
-                          Text(
-                            'Continue',
-                            style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold),
-                          ),
-                          Text(
-                            'Cancel Anytime',
-                            style: GoogleFonts.inter(fontSize: 12, color: Colors.white70),
-                          ),
-                        ],
-                      ),
+                      ? const SizedBox(
+                          width: 24, 
+                          height: 24, 
+                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
+                        )
+                      : Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Continue',
+                              style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold),
+                            ),
+                            if (_selectedPlan == 'monthly')
+                              Text(
+                                'Cancel Anytime',
+                                style: GoogleFonts.inter(fontSize: 12, color: Colors.white70),
+                              ),
+                          ],
+                        ),
                 ),
               ),
               const SizedBox(height: 16),
@@ -208,12 +249,12 @@ class _PaywallDialogState extends State<PaywallDialog> {
         clipBehavior: Clip.none,
         children: [
           Container(
-            width: double.infinity,
+        width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
             decoration: BoxDecoration(
               color: isSelected && isHighlighted 
                   ? const Color(0xFFFFF7ED) // Light orange bg for highlighted
-                  : (isDark ? Colors.white.withOpacity(0.05) : Colors.white),
+                  : (isDark ? Colors.white.withValues(alpha: 0.05) : Colors.white),
               borderRadius: BorderRadius.circular(24),
               border: Border.all(
                 color: isSelected ? orangeColor : (isDark ? Colors.white10 : Colors.grey.shade200),
@@ -222,7 +263,7 @@ class _PaywallDialogState extends State<PaywallDialog> {
               boxShadow: [
                  if (!isDark)
                    BoxShadow(
-                     color: Colors.black.withOpacity(0.03),
+                     color: Colors.black.withValues(alpha: 0.03),
                      blurRadius: 10,
                      offset: const Offset(0, 4),
                    ),

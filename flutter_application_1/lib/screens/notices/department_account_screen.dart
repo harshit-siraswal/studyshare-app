@@ -40,7 +40,6 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
   Future<void> _loadFollowData() async {
     final email = _authService.userEmail;
     if (email == null) return;
-    
     try {
       final isFollowing = await _supabaseService.isFollowingDepartment(
         widget.account.id, 
@@ -99,9 +98,10 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
       );
       
       // Filter by department
-      final deptNotices = allNotices.where((n) => 
-        n['department']?.toString().toLowerCase() == widget.account.id.toLowerCase()
-      ).toList();
+      final deptNotices = allNotices.where((n) {
+          final dept = n['department']?.toString() ?? n['department_id']?.toString() ?? '';
+          return dept.toLowerCase() == widget.account.id.toLowerCase();
+      }).toList();
       
       setState(() {
         _notices = deptNotices;
@@ -118,218 +118,157 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
     final textColor = isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
     final secondaryColor = isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary;
     final bgColor = isDark ? AppTheme.darkBackground : AppTheme.lightBackground;
-    final cardColor = isDark ? AppTheme.darkCard : Colors.white;
-    final borderColor = isDark ? AppTheme.darkBorder : AppTheme.lightBorder;
     
     return Scaffold(
       backgroundColor: bgColor,
+      appBar: AppBar(
+        backgroundColor: bgColor,
+        elevation: 0,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back, color: textColor),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
       body: CustomScrollView(
         slivers: [
-          // App Bar with department header
-          SliverAppBar(
-            expandedHeight: 200,
-            pinned: true,
-            backgroundColor: widget.account.color,
-            leading: IconButton(
-              icon: const Icon(Icons.arrow_back_ios_rounded, color: Colors.white),
-              onPressed: () => Navigator.pop(context),
-            ),
-            flexibleSpace: FlexibleSpaceBar(
-              background: Container(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      widget.account.color,
-                      widget.account.color.withOpacity(0.8),
-                    ],
-                  ),
-                ),
-                child: SafeArea(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+          // Profile Header Section
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const SizedBox(height: 20),
                       // Avatar
                       Container(
                         width: 80,
                         height: 80,
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: widget.account.color,
                           shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.2),
-                              blurRadius: 10,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
                         ),
                         child: Center(
                           child: Text(
                             widget.account.avatarLetter,
                             style: GoogleFonts.inter(
-                              fontSize: widget.account.avatarLetter.length > 1 ? 24 : 32,
-                              fontWeight: FontWeight.bold,
-                              color: widget.account.color,
+                              fontSize: 32, 
+                              fontWeight: FontWeight.bold, 
+                              color: Colors.white
                             ),
                           ),
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      Text(
-                        widget.account.name,
-                        style: GoogleFonts.inter(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            widget.account.handle,
-                            style: GoogleFonts.inter(
-                              fontSize: 14,
-                              color: Colors.white70,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          const Icon(
-                            Icons.verified_rounded,
-                            size: 16,
-                            color: Colors.white,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
+                      const Spacer(),
                       // Follow Button
-                      SizedBox(
-                        height: 36,
-                        child: ElevatedButton(
-                          onPressed: _isFollowLoading ? null : _toggleFollow,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: _isFollowing ? Colors.transparent : Colors.white,
-                            foregroundColor: _isFollowing ? Colors.white : widget.account.color,
-                            elevation: _isFollowing ? 0 : 2,
-                            side: _isFollowing ? const BorderSide(color: Colors.white, width: 1.5) : null,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                            padding: const EdgeInsets.symmetric(horizontal: 24),
-                          ),
-                          child: _isFollowLoading
-                              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: SizedBox(
+                          height: 36,
+                          child: ElevatedButton(
+                            onPressed: _isFollowLoading ? null : _toggleFollow,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _isFollowing ? Colors.transparent : (isDark ? Colors.white : Colors.black),
+                              foregroundColor: _isFollowing ? (isDark ? Colors.white : Colors.black) : Colors.white,
+                              elevation: 0,
+                              side: _isFollowing ? BorderSide(color: isDark ? Colors.white30 : Colors.black26) : null,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                              padding: const EdgeInsets.symmetric(horizontal: 20),
+                            ),
+                            child: _isFollowLoading 
+                              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                               : Text(
                                   _isFollowing ? 'Following' : 'Follow',
-                                  style: GoogleFonts.inter(
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                                  style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 14),
                                 ),
+                          ),
                         ),
                       ),
                     ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          
-          // Stats bar
-          SliverToBoxAdapter(
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              decoration: BoxDecoration(
-                color: cardColor,
-                border: Border(
-                  bottom: BorderSide(color: borderColor),
-                ),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  _buildStat(_notices.length.toString(), 'Notices', textColor, secondaryColor),
-                  _buildStat(_followerCount.toString(), 'Followers', textColor, secondaryColor),
-                  _buildStat('Active', 'Status', textColor, secondaryColor),
-                ],
-              ),
-            ),
-          ),
-          
-          // Header for notices
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Text(
-                    'Recent Notices',
+                   ),
+                   const SizedBox(height: 16),
+                   
+                   // Name & Handle
+                   Row(
+                    children: [
+                      Text(
+                        widget.account.name,
+                        style: GoogleFonts.inter(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          color: textColor,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                       if (_isFollowing)
+                         Icon(Icons.verified, size: 20, color: AppTheme.primary),
+                    ],
+                   ),
+                   Text(
+                    widget.account.handle,
                     style: GoogleFonts.inter(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: textColor,
-                    ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    '${_notices.length} total',
-                    style: GoogleFonts.inter(
-                      fontSize: 13,
+                      fontSize: 15,
                       color: secondaryColor,
                     ),
-                  ),
+                   ),
+                   const SizedBox(height: 16),
+                   
+                   // Stats
+                   Row(
+                    children: [
+                      _buildXStat(_followerCount.toString(), 'Followers', textColor, secondaryColor),
+                      const SizedBox(width: 16),
+                      _buildXStat('${_notices.length}', 'Notices', textColor, secondaryColor),
+                    ],
+                   ),
+                   const SizedBox(height: 16),
+                   const Divider(height: 1),
                 ],
               ),
             ),
           ),
-          
-          // Notices list
-          _isLoading
-              ? SliverToBoxAdapter(child: _buildLoadingSkeleton(isDark))
-              : _notices.isEmpty
-                  ? SliverToBoxAdapter(child: _buildEmptyState(isDark, textColor, secondaryColor))
-                  : SliverList(
-                      delegate: SliverChildBuilderDelegate(
-                        (context, index) => NoticeCard(
-                          notice: _notices[index],
-                          account: widget.account,
-                          isDark: isDark,
-                        ),
-                        childCount: _notices.length,
-                      ),
-                    ),
-          
-          // Bottom padding
-          const SliverToBoxAdapter(
-            child: SizedBox(height: 32),
-          ),
+            
+            // Notices List
+            if (_isLoading)
+               SliverToBoxAdapter(child: _buildLoadingSkeleton(isDark))
+            else if (_notices.isEmpty)
+               SliverToBoxAdapter(child: _buildEmptyState(isDark, textColor, secondaryColor))
+            else 
+               SliverList(
+                 delegate: SliverChildBuilderDelegate(
+                   (context, index) => NoticeCard(
+                     notice: _notices[index],
+                     account: widget.account,
+                     isDark: isDark,
+                   ),
+                   childCount: _notices.length,
+                 ),
+               ),
+            
+            const SliverToBoxAdapter(child: SizedBox(height: 40)),
         ],
       ),
     );
   }
 
-  Widget _buildStat(String value, String label, Color textColor, Color secondaryColor) {
-    return Column(
+  Widget _buildXStat(String value, String label, Color textColor, Color secondaryColor) {
+    return Row(
       children: [
         Text(
           value,
-          style: GoogleFonts.inter(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: textColor,
-          ),
+          style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: textColor),
         ),
-        const SizedBox(height: 2),
+        const SizedBox(width: 4),
         Text(
           label,
-          style: GoogleFonts.inter(
-            fontSize: 12,
-            color: secondaryColor,
-          ),
+          style: GoogleFonts.inter(color: secondaryColor),
         ),
       ],
     );
   }
+
+
 
   Widget _buildEmptyState(bool isDark, Color textColor, Color secondaryColor) {
     return Center(

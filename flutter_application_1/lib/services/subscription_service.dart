@@ -1,15 +1,19 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../config/app_config.dart';
 import 'backend_api_service.dart';
 
 class SubscriptionService {
   final BackendApiService _api = BackendApiService();
   final SupabaseClient _supabase = Supabase.instance.client;
+  final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
   late Razorpay _razorpay;
   Completer<bool>? _paymentCompleter;
+  String? _pendingPlanId;
 
   SubscriptionService() {
     _razorpay = Razorpay();
@@ -24,61 +28,135 @@ class SubscriptionService {
 
   /// Checks if the user is currently premium
   Future<bool> isPremium() async {
-    final user = _supabase.auth.currentUser;
-    if (user == null) return false;
+    // 1. Check local cache first for immediate responsiveness
+    final prefs = await SharedPreferences.getInstance();
+    final localPremiumUntilStr = prefs.getString('premium_until');
+    
+    if (localPremiumUntilStr != null) {
+      try {
+        final localUntil = DateTime.parse(localPremiumUntilStr);
+        final localUntilUtc = localUntil.isUtc ? localUntil : localUntil.toUtc();
+        if (localUntilUtc.isAfter(DateTime.now().toUtc())) {
+          return true; 
+        }
+      } catch (e) {
+        debugPrint('Failed to parse cached premium_until: $e');
+        // Fall through to Supabase check
+      }
+    }
 
-      debugPrint('Checking premium status for user: ${user.id}');
+    // 2. Fallback to Supabase (Source of Truth)
+    return _checkPremiumStatus();
+  }
+
+  Future<bool> _checkPremiumStatus() async {
+    try {
+      // Use Firebase Auth email instead of Supabase Auth user ID
+      final email = _firebaseAuth.currentUser?.email;
+      if (email == null) return false;
+
       final res = await _supabase
-          .from('premium_users')
-          .select('premium_until')
-          .eq('id', user.id)
+          .from('users')
+          .select('subscription_end_date, subscription_tier')
+          .eq('email', email)
           .maybeSingle(); 
       
-      debugPrint('Premium check result: $res');
-
-      if (res == null) {
-        debugPrint('User has no entry in premium_users table.');
-        return false;
-      }
+      if (res == null) return false;
       
-      final premiumUntilStr = res['premium_until'];
+      final premiumUntilStr = res['subscription_end_date'];
       if (premiumUntilStr == null) return false;
 
+      // Sync tier to local cache
+      final tier = res['subscription_tier'] as String?;
+      final prefs = await SharedPreferences.getInstance();
+      
+      if (tier != null) {
+        // Map backend tier to local usage if needed, or just store it
+        await prefs.setString('premium_tier', tier);
+      }
+      
+      // Sync expiry to local cache
+      await prefs.setString('premium_until', premiumUntilStr);
+
       final premiumUntil = DateTime.parse(premiumUntilStr);
-      final isActive = premiumUntil.isAfter(DateTime.now());
-      debugPrint('Premium until: $premiumUntil, Is active: $isActive');
-      return isActive;
+      final now = DateTime.now();
+      
+      // Handle timezone explicitly to avoid confusion
+      final premiumUntilUtc = premiumUntil.isUtc ? premiumUntil : premiumUntil.toUtc();
+      final nowUtc = now.isUtc ? now : now.toUtc();
+      
+      return premiumUntilUtc.isAfter(nowUtc);
     } catch (e) {
-      debugPrint('Error checking premium status: $e');
+      debugPrint('Check Premium Critical Error: $e');
       return false;
     }
   }
 
-  /// Starts the payment flow for Premium (₹49)
-  Future<bool> buyPremium(String email, String phone) async {
+  /// Checks if the user is on the Max (Tier 2) plan
+  Future<bool> isTier2() async {
+    // Ensure we have latest data
+    final isPrem = await isPremium();
+    if (!isPrem) return false;
+    
+    // Check local cache
+    final prefs = await SharedPreferences.getInstance();
+    final tier = prefs.getString('premium_tier');
+    
+    return tier == 'max';
+  }
+
+  /// Starts the payment flow
+  /// [planId]: 'monthly' (₹49) or 'quarterly' (₹149)
+  Future<bool> buyPremium(BuildContext context, String email, String phone, {required String planId}) async {
+    if (_paymentCompleter != null && !_paymentCompleter!.isCompleted) {
+      debugPrint('Payment already in progress');
+      return _paymentCompleter!.future;
+    }
+
     _paymentCompleter = Completer<bool>();
-    debugPrint('Step 1: buyPremium called');
+    _pendingPlanId = planId;
+    
+    // Explicit Amount Logic
+    int amount;
+    String description;
+    
+    if (planId == 'quarterly') {
+      amount = 14900; // ₹149.00
+      description = '3 Months Subscription';
+    } else {
+      amount = 4900; // ₹49.00
+      description = 'Monthly Subscription';
+    }
+
+    debugPrint('Initiating Payment: Plan=$planId, Amount=$amount');
 
     try {
-      // 1. Create Order on Backend
-      debugPrint('Step 2: Creating order on backend...');
-      final orderData = await _api.createPaymentOrder();
-      debugPrint('Step 3: Order created: $orderData');
+      // 2. Create Order on Backend
+      final orderData = await _api.createPaymentOrder(
+        amount: amount, 
+        planId: planId,
+        context: context.mounted ? context : null,
+      );
       
-      if (orderData == null) {
-         debugPrint('Step 3.1: Order data is null');
-         return false;
+      if (orderData['error'] != null) {
+        throw Exception(orderData['error']);
       }
 
-      final orderId = orderData['id']; // Razorpay Order ID
-      debugPrint('Step 4: Order ID: $orderId');
-
-      // 2. Open Checkout
+      final orderId = orderData['id'];
+      
+      final authorizedAmount = orderData['amount'] ?? amount; 
+      
+      if (authorizedAmount != amount) {
+        debugPrint('ERROR: Backend returned different amount: $authorizedAmount vs expected $amount');
+        throw Exception('Price mismatch. Please try again or contact support.');
+      }
+      
+      // 3. Open Checkout
       var options = {
         'key': AppConfig.razorpayKeyId,
-        'amount': 4900, // in paise
+        'amount': authorizedAmount, 
         'name': 'MyStudySpace Premium',
-        'description': 'Offline Downloads Subscription',
+        'description': description,
         'order_id': orderId,
         'prefill': {
           'contact': phone,
@@ -89,62 +167,93 @@ class SubscriptionService {
         }
       };
       
-      debugPrint('Step 5: Opening Razorpay with options: $options');
       _razorpay.open(options);
-      debugPrint('Step 6: Razorpay open called');
-
       return _paymentCompleter!.future;
-    } catch (e, stack) {
+    } catch (e) {
       debugPrint('Payment Init Error: $e');
-      debugPrint('Stack trace: $stack');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to initiate payment. Please try again.')),
+        );
+      }
+      _resetPaymentState();
+      _paymentCompleter?.complete(false);
       return false;
     }
   }
 
   void _handlePaymentSuccess(PaymentSuccessResponse response) async {
+    if (response.orderId == null || response.paymentId == null || response.signature == null) {
+      debugPrint('Payment response missing required fields');
+      _resetPaymentState();
+      _paymentCompleter?.complete(false);
+      return;
+    }
+
     try {
-      // 3. Verify on Backend (Critical for security)
-      await _api.verifyPayment(
+      debugPrint('Payment Success Callback: ${response.paymentId}');
+      
+      // 4. Verify on Backend
+      final result = await _api.verifyPayment(
         orderId: response.orderId!,
         paymentId: response.paymentId!,
         signature: response.signature!,
       );
       
-      // 4. Update Client-side State (Immediate feedback)
-      // Ideally backend does this via webhook, but for now we do it here 
-      // ensuring the RLS policy "Users can insert own premium status" allows it.
-      final user = _supabase.auth.currentUser;
-      if (user != null) {
-        final now = DateTime.now();
-        final expiresAt = now.add(const Duration(days: 30)); // 30 days subscription
-        
-        await _supabase.from('premium_users').upsert({
-          'id': user.id,
-          'email': user.email,
-          'plan_type': 'monthly',
-          'premium_until': expiresAt.toIso8601String(),
-          'updated_at': now.toIso8601String(),
-        });
+      // 5. Update Local Cache IMMEDIATELY from intent (Optimistic Update)
+      // Executed ONLY after successful verification as requested.
+      
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Set Plan
+      if (_pendingPlanId != null) {
+        await prefs.setString('premium_tier', _pendingPlanId!);
+      } else if (result.containsKey('plan')) {
+         await prefs.setString('premium_tier', result['plan']);
       }
 
+      // Calculate new expiry date locally to allow immediate access
+      final now = DateTime.now().toUtc();
+      late DateTime newExpiry;
+      
+      // Use pending plan ID for calculation, default to monthly if unknown
+      final plan = _pendingPlanId ?? result['subscription_tier'] ?? 'monthly';
+      
+      if (plan == 'quarterly' || plan == 'max') {
+        newExpiry = now.add(const Duration(days: 90));
+        await prefs.setString('premium_tier', 'max');
+      } else {
+        newExpiry = now.add(const Duration(days: 30));
+        await prefs.setString('premium_tier', 'pro');
+      }
+      
+      await prefs.setString('premium_until', newExpiry.toIso8601String());
+      debugPrint('Success: Subscription activated locally until $newExpiry');
+
+      _resetPaymentState();
       _paymentCompleter?.complete(true);
     } catch (e) {
-      debugPrint('Payment Verify/Update Error: $e');
-      // Even if update fails, we might want to return true if payment was verified? 
-      // But for now, let's play safe and fail if we can't record it.
+      debugPrint('Payment Verify Error: $e');
+      // If verification fails, we do NOT apply optimistic updates.
+      // We ensure the state is reset and return false.
+      _resetPaymentState();
       _paymentCompleter?.complete(false);
     }
   }
 
+  void _resetPaymentState() {
+    _pendingPlanId = null;
+  }
+
   void _handlePaymentError(PaymentFailureResponse response) {
     debugPrint('Payment Error: ${response.code} - ${response.message}');
+    _resetPaymentState();
     _paymentCompleter?.complete(false);
   }
 
   void _handleExternalWallet(ExternalWalletResponse response) {
     debugPrint('External Wallet: ${response.walletName}');
-    // Usually treated as success pending verification, strictly we should probably fail or wait
-    // For standard flow, we might not need this if not using external wallets extensively
+    _resetPaymentState();
     _paymentCompleter?.complete(false); 
   }
 }
