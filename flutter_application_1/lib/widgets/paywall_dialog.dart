@@ -249,14 +249,13 @@ class _PaywallDialogState extends State<PaywallDialog> {
         clipBehavior: Clip.none,
         children: [
           Container(
-        width: double.infinity,
+            width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
             decoration: BoxDecoration(
-              color: isSelected && isHighlighted 
+              color: isSelected && isHighlighted
                   ? const Color(0xFFFFF7ED) // Light orange bg for highlighted
                   : (isDark ? Colors.white.withValues(alpha: 0.05) : Colors.white),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(
+              borderRadius: BorderRadius.circular(24),              border: Border.all(
                 color: isSelected ? orangeColor : (isDark ? Colors.white10 : Colors.grey.shade200),
                 width: isSelected ? 2 : 1,
               ),

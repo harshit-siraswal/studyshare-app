@@ -54,7 +54,7 @@ class _SavedPostsScreenState extends State<SavedPostsScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
+      backgroundColor: isDark ? Colors.black : AppTheme.lightBackground,
       appBar: AppBar(
         title: Text(
           'Saved Posts',

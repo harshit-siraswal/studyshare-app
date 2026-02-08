@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'dart:ui';
 import '../../config/theme.dart';
 import '../../services/auth_service.dart';
 import '../../services/supabase_service.dart';
@@ -8,16 +7,17 @@ import '../../services/backend_api_service.dart';
 import '../../providers/theme_provider.dart';
 import '../../models/resource.dart';
 import '../../widgets/resource_card.dart';
-import '../study/bookmarks_screen.dart';
+import 'bookmarks_screen.dart';
 import 'following_screen.dart';
 import 'edit_profile_screen.dart';
 import '../../widgets/paywall_dialog.dart';
 import '../../services/subscription_service.dart';
 import 'settings_screen.dart';
 import 'explore_students_screen.dart';
+import 'saved_posts_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
-  final String collegeId;
+
   final String collegeName;
   final String collegeDomain;
   final VoidCallback onLogout;
@@ -26,7 +26,7 @@ class ProfileScreen extends StatefulWidget {
 
   const ProfileScreen({
     super.key,
-    required this.collegeId,
+
     required this.collegeName,
     required this.collegeDomain,
     required this.onLogout,
@@ -89,16 +89,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _loadStats() async {
-    if (_authService.userEmail == null) return;
+    if (_authService.userEmail == null) {
+      if (mounted) setState(() => _statsLoading = false);
+      return;
+    }
     try {
       final stats = await _supabaseService.getUserStats(_authService.userEmail!);
       final followingCount = await _supabaseService.getFollowingCount(_authService.userEmail!);
       final followersCount = await _supabaseService.getFollowersCount(_authService.userEmail!);
       if (mounted) {
         setState(() {
-          _uploadCount = stats['uploads'] ?? 0;
+          _uploadCount = stats['uploads'] ?? stats['contributions'] ?? 0;
           _followersCount = followersCount;
           _followingCount = followingCount;
+          _statsLoading = false;
         });
       }
     } catch (e) {
@@ -139,11 +143,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget build(BuildContext context) {
     // Determine if we are in dark mode based on system/theme provider
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textColor = isDark ? Colors.white : Colors.black;
-    final subTextColor = isDark ? Colors.white70 : Colors.black54;
+    final textColor = AppTheme.getTextColor(context);
+    final subTextColor = AppTheme.getTextColor(context, isPrimary: false);
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      backgroundColor: isDark ? Colors.black : AppTheme.lightBackground,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -158,6 +162,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         centerTitle: true,
         actions: [
+          IconButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ExploreStudentsScreen(
+                    collegeDomain: widget.collegeDomain,
+                    userEmail: _userEmail,
+                  ),
+                ),
+              );
+            },
+            icon: Icon(
+              Icons.people_outline_rounded,
+              color: textColor,
+            ),
+          ),
           IconButton(
             icon: Icon(Icons.settings_outlined, color: textColor),
             onPressed: () async {
@@ -200,32 +221,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                    _buildStatsRow(textColor, subTextColor),
                    const SizedBox(height: 24),
                    
-                   // Explore Students Button
-                   Padding(
-                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                     child: OutlinedButton.icon(
-                       onPressed: () {
-                         Navigator.push(
-                           context,
-                           MaterialPageRoute(
-                             builder: (_) => ExploreStudentsScreen(collegeId: widget.collegeId),
-                           ),
-                         );
-                       },
-                       icon: Icon(Icons.people_outline, color: textColor),
-                       label: Text('Find Classmates', style: GoogleFonts.inter(color: textColor)),
-                       style: OutlinedButton.styleFrom(
-                         padding: const EdgeInsets.symmetric(vertical: 12),
-                         side: BorderSide(color: subTextColor.withValues(alpha: 0.3)),
-                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                         minimumSize: const Size(double.infinity, 48),
-                       ),
-                     ),
-                   ),
                    const SizedBox(height: 24),
                    // Premium Badge / Status
                    FutureBuilder<bool>(
-                     future: SubscriptionService().isPremium(),
+                     future: _subscriptionService.isPremium(),
                      builder: (context, snapshot) {
                        final isPremium = snapshot.data ?? false;
                        return isPremium 
@@ -240,6 +239,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                    // Offline Toggle (Only if Premium, or disabled if Free)
                    _buildOfflineToggle(textColor),
                    const SizedBox(height: 16),
+                   
+                   // Saved Posts Link
+                   _buildSavedPostsLink(textColor),
+                   const SizedBox(height: 16),
+
                    // Contributions Header
                    Align(
                      alignment: Alignment.centerLeft,
@@ -316,8 +320,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                       child: ClipOval(
                         child: _photoUrl != null
-                          ? Image.network(
+                            ? 
+                              Image.network(
                               _photoUrl!,
+                              cacheWidth: 400,
                               fit: BoxFit.cover,
                               errorBuilder: (context, error, stackTrace) {
                                 return Center(
@@ -580,11 +586,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _searchQuery = val.toLowerCase();
         });
       },
+      style: GoogleFonts.inter(color: AppTheme.getTextColor(context)),
       decoration: InputDecoration(
         hintText: 'Search contributions...',
-        prefixIcon: const Icon(Icons.search),
+        hintStyle: GoogleFonts.inter(color: AppTheme.getMutedColor(context)),
+        prefixIcon: Icon(Icons.search, color: AppTheme.getMutedColor(context)),
         filled: true,
-        fillColor: isDark ? Colors.grey[800] : Colors.grey[100],
+        fillColor: AppTheme.getCardColor(context),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(30),
           borderSide: BorderSide.none,
@@ -611,10 +619,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
              Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (_) => BookmarksScreen(
-                  userEmail: _userEmail,
-                  collegeId: widget.collegeId,
-                ),
+                builder: (_) => const BookmarksScreen(),
               ),
             );
           },
@@ -684,6 +689,47 @@ class _ProfileScreenState extends State<ProfileScreen> {
           },
         );
       },
+    );
+  }
+
+  Widget _buildSavedPostsLink(Color textColor) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => SavedPostsScreen(
+                userEmail: _userEmail,
+              ),
+            ),
+          );
+        },
+        borderRadius: BorderRadius.circular(8), // Add some radius for better visual
+        child: Semantics(
+          button: true,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4), // Ensure hit target size
+            child: Row(
+              children: [
+                Icon(Icons.bookmark_border_rounded, color: textColor, size: 24),
+                const SizedBox(width: 12),
+                Text(
+                  'Saved Posts',
+                  style: GoogleFonts.inter(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: textColor,
+                  ),
+                ),
+                const Spacer(),
+                Icon(Icons.arrow_forward_ios_rounded, size: 16, color: AppTheme.primary),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 

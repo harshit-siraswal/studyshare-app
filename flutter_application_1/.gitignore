@@ -43,3 +43,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Analysis logs
+analysis_log*.txt
+*.log
+
+debug_output*.txt

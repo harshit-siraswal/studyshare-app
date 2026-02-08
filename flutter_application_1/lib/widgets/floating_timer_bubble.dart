@@ -66,6 +66,7 @@ class _FloatingTimerBubbleState extends State<FloatingTimerBubble>
       left: _position.dx.clamp(0, screenSize.width - 72),
       top: _position.dy.clamp(0, screenSize.height - 72),
       child: GestureDetector(
+        onTap: _showControlDialog,
         onPanStart: (_) => setState(() => _isDragging = true),
         onPanUpdate: (details) {
           setState(() {
@@ -76,9 +77,7 @@ class _FloatingTimerBubbleState extends State<FloatingTimerBubble>
           });
         },
         onPanEnd: (_) => setState(() => _isDragging = false),
-        onTap: _showControlDialog,
-        child: AnimatedBuilder(
-          animation: Listenable.merge([_pulseController, widget.controller]),
+        child: AnimatedBuilder(          animation: Listenable.merge([_pulseController, widget.controller]),
           builder: (context, child) {
             final pulseScale = 1.0 + (_pulseController.value * 0.05);
             final isRunning = widget.controller.isRunning;
@@ -176,13 +175,12 @@ class _ProgressRingPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _ProgressRingPainter oldDelegate) =>
-      oldDelegate.progress != progress;
+      oldDelegate.progress != progress || oldDelegate.color != color;
 }
 
 /// Timer Control Dialog - Shows pause/stop controls
 class TimerControlDialog extends StatelessWidget {
-  final StudyTimerController controller;
-  final VoidCallback? onExpand;
+  final StudyTimerController controller;  final VoidCallback? onExpand;
   final VoidCallback? onClose;
 
   const TimerControlDialog({
@@ -218,24 +216,26 @@ class TimerControlDialog extends StatelessWidget {
             // Close button
             Align(
               alignment: Alignment.topRight,
-              child: GestureDetector(
-                onTap: () => Navigator.pop(context),
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.close,
-                    size: 20,
-                    color: isDark ? Colors.white70 : Colors.black54,
+              child: Semantics(
+                label: 'Close dialog',
+                button: true,
+                child: GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.close,
+                      size: 20,
+                      color: isDark ? Colors.white70 : Colors.black54,
+                    ),
                   ),
                 ),
               ),
             ),
-            
-            const SizedBox(height: 8),
             
             // Timer display
             ListenableBuilder(

@@ -81,9 +81,9 @@ class _ResourceSearchScreenState extends State<ResourceSearchScreen> with Single
       if (mounted) setState(() => _subjects = []);
     }
   }
+
   Future<void> _loadRecentSearches() async {
-    final prefs = await SharedPreferences.getInstance();
-    if (!mounted) return;
+    final prefs = await SharedPreferences.getInstance();    if (!mounted) return;
     setState(() {
       _recentSearches = prefs.getStringList('resource_recent_searches') ?? [];
     });
@@ -238,20 +238,20 @@ class _ResourceSearchScreenState extends State<ResourceSearchScreen> with Single
                                         ),
                                       ),
                                     ],
-                                   ),
-                                   border: OutlineInputBorder(
+                                  ),
+                                  border: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(30),
                                     borderSide: BorderSide.none,
                                   ),
                                   contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                                ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),                  
                   const SizedBox(height: 12),
                   
                   // Tabs
@@ -344,8 +344,10 @@ class _ResourceSearchScreenState extends State<ResourceSearchScreen> with Single
                 ),
                 items: _semesters.map((s) => DropdownMenuItem(value: s, child: Text(s, style: TextStyle(color: isDark ? Colors.white : Colors.black)))).toList(),
                 onChanged: (val) {
-                  setSheetState(() => _selectedSemester = val);
-                  setState(() => _selectedSemester = val); 
+                  if (val != null) {
+                    setSheetState(() => _selectedSemester = val);
+                    setState(() => _selectedSemester = val);
+                  }
                 },
               ),
               const SizedBox(height: 16),
@@ -363,7 +365,7 @@ class _ResourceSearchScreenState extends State<ResourceSearchScreen> with Single
                 onChanged: (val) async {
                    setSheetState(() {
                      _selectedBranch = val;
-                     _selectedSubject = null; 
+                     _selectedSubject = null;
                    });
                    setState(() { 
                      _selectedBranch = val;
@@ -397,15 +399,15 @@ class _ResourceSearchScreenState extends State<ResourceSearchScreen> with Single
                   ),
                   items: _subjects.map((s) => DropdownMenuItem(value: s, child: Text(s, style: TextStyle(color: isDark ? Colors.white : Colors.black)))).toList(),
                   onChanged: (val) {
-                    setSheetState(() => _selectedSubject = val);
-                    setState(() => _selectedSubject = val);
+                    if (val != null) {
+                        setSheetState(() => _selectedSubject = val);
+                        setState(() => _selectedSubject = val);
+                    }
                   },
                 ),
-
-              const Spacer(),
+              const SizedBox(height: 16),
               SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
+                width: double.infinity,                child: ElevatedButton(
                   onPressed: () {
                     _performSearch();
                     Navigator.pop(context);

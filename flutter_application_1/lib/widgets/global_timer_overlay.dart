@@ -37,8 +37,8 @@ class _GlobalTimerOverlayState extends State<GlobalTimerOverlay>
   bool _showBubble = false;
   late AnimationController _swirlController;
   Offset _swirlStart = Offset.zero;
-  double _dragDistance = 0.0; // Function to track sloppy taps
-
+  bool _isDragging = false;
+  bool _isSidebarOpen = false;
 
   @override
   void initState() {
@@ -62,13 +62,10 @@ class _GlobalTimerOverlayState extends State<GlobalTimerOverlay>
     setState(() {});
   }
 
-  bool _isSidebarOpen = false;
-
   /// Update sidebar state to prevent bubble from showing when drawer is open
   void setSidebarOpen(bool isOpen) {
     setState(() {
       _isSidebarOpen = isOpen;
-      // If sidebar opens, hide bubble immediately
       if (isOpen) {
         _showBubble = false;
       }
@@ -86,7 +83,6 @@ class _GlobalTimerOverlayState extends State<GlobalTimerOverlay>
     _swirlController.forward(from: 0).then((_) {
       setState(() {
         _showSwirl = false;
-        // Only show bubble if sidebar is closed (it should be, but safety check)
         _showBubble = !_isSidebarOpen;
       });
     });
@@ -99,8 +95,10 @@ class _GlobalTimerOverlayState extends State<GlobalTimerOverlay>
     final defaultPos = Offset(screenSize.width - 88, topPadding + 16);
     final bubblePos = _floatingPos ?? defaultPos;
 
-    // Don't show bubble if sidebar is open
-    final shouldShowBubble = !_isSidebarOpen && _timerController.isRunning;
+    // Show bubble if:
+    // 1. Manually showing (_showBubble is true)
+    // 2. Timer is running AND sidebar is closed AND not animating
+    final shouldShow = _showBubble || (_timerController.isRunning && !_isSidebarOpen && !_showSwirl);
 
     return Stack(
       children: [
@@ -124,13 +122,8 @@ class _GlobalTimerOverlayState extends State<GlobalTimerOverlay>
             ),
           ),
 
-        // Floating Timer Bubble
-        // Case 1: Explicitly showing after animation
-        if (shouldShowBubble && _showBubble)
-          _buildFloatingBubble(context, bubblePos, screenSize),
-
-        // Case 2: Auto-show if running, no swirl, and sidebar closed
-        if (shouldShowBubble && !_showBubble && !_showSwirl)
+        // Floating Bubble
+        if (shouldShow)
           _buildFloatingBubble(context, bubblePos, screenSize),
       ],
     );
@@ -140,32 +133,28 @@ class _GlobalTimerOverlayState extends State<GlobalTimerOverlay>
     final clampedX = pos.dx.clamp(0.0, screenSize.width - 72);
     final clampedY = pos.dy.clamp(0.0, screenSize.height - 72);
     
-    return AnimatedPositioned(
-      duration: const Duration(milliseconds: 50), // Smooth interpolation
-      curve: Curves.easeOut,
+    return Positioned( // Changed from AnimatedPositioned for smoother drag
       left: clampedX,
       top: clampedY,
       child: GestureDetector(
-        onPanStart: (_) => _dragDistance = 0.0,
         onPanUpdate: (details) {
-          _dragDistance += details.delta.distance;
           setState(() {
-            _floatingPos = Offset(
-              (pos.dx + details.delta.dx).clamp(0, screenSize.width - 72),
-              (pos.dy + details.delta.dy).clamp(0, screenSize.height - 72),
-            );
+             _isDragging = true;
+             final currentPos = _floatingPos ?? pos;
+             _floatingPos = Offset(
+               (currentPos.dx + details.delta.dx).clamp(0.0, screenSize.width - 72.0),
+               (currentPos.dy + details.delta.dy).clamp(0.0, screenSize.height - 72.0),
+             );
           });
         },
-        onPanEnd: (details) {
-          // Fix for "Dialog doesn't open":
-          // If the drag was very small (micro-movement/jitter), treat it as a tap.
-          if (_dragDistance < 10.0) {
-            _showTimerControlDialog();
-          }
-          // No snapping - free movement
+        onPanEnd: (_) => setState(() => _isDragging = false),
+        onTap: () {
+            if (!_isDragging) {
+                // Ensure we call the dialog with the context from the Overlay
+                _showTimerControlDialog(context);
+            }
         },
-        onTap: _showTimerControlDialog, // Changed from onTapUp for better reliability
-        behavior: HitTestBehavior.opaque,
+        behavior: HitTestBehavior.opaque, // Ensure tap detection
         child: TweenAnimationBuilder<double>(
           tween: Tween(begin: 0.0, end: 1.0),
           duration: const Duration(milliseconds: 400),
@@ -180,14 +169,17 @@ class _GlobalTimerOverlayState extends State<GlobalTimerOverlay>
     );
   }
 
-  void _showTimerControlDialog() {
+  void _showTimerControlDialog(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     showDialog(
       context: context,
       barrierColor: Colors.black54,
-      builder: (context) => Dialog(
+       // Use root navigator to ensure it displays over everything
+      useRootNavigator: true,
+      builder: (dialogContext) => Dialog(
         backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(16),
         child: Container(
           width: 280,
           padding: const EdgeInsets.all(24),
@@ -205,21 +197,25 @@ class _GlobalTimerOverlayState extends State<GlobalTimerOverlay>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              // Close button
+              // Close button (Minimize to bubble)
               Align(
                 alignment: Alignment.topRight,
-                child: GestureDetector(
-                  onTap: () => Navigator.pop(context),
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      Icons.close,
-                      size: 20,
-                      color: isDark ? Colors.white70 : Colors.black54,
+                child: Tooltip(
+                  message: 'Minimize to bubble',
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: IconButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      icon: Icon(
+                        Icons.close_rounded,
+                        size: 24,
+                        color: isDark ? Colors.white70 : Colors.black54,
+                      ),
+                      style: IconButton.styleFrom(
+                        backgroundColor: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+                        shape: const CircleBorder(),
+                        padding: const EdgeInsets.all(8),
+                      ),
                     ),
                   ),
                 ),
@@ -242,41 +238,43 @@ class _GlobalTimerOverlayState extends State<GlobalTimerOverlay>
               const SizedBox(height: 24),
 
               // Control buttons
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  // Pause/Play
-                  _buildControlButton(
-                    icon: _timerController.isRunning ? Icons.pause : Icons.play_arrow,
-                    color: const Color(0xFF3B82F6),
-                    onTap: () {
-                      if (_timerController.isRunning) {
-                        _timerController.pauseTimer();
-                      } else {
-                        _timerController.startTimer();
-                      }
-                      setState(() {});
-                    },
-                  ),
-                  const SizedBox(width: 24),
-                  // Stop
-                  _buildControlButton(
-                    icon: Icons.stop,
-                    color: const Color(0xFFEF4444),
-                    onTap: () {
-                      _timerController.resetTimer();
-                      Navigator.pop(context);
-                      setState(() => _showBubble = false);
-                    },
-                  ),
-                ],
+              ListenableBuilder(
+                listenable: _timerController,
+                builder: (context, _) => Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // Pause/Play
+                    _buildControlButton(
+                      icon: _timerController.isRunning ? Icons.pause : Icons.play_arrow,
+                      color: const Color(0xFF3B82F6),
+                      onTap: () {
+                        if (_timerController.isRunning) {
+                          _timerController.pauseTimer();
+                        } else {
+                          _timerController.startTimer();
+                        }
+                      },
+                    ),
+                    const SizedBox(width: 24),
+                    // Stop
+                    _buildControlButton(
+                      icon: Icons.stop,
+                      color: const Color(0xFFEF4444),
+                      onTap: () {
+                        _timerController.resetTimer();
+                        Navigator.of(dialogContext).pop();
+                        setState(() => _showBubble = false);
+                      },
+                    ),
+                  ],
+                ),
               ),
 
               const SizedBox(height: 24),
 
-              // Open full timer hint
+              // Hint
               Text(
-                'Drag to move • Tap to control',
+                'Drag to move - Tap to control',
                 style: GoogleFonts.inter(
                   fontSize: 12,
                   color: isDark ? Colors.white38 : Colors.black38,

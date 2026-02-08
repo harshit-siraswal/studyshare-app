@@ -2,18 +2,20 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
-import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import 'package:audioplayers/audioplayers.dart';
 import '../../config/theme.dart';
 import '../../models/resource.dart';
-import '../notifications/notification_screen.dart';
-import '../../providers/theme_provider.dart';
 import '../../services/supabase_service.dart';
 import '../../services/download_service.dart';
 import '../../widgets/resource_card.dart';
-import 'bookmarks_screen.dart';
+import '../notifications/notification_screen.dart';
+import '../profile/bookmarks_screen.dart';
+import '../ai_chat_screen.dart';
+import '../profile/explore_students_screen.dart';
 import 'syllabus_screen.dart';
 import 'resource_search_screen.dart';
+
+import '../../data/departments_data.dart'; // Added for DepartmentData and DepartmentsProvider
 
 class StudyScreen extends StatefulWidget {
   final String collegeId;
@@ -40,13 +42,16 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
   late TabController _tabController;
 
   // Tab state
-  // int _selectedTabIndex = 0; // Removed unused
+
   
   // For You resources
   List<Resource> _resources = [];
   bool _isLoading = true;
   bool _isLoadingMore = false;
+  int _page = 0;
+  bool _hasMore = true;
   final AudioPlayer _audioPlayer = AudioPlayer();
+  late Future<List<DepartmentData>> _departmentsFuture;
 
   
   // Following resources
@@ -77,6 +82,7 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
     _loadResources();
     _loadFollowingFeed();
     _scrollController.addListener(_onScroll);
+    _departmentsFuture = DepartmentsProvider.getDepartments();
   }
 
   @override
@@ -88,16 +94,7 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
     super.dispose();
   }
 
-  Future<void> _playRetroSound() async {
-    try {
-      // User requested a retro machine sound. 
-      // Ensure the file exists at assets/sounds/retro_scroll.mp3
-      await _audioPlayer.stop(); // Stop previous to prevent overlap buildup
-      await _audioPlayer.play(AssetSource('sounds/retro_scroll.mp3'), volume: 0.3);
-    } catch (e) {
-      debugPrint('Error playing sound: $e');
-    }
-  }
+
 
   Future<void> _loadFollowingFeed() async {
     try {
@@ -110,6 +107,7 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
         _isLoadingFollowing = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => _isLoadingFollowing = false);
     }
   }
@@ -163,11 +161,14 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
         offset: 0,
       );
       
+      if (!mounted) return;
+      
       setState(() {
         _resources = resources;
         _isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => _isLoading = false);
     }
   }
@@ -182,6 +183,9 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
   Future<void> _loadMoreResources() async {
     if (_isLoadingMore || _isLoading) return;
     
+    // Downloads are local only - no pagination needed
+    if (_selectedType == 'Downloads') return;
+    
     setState(() => _isLoadingMore = true);
     
     try {
@@ -195,6 +199,8 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
         offset: _resources.length,
       );
       
+      if (!mounted) return;
+      
       setState(() {
         _resources.addAll(moreResources);
         _isLoadingMore = false;
@@ -203,6 +209,7 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
       setState(() => _isLoadingMore = false);
     }
   }
+
 
   // Unused method removed
 
@@ -300,6 +307,18 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
     );
   }
 
+  void _navigateToExploreStudents(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ExploreStudentsScreen(
+          collegeDomain: widget.collegeId,
+          userEmail: widget.userEmail,
+        ),
+      ),
+    );
+  }
+
   Widget _buildFollowingEmptyState() {
     return Center(
       child: Column(
@@ -316,14 +335,26 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
             'Follow students to see their uploads here',
             style: GoogleFonts.inter(fontSize: 13, color: AppTheme.textMuted.withValues(alpha: 0.7)),
           ),
-        ],
-      ),
-    );
+          const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: () => _navigateToExploreStudents(context),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              ),
+              child: const Text('Find Students'),
+            ),
+          ],
+        ),
+      );
   }
+
+
 
   Widget _buildFollowingGrid() {
     return ListView.builder(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 100), // Bottom padding for floating nav
       itemCount: _followingResources.length,
       itemBuilder: (context, index) {
         return Padding(
@@ -337,143 +368,90 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
     );
   }
 
+  ({Color textColor, Color secondaryColor, Color cardColor, Color borderColor}) _getThemeColors(bool isDark) {
+    return (
+      textColor: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+      secondaryColor: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+      cardColor: isDark ? AppTheme.darkCard : Colors.white,
+      borderColor: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+    );
+  }
+
   Widget _buildSyllabusTab(bool isDark) {
-    final textColor = isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
-    final secondaryColor = isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary;
-    final cardColor = isDark ? AppTheme.darkCard : Colors.white;
-    final borderColor = isDark ? AppTheme.darkBorder : AppTheme.lightBorder;
+    final (:textColor, :secondaryColor, :cardColor, :borderColor) = _getThemeColors(isDark);
     
-    // Department list with colors
-    final departments = [
-      {'name': 'CSE', 'full': 'Computer Science', 'color': const Color(0xFF8B5CF6)},
-      {'name': 'ECE', 'full': 'Electronics & Comm', 'color': const Color(0xFF10B981)},
-      {'name': 'EEE', 'full': 'Electrical Engg', 'color': const Color(0xFFF59E0B)},
-      {'name': 'ME', 'full': 'Mechanical Engg', 'color': const Color(0xFFEF4444)},
-      {'name': 'CE', 'full': 'Civil Engineering', 'color': const Color(0xFF6366F1)},
-      {'name': 'IT', 'full': 'Information Tech', 'color': const Color(0xFF14B8A6)},
-    ];
-    
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Select Department',
-            style: GoogleFonts.inter(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: textColor,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'View syllabus by department',
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              color: secondaryColor,
-            ),
-          ),
-          const SizedBox(height: 20),
-          
-          // Department Grid
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              childAspectRatio: 1.4,
-            ),
-            itemCount: departments.length,
-            itemBuilder: (context, index) {
-              final dept = departments[index];
-              return InkWell(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => SyllabusScreen(
-                        collegeId: widget.collegeId,
-                        department: dept['name'] as String,
-                        departmentName: dept['full'] as String,
-                        departmentColor: dept['color'] as Color,
-                      ),
-                    ),
-                  );
-                },
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: cardColor,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: borderColor),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: (dept['color'] as Color).withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Center(
-                          child: Text(
-                            dept['name'] as String,
-                            style: GoogleFonts.inter(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: dept['color'] as Color,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        dept['full'] as String,
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: textColor,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-          
-          const SizedBox(height: 24),
-          
-          // Semester selector hint
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppTheme.primary.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
+    // Use DepartmentsProvider
+    return FutureBuilder<List<DepartmentData>>(
+      future: _departmentsFuture,
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.info_outline_rounded, color: AppTheme.primary, size: 20),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Select a department to view semester-wise syllabus PDFs',
-                    style: GoogleFonts.inter(
-                      fontSize: 13,
-                      color: AppTheme.primary,
-                    ),
-                  ),
+                Text(
+                  'Failed to load departments',
+                  style: GoogleFonts.inter(color: AppTheme.textMuted),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: () => setState(() {
+                    _departmentsFuture = DepartmentsProvider.getDepartments();
+                  }),
+                  child: const Text('Retry'),
                 ),
               ],
             ),
+          );
+        }
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        final departments = snapshot.data!;
+
+        return SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Select Department',
+                style: GoogleFonts.inter(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: textColor,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'View syllabus by department',
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  color: secondaryColor,
+                ),
+              ),
+              const SizedBox(height: 20),
+              
+              // Department Grid
+              GridView(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 1.4,
+                ),
+                children: [
+                  ...departments.map((dept) {
+                    return _buildDepartmentCard(dept, isDark: isDark);
+                  }),
+                ],
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -524,16 +502,32 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
             ),
           ),
           const Spacer(),
+
+          IconButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => AIChatScreen(
+                    collegeId: widget.collegeId,
+                    collegeName: widget.collegeName,
+                  ),
+                ),
+              );
+            },
+            icon: Icon(
+              Icons.auto_awesome,
+              color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+            ),
+          ),
+
           // Bookmarks button
           IconButton(
             onPressed: () {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => BookmarksScreen(
-                    userEmail: widget.userEmail,
-                    collegeId: widget.collegeId,
-                  ),
+                  builder: (context) => const BookmarksScreen(),
                 ),
               );
             },
@@ -547,7 +541,7 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
             onPressed: () {
               Navigator.push(
                 context,
-                MaterialPageRoute(builder: (_) => const NotificationScreen()),
+                MaterialPageRoute(builder: (context) => const NotificationScreen()),
               );
             },
             icon: Icon(
@@ -560,8 +554,73 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
     );
   }
 
+  Widget _buildDepartmentCard(DepartmentData dept, {required bool isDark}) {
+    final (:textColor, :secondaryColor, :cardColor, :borderColor) = _getThemeColors(isDark);
+
+    return Material(
+      color: cardColor,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => SyllabusScreen(
+                collegeId: widget.collegeId,
+                department: dept.name,
+                departmentName: dept.full,
+                departmentColor: dept.color,
+              ),
+            ),
+          );
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: borderColor),
+          ),
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: dept.color.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(Icons.folder_outlined, color: dept.color, size: 20),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                dept.name,
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: textColor,
+                ),
+              ),
+              Text(
+                dept.full,
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: secondaryColor,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildSearchBar() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
     final hasActiveFilters = (_selectedSemester != null && _selectedSemester != 'All') ||
         (_selectedBranch != null && _selectedBranch != 'All') ||
         _selectedSubject != null ||
@@ -608,40 +667,43 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
                 offset: const Offset(0, 4),
               ),
           ],
-        ),
+            ),
         child: Row(
           children: [
-            Icon(
-              Icons.search,
-              color: isDark ? Colors.grey : Colors.black54,
-              size: 22,
+            const Padding(
+               padding: EdgeInsets.only(left: 4),
+               child: Icon(Icons.search, color: Colors.grey),
             ),
             const SizedBox(width: 12),
             Text(
-              'Search resources...',
-              style: GoogleFonts.inter(
-                color: isDark ? const Color(0xFF8E8E93) : Colors.grey.shade400,
-                fontSize: 16,
+              "Search resources...",
+              style: TextStyle(
+                color: isDark ? Colors.grey[400] : Colors.grey[600],
+                fontSize: 15,
               ),
             ),
-            const Spacer(),
             const Spacer(),
             // Filter Icon Button
-            GestureDetector(
-              onTap: _showFilterOptionsSheet,
-              child: Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: hasActiveFilters ? AppTheme.primary : (isDark ? Colors.grey[800] : Colors.grey[200]),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  Icons.tune_rounded,
-                  color: hasActiveFilters ? Colors.white : (isDark ? Colors.grey[400] : Colors.grey[600]),
-                  size: 18,
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: _showFilterOptionsSheet,
+                customBorder: const CircleBorder(),
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: hasActiveFilters ? AppTheme.primary : (isDark ? Colors.grey[800] : Colors.grey[200]),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.tune_rounded,
+                    color: hasActiveFilters ? Colors.white : (isDark ? Colors.grey[400] : Colors.grey[600]),
+                    size: 18,
+                  ),
                 ),
               ),
             ),
+
           ],
         ),
       ),
@@ -661,13 +723,13 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
         separatorBuilder: (_, __) => const SizedBox(width: 8),
         itemBuilder: (context, index) {
           final type = _types[index];
-          final isSelected = _selectedType == type || (_selectedType == null && type == 'All');
+          final isSelected = (_selectedType == null && type == 'All') || _selectedType == type;
           return GestureDetector(
             onTap: () {
               setState(() {
                 _selectedType = type == 'All' ? null : type;
-                _loadResources(refresh: true);
               });
+              _loadResources(refresh: true);
             },
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -729,10 +791,9 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
               ),
             ),
           ),
-          
-          // Title / Header
+          const SizedBox(height: 20),
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
+            padding: const EdgeInsets.symmetric(horizontal: 24),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -839,10 +900,6 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
           // Apply Button Area
           Container(
             padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: bgColor,
-              border: Border(top: BorderSide(color: isDark ? Colors.white10 : Colors.black12)),
-            ),
             child: ElevatedButton(
               onPressed: () => Navigator.pop(context),
               style: ElevatedButton.styleFrom(
@@ -1075,63 +1132,41 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
   }
 
   Widget _buildResourcesGrid() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    
-    return Stack(
-      children: [
-        ListWheelScrollView.useDelegate(
-          controller: _scrollController,
-          itemExtent: 220, // Fixed height for cards
-          perspective: 0.003,
-          diameterRatio: 2.0, // Adjusts the curve
-          physics: const FixedExtentScrollPhysics(),
-          onSelectedItemChanged: (index) {
-            _playRetroSound();
-            // Optional: trigger load more if needed
-          },
-          childDelegate: ListWheelChildBuilderDelegate(
-            builder: (context, index) {
-              if (_resources.isEmpty) return null;
-              final resource = _resources[index % _resources.length];
-              
-              return Center(
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  child: ResourceCard(
-                    resource: resource,
-                    userEmail: widget.userEmail,
-                    onVoteChanged: () => _loadResources(),
-                  ),
-                ),
-              );
-            },
-            childCount: null, // Infinite loop
-          ),
-        ),
-        
-        // Gradient Fade at Bottom
-        Positioned(
-          bottom: 0,
-          left: 0,
-          right: 0,
-          height: 140, // Height of the fade
-          child: IgnorePointer(
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    (isDark ? AppTheme.darkBackground : AppTheme.lightBackground).withOpacity(0.0),
-                    (isDark ? AppTheme.darkBackground : AppTheme.lightBackground),
-                  ],
-                  stops: const [0.0, 0.8],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
+    return ShaderMask(
+      shaderCallback: (Rect bounds) {
+        return const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            Colors.purple,
+            Colors.transparent,
+            Colors.transparent,
+            Colors.purple,
+          ],
+          stops: [0.0, 0.05, 0.9, 1.0], // Fade out top 5% and bottom 10%
+        ).createShader(bounds);
+      },
+      blendMode: BlendMode.dstOut,
+      child: ListView.separated(
+        controller: _scrollController,
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 100), // Bottom padding for FAB/Nav
+        itemCount: _resources.length + (_isLoadingMore ? 1 : 0),
+        separatorBuilder: (context, index) => const SizedBox(height: 12),
+        itemBuilder: (context, index) {
+          if (index == _resources.length) {
+            return const Padding(
+              padding: EdgeInsets.all(16.0),
+              child: Center(child: CircularProgressIndicator()),
+            );
+          }
+          final resource = _resources[index];
+          return ResourceCard(
+            resource: resource,
+            userEmail: widget.userEmail,
+            onVoteChanged: () => _loadResources(),
+          );
+        },
+      ),
     );
   }
 
@@ -1206,7 +1241,7 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
     );
   }
 
-  // Legacy filter methods removed
+
 
 
   void _loadDownloadedResources() {

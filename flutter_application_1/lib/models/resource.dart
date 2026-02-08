@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 class Resource {
   final String id;
   final String title;
@@ -9,6 +11,7 @@ class Resource {
   final String? subject;
   final String? chapter;
   final String? topic;
+  final String? description; // Added for notices
   final int upvotes;
   final int downvotes;
   final String uploadedByEmail;
@@ -28,6 +31,7 @@ class Resource {
     this.subject,
     this.chapter,
     this.topic,
+    this.description,
     this.upvotes = 0,
     this.downvotes = 0,
     required this.uploadedByEmail,
@@ -49,16 +53,25 @@ class Resource {
       subject: json['subject'],
       chapter: json['chapter'],
       topic: json['topic'],
+      description: json['description'] ?? json['content'], // Map content to description for flexibility
       upvotes: json['upvotes'] ?? 0,
       downvotes: json['downvotes'] ?? 0,
       uploadedByEmail: json['uploaded_by_email'] ?? '',
       uploadedByName: json['uploaded_by_name'],
       collegeId: json['college_id'] ?? '',
       isApproved: json['status'] == 'approved' || json['is_approved'] == true,
-      createdAt: json['created_at'] != null 
-          ? DateTime.parse(json['created_at'])
-          : DateTime.now(),
+      createdAt: _parseCreatedAt(json),
     );
+  }
+
+  static DateTime _parseCreatedAt(Map<String, dynamic> json) {
+    final raw = json['created_at'];
+    final parsed = DateTime.tryParse(raw?.toString() ?? '');
+    if (parsed == null) {
+      debugPrint('Resource Warning: Invalid created_at "$raw" for ID ${json['id']}. Fallback to epoch.');
+      return DateTime.utc(1970, 1, 1);
+    }
+    return parsed;
   }
 
   Map<String, dynamic> toJson() {
@@ -73,12 +86,15 @@ class Resource {
       'subject': subject,
       'chapter': chapter,
       'topic': topic,
+      'description': description,
+      'content': description, // Ensure content mirrors description
       'upvotes': upvotes,
       'downvotes': downvotes,
       'uploaded_by_email': uploadedByEmail,
       'uploaded_by_name': uploadedByName,
       'college_id': collegeId,
       'is_approved': isApproved,
+      'status': isApproved ? 'approved' : 'pending', // Ensure status mirrors isApproved
       'created_at': createdAt.toIso8601String(),
     };
   }
@@ -119,6 +135,9 @@ class Resource {
     
     if (difference.inDays == 0) {
       if (difference.inHours == 0) {
+        if (difference.inMinutes <= 0) {
+          return 'just now';
+        }
         return '${difference.inMinutes}m ago';
       }
       return '${difference.inHours}h ago';

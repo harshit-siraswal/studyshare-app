@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
 class StudyTimerController extends ChangeNotifier with WidgetsBindingObserver {
@@ -37,6 +36,7 @@ class StudyTimerController extends ChangeNotifier with WidgetsBindingObserver {
     // Unregistering the observer is critical to prevent leaks.
     WidgetsBinding.instance.removeObserver(this);
     _timer?.cancel();
+    _isOverlayVisible = false; // direct cleanup
     super.dispose();
   }
 
@@ -95,6 +95,7 @@ class StudyTimerController extends ChangeNotifier with WidgetsBindingObserver {
     _timer?.cancel();
     _isRunning = false;
     _endTime = null;
+    closeOverlay(); // Cleanup
     if (completed) {
       _sessionCount++;
       _totalMinutes += _selectedMinutes;
@@ -108,6 +109,7 @@ class StudyTimerController extends ChangeNotifier with WidgetsBindingObserver {
     _isRunning = false;
     _endTime = null;
     _remainingSeconds = _selectedMinutes * 60;
+    closeOverlay(); // Cleanup
     notifyListeners();
   }
 
@@ -149,17 +151,25 @@ class StudyTimerController extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   // Overlay System Window Logic
-  Future<void> showOverlay() async {
-    // This requires platform channel implementation or the system_alert_window package usage.
-    // For now, we will notify listeners that overlay mode is requested.
-    // In a real implementation, you'd call SystemAlertWindow.showSystemWindow(...) here.
-    debugPrint('Showing system overlay...');
-    // Implementation detail: The actual overlay draw is often handled by the native side or a specific plugin method.
-    // We will simulate the state here.
-  }
+  // Overlay State
+  bool _isOverlayVisible = false;
+  bool get isOverlayVisible => _isOverlayVisible;
 
+  Future<void> showOverlay() async {
+    try {
+      // Platform channel code would go here
+      // await platformChannel.invokeMethod('showOverlay');
+      _isOverlayVisible = true;
+      notifyListeners();
+      debugPrint('Showing system overlay...');
+    } catch (e) {
+      debugPrint('Failed to show overlay: $e');
+      rethrow;
+    }
+  }
   Future<void> closeOverlay() async {
+    _isOverlayVisible = false;
+    notifyListeners();
     debugPrint('Closing system overlay...');
-    // SystemAlertWindow.closeSystemWindow();
   }
 }

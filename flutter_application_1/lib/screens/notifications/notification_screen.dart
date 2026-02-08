@@ -1,6 +1,5 @@
 
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import 'package:google_fonts/google_fonts.dart';
 import '../../config/theme.dart';
@@ -23,6 +22,8 @@ class _NotificationScreenState extends State<NotificationScreen> with SingleTick
   final ScrollController _scrollController = ScrollController();
   late TabController _tabController;
   final List<String> _tabs = ['All', 'Follows', 'Activity'];
+  final BackendApiService _api = BackendApiService();
+  final SupabaseService _supabaseService = SupabaseService();
   
   bool _isLoading = false;
   String? _error;
@@ -76,10 +77,9 @@ class _NotificationScreenState extends State<NotificationScreen> with SingleTick
     }
 
     try {
-      final api = Provider.of<BackendApiService>(context, listen: false);
       final currentOffset = loadMore ? _offset : 0;
       
-      final rawList = await api.getNotifications(limit: _limit, offset: currentOffset);
+      final rawList = await _api.getNotifications(limit: _limit, offset: currentOffset);
       final newItems = rawList.map((e) => NotificationModel.fromJson(e)).toList();
       
       setState(() {
@@ -97,7 +97,11 @@ class _NotificationScreenState extends State<NotificationScreen> with SingleTick
     } catch (e) {
       if (mounted) {
         setState(() {
-          if (!loadMore) _error = e.toString();
+          if (loadMore) {
+             ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to load more: $e')));
+          } else {
+             _error = e.toString();
+          }
           _isLoading = false;
           _isLoadingMore = false;
         });
@@ -107,18 +111,14 @@ class _NotificationScreenState extends State<NotificationScreen> with SingleTick
 
   Future<void> _markAllRead() async {
     try {
-      final api = Provider.of<BackendApiService>(context, listen: false);
-      await api.markAllNotificationsRead();
+      await _api.markAllNotificationsRead(contextForRecaptcha: context);
       setState(() {
-        for (var n in _notifications) {
-          if (!n.isRead) {
-            // Create a copy with isRead = true
-            final index = _notifications.indexOf(n);
-            _notifications[index] = n.copyWith(isRead: true);
+        for (var i = 0; i < _notifications.length; i++) {
+          if (!_notifications[i].isRead) {
+            _notifications[i] = _notifications[i].copyWith(isRead: true);
           }
         }
-      });
-    } catch (e) {
+      });    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to mark all as read: $e')),
@@ -224,11 +224,24 @@ class _NotificationScreenState extends State<NotificationScreen> with SingleTick
         color: Colors.red.shade400,
         child: const Icon(Icons.delete_outline, color: Colors.white, size: 24),
       ),
-      onDismissed: (_) {
-        // Remove from list (could add delete API call)
+      onDismissed: (_) async {
+        // Optimistic remove
+        final index = _notifications.indexOf(n);
         setState(() {
-          _notifications.removeWhere((item) => item.id == n.id);
+          _notifications.removeAt(index);
         });
+
+        try {
+          await _api.deleteNotification(n.id, contextForRecaptcha: context);
+        } catch (e) {
+          // Revert on failure
+          if (mounted) {
+            setState(() {
+               _notifications.insert(index, n);
+            });
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
+          }
+        }
       },
       child: GestureDetector(
         onTap: () => _handleTap(n),
@@ -358,23 +371,52 @@ class _NotificationScreenState extends State<NotificationScreen> with SingleTick
     }
   }
 
+  String? _resolveActorEmail(NotificationModel n) {
+    final raw = n.actorId;
+    if (raw != null && raw.contains('@')) return raw;
+
+    final data = n.data;
+    if (data == null) return null;
+
+    final candidates = [
+      data['actor_email'],
+      data['actorEmail'],
+      data['user_email'],
+      data['userEmail'],
+      data['email'],
+    ];
+
+    for (final candidate in candidates) {
+      if (candidate is String && candidate.contains('@')) return candidate;
+    }
+
+    return null;
+  }
+
   Future<void> _handleTap(NotificationModel n) async {
     await _markRead(n);
 
     if (!mounted) return;
 
     // 1. Follow Request Navigation
-    if (n.actorId != null && (n.type == 'follow_request' || n.type == 'follow_accepted')) {
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => UserProfileScreen(
-            userEmail: n.actorId!,
-            userName: n.actorName,
-            userPhotoUrl: n.actorAvatar,
+    if (n.type == 'follow_request' || n.type == 'follow_accepted') {
+      final actorEmail = _resolveActorEmail(n);
+      if (actorEmail != null) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => UserProfileScreen(
+              userEmail: actorEmail,
+              userName: n.actorName,
+              userPhotoUrl: n.actorAvatar,
+            ),
           ),
-        ),
-      );
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to open profile for this notification.')),
+        );
+      }
       return;
     }
 
@@ -406,14 +448,13 @@ class _NotificationScreenState extends State<NotificationScreen> with SingleTick
         
         if (targetId != null) {
           // Show loading
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
           ScaffoldMessenger.of(context).showSnackBar(
              const SnackBar(content: Text('Loading notice...'), duration: Duration(seconds: 1)),
           );
           
-          final supabase = SupabaseService(); // Or Provider if registered, creating new instance is safe for stateless calls usually
-          
           // Fetch Notice
-          final noticeMap = await supabase.getNotice(targetId.toString());
+          final noticeMap = await _supabaseService.getNotice(targetId.toString());
           if (noticeMap == null) {
              if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Notice not found')));
              return;
@@ -425,20 +466,16 @@ class _NotificationScreenState extends State<NotificationScreen> with SingleTick
           DepartmentAccount? account;
           
           if (authorId != null) {
-             account = await supabase.getDepartmentProfile(authorId);
+             account = await _supabaseService.getDepartmentProfile(authorId);
           }
           
-          if (account == null) {
-            // Fallback dummy account if fetch fails but we have notification actor info
-             account = DepartmentAccount(
+          account ??= DepartmentAccount(
                id: authorId ?? 'unknown', 
                name: n.actorName ?? 'Department', 
                handle: '', 
-               avatarLetter: (n.actorName ?? 'D')[0], 
+               avatarLetter: (n.actorName?.isNotEmpty == true) ? n.actorName![0] : 'D', 
                color: Colors.blue
              );
-          }
-
           if (mounted) {
             Navigator.push(
               context,
@@ -470,8 +507,7 @@ class _NotificationScreenState extends State<NotificationScreen> with SingleTick
     });
 
     try {
-      final api = Provider.of<BackendApiService>(context, listen: false);
-      await api.markNotificationRead(n.id);
+      await _api.markNotificationRead(n.id, contextForRecaptcha: context);
     } catch (e) {
       debugPrint('Error marking notification as read: $e');
       // Optionally revert optimistic update or show error
@@ -493,12 +529,23 @@ class _NotificationScreenState extends State<NotificationScreen> with SingleTick
         children: [
           CircleAvatar(
             radius: 24,
-            backgroundImage: NetworkImage(n.actorAvatar!),
             backgroundColor: Colors.grey[300],
+            child: ClipOval(
+              child: Image.network(
+                n.actorAvatar!,
+                fit: BoxFit.cover,
+                width: 48,
+                height: 48,
+                errorBuilder: (_, __, ___) => Text(
+                  n.actorName?.isNotEmpty == true ? n.actorName![0].toUpperCase() : '?',
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ),
           ),
           Positioned(
-            bottom: 0,
             right: 0,
+            bottom: 0,
             child: Container(
               padding: const EdgeInsets.all(2),
               decoration: BoxDecoration(
@@ -613,16 +660,19 @@ class _NotificationScreenState extends State<NotificationScreen> with SingleTick
         }
       });
 
-      final api = BackendApiService();
+      final requestId = int.tryParse(n.followRequestId!);
+      if (requestId == null) {
+        throw FormatException('Invalid follow request ID: ${n.followRequestId}');
+      }
+
       if (accept) {
-        await api.acceptFollowRequest(int.parse(n.followRequestId!));
+        await _api.acceptFollowRequest(requestId);
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request accepted')));
       } else {
-        await api.rejectFollowRequest(int.parse(n.followRequestId!));
+        await _api.rejectFollowRequest(requestId);
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request declined')));
       }
-    } catch (e) {
-      if (mounted) {
+    } catch (e) {      if (mounted) {
          _loadNotifications();
          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Action failed: $e')));
       }
@@ -658,16 +708,15 @@ class _NotificationScreenState extends State<NotificationScreen> with SingleTick
           ),
           const SizedBox(height: 8),
           Text(
-            _tabController.index == 1 
-                ? 'When people want to follow you, you\'ll see it here'
-                : 'We\'ll let you know when something arrives',
-            textAlign: TextAlign.center,
-            style: GoogleFonts.inter(
+            _tabController.index == 1
+                ? 'Follow requests will appear here'
+                : _tabController.index == 2
+                    ? 'Your activity will appear here'
+                    : 'Your notifications will appear here',            style: GoogleFonts.inter(
               fontSize: 14,
-              color: isDark ? Colors.grey[500] : Colors.grey[500],
+              color: Colors.grey[500],
             ),
-          ),
-        ],
+          ),        ],
       ),
     );
   }

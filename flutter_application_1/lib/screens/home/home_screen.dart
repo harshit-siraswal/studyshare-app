@@ -44,8 +44,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final SupabaseService _supabaseService = SupabaseService();
   int _currentIndex = 0;
   bool _showHelpOverlay = false;
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-  
 
   @override
   void initState() {
@@ -126,7 +124,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         return NoticesScreen(collegeId: widget.collegeDomain);
       case 3:
         return ProfileScreen(
-          collegeId: widget.collegeId,
+
           collegeName: widget.collegeName,
           collegeDomain: widget.collegeDomain,
           onLogout: _handleLogout,
@@ -153,7 +151,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final email = _authService.userEmail;
 
     return Scaffold(
-      key: _scaffoldKey,
       backgroundColor: isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
       resizeToAvoidBottomInset: false, // Prevent floating nav from rising with keyboard
       extendBody: true,
@@ -330,22 +327,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     // 0: Resources, 1: Rooms, 2: Notices, 3: Profile
     
     // Position Calculations (Centered by default per user request "remain at bottom bar")
-    // The user wants it to "remain at bottom bar", implying a fixed position?
-    // "at rooms section '+' should remain at bottom bar"
-    // "only when we open a particular room... that '+' comes to bottom right corner"
-    // This implies the FAB on HomeScreen should be static in the center (or wherever it is).
-    // The current code moves it left/right. Let's make it static center for all tabs.
-    // Wait, typically FAB is center-docked or bottom-right.
-    // The previous code had it center for Home, right for others.
-    // Let's stick to Center Docked for consistency if that's what "remain at bottom bar" implies,
-    // or maybe Bottom Right if that's the "bottom bar" location he refers to?
-    // "'+' should remain at bottom bar... only when we open... comes to bottom right corner of that room"
-    // This implies it is NOT at bottom right normally. So Center Docked is correct.
+    // Show on all tabs
+    // 0: Resources, 1: Rooms, 2: Notices, 3: Profile
+    
+    // FAB is center-docked on all tabs; repositions to bottom-right only within individual room screens
     
     final screenWidth = MediaQuery.of(context).size.width;
-    final double left = screenWidth / 2 - 28; // Always center
-    final double bottom = bottomPadding + 24; // Always docked
-
+    final double left = (screenWidth - 56) / 2; // Center horizontally (56 = FAB width)
+    final double bottom = bottomPadding + 16 + 8; // Above the floating nav bar
+    
     return Positioned(
       left: left,
       bottom: bottom,
@@ -363,14 +353,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               Navigator.push(context, MaterialPageRoute(builder: (_) => DiscoverRoomsScreen(
                 collegeId: widget.collegeDomain,
                 collegeDomain: widget.collegeDomain,
-                userEmail: _authService.userEmail!,
+                userEmail: _authService.userEmail ?? '',
               )));
-            } else if (_currentIndex == 2) {
-              // Notices: Restricted to Upload
-              _showUpload();
-            } else if (_currentIndex == 3) {
-              // Profile: Restricted to Upload
-              _showUpload();
             }
           },
           child: Container(

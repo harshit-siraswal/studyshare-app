@@ -4,7 +4,8 @@ import 'package:file_picker/file_picker.dart';
 import '../config/theme.dart';
 import '../services/supabase_service.dart';
 import '../services/auth_service.dart';
-import '../services/cloudinary_service.dart';
+import '../services/backend_api_service.dart';
+import 'package:http/http.dart' as http;
 import 'success_overlay.dart';
 
 class UploadResourceDialog extends StatefulWidget {
@@ -115,6 +116,18 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     );
   }
 
+  String _getContentType(String filename) {
+    final lower = filename.toLowerCase();
+    if (lower.endsWith('.pdf')) return 'application/pdf';
+    if (lower.endsWith('.doc')) return 'application/msword';
+    if (lower.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    if (lower.endsWith('.ppt')) return 'application/vnd.ms-powerpoint';
+    if (lower.endsWith('.pptx')) return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    if (lower.endsWith('.odt')) return 'application/vnd.oasis.opendocument.text';
+    if (lower.endsWith('.odp')) return 'application/vnd.oasis.opendocument.presentation';
+    return 'application/octet-stream';
+  }
+
   Future<void> _handleSubmit() async {
     if (_title.trim().isEmpty) return _showError('Enter a title');
     if (_semester.isEmpty) return _showError('Select semester');
@@ -128,16 +141,44 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     try {
       final supabaseService = SupabaseService();
       final authService = AuthService();
+      final backendApi = BackendApiService();
       
       // Progress: preparing
       setState(() => _uploadProgress = 0.2);
       
-      // Upload file to Cloudinary if notes/pyq
+      // Upload file to R2 if notes/pyq
       String? filePath;
       if (_typeIndex == 0 && _selectedFile != null) {
         setState(() => _uploadProgress = 0.4);
         try {
-          filePath = await CloudinaryService.uploadFile(_selectedFile!);
+          final file = _selectedFile!;
+          final bytes = file.bytes;
+          if (bytes == null) {
+            throw Exception('File bytes not available');
+          }
+
+          final presign = await backendApi.getResourceUploadUrl(filename: file.name);
+          final uploadUrl = presign['uploadUrl']?.toString();
+          final publicUrl = presign['publicUrl']?.toString();
+
+          if (uploadUrl == null || publicUrl == null) {
+            throw Exception('Failed to get upload URL');
+          }
+
+          final response = await http.put(
+            Uri.parse(uploadUrl),
+            headers: {
+              'Content-Type': _getContentType(file.name),
+              'Cache-Control': 'max-age=31536000',
+            },
+            body: bytes,
+          );
+
+          if (response.statusCode < 200 || response.statusCode >= 300) {
+            throw Exception('Upload failed: ${response.statusCode}');
+          }
+
+          filePath = publicUrl;
         } catch (e) {
           _showError('File submission failed: $e');
           setState(() { _isUploading = false; _uploadProgress = 0; });
@@ -168,10 +209,6 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
       await Future.delayed(const Duration(milliseconds: 200));
 
       if (mounted) {
-      setState(() => _uploadProgress = 1.0);
-      await Future.delayed(const Duration(milliseconds: 200));
-
-      if (mounted) {
         Navigator.pop(context); // Close upload dialog
         
         // Show success animation
@@ -186,7 +223,6 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
             },
           ),
         );
-      }
       }
     } catch (e) {
       if (mounted) _showError('Submission failed: ${e.toString()}');
@@ -374,7 +410,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           _buildStageIndicator('Preparing', _uploadProgress >= 0.1, _uploadProgress >= 0.2),
-                          _buildStageIndicator('Uploading', _uploadProgress >= 0.2, _uploadProgress >= 0.7),
+                          _buildStageIndicator('Sending file', _uploadProgress >= 0.2, _uploadProgress >= 0.7),
                           _buildStageIndicator('Saving', _uploadProgress >= 0.7, _uploadProgress >= 0.95),
                           _buildStageIndicator('Done', _uploadProgress >= 0.95, _uploadProgress >= 1.0),
                         ],
@@ -426,9 +462,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                             style: ElevatedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 14),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                              // backgroundColor: AppTheme.primary, // Default
-                            ),
-                            child: _isUploading
+                            ),                            child: _isUploading
                                 ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                                 : Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
@@ -457,7 +491,6 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     // For unselected state in light mode, textMuted is fine (grayish).
     // isSelected will be Primary + White Text.
     final unselectedTextColor = isDark ? AppTheme.textMuted : AppTheme.textPrimary.withValues(alpha: 0.6);
-    
     return Expanded(
       child: GestureDetector(
         onTap: _isUploading ? null : () => setState(() => _typeIndex = index),

@@ -39,7 +39,9 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this, initialIndex: widget.initialTab);
+    // Clamp initial index to valid range
+    final initialIndex = widget.initialTab.clamp(0, 1);
+    _tabController = TabController(length: 2, vsync: this, initialIndex: initialIndex);
     _tabController.addListener(_handleTabSelection); // Add listener
     _loadData();
     _searchController.addListener(_onSearchChanged);
@@ -380,8 +382,8 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
                 _errorMessage!,
                 textAlign: TextAlign.center,
                 style: GoogleFonts.inter(color: AppTheme.textMuted),
-              ),              const SizedBox(height: 24),
-              ElevatedButton(
+              ),
+              const SizedBox(height: 24),              ElevatedButton(
                 onPressed: _loadData,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primary,

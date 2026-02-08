@@ -1,3 +1,4 @@
 {
-    "coderabbit.agentType": "Native"
+    "coderabbit.agentType": "Native",
+    "java.configuration.updateBuildConfiguration": "interactive"
 }

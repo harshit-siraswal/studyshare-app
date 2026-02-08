@@ -92,19 +92,22 @@ class _NoticeCardState extends State<NoticeCard> {
     final content = widget.notice['content'] ?? '';
     final createdAt = widget.notice['created_at'];
     final timeAgo = _formatTimeAgo(createdAt);
+    final priority = widget.notice['priority']?.toString();
+    final rawCount = widget.notice['comments'] ?? widget.notice['comment_count'];
+    final commentCount = rawCount is int ? rawCount : int.tryParse(rawCount?.toString() ?? '');
     
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
         color: cardColor,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: borderColor),
         boxShadow: [
           if (!widget.isDark)
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.02),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
             ),
         ],
       ),
@@ -122,63 +125,118 @@ class _NoticeCardState extends State<NoticeCard> {
               ),
             );
           },
-          borderRadius: BorderRadius.circular(12),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header
-                Row(
+          borderRadius: BorderRadius.circular(16),
+          child: Stack(
+            children: [
+              Positioned(
+                left: 0,
+                top: 0,
+                bottom: 0,
+                child: Container(
+                  width: 4,
+                  decoration: BoxDecoration(
+                    color: widget.account.color,
+                    borderRadius: const BorderRadius.horizontal(left: Radius.circular(16)),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: widget.account.color,
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: Center(
-                        child: Text(
-                          widget.account.avatarLetter,
-                          style: GoogleFonts.inter(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
+                    // Header
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: widget.account.color,
+                            borderRadius: BorderRadius.circular(19),
+                          ),
+                          child: Center(
+                            child: Text(
+                              widget.account.avatarLetter,
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
                           ),
                         ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                widget.account.name,
-                                style: GoogleFonts.inter(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                  color: textColor,
-                                ),
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      widget.account.name,
+                                      style: GoogleFonts.inter(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w600,
+                                        color: textColor,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Icon(Icons.verified_rounded, size: 12, color: AppTheme.primary),
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: widget.isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.06),
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                    child: Text(
+                                      widget.account.handle,
+                                      style: GoogleFonts.inter(
+                                        fontSize: 10,
+                                        color: secondaryColor,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(width: 4),
-                              Icon(Icons.verified_rounded, size: 12, color: AppTheme.primary),
+                              const SizedBox(height: 4),
+                              Row(
+                                children: [
+                                  Text(
+                                    timeAgo,
+                                    style: GoogleFonts.inter(fontSize: 11, color: secondaryColor),
+                                  ),
+                                  if (priority == 'urgent') ...[
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.error.withValues(alpha: 0.15),
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Text(
+                                        'URGENT',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppTheme.error,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
                             ],
                           ),
-                          Text(
-                            timeAgo,
-                            style: GoogleFonts.inter(fontSize: 11, color: secondaryColor),
-                          ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                    // Removed 3-dot menu
-                  ],
-                ),
-                const SizedBox(height: 12),
+                    const SizedBox(height: 12),
                 
                 // Title
                 Text(
@@ -205,50 +263,52 @@ class _NoticeCardState extends State<NoticeCard> {
                 
                 const SizedBox(height: 12),
                 
-                // Actions
-                Row(
-                  children: [
-                    _buildActionButton(
-                      icon: Icons.mode_comment_outlined, 
-                      count: 'Comments', 
-                      color: secondaryColor,
-                      onTap: () {
-                         Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => NoticeDetailScreen(
-                              notice: widget.notice,
-                              account: widget.account,
+                    // Actions
+                    Row(
+                      children: [
+                        _buildActionButton(
+                          icon: Icons.mode_comment_outlined,
+                          count: commentCount != null ? '$commentCount' : 'Comment',
+                          color: secondaryColor,
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => NoticeDetailScreen(
+                                  notice: widget.notice,
+                                  account: widget.account,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        const Spacer(),
+                        // Bookmark Button
+                        InkWell(
+                          onTap: _isLoading ? null : _toggleSaved,
+                          borderRadius: BorderRadius.circular(20),
+                          child: Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: Icon(
+                              _isSaved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+                              size: 20,
+                              color: _isSaved ? AppTheme.primary : secondaryColor,
                             ),
                           ),
-                        );
-                      },
-                    ),
-                    const Spacer(),
-                    // Bookmark Button
-                    InkWell(
-                      onTap: _isLoading ? null : _toggleSaved,
-                      borderRadius: BorderRadius.circular(20),
-                      child: Padding(
-                        padding: const EdgeInsets.all(8.0),
-                        child: Icon(
-                          _isSaved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
-                          size: 20,
-                          color: _isSaved ? AppTheme.primary : secondaryColor,
                         ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    _buildActionButton(
-                      icon: Icons.share_outlined,
-                      count: null,
-                      color: secondaryColor,
-                      onTap: _shareAsImage,
+                        const SizedBox(width: 8),
+                        _buildActionButton(
+                          icon: Icons.share_outlined,
+                          count: 'Share',
+                          color: secondaryColor,
+                          onTap: _shareAsImage,
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

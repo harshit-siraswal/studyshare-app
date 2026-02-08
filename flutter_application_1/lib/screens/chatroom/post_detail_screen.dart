@@ -7,11 +7,15 @@ import '../../services/auth_service.dart';
 import '../../widgets/emoji_reactions.dart';
 import '../profile/user_profile_screen.dart';
 import '../../services/backend_api_service.dart';
+import '../../services/cloudinary_service.dart';
 import '../../widgets/comment_input_box.dart';
-import '../../config/app_config.dart';
+
 
 import '../../services/subscription_service.dart';
 import '../../widgets/paywall_dialog.dart';
+import 'package:flutter_linkify/flutter_linkify.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../../widgets/full_screen_image_viewer.dart';
 
 class PostDetailScreen extends StatefulWidget {
   final Map<String, dynamic> post;
@@ -42,6 +46,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   
   // ... (rest of vars)
 
+  /*
   Future<void> _handleGifTap() async {
      final isPremium = await _subscriptionService.isPremium();
      if (!mounted) return;
@@ -86,9 +91,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               child: GridView.count(
                 crossAxisCount: 3,
                 children: [
-                  _buildGifOption('https://media.giphy.com/media/l0HlHJGHe3yAMhdQY/giphy.gif'),
-                  _buildGifOption('https://media.giphy.com/media/3o7TKs6DH0R3X3U6v6/giphy.gif'),
-                  _buildGifOption('https://media.giphy.com/media/d9QiBcfzg64Io/giphy.gif'),
+                   _buildGifOption('https://media.giphy.com/media/l0HlHJGHe3yAMhdQY/giphy.gif'),
+                   _buildGifOption('https://media.giphy.com/media/3o7TKs6DH0R3X3U6v6/giphy.gif'),
+                   _buildGifOption('https://media.giphy.com/media/d9QiBcfzg64Io/giphy.gif'),
                 ],
               ),
             ),
@@ -126,6 +131,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       ),
     );
   }
+  */
+
 
   // ... (rest of methods)
   List<Map<String, dynamic>> _comments = [];
@@ -137,6 +144,84 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   bool _isSubmitting = false;
   bool _isReadOnly = false;
   final Set<String> _expandedCommentIds = {};
+
+  Widget _buildCommentContent(String content, bool isDark, Color textColor) {
+    // Check for Sticker format: ![Sticker](url)
+    // Also support user-reported format: sticker!url or sticker!{url} just in case
+    final stickerRegex = RegExp(r'^!\[Sticker\]\((.*?)\)$|^sticker!(https?://.*)$', caseSensitive: false);
+    final match = stickerRegex.firstMatch(content.trim());
+
+    if (match != null) {
+      final url = match.group(1) ?? match.group(2);
+      if (url != null && url.isNotEmpty) {
+        // Clean up URL if it has curly braces (user said "sticker!{link}")
+        final cleanUrl = url.replaceAll('{', '').replaceAll('}', '');
+        
+        return GestureDetector(
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => FullScreenImageViewer(
+                  imageUrl: cleanUrl,
+                  heroTag: 'sticker_${cleanUrl.hashCode}',
+                ),
+              ),
+            );
+          },
+          child: Hero(
+            tag: 'sticker_${cleanUrl.hashCode}',
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.network(
+                cleanUrl,
+                width: 150,
+                height: 150,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) => Text(content, style: GoogleFonts.inter(color: textColor)),
+                loadingBuilder: (context, child, loadingProgress) {
+                  if (loadingProgress == null) return child;
+                  return Container(
+                    width: 150,
+                    height: 150,
+                    color: isDark ? Colors.white10 : Colors.grey.shade200,
+                    child: Center(
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        value: loadingProgress.expectedTotalBytes != null
+                            ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                            : null,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      }
+    }
+
+    // Default text rendering
+    return SelectableLinkify(
+      text: content,
+      onOpen: (link) async {
+        final uri = Uri.tryParse(link.url);
+        if (uri != null) {
+          if (await canLaunchUrl(uri)) {
+             await launchUrl(uri, mode: LaunchMode.externalApplication);
+          }
+        }
+      },
+      style: GoogleFonts.inter(
+        fontSize: 15,
+        color: textColor.withValues(alpha: 0.9),
+        height: 1.4,
+      ),
+      linkStyle: GoogleFonts.inter(color: Colors.blueAccent, decoration: TextDecoration.underline),
+    );
+  }
+
 
   @override
   void initState() {
@@ -180,11 +265,15 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       } else {
         await _supabaseService.savePost(widget.post['id'].toString(), widget.userEmail);
       }
+      
+      if (!mounted) return;
+      
       setState(() => _isSaved = !_isSaved);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_isSaved ? 'Post saved!' : 'Post unsaved')),
+        SnackBar(content: Text(_isSaved ? 'Post saved' : 'Post unsaved')),
       );
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
       );
@@ -245,17 +334,20 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       _commentFocusNode.unfocus();
       await _loadData(); // Refresh comments
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e')),
       );
     } finally {
-      setState(() => _isSubmitting = false);
+      if (mounted) setState(() => _isSubmitting = false);
     }
+
   }
 
   @override
   void dispose() {
     _commentController.dispose();
+    _commentFocusNode.dispose();
     super.dispose();
   }
 
@@ -594,16 +686,20 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     );
   }
 
-  Widget _buildCommentCard(Map<String, dynamic> comment, bool isDark) {
+  Widget _buildCommentCard(Map<String, dynamic> comment, bool isDark, {int depth = 0}) {
+    final textColor = isDark ? Colors.white : Colors.black87;
     final authorName = comment['author_name'] ?? comment['author_email']?.split('@')[0] ?? 'User';
     final content = comment['content'] ?? '';
     final createdAt = comment['created_at'] != null 
         ? DateTime.parse(comment['created_at']) 
         : DateTime.now();
 
-    final replies = comment['replies'] as List<Map<String, dynamic>>? ?? [];
+    final rawReplies = comment['replies'];
+    final replies = (rawReplies is List)
+        ? rawReplies.map((r) => r as Map<String, dynamic>).toList()
+        : <Map<String, dynamic>>[];
     final hasReplies = replies.isNotEmpty;
-    final commentId = comment['id']?.toString() ?? '';
+    final commentId = comment['id']?.toString() ?? 'comment-${createdAt.toIso8601String()}-$authorName';
     final isExpanded = _expandedCommentIds.contains(commentId);
 
     return Padding(
@@ -682,20 +778,25 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                           ),
                         ),
                         const Spacer(),
-                        Icon(Icons.more_horiz_rounded, size: 16, color: AppTheme.textMuted),
+                        PopupMenuButton<String>(
+                          icon: Icon(Icons.more_horiz_rounded, size: 16, color: AppTheme.textMuted),
+                          onSelected: (value) {
+                            if (value == 'report') {
+                              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Reported')));
+                            }
+                          },
+                          itemBuilder: (context) => [
+                            const PopupMenuItem(value: 'report', child: Text('Report')),
+                          ],
+                        ),
                       ],
                     ),
                     const SizedBox(height: 4),
                     
                     // Comment Body
-                    Text(
-                      content,
-                      style: GoogleFonts.inter(
-                        fontSize: 15,
-                        color: isDark ? Colors.white.withValues(alpha: 0.9) : Colors.black87,
-                        height: 1.4,
-                      ),
-                    ),
+                    // Comment Body
+                    _buildCommentContent(content, isDark, textColor),
+
                     const SizedBox(height: 8),
                     
                     // Actions Row: Reactions + Reply
@@ -779,13 +880,21 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           if (hasReplies && isExpanded)
             Padding(
               padding: const EdgeInsets.only(left: 44, top: 12), // Indent replies
-              child: ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: replies.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 12),
-                itemBuilder: (context, index) => _buildCommentCard(replies[index], isDark),
-              ),
+              child: depth < 3 
+                ? ListView.separated(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    itemCount: replies.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 12),
+                    itemBuilder: (context, index) => _buildCommentCard(replies[index], isDark, depth: depth + 1),
+                  )
+                : TextButton(
+                    onPressed: () {
+                      // Navigate to thread detail or expand further (not implemented)
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Deep thread view not implemented')));
+                    },
+                    child: Text('View ${replies.length} more replies'),
+                  ),
             ),
         ],
       ),
@@ -799,11 +908,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
      // For now, show a placeholder message
      setState(() => _isSubmitting = true);
      try {
-       // TODO: Upload sticker to storage and get URL
-       // For now, just show the file path as content
+       final bytes = await stickerFile.readAsBytes();
+       final filename = 'sticker_${DateTime.now().millisecondsSinceEpoch}.png';
+       
+       final url = await CloudinaryService.uploadBytes(bytes, filename);
+       
        await _supabaseService.addPostComment(
          postId: widget.post['id'].toString(),
-         content: '📝 [Sticker sent]',
+         content: '![Sticker]($url)',
          userEmail: widget.userEmail,
          userName: _authService.displayName ?? widget.userEmail.split('@')[0],
          parentId: _replyToId,
@@ -815,12 +927,13 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
        });
        await _loadData();
      } catch (e) {
-       ScaffoldMessenger.of(context).showSnackBar(
-         SnackBar(content: Text('Error sending GIF: $e')),
-       );
-     } finally {
-       setState(() => _isSubmitting = false);
-     }
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error sending sticker: $e')),
+        );
+      } finally {
+        if (mounted) setState(() => _isSubmitting = false);
+      }
   }
 
   Widget _buildCommentInput(bool isDark) {

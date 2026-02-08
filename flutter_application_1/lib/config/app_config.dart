@@ -26,5 +26,47 @@ class AppConfig {
   // Support Email
   static const String supportEmail = 'support@mystudyspace.me';
   // Giphy API Key (Get from Giphy Developers Dashboard: developers.giphy.com)
-  static const String giphyApiKey = 'E2CYfJbrw5NGA8aUUN2d8nDn4Q6PoH77';
+  static const String giphyApiKey = String.fromEnvironment('GIPHY_API_KEY');
+  
+  // Google Sign-In Server Client ID (Web Client ID)
+  static const String googleServerClientId = String.fromEnvironment('GOOGLE_SERVER_CLIENT_ID');
+
+  /// Validates that critical environment variables are set.
+  /// Call this at the start of the app (e.g. in main.dart).
+  /// Returns a [ValidationResult] containing any errors or warnings.
+  static ValidationResult validate() {
+    final errors = <String>[];
+    final warnings = <String>[];
+    
+    // Critical: Supabase
+    if (supabaseUrl.isEmpty || supabaseUrl == 'https://your-project.supabase.co') {
+      errors.add('Supabase URL is not configured');
+    }
+    if (supabaseAnonKey.isEmpty || supabaseAnonKey == 'your-anon-key') {
+      errors.add('Supabase Anon Key is not configured');
+    }
+
+    // Optional: GIPHY_API_KEY - GIF picker won't work without it
+    if (giphyApiKey.isEmpty) {
+      warnings.add('GIPHY_API_KEY not set - GIF features will be disabled');
+    }
+    
+    // Optional: GOOGLE_SERVER_CLIENT_ID
+    if (googleServerClientId.isEmpty) {
+      warnings.add('GOOGLE_SERVER_CLIENT_ID not set - Google Sign-In may not work');
+    }
+    
+    return ValidationResult(errors, warnings);
+  }
+}
+
+class ValidationResult {
+  final List<String> errors;
+  final List<String> warnings;
+  
+  ValidationResult(List<String> errors, List<String> warnings)
+      : errors = List.unmodifiable(errors),
+        warnings = List.unmodifiable(warnings);
+  
+  bool get isValid => errors.isEmpty;
 }

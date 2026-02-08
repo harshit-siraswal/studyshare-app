@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../config/theme.dart';
 import '../../services/auth_service.dart';
 import '../../services/supabase_service.dart';
@@ -37,9 +36,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   FollowStatus _followStatus = FollowStatus.notFollowing;
   bool _followLoading = false;
   List<Resource> _userResources = [];
-  
-  // Note: Bio not yet in DB
-  final String _bio = "Computer Science Student | Tech Enthusiast"; 
+  String? _fetchedPhotoUrl;
+  String? _fetchedBio;
+  String? _fetchedDisplayName; 
 
   @override
   void initState() {
@@ -56,29 +55,38 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     try {
       final currentUserEmail = _authService.userEmail;
 
-      final results = await Future.wait([
+      // 1. Parallelize independent fetches
+      final futures = await Future.wait([
         _supabaseService.getUserStats(widget.userEmail),
         _supabaseService.getFollowersCount(widget.userEmail),
         _supabaseService.getFollowingCount(widget.userEmail),
         _supabaseService.getUserResources(widget.userEmail),
-        (currentUserEmail != null)
-            ? _supabaseService.getFollowStatus(currentUserEmail, widget.userEmail)
-            : Future.value(FollowStatus.notFollowing),
+        _supabaseService.getUserInfo(widget.userEmail), // Fetch user info including photo
+        // If logged in, fetch follow status in parallel too
+        if (currentUserEmail != null) 
+          _supabaseService.getFollowStatus(currentUserEmail, widget.userEmail)
+        else 
+          Future.value(FollowStatus.notFollowing)
       ]);
-
-      final stats = results[0] as Map<String, int>;
-      final followers = results[1] as int;
-      final following = results[2] as int;
-      final resources = results[3] as List<Resource>;
-      final status = results[4] as FollowStatus;
-
+      
+      // 2. Destructure results
+      final stats = futures[0] as Map<String, dynamic>;
+      final followers = futures[1] as int;
+      final following = futures[2] as int;
+      final resources = futures[3] as List<Resource>;
+      final userInfo = futures[4] as Map<String, dynamic>?;
+      final status = futures[5] as FollowStatus;
       if (mounted) {
         setState(() {
-          _uploadCount = stats['uploads'] ?? 0;
+          _uploadCount = stats['uploads'] ?? stats['contributions'] ?? 0;
           _followersCount = followers;
           _followingCount = following;
           _userResources = resources;
           _followStatus = status;
+          final photo = userInfo?['profile_photo_url'] ?? userInfo?['photo_url'];
+          _fetchedPhotoUrl = photo?.toString();
+          _fetchedBio = userInfo?['bio'] as String?;
+          _fetchedDisplayName = userInfo?['display_name'] as String?;
           _isLoading = false;
         });
       }
@@ -93,13 +101,28 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     }
   }
 
-  String get _displayName => widget.userName ?? widget.userEmail.split('@')[0];
+  Future<void> _refreshResourcesOnly() async {
+    try {
+      final resources = await _supabaseService.getUserResources(widget.userEmail);
+      if (mounted) {
+        setState(() {
+          _userResources = resources;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error refreshing resources: $e');
+    }
+  }
+
+  String get _displayName => _fetchedDisplayName ?? widget.userName ?? widget.userEmail.split('@')[0];
   String get _avatarLetter => _displayName.isNotEmpty ? _displayName[0].toUpperCase() : 'U';
+  String? get _photoUrl => _fetchedPhotoUrl ?? widget.userPhotoUrl;
+  String get _bio => _fetchedBio ?? 'No bio yet';
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgColor = isDark ? AppTheme.darkBackground : AppTheme.lightBackground;
+    final bgColor = isDark ? Colors.black : AppTheme.lightBackground;
     final cardColor = isDark ? AppTheme.darkCard : Colors.white;
     final textColor = isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
 
@@ -203,11 +226,16 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                 decoration: BoxDecoration(
                                   color: AppTheme.primary,
                                   shape: BoxShape.circle,
-                                  image: widget.userPhotoUrl != null 
-                                      ? DecorationImage(image: NetworkImage(widget.userPhotoUrl!), fit: BoxFit.cover)
-                                      : null,
-                                ),
-                                child: widget.userPhotoUrl == null
+                                image: _photoUrl != null 
+                                    ? DecorationImage(
+                                        image: NetworkImage(_photoUrl!),
+                                        fit: BoxFit.cover,
+                                        onError: (exception, stackTrace) {
+                                          debugPrint('Failed to load avatar: $exception');
+                                        },
+                                      )
+                                    : null,                                ),
+                                child: _photoUrl == null
                                   ? Center(
                                       child: Text(
                                         _avatarLetter,
@@ -319,7 +347,17 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                            resource: resource,
                                            userEmail: widget.userEmail,
                                            onVoteChanged: () {
-                                             _loadUserProfile();
+                                             // Optimistic / Local update instead of full reload
+                                             // We can't easily know the new vote count from here without passing it back, 
+                                             // but usually the Card handles the immediate UI cache. 
+                                             // If we want to reflect it in THIS list without reload, we would need the new state.
+                                             // Assuming the ResourceCard handles its own display state, we might just need
+                                             // to update our local data model if we want to persist it across scrolls.
+                                             
+                                             // Re-fetching just resources would be lighter than full profile
+                                             // But ideally we just update the specific item if we had the ID and new values.
+                                             // For now, let's just fetch resources to be safe but not the whole profile stats
+                                             _refreshResourcesOnly();
                                            },
                                          ),
                                        ),
@@ -353,13 +391,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         onTap = _toggleFollow;
         break;
       case FollowStatus.pending:
-        text = 'Requested';
-        bgColor = Colors.transparent;
-        textColor = isDark ? Colors.white70 : Colors.black54;
-        onTap = _toggleFollow;
-        break;
       case FollowStatus.notFollowing:
-      default:
         text = 'Follow';
         bgColor = isDark ? Colors.white : Colors.black;
         textColor = isDark ? Colors.black : Colors.white;
@@ -394,24 +426,27 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
   Widget _buildXStat(String value, String label, Color textColor, bool isDark, VoidCallback? onTap) {
     final secondaryColor = isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary;
-    return GestureDetector(
+    return InkWell(
       onTap: onTap,
-      child: Row(
-        children: [
-          Text(
-            value,
-            style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: textColor),
-          ),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: GoogleFonts.inter(color: secondaryColor),
-          ),
-        ],
+      borderRadius: BorderRadius.circular(4),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+        child: Row(
+          children: [
+            Text(
+              value,
+              style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: textColor),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              label,
+              style: GoogleFonts.inter(color: secondaryColor),
+            ),
+          ],
+        ),
       ),
     );
   }
-
   Widget _buildEmptyState(Color cardColor, bool isDark) {
     return Container(
       padding: const EdgeInsets.all(32),
@@ -441,29 +476,43 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       return;
     }
 
-    setState(() => _followLoading = true);
+    // 1. Calculate optimistic state
+    final oldStatus = _followStatus;
+    final oldFollowers = _followersCount;
+    
+    final isFollowing = oldStatus == FollowStatus.following;
+    
+    // OPTIMISTIC UPDATE
+    setState(() {
+      _followLoading = true;
+      if (isFollowing) {
+        _followStatus = FollowStatus.notFollowing;
+        _followersCount = (_followersCount - 1).clamp(0, 999999);
+      } else {
+        // Assume pending for request flow
+        _followStatus = FollowStatus.pending; 
+      }
+    });
 
     try {
-      if (_followStatus == FollowStatus.notFollowing) {
-        // Send Request
+      if (isFollowing) {
+        await _supabaseService.unfollowUser(widget.userEmail);
+      } else {
         await _supabaseService.sendFollowRequest(currentUserEmail, widget.userEmail);
-        setState(() => _followStatus = FollowStatus.pending);
-      } else if (_followStatus == FollowStatus.pending) {
-        // Cancel Request
-        await _supabaseService.cancelFollowRequest(currentUserEmail, widget.userEmail);
-        setState(() => _followStatus = FollowStatus.notFollowing);
-      } else if (_followStatus == FollowStatus.following) {
-        // Unfollow
-        await _supabaseService.unfollowUser(currentUserEmail, widget.userEmail);
-        setState(() {
-          _followStatus = FollowStatus.notFollowing;
-          if (_followersCount > 0) _followersCount--;
-        });
       }
+      // Success - just turn off loading
+      if(mounted) setState(() => _followLoading = false);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Action failed. Please try again.')));
-    } finally {
-      if (mounted) setState(() => _followLoading = false);
+      // REVERT
+      debugPrint('Follow action failed: $e');
+      if (mounted) {
+        setState(() {
+           _followStatus = oldStatus;
+           _followersCount = oldFollowers;
+           _followLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Action failed. Please try again.')));
+      }
     }
   }
 }

@@ -164,9 +164,9 @@ class RoomCard extends StatelessWidget {
                 ],
               ),
             ),
-          ),        ],
-      ),
-    );
+          ),
+        ],
+      ),    );
   }
 
   Widget _buildTagChip(String label, bool isDark, {bool isPlaceholder = false}) {

@@ -4,6 +4,7 @@ import 'package:shimmer/shimmer.dart';
 import '../../config/theme.dart';
 import '../../services/supabase_service.dart';
 import '../viewer/pdf_viewer_screen.dart';
+import '../../data/syllabus_subjects_data.dart'; // Import the new data file
 
 class SyllabusScreen extends StatefulWidget {
   final String collegeId;
@@ -27,35 +28,79 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
   final SupabaseService _supabaseService = SupabaseService();
   
   List<Map<String, dynamic>> _syllabusItems = [];
-  bool _isLoading = true;
+  bool _isLoading = false; 
+  bool _hasFetched = false;
+  
+  // Selection State
   String? _selectedSemester;
-  List<String> _availableSemesters = [];
+  String? _selectedSubject;
+  
+  // Available Options
+  final List<String> _semesters = ['1', '2', '3', '4', '5', '6', '7', '8'];
+  List<String> _availableSubjects = [];
 
   @override
   void initState() {
     super.initState();
-    _loadSyllabus();
+    // No initial load - wait for user selection
+    // But we sort _semesters just in case (already sorted)
   }
 
-  Future<void> _loadSyllabus() async {
+  void _onSemesterChanged(String? newValue) {
+    if (newValue == null || newValue == _selectedSemester) return;
+    
+    setState(() {
+      _selectedSemester = newValue;
+      _selectedSubject = null; // Reset subject
+      _availableSubjects = _getSubjectsForBranch();
+      _syllabusItems = []; // Clear list until subject selected
+      _hasFetched = false;
+    });
+  }
+
+  void _onSubjectChanged(String? newValue) {
+    if (newValue == null || newValue == _selectedSubject) return;
+    
+    setState(() {
+      _selectedSubject = newValue;
+    });
+    
+    _fetchSyllabus();
+  }
+  List<String> _getSubjectsForBranch() {
+    // Map 'CSE' -> 'cse' for lookup
+    final branchKey = widget.department.toLowerCase();
+    
+    // Convert string to Branch enum safely
+    final branch = Branch.values.cast<Branch?>().firstWhere(
+      (e) => e?.name == branchKey,
+      orElse: () => null,
+    );
+    if (branch == null) return [];
+    
+    final subjects = syllabusSubjects[branch] ?? [];
+    return List<String>.from(subjects)..sort();
+  }
+
+  Future<void> _fetchSyllabus() async {
+    if (_selectedSemester == null || _selectedSubject == null) return;
+
+    setState(() {
+      _isLoading = true;
+      _hasFetched = true;
+    });
+
     try {
       final items = await _supabaseService.getSyllabus(
         collegeId: widget.collegeId,
         department: widget.department,
+        semester: _selectedSemester,
+        subject: _selectedSubject,
       );
-      
-      // Extract unique semesters
-      final semesters = items
-          .map((item) => item['semester']?.toString() ?? '')
-          .where((sem) => sem.isNotEmpty)
-          .toSet()
-          .toList();
-      semesters.sort();
       
       if (mounted) {
         setState(() {
           _syllabusItems = items;
-          _availableSemesters = semesters;
           _isLoading = false;
         });
       }
@@ -67,13 +112,6 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
         );
       }
     }
-  }
-
-  List<Map<String, dynamic>> get _filteredItems {
-    if (_selectedSemester == null) return _syllabusItems;
-    return _syllabusItems.where((item) {
-      return item['semester']?.toString() == _selectedSemester;
-    }).toList();
   }
 
   @override
@@ -124,7 +162,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
                     overflow: TextOverflow.ellipsis,
                   ),
                   Text(
-                    '${_syllabusItems.length} items',
+                    'Select Semester & Subject',
                     style: GoogleFonts.inter(
                       fontSize: 12,
                       color: AppTheme.textMuted,
@@ -138,66 +176,119 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
       ),
       body: Column(
         children: [
-          // Semester filter chips
-          if (_availableSemesters.isNotEmpty)
-            Container(
-              height: 50,
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                itemCount: _availableSemesters.length + 1, // +1 for "All"
-                separatorBuilder: (_, __) => const SizedBox(width: 8),
-                itemBuilder: (context, index) {
-                  if (index == 0) {
-                    return _buildSemesterChip('All', null, isDark);
-                  }
-                  return _buildSemesterChip(
-                    'Sem ${_availableSemesters[index - 1]}',
-                    _availableSemesters[index - 1],
-                    isDark,
-                  );
-                },
-              ),
+          // Filters Section
+          Container(
+            color: isDark ? AppTheme.darkCard : Colors.white,
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              children: [
+                // Semester Dropdown
+                _buildDropdown(
+                  label: 'Semester',
+                  value: _selectedSemester,
+                  items: _semesters,
+                  onChanged: _onSemesterChanged,
+                  icon: Icons.calendar_today_rounded,
+                  isDark: isDark,
+                  hint: 'Select Semester',
+                ),
+                
+                const SizedBox(height: 12),
+                
+                // Subject Dropdown
+                _buildDropdown(
+                  label: 'Subject',
+                  value: _selectedSubject,
+                  items: _availableSubjects,
+                  onChanged: _onSubjectChanged,
+                  icon: Icons.book_rounded,
+                  isDark: isDark,
+                  hint: _selectedSemester == null 
+                      ? 'Select Semester First' 
+                      : (_availableSubjects.isEmpty ? 'No subjects found' : 'Select Subject'),
+                  isDisabled: _selectedSemester == null,
+                ),
+              ],
             ),
+          ),
           
-          const SizedBox(height: 8),
+          const Divider(height: 1),
           
           // Content
           Expanded(
             child: _isLoading
                 ? _buildShimmerLoading(isDark)
-                : _filteredItems.isEmpty
-                    ? _buildEmptyState(isDark)
-                    : _buildSyllabusList(isDark),
+                : (!_hasFetched)
+                    ? _buildInitialState(isDark)
+                    : _syllabusItems.isEmpty
+                        ? _buildEmptyState(isDark)
+                        : _buildSyllabusList(isDark),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildSemesterChip(String label, String? value, bool isDark) {
-    final isSelected = _selectedSemester == value;
-    
-    return FilterChip(
-      label: Text(label),
-      selected: isSelected,
-      onSelected: (_) {
-        setState(() => _selectedSemester = value);
-      },
-      backgroundColor: isDark ? AppTheme.darkCard : Colors.white,
-      selectedColor: widget.departmentColor.withValues(alpha: 0.2),
-      checkmarkColor: widget.departmentColor,
-      labelStyle: GoogleFonts.inter(
-        fontSize: 13,
-        fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-        color: isSelected 
-            ? widget.departmentColor 
-            : (isDark ? Colors.white : Colors.black),
+  Widget _buildDropdown({
+    required String label,
+    required String? value,
+    required List<String> items,
+    required Function(String?) onChanged,
+    required IconData icon,
+    required bool isDark,
+    String? hint,
+    bool isDisabled = false,
+  }) {
+    // Dropdown styling colors
+    final borderColor = isDark ? AppTheme.darkBorder : AppTheme.lightBorder;
+    final bgColor = isDark ? AppTheme.darkBackground : Colors.grey[50];
+    final textColor = isDark ? Colors.white : Colors.black;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: isDisabled ? (isDark ? Colors.white10 : Colors.grey[100]) : bgColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderColor),
       ),
-      side: BorderSide(
-        color: isSelected 
-            ? widget.departmentColor 
-            : (isDark ? AppTheme.darkBorder : AppTheme.lightBorder),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: value,
+          isExpanded: true,
+          hint: Row(
+            children: [
+              Icon(icon, size: 18, color: AppTheme.textMuted),
+              const SizedBox(width: 10),
+              Text(
+                hint ?? label,
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  color: AppTheme.textMuted,
+                ),
+              ),
+            ],
+          ),
+          icon: Icon(Icons.arrow_drop_down_rounded, color: isDisabled ? Colors.grey : widget.departmentColor),
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: textColor,
+          ),
+          dropdownColor: isDark ? AppTheme.darkCard : Colors.white,
+          onChanged: isDisabled ? null : onChanged,
+          items: items.map((String item) {
+            return DropdownMenuItem<String>(
+              value: item,
+              child: Row(
+                children: [
+                  Icon(icon, size: 18, color: value == item ? widget.departmentColor : AppTheme.textMuted),
+                  const SizedBox(width: 10),
+                  Text(item),
+                ],
+              ),
+            );
+          }).toList(),
+        ),
       ),
     );
   }
@@ -221,6 +312,39 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
     );
   }
 
+  Widget _buildInitialState(bool isDark) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.filter_list_rounded,
+            size: 64,
+            color: widget.departmentColor.withValues(alpha: 0.3),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Select Filters',
+            style: GoogleFonts.inter(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white : Colors.black,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Choose a Semester and Subject\nto view syllabus documents',
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              color: AppTheme.textMuted,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildEmptyState(bool isDark) {
     return Center(
       child: Column(
@@ -232,8 +356,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
             color: AppTheme.textMuted.withValues(alpha: 0.5),
           ),
           const SizedBox(height: 16),
-          Text(
-            'No syllabus available',
+          Text(            'No documents found',
             style: GoogleFonts.inter(
               fontSize: 18,
               fontWeight: FontWeight.w600,
@@ -242,9 +365,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            _selectedSemester == null
-                ? 'Syllabus for ${widget.departmentName} will be uploaded soon'
-                : 'No syllabus for Semester $_selectedSemester',
+            'No syllabus available for\n${_selectedSubject ?? 'Unknown'} (Sem ${_selectedSemester ?? '?'})',
             style: GoogleFonts.inter(
               fontSize: 14,
               color: AppTheme.textMuted,
@@ -259,10 +380,10 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
   Widget _buildSyllabusList(bool isDark) {
     return ListView.separated(
       padding: const EdgeInsets.all(16),
-      itemCount: _filteredItems.length,
+      itemCount: _syllabusItems.length,
       separatorBuilder: (_, __) => const SizedBox(height: 12),
       itemBuilder: (context, index) {
-        final item = _filteredItems[index];
+        final item = _syllabusItems[index];
         return _buildSyllabusCard(item, isDark);
       },
     );
@@ -271,13 +392,18 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
   Widget _buildSyllabusCard(Map<String, dynamic> item, bool isDark) {
     final title = item['title'] ?? item['name'] ?? 'Syllabus Document';
     final semester = item['semester']?.toString() ?? '';
-    final fileUrl = item['file_url'] ?? item['url'] ?? '';
+    final fileUrl = item['pdf_url'] ?? item['file_url'] ?? item['url'] ?? ''; // Web uses 'pdf_url'
     final subject = item['subject'] ?? '';
+    
+    // Note: 'pdf_url' seems to be the key in Web (SyllabusItem interface)
+    // SupabaseService generally returns raw JSON, so check DB keys if needed. 
+    // Usually 'url' or 'file_url'. I added fallback to 'pdf_url'.
 
     return Material(
       color: isDark ? AppTheme.darkCard : Colors.white,
       borderRadius: BorderRadius.circular(12),
-      child: InkWell(
+      elevation: 2,
+      shadowColor: Colors.black.withValues(alpha: 0.05),      child: InkWell(
         onTap: () {
           if (fileUrl.isNotEmpty) {
             Navigator.push(
@@ -298,29 +424,23 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
         borderRadius: BorderRadius.circular(12),
         child: Container(
           padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
-            ),
-          ),
           child: Row(
             children: [
               // PDF Icon
               Container(
-                width: 48,
-                height: 48,
+                width: 50,
+                height: 50,
                 decoration: BoxDecoration(
                   color: widget.departmentColor.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
                   Icons.picture_as_pdf_rounded,
                   color: widget.departmentColor,
-                  size: 24,
+                  size: 26,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 16),
               
               // Content
               Expanded(
@@ -331,44 +451,30 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
                       title,
                       style: GoogleFonts.inter(
                         fontWeight: FontWeight.w600,
-                        fontSize: 14,
+                        fontSize: 15,
                         color: isDark ? Colors.white : Colors.black,
+                        height: 1.3,
                       ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 6),
                     Row(
                       children: [
-                        if (semester.isNotEmpty)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: widget.departmentColor.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(4),
+                        _buildTag('Sem $semester', isDark),
+                        const SizedBox(width: 8),
+                         Expanded(
+                           child: Text(
+                            subject,
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              color: AppTheme.textMuted,
+                              fontWeight: FontWeight.w500,
                             ),
-                            child: Text(
-                              'Sem $semester',
-                              style: GoogleFonts.inter(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                color: widget.departmentColor,
-                              ),
-                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        if (semester.isNotEmpty && subject.isNotEmpty)
-                          const SizedBox(width: 8),
-                        if (subject.isNotEmpty)
-                          Expanded(
-                            child: Text(
-                              subject,
-                              style: GoogleFonts.inter(
-                                fontSize: 12,
-                                color: AppTheme.textMuted,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
+                         ),
                       ],
                     ),
                   ],
@@ -378,11 +484,30 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
               // Arrow
               Icon(
                 Icons.chevron_right_rounded,
-                color: AppTheme.textMuted,
+                color: AppTheme.textMuted.withValues(alpha: 0.5),
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+  
+  Widget _buildTag(String text, bool isDark) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white10 : Colors.grey[100],
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: isDark ? Colors.white24 : Colors.grey[200]!),
+      ),
+      child: Text(
+         text,
+         style: GoogleFonts.inter(
+           fontSize: 11,
+           fontWeight: FontWeight.w600,
+           color: isDark ? Colors.white70 : Colors.grey[700],
+         ),
       ),
     );
   }

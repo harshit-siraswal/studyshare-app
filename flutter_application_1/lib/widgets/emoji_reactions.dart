@@ -3,7 +3,6 @@ import 'package:google_fonts/google_fonts.dart';
 import '../config/theme.dart';
 import '../services/supabase_service.dart';
 import '../services/auth_service.dart';
-
 /// A widget that displays emoji reactions for a comment.
 /// Shows reaction counts and allows users to add/remove their reactions.
 class EmojiReactions extends StatefulWidget {
@@ -70,7 +69,6 @@ class _EmojiReactionsState extends State<EmojiReactions> {
       }
     }
   }
-
   Future<void> _toggleReaction(String emoji) async {
     if (_currentUserEmail == null) return;
     

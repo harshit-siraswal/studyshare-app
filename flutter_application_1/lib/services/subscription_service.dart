@@ -22,14 +22,27 @@ class SubscriptionService {
     _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
   }
 
+  Future<void> _clearPremiumCache(SharedPreferences prefs) async {
+    await prefs.remove('premium_until');
+    await prefs.remove('premium_tier');
+    await prefs.remove('premium_email');
+  }
+
   void dispose() {
     _razorpay.clear();
   }
 
   /// Checks if the user is currently premium
   Future<bool> isPremium() async {
+    final email = _firebaseAuth.currentUser?.email;
+    if (email == null) return false;
+
     // 1. Check local cache first for immediate responsiveness
     final prefs = await SharedPreferences.getInstance();
+    final cachedEmail = prefs.getString('premium_email');
+    if (cachedEmail != email) {
+      await _clearPremiumCache(prefs);
+    }
     final localPremiumUntilStr = prefs.getString('premium_until');
     
     if (localPremiumUntilStr != null) {
@@ -74,6 +87,7 @@ class SubscriptionService {
         // Map backend tier to local usage if needed, or just store it
         await prefs.setString('premium_tier', tier);
       }
+      await prefs.setString('premium_email', email);
       
       // Sync expiry to local cache
       await prefs.setString('premium_until', premiumUntilStr);
@@ -210,6 +224,10 @@ class SubscriptionService {
         await prefs.setString('premium_tier', _pendingPlanId!);
       } else if (result.containsKey('plan')) {
          await prefs.setString('premium_tier', result['plan']);
+      }
+      final email = _firebaseAuth.currentUser?.email;
+      if (email != null) {
+        await prefs.setString('premium_email', email);
       }
 
       // Calculate new expiry date locally to allow immediate access

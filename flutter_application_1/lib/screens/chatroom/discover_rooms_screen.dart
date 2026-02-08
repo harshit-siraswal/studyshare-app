@@ -30,6 +30,13 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
   
   List<Map<String, dynamic>> _rooms = [];
   bool _isLoading = true;
+  
+  bool get _isReadOnly {
+    final email = widget.userEmail;
+    final domain = widget.collegeDomain;
+    if (domain.isEmpty) return true;
+    return !email.endsWith(domain);
+  }
 
   @override
   void initState() {
@@ -53,13 +60,13 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
       );
       final joinedIds = await _supabaseService.getUserRoomIds(widget.userEmail);
       
-      // Filter strictly for public rooms AND not joined
+      // Show only public rooms that the user hasn't joined yet
       final publicRooms = rooms.where((r) {
-        final isPrivate = r['is_private'] == true; // Handles null as false (public)
-        final roomId = r['id']?.toString() ?? '';
-        return !isPrivate && !joinedIds.contains(roomId);
+        final isPrivate = r['is_private'] == true;
+        final roomId = r['id'];
+        return !isPrivate && roomId != null && !joinedIds.contains(roomId.toString());
       }).toList();
-      
+
       if (mounted) {
         setState(() {
           _rooms = publicRooms;
@@ -97,11 +104,12 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
           ),
         ),
         actions: [
-          IconButton(
-            icon: Icon(Icons.lock_open_rounded, color: isDark ? Colors.white : Colors.black),
-            onPressed: _showJoinRoomDialog,
-            tooltip: 'Join by Code',
-          ),
+          if (!_isReadOnly)
+            IconButton(
+              icon: Icon(Icons.lock_open_rounded, color: isDark ? Colors.white : Colors.black),
+              onPressed: _showJoinRoomDialog,
+              tooltip: 'Join by Code',
+            ),
         ],
       ),
       body: Column(
@@ -159,18 +167,26 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        heroTag: 'fab_main',
-        onPressed: _showCreateRoomDialog,
-        backgroundColor: AppTheme.primary,
-        child: const Icon(Icons.add, color: Colors.white),
-      ),
+      floatingActionButton: _isReadOnly
+          ? null
+          : FloatingActionButton(
+              heroTag: 'fab_main',
+              onPressed: _showCreateRoomDialog,
+              backgroundColor: AppTheme.primary,
+              child: const Icon(Icons.add, color: Colors.white),
+            ),
     );
   }
 
 
 
   void _showJoinRoomDialog() {
+     if (_isReadOnly) {
+       ScaffoldMessenger.of(context).showSnackBar(
+         const SnackBar(content: Text('Read-only access. Use your college email to join rooms.')),
+       );
+       return;
+     }
      final isDark = Theme.of(context).brightness == Brightness.dark;
      final codeController = TextEditingController();
      
@@ -215,6 +231,12 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
   }
   
   void _showCreateRoomDialog() {
+      if (_isReadOnly) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Read-only access. Use your college email to create rooms.')),
+        );
+        return;
+      }
       final isDark = Theme.of(context).brightness == Brightness.dark;
       final nameCtrl = TextEditingController();
       final descCtrl = TextEditingController();

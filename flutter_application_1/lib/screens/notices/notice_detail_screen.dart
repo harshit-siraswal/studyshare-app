@@ -13,9 +13,9 @@ import '../../config/theme.dart';
 import '../../services/supabase_service.dart';
 import '../../services/auth_service.dart';
 import '../../models/department_account.dart';
-import '../../widgets/emoji_reactions.dart';
 import '../profile/user_profile_screen.dart';
-import '../../widgets/comment_input_box.dart'; // Added
+import '../../widgets/comment_input_box.dart'; 
+import '../../services/cloudinary_service.dart';
 
 class NoticeDetailScreen extends StatefulWidget {
   final Map<String, dynamic> notice;
@@ -518,12 +518,12 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
               width: double.infinity,
               placeholder: (context, url) => Container(
                 height: 200,
-                color: Colors.grey.withOpacity(0.1),
+                color: Colors.grey.withValues(alpha: 0.1),
                 child: const Center(child: CircularProgressIndicator()),
               ),
               errorWidget: (context, url, error) => Container(
                 height: 200,
-                color: Colors.grey.withOpacity(0.1),
+                color: Colors.grey.withValues(alpha: 0.1),
                 child: const Icon(Icons.error),
               ),
             ),
@@ -553,7 +553,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                     fit: BoxFit.cover,
                     placeholder: (context, url) => Container(
                       width: 200,
-                      color: Colors.grey.withOpacity(0.1),
+                      color: Colors.grey.withValues(alpha: 0.1),
                       child: const Center(child: CircularProgressIndicator()),
                     ),
                   ),
@@ -567,13 +567,9 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
   }
 
   Widget _buildCommentTree(Map<String, dynamic> comment, bool isDark, Color textColor, Color secondaryColor) {
-    // Check if this comment is a reply (should be handled by recursion if nested, 
-    // but assuming flat list with parent_id or nested structure from backend)
-    // For now assuming backend returns flat list and we might need to build tree? 
-    // Or backend returns nested 'replies'?
-    // Based on `getNoticeComments` RPC, usually it sends flat list or we need to check.
-    // If usage map(c => _buildCommentTree) suggests flat list of top level threads?
-    // Let's assume `replies` field exists or we just show flat for now if simple.
+    // Backend returns a flat list of comments with 'parent_id'.
+    // The getNoticeComments method already converts this into a nested structure with a 'replies' list.
+    // So here we assume each comment map has a 'replies' key containing a List<Map<String, dynamic>>.
     
     // Check for replies array
     final replies = (comment['replies'] as List?)?.cast<Map<String, dynamic>>() ?? [];
@@ -607,7 +603,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
         children: [
           CircleAvatar(
             radius: 16,
-            backgroundColor: AppTheme.primary.withOpacity(0.2),
+            backgroundColor: AppTheme.primary.withValues(alpha: 0.2),
             child: Text(
               senderName.isNotEmpty ? senderName[0].toUpperCase() : '?',
               style: TextStyle(fontSize: 12, color: AppTheme.primary, fontWeight: FontWeight.bold),
@@ -640,7 +636,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                   content,
                   style: GoogleFonts.inter(
                     fontSize: 14,
-                    color: textColor.withOpacity(0.9),
+                    color: textColor.withValues(alpha: 0.9),
                   ),
                 ),
                 const SizedBox(height: 4),
@@ -648,7 +644,11 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                  Row(
                   children: [
                     GestureDetector(
-                      onTap: () => _initiateReply(commentId, senderName),
+                      onTap: () {
+                        if (commentId.isNotEmpty) {
+                          _initiateReply(commentId, senderName);
+                        }
+                      },
                       child: Text(
                         'Reply',
                         style: GoogleFonts.inter(
@@ -685,21 +685,30 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
      if (_isReadOnly) return;
      
      setState(() => _isPosting = true);
+     
+     // Save reply ID before clearing it
+     final String? parentId = _replyToId;
+     
      try {
-       // TODO: Upload sticker to storage and get URL
-       // For now, just show placeholder message
+       final bytes = await stickerFile.readAsBytes();
+       final filename = 'sticker_${DateTime.now().millisecondsSinceEpoch}.png';
+       
+       final url = await CloudinaryService.uploadBytes(bytes, filename);
+       
+       if (_authService.userEmail == null) throw Exception('User not signed in');
+
        await _supabaseService.addNoticeComment(
          noticeId: widget.notice['id'].toString(),
-         content: '📝 [Sticker sent]',
+         content: '![Sticker]($url)',
          userEmail: _authService.userEmail!,
-         userName: _authService.displayName ??_authService.userEmail!.split('@')[0],
-         parentId: _replyToId,
+         userName: _authService.displayName ?? _authService.userEmail!.split('@')[0],
+         parentId: parentId,
        );
 
        _cancelReply();
        await _loadComments();
        
-       if (_replyToId == null && _scrollController.hasClients) {
+       if (parentId == null && _scrollController.hasClients) {
           _scrollController.animateTo(
             _scrollController.position.maxScrollExtent,
             duration: const Duration(milliseconds: 300),

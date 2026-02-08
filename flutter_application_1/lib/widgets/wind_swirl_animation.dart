@@ -1,7 +1,5 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import '../../config/theme.dart';
-
 class WindSwirlAnimation extends StatefulWidget {
   final double size;
   final VoidCallback onCompleted;

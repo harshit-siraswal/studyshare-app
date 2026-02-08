@@ -6,6 +6,7 @@ import '../../services/supabase_service.dart';
 import 'department_account_screen.dart' as dept_screen;
 import '../../widgets/notice_card.dart';
 import '../../models/department_account.dart';
+import '../../widgets/branded_loader.dart';
 
 class NoticesScreen extends StatefulWidget {
   final String collegeId;
@@ -294,25 +295,74 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
             // Header
             Container(
               color: bgColor,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Notices', 
-                    style: GoogleFonts.inter(
-                      fontSize: 24, 
-                      fontWeight: FontWeight.bold, 
-                      color: isDark ? Colors.white : Colors.black
-                    )
+                  Row(
+                    children: [
+                      Image.asset(
+                        'assets/icon/app_icon.png',
+                        width: 28,
+                        height: 28,
+                        fit: BoxFit.contain,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Notices',
+                              style: GoogleFonts.inter(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: isDark ? Colors.white : Colors.black,
+                              ),
+                            ),
+                            Text(
+                              'Latest updates from your departments',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                color: isDark ? AppTheme.darkTextMuted : AppTheme.lightTextMuted,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: Icon(Icons.calendar_today_rounded, color: isDark ? Colors.white : Colors.black),
+                        onPressed: _showDateFilter,
+                      ),
+                    ],
                   ),
-                  const Spacer(),
-                  IconButton(
-                    icon: Icon(Icons.search_rounded, color: isDark ? Colors.white : Colors.black),
-                    onPressed: () => _showNoticeSearch(isDark),
-                  ),
-                  IconButton(
-                    icon: Icon(Icons.calendar_today_rounded, color: isDark ? Colors.white : Colors.black),
-                    onPressed: _showDateFilter,
+                  const SizedBox(height: 12),
+                  InkWell(
+                    onTap: () => _showNoticeSearch(isDark),
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: isDark ? Colors.white12 : Colors.black12,
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.search_rounded, size: 18, color: isDark ? Colors.white70 : Colors.black54),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Search notices...',
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              color: isDark ? Colors.white54 : Colors.black54,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -329,6 +379,7 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
                 Tab(text: 'Departments'),
               ],
             ),
+            _buildDateFilterHeader(isDark),
             
             // Content
             Expanded(
@@ -529,54 +580,63 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
   }
 
   Widget _buildLoadingSkeleton(bool isDark) {
-    return ListView.builder(
+    return ListView(
       physics: const NeverScrollableScrollPhysics(),
       padding: const EdgeInsets.all(16),
-      itemCount: 5,
-      itemBuilder: (context, index) {
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: Shimmer.fromColors(
-            baseColor: isDark ? const Color(0xFF2C2C2C) : Colors.grey[300]!,
-            highlightColor: isDark ? const Color(0xFF3D3D3D) : Colors.grey[100]!,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 120,
-                        height: 12,
-                        color: Colors.white,
-                      ),
-                      const SizedBox(height: 8),
-                      Container(
-                        width: double.infinity,
-                        height: 60,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+      children: [
+        const Center(
+          child: BrandedLoader(
+            compact: true,
+            showQuotes: false,
+            message: 'Loading notices...',
           ),
-        );
-      },
+        ),
+        const SizedBox(height: 16),
+        ...List.generate(5, (index) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: Shimmer.fromColors(
+              baseColor: isDark ? const Color(0xFF2C2C2C) : Colors.grey[300]!,
+              highlightColor: isDark ? const Color(0xFF3D3D3D) : Colors.grey[100]!,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 120,
+                          height: 12,
+                          color: Colors.white,
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          width: double.infinity,
+                          height: 60,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ],
     );
   }
 
@@ -633,10 +693,15 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
       padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 64),
       children: [
          Center(
-          child: Column(
+         child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.mark_email_unread_outlined, size: 64, color: isDark ? Colors.white24 : Colors.grey.shade300),
+              Image.asset(
+                'assets/icon/app_icon.png',
+                width: 64,
+                height: 64,
+                fit: BoxFit.contain,
+              ),
               const SizedBox(height: 16),
               Text(
                 'No notices found', 
@@ -659,5 +724,3 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
     );
   }
 }
-
-

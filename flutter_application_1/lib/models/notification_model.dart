@@ -1,6 +1,8 @@
+import 'package:flutter/foundation.dart';
 
 class NotificationModel {
   final int id;
+
   final String userId;
   final String type; // 'follow_request', 'resource_posted', etc.
   final String title;
@@ -40,17 +42,22 @@ class NotificationModel {
       title: json['title'] ?? 'Notification',
       message: json['message'] ?? '',
       isRead: json['is_read'] ?? false,
-      createdAt: json['created_at'] != null 
-          ? DateTime.parse(json['created_at']) 
-          : DateTime.now(),
+      createdAt: () {
+        if (json['created_at'] == null) return DateTime.now();
+        final parsed = DateTime.tryParse(json['created_at'].toString());
+        if (parsed == null) {
+          debugPrint('Failed to parse created_at: "${json['created_at']}" for notification id: ${json['id']}');
+          return DateTime.now();
+        }
+        return parsed;
+      }(),
+      data: json['data'] is Map<String, dynamic> ? json['data'] as Map<String, dynamic> : null,
       actionUrl: json['action_url'],
       actorId: json['actor_id']?.toString(),
       actorName: json['actor_name'],
       actorAvatar: json['actor_avatar'],
       followRequestId: json['follow_request_id']?.toString(),
-      actionTaken: json['action_taken'] ?? false,
-      data: json['data'] as Map<String, dynamic>?,
-    );
+      actionTaken: json['action_taken'] ?? false,    );
   }
 
   NotificationModel copyWith({

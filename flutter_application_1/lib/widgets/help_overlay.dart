@@ -130,9 +130,10 @@ class _HelpOverlayState extends State<HelpOverlay> with SingleTickerProviderStat
                           // Title with Icon
                           Row(
                             children: [
-                              Icon(step.icon, color: Colors.white, size: 24),
-                              const SizedBox(width: 12),
-                              Expanded(
+                              ExcludeSemantics(
+                                child: Icon(step.icon, color: Colors.white, size: 24),
+                              ),
+                              const SizedBox(width: 12),                              Expanded(
                                 child: Text(
                                   step.title,
                                   style: GoogleFonts.inter(

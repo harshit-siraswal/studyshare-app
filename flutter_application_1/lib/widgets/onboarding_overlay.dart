@@ -114,20 +114,13 @@ class _OnboardingOverlayState extends State<OnboardingOverlay>
           if (mounted) setState(() => _currentStep = 0);
         });
       }
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _updateSpotlight(); // clear spotlight
-      });
-      return; 
+      return;
     }
-    
+
     if (_currentStep >= widget.steps.length) {
-      // Clamp
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) setState(() => _currentStep = widget.steps.length - 1);
-      });
-      // We can't access widget.steps[_currentStep] yet safely if we just scheduled a setState
-      // But _updateSpotlight uses _currentStep, so we should update it after frame
-      _updateSpotlight(); 
+      // Clamp synchronously to avoid build() accessing invalid index
+      _currentStep = widget.steps.length - 1;
+      _updateSpotlight();
       return;
     }
 
@@ -143,6 +136,12 @@ class _OnboardingOverlayState extends State<OnboardingOverlay>
   void _updateSpotlight() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      
+      // Defensive bounds check to prevent out-of-bounds access
+      if (widget.steps.isEmpty || _currentStep < 0 || _currentStep >= widget.steps.length) {
+        setState(() => _spotlightRect = null);
+        return;
+      }
       
       final targetKey = widget.steps[_currentStep].targetKey;
       if (targetKey == null) {
@@ -426,9 +425,9 @@ class SpotlightPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant SpotlightPainter oldDelegate) {
     return spotlightRect != oldDelegate.spotlightRect ||
-           borderRadius != oldDelegate.borderRadius;
-  }}
-
+        borderRadius != oldDelegate.borderRadius;
+  }
+}
 /// Default onboarding steps for MyStudySpace
 List<OnboardingStep> getDefaultOnboardingSteps() {
   return const [

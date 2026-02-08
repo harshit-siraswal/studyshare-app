@@ -1,22 +1,28 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+import 'dart:async';
+import 'dart:io';
+import 'dart:math';
 import 'dart:ui' as ui;
+
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter_linkify/flutter_linkify.dart';
+import 'package:giphy_picker/giphy_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'dart:io';
-import 'dart:async';
-import 'dart:math';
-import 'package:file_picker/file_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 import '../../config/theme.dart';
-import '../../services/cloudinary_service.dart';
-import '../../services/supabase_service.dart';
 import '../../services/auth_service.dart';
+import '../../services/backend_api_service.dart';
+import '../../services/supabase_service.dart';
+import '../../widgets/full_screen_image_viewer.dart';
 import '../profile/user_profile_screen.dart';
 import 'post_detail_screen.dart';
-import 'package:giphy_picker/giphy_picker.dart';
+import '../../services/cloudinary_service.dart';
 import '../../config/app_config.dart';
-import '../../services/backend_api_service.dart';
-import '../../services/subscription_service.dart';
+
 
 class ChatRoomScreen extends StatefulWidget {
   final String roomId;
@@ -41,6 +47,7 @@ class ChatRoomScreen extends StatefulWidget {
 class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProviderStateMixin {
   final SupabaseService _supabaseService = SupabaseService();
   final AuthService _authService = AuthService();
+  final BackendApiService _backendApiService = BackendApiService();
 
   bool get _isReadOnly {
     final domain = widget.collegeDomain;
@@ -125,13 +132,17 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProvid
       final rawUserRoomIds = results[3];
       final Set<String> memberCheckIds = (rawUserRoomIds is List) 
           ? rawUserRoomIds.map((e) => e.toString()).toSet() 
-          : (rawUserRoomIds as Set).cast<String>();
+          : (rawUserRoomIds is Set) 
+              ? rawUserRoomIds.map((e) => e.toString()).toSet()
+              : <String>{};
 
       // Handle Saved Post IDs (Set or List -> Set)
       final rawSavedPostIds = results[4];
       final Set<String> savedPostIds = (rawSavedPostIds is List)
           ? rawSavedPostIds.map((e) => e.toString()).toSet()
-          : (rawSavedPostIds as Set).cast<String>();
+          : (rawSavedPostIds is Set)
+              ? rawSavedPostIds.map((e) => e.toString()).toSet()
+              : <String>{};
 
       final userVotes = results[5] as Map<String, int>;
       
@@ -162,9 +173,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProvid
   }
 
   Future<void> _joinRoom() async {
+    if (_isReadOnly) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Read-only access. Use your college email to join rooms.')),
+      );
+      return;
+    }
     setState(() => _isLoading = true);
     try {
-      await _supabaseService.joinRoom(widget.roomId);
+      await _backendApiService.joinChatRoomById(widget.roomId);
       
       if (mounted) {
          await _loadRoomData();
@@ -316,27 +333,43 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProvid
 
 
 
+  ImageProvider _getImageProvider(PlatformFile? file, GiphyGif? gif) {
+    if (gif != null) {
+      final url = gif.images.original?.url;
+      if (url != null && url.isNotEmpty) {
+         return NetworkImage(url);
+      }
+    }
+    if (file != null) {
+      if (file.bytes != null) return MemoryImage(file.bytes!);
+      if (file.path != null) return FileImage(File(file.path!));
+    }
+    return const AssetImage('assets/images/placeholder.png');
+  }
+
   @override
   Widget build(BuildContext context) {
-    final isDark = true; // Force dark mode for this screen as per design
+    // Respect system theme/settings
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     
     return Scaffold(
-      backgroundColor: const Color(0xFF0B1015), // Deep dark background
+      backgroundColor: isDark ? const Color(0xFF0B1015) : const Color(0xFFF5F5F7), // Deep dark or light grey
       appBar: AppBar(
-        backgroundColor: const Color(0xFF0B1015),
+        backgroundColor: isDark ? const Color(0xFF0B1015) : Colors.white,
         elevation: 0,
+        iconTheme: IconThemeData(color: isDark ? Colors.white : Colors.black),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          icon: Icon(Icons.arrow_back, color: isDark ? Colors.white : Colors.black),
           onPressed: () => Navigator.pop(context),
         ),
         title: _isSearching
             ? TextField(
-                controller: _searchController, // need to add this controller
+                controller: _searchController, 
                 autofocus: true,
-                style: GoogleFonts.inter(color: Colors.white),
+                style: GoogleFonts.inter(color: isDark ? Colors.white : Colors.black),
                 decoration: InputDecoration(
                   hintText: 'Search posts...',
-                  hintStyle: GoogleFonts.inter(color: Colors.white54),
+                  hintStyle: GoogleFonts.inter(color: isDark ? Colors.white54 : Colors.black54),
                   border: InputBorder.none,
                 ),
                 onChanged: (val) {
@@ -346,19 +379,19 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProvid
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                   Text(
                     widget.roomName,
                     style: GoogleFonts.inter(
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
-                      color: Colors.white,
+                      color: isDark ? Colors.white : Colors.black,
                     ),
                   ),
                 ],
               ),
         actions: [
           IconButton(
-            icon: Icon(_isSearching ? Icons.close : Icons.search, color: Colors.white70),
+            icon: Icon(_isSearching ? Icons.close : Icons.search, color: isDark ? Colors.white70 : Colors.black54),
             onPressed: () {
                setState(() {
                   _isSearching = !_isSearching;
@@ -370,7 +403,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProvid
           ),
           if (!_isSearching)
             IconButton(
-              icon: const Icon(Icons.more_vert, color: Colors.white70),
+              icon: Icon(Icons.more_vert, color: isDark ? Colors.white70 : Colors.black54),
               onPressed: _showRoomInfo,
             ),
         ],
@@ -386,7 +419,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProvid
                    padding: const EdgeInsets.all(12),
                    color: AppTheme.primary.withValues(alpha: 0.1),
                    child: Text(
-                     'Join this room to post and interact.',
+                     _isReadOnly
+                         ? 'Read-only access. Use your college email to join this room.'
+                         : 'Join this room to post and interact.',
                      textAlign: TextAlign.center,
                      style: GoogleFonts.inter(color: AppTheme.primary, fontWeight: FontWeight.w600),
                    ),
@@ -456,15 +491,21 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProvid
               padding: const EdgeInsets.all(16),
               color: const Color(0xFF151922),
               child: SafeArea(
-                child: ElevatedButton(
-                  onPressed: () => _joinRoom(),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                  ),
-                  child: const Text('Join Room', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                ),
+                child: _isReadOnly
+                    ? Text(
+                        'Read-only access. Use your college email to join.',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.inter(color: Colors.white70, fontWeight: FontWeight.w600),
+                      )
+                    : ElevatedButton(
+                        onPressed: () => _joinRoom(),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primary,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                        ),
+                        child: const Text('Join Room', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                      ),
               ),
             )
           : null,
@@ -528,6 +569,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProvid
     final voteScore = upvotes - ((post['downvotes'] ?? 0) as int);
     final commentCount = (post['comment_count'] ?? 0) as int;
     final isSaved = _savedPosts[postId] ?? false;
+
+    final textColor = isDark ? Colors.white : Colors.black;
+    final secondaryTextColor = isDark ? Colors.white38 : Colors.black54;
+    final cardColor = isDark ? const Color(0xFF151922) : Colors.white;
+    final borderColor = isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade200;
     
     return GestureDetector(
       onTap: () {
@@ -546,9 +592,16 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProvid
         margin: const EdgeInsets.only(bottom: 16),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: const Color(0xFF151922),
+          color: cardColor,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+          border: Border.all(color: borderColor),
+          boxShadow: isDark ? null : [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            )
+          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -585,14 +638,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProvid
                             style: GoogleFonts.inter(
                               fontSize: 14, 
                               fontWeight: FontWeight.w600,
-                              color: Colors.white
+                              color: textColor
                             ),
                           ),
                           Text(
                             _formatTime(createdAt),
                             style: GoogleFonts.inter(
                               fontSize: 12,
-                              color: Colors.white38
+                              color: secondaryTextColor
                             ),
                           ),
                         ],
@@ -602,8 +655,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProvid
                 ),
                 const Spacer(),
                 PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_horiz, color: Colors.white38, size: 20),
-                  color: const Color(0xFF1E293B),
+                  icon: Icon(Icons.more_horiz, color: secondaryTextColor, size: 20),
+                  color: isDark ? const Color(0xFF1E293B) : Colors.white,
                   onSelected: (value) {
                     if (value == 'copy') {
                       Clipboard.setData(ClipboardData(text: displayContent));
@@ -619,9 +672,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProvid
                       value: 'copy',
                       child: Row(
                         children: [
-                          const Icon(Icons.copy, color: Colors.white, size: 18),
+                          Icon(Icons.copy, color: textColor, size: 18),
                           const SizedBox(width: 12),
-                          Text('Copy Text', style: GoogleFonts.inter(color: Colors.white)),
+                          Text('Copy Text', style: GoogleFonts.inter(color: textColor)),
                         ],
                       ),
                     ),
@@ -643,22 +696,69 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProvid
             const SizedBox(height: 12),
             
             // Content
-            Text(
-              displayContent,
+            SelectableLinkify(
+              text: displayContent,
+              onOpen: (link) async {
+                final uri = Uri.tryParse(link.url);
+                if (uri == null) return;
+                try {
+                  if (await canLaunchUrl(uri)) {
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  } else {
+                    debugPrint('Cannot launch URL: $uri');
+                  }
+                } catch (e) {
+                  debugPrint('Failed to launch URL: $e');
+                }
+              },
               style: GoogleFonts.inter(
                 fontSize: 15,
-                color: Colors.white.withValues(alpha: 0.9),
+                color: textColor.withValues(alpha: 0.9),
                 height: 1.4,
               ),
+              linkStyle: GoogleFonts.inter(color: Colors.blueAccent, decoration: TextDecoration.underline),
               maxLines: 4,
-              overflow: TextOverflow.ellipsis,
             ),
             
             if (post['image_url'] != null && post['image_url'].toString().isNotEmpty) ...[
                const SizedBox(height: 12),
-               ClipRRect(
-                 borderRadius: BorderRadius.circular(8),
-                 child: Image.network(post['image_url'], height: 150, width: double.infinity, fit: BoxFit.cover),
+               GestureDetector(
+                 onTap: () {
+                   Navigator.push(
+                     context,
+                     MaterialPageRoute(
+                       builder: (context) => FullScreenImageViewer(
+                         imageUrl: post['image_url'],
+                         heroTag: 'post_image_$postId',
+                       ),
+                     ),
+                   );
+                 },
+                 child: Hero(
+                   tag: 'post_image_$postId',
+                   child: ClipRRect(
+                     borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
+                      post['image_url'],
+                      height: 150,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                      loadingBuilder: (context, child, loadingProgress) {
+                        if (loadingProgress == null) return child;
+                        return Container(
+                          height: 150,
+                          color: isDark ? Colors.white10 : Colors.grey.shade200,
+                          child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                        );
+                      },
+                      errorBuilder: (context, error, stackTrace) => Container(
+                        height: 150,
+                        color: isDark ? Colors.white10 : Colors.grey.shade200,
+                        child: Icon(Icons.broken_image, color: secondaryTextColor),
+                      ),
+                    ),
+                   ),
+                 ),
                ),
             ],
             
@@ -673,7 +773,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProvid
                     // Upvote
                     IconButton(
                       icon: const Icon(Icons.arrow_upward, size: 20),
-                      color: (_userVotes[postId] == 1) ? Colors.orange : Colors.white38,
+                      color: (_userVotes[postId] == 1) ? Colors.orange : secondaryTextColor,
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                       onPressed: () => _handleVote(postId, 1),
@@ -681,13 +781,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProvid
                     const SizedBox(width: 8),
                     Text(
                       '$voteScore',
-                      style: GoogleFonts.inter(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w500),
+                      style: GoogleFonts.inter(fontSize: 13, color: textColor, fontWeight: FontWeight.w500),
                     ),
                     const SizedBox(width: 8),
                     // Downvote
                     IconButton(
                       icon: const Icon(Icons.arrow_downward, size: 20),
-                      color: (_userVotes[postId] == -1) ? Colors.blue : Colors.white38,
+                      color: (_userVotes[postId] == -1) ? Colors.blue : secondaryTextColor,
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
                       onPressed: () => _handleVote(postId, -1),
@@ -698,11 +798,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProvid
                 // Comments
                 Row(
                   children: [
-                    const Icon(Icons.chat_bubble_outline, color: Colors.white38, size: 20),
+                    Icon(Icons.chat_bubble_outline, color: secondaryTextColor, size: 20),
                     const SizedBox(width: 6),
                     Text(
                       '$commentCount',
-                      style: GoogleFonts.inter(fontSize: 13, color: Colors.white38, fontWeight: FontWeight.w500),
+                      style: GoogleFonts.inter(fontSize: 13, color: secondaryTextColor, fontWeight: FontWeight.w500),
                     ),
                   ],
                 ),
@@ -710,7 +810,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProvid
                 // Bookmark
                 IconButton(
                   icon: Icon(isSaved ? Icons.bookmark : Icons.bookmark_border, size: 20),
-                  color: isSaved ? AppTheme.primary : Colors.white38,
+                  color: isSaved ? AppTheme.primary : secondaryTextColor,
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(),
                   onPressed: () => _handleBookmark(postId),
@@ -771,7 +871,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProvid
                   const SnackBar(content: Text("Submitting report...")),
                 );
 
-                await BackendApiService().reportPost(postId, reason, reporterId);
+                await _backendApiService.reportPost(postId, reason, reporterId);
 
                 if (mounted) {
                    ScaffoldMessenger.of(context).showSnackBar(
@@ -904,19 +1004,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProvid
                               margin: const EdgeInsets.only(bottom: 16),
                               height: 200,
                               width: double.infinity,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(12),
-                                image: DecorationImage(
-                                  image: selectedFile != null 
-                                      ? (selectedFile!.bytes != null 
-                                          ? MemoryImage(selectedFile!.bytes!) 
-                                          : (selectedFile!.path != null 
-                                              ? FileImage(File(selectedFile!.path!)) 
-                                              : const AssetImage('assets/images/placeholder.png'))) as ImageProvider
-                                      : NetworkImage(selectedGif!.images.original?.url ?? ''),
-                                  fit: BoxFit.cover,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(12),
+                                  image: DecorationImage(
+                                    image: _getImageProvider(selectedFile, selectedGif),
+                                    fit: BoxFit.cover,
+                                  ),
                                 ),
-                              ),
                             ),
                             Positioned(
                               top: 8,
@@ -1013,39 +1107,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProvid
                       IconButton(
                         icon: Icon(Icons.gif_box_outlined, color: AppTheme.primary),
                         onPressed: () async {
-                          // 1. Check Premium
-                          final isPremium = await SubscriptionService().isPremium();
-                          
-                          if (!isPremium && mounted) {
-                             showDialog(
-                               context: context,
-                               builder: (ctx) => AlertDialog(
-                                 backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-                                 title: Text('Premium Feature', style: TextStyle(color: isDark ? Colors.white : Colors.black)),
-                                 content: Text('Sending GIFs is a premium feature. Upgrade to unlock!', style: TextStyle(color: isDark ? Colors.white70 : Colors.black87)),
-                                 actions: [
-                                   TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-                                   ElevatedButton(
-                                     onPressed: () {
-                                       Navigator.pop(ctx);
-                                       // Navigate to subscription screen if implemented, or show upgrade info
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          const SnackBar(content: Text('Navigate to profile to upgrade!')), // Placeholder until SubscriptionScreen is linked
-                                        );
-                                     },
-                                     child: const Text('Upgrade'),
-                                   ),
-                                 ],
-                               ),
-                             );
-                             return;
-                          }
-
-                          // 2. Open Giphy Picker
+                          // Allow stickers for everyone as requested
                           if (!mounted) return;
                           final gif = await GiphyPicker.pickGif(
                             context: context,
                             apiKey: AppConfig.giphyApiKey,
+                            showPreviewPage: true,
                           );
 
                           if (gif != null) {
@@ -1226,7 +1293,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> with SingleTickerProvid
                       
                       if (confirm == true) {
                         try {
-                          await BackendApiService().leaveChatRoom(
+                          await _backendApiService.leaveChatRoom(
                             roomId: widget.roomId,
                             context: dialogCtx,
                           );

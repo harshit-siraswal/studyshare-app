@@ -15,6 +15,7 @@ class DefaultFirebaseOptions {
 
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
+      validate();
       return web;
     }
     throw UnsupportedError(
@@ -23,26 +24,27 @@ class DefaultFirebaseOptions {
   }
 
   static FirebaseOptions get web {
-    return _validatedWeb;
+    return _webOptions;
   }
 
-  static const FirebaseOptions _validatedWeb = FirebaseOptions(
-    apiKey: 'AIzaSyDt_mnuBryHcssBjRSdnPlh9VIC58LKL9Q',
-    appId: '1:28032445048:web:025624ffdb03cfd54b1b8d',
-    messagingSenderId: '28032445048',
-    projectId: 'studyspace-kiet',
-    authDomain: 'studyspace-kiet.firebaseapp.com',
-    storageBucket: 'studyspace-kiet.appspot.com',
+  static const FirebaseOptions _webOptions = FirebaseOptions(
+    apiKey: String.fromEnvironment('FIREBASE_API_KEY'),
+    appId: String.fromEnvironment('FIREBASE_APP_ID'),
+    messagingSenderId: String.fromEnvironment('FIREBASE_MESSAGING_SENDER_ID'),
+    projectId: String.fromEnvironment('FIREBASE_PROJECT_ID'),
+    authDomain: String.fromEnvironment('FIREBASE_AUTH_DOMAIN'),
+    storageBucket: String.fromEnvironment('FIREBASE_STORAGE_BUCKET'),
   );
 
   static void validate() {
     if (kIsWeb) {
-      if (_validatedWeb.apiKey.isEmpty ||
-          _validatedWeb.appId.isEmpty ||
-          _validatedWeb.messagingSenderId.isEmpty ||
-          _validatedWeb.projectId.isEmpty) {
+      if (_webOptions.apiKey.isEmpty ||
+          _webOptions.appId.isEmpty ||
+          _webOptions.messagingSenderId.isEmpty ||
+          _webOptions.projectId.isEmpty) {
         throw ArgumentError(
-          'Missing Firebase Web keys. Ensure --dart-define options are set.',
+          'Missing Firebase Web keys. Ensure --dart-define options are set for:\n'
+          'FIREBASE_API_KEY, FIREBASE_APP_ID, FIREBASE_MESSAGING_SENDER_ID, FIREBASE_PROJECT_ID',
         );
       }
     }

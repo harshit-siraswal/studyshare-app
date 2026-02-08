@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -64,7 +63,7 @@ class CloudinaryService {
     }
   }
 
-  static Future<String> uploadBytes(Uint8List bytes, String filename) async {
+  static Future<String> uploadBytes(Uint8List bytes, String filename, {Duration? timeout}) async {
     try {
       if (bytes.isEmpty) {
         throw Exception('File data is empty');
@@ -83,8 +82,10 @@ class CloudinaryService {
         ),
       );
 
+      final duration = timeout ?? const Duration(seconds: 60);
+
       final streamedResponse = await request.send().timeout(
-        const Duration(seconds: 60),
+        duration,
         onTimeout: () => throw Exception('Upload timed out'),
       );
       final response = await http.Response.fromStream(streamedResponse);
@@ -101,7 +102,8 @@ class CloudinaryService {
           errorMessage = 'Upload failed: ${response.statusCode}';
         }
         throw Exception(errorMessage);
-      }    } catch (e) {
+      }
+    } catch (e) {
       debugPrint('Cloudinary upload error: $e');
       rethrow;
     }

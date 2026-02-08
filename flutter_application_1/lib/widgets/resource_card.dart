@@ -68,14 +68,17 @@ class _ResourceCardState extends State<ResourceCard> {
         );
       }
     } catch (e) {
-      // Handle error
+      debugPrint('Bookmark toggle error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to update bookmark. Please try again.')),
+        );
+      }
     }
   }
-
   Future<void> _vote(int direction) async {
     if (_isVoting) return;
     setState(() => _isVoting = true);
-
     try {
       final oldVote = _userVote;
       final newVote = _userVote == direction ? null : direction;
@@ -145,9 +148,61 @@ class _ResourceCardState extends State<ResourceCard> {
   void _openResource() {
     if (widget.resource.type == 'video') {
       _openVideo();
+    } else if (widget.resource.type == 'notice') {
+      _showNoticeDialog();
     } else {
       _showPDFViewer();
     }
+  }
+
+  void _showNoticeDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(widget.resource.title, style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (widget.resource.fileUrl.isNotEmpty) // If notice has image
+                 Padding(
+                   padding: const EdgeInsets.only(bottom: 12),
+                   child: ClipRRect(
+                     borderRadius: BorderRadius.circular(8),
+                     child: Image.network(
+                       widget.resource.fileUrl,
+                       fit: BoxFit.contain,
+                       loadingBuilder: (context, child, loadingProgress) {
+                         if (loadingProgress == null) return child;
+                         return const Center(child: CircularProgressIndicator());
+                       },
+                        errorBuilder: (_, __, ___) => Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.broken_image_outlined, size: 48, color: Colors.grey),
+                              const SizedBox(height: 8),
+                              Text('Image not found', style: GoogleFonts.inter(color: Colors.grey, fontSize: 12)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              const SizedBox(height: 12),
+              Text(widget.resource.description ?? '', style: GoogleFonts.inter(fontSize: 14)),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showPDFViewer() {
@@ -171,6 +226,7 @@ class _ResourceCardState extends State<ResourceCard> {
           pdfUrl: url,
           title: widget.resource.title,
           resourceId: widget.resource.id,
+          collegeId: widget.resource.collegeId,
         ),
       ),
     );
@@ -189,6 +245,8 @@ class _ResourceCardState extends State<ResourceCard> {
 
   @override
   Widget build(BuildContext context) {
+    // ... no change needed in build if _openResource is handling dispatch ...
+    // But we need to update _getTypeIcon and _getTypeColor below
     final isDark = Theme.of(context).brightness == Brightness.dark;
     
     return Material(
@@ -264,33 +322,10 @@ class _ResourceCardState extends State<ResourceCard> {
                     ),
                     const SizedBox(height: 4),
                     
-                    // Author
-                    if (widget.resource.uploadedByName != null)
-                      GestureDetector(
-                        onTap: () {
-                          // Navigate to User Profile
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => UserProfileScreen(
-                                userEmail: widget.resource.uploadedByEmail,
-                                userName: widget.resource.uploadedByName,
-                              ),
-                            ),
-                          );
-                        },
-                        child: Text(
-                          'by ${widget.resource.uploadedByName}',
-                          style: GoogleFonts.inter(
-                            fontSize: 12,
-                            color: AppTheme.textMuted,
-                            decoration: TextDecoration.underline,
-                            decorationColor: AppTheme.textMuted,
-                          ),
-                        ),
-                      ),
-                    const SizedBox(height: 4),
-                    
+                     
+                     // Author
+                     _buildAuthorWidget(),
+                    const SizedBox(height: 4),                    
                     // Subject & Branch
                     Text(
                       '${widget.resource.subject ?? 'Unknown'} • ${widget.resource.branch ?? 'General'}',
@@ -353,14 +388,21 @@ class _ResourceCardState extends State<ResourceCard> {
                           const SizedBox(width: 8),
                           
                           // Bookmark button
-                          GestureDetector(
-                            onTap: _toggleBookmark,
-                            child: Icon(
-                              _isBookmarked ? Icons.bookmark : Icons.bookmark_border,
-                              size: 20,
-                              color: _isBookmarked 
-                                  ? AppTheme.warning 
-                                  : AppTheme.textMuted,
+                          Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(20),
+                              onTap: _toggleBookmark,
+                              child: Padding(
+                                padding: const EdgeInsets.all(8.0),
+                                child: Icon(
+                                  _isBookmarked ? Icons.bookmark : Icons.bookmark_border,
+                                  size: 20,
+                                  color: _isBookmarked 
+                                      ? AppTheme.warning 
+                                      : AppTheme.textMuted,
+                                ),
+                              ),
                             ),
                           ),
                           
@@ -404,18 +446,22 @@ class _ResourceCardState extends State<ResourceCard> {
     required Color color,
     required VoidCallback onTap,
   }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(4),
-        decoration: BoxDecoration(
-          color: isActive ? color.withValues(alpha: 0.15) : Colors.transparent,
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Icon(
-          icon,
-          size: 16,
-          color: isActive ? color : AppTheme.textMuted,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: isActive ? color.withValues(alpha: 0.15) : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Icon(
+            icon,
+            size: 16,
+            color: isActive ? color : AppTheme.textMuted,
+          ),
         ),
       ),
     );
@@ -427,6 +473,8 @@ class _ResourceCardState extends State<ResourceCard> {
         return Icons.play_circle_fill;
       case 'pyq':
         return Icons.help_outline;
+      case 'notice':
+        return Icons.campaign_rounded;
       case 'notes':
       default:
         return Icons.description;
@@ -439,12 +487,80 @@ class _ResourceCardState extends State<ResourceCard> {
         return AppTheme.error;   // Red
       case 'pyq':
         return AppTheme.warning; // Amber
+      case 'notice':
+        return AppTheme.noticeColor; // Purple for notices
       case 'notes':
       default:
         return AppTheme.primary; // Blue (now #2563EB)
     }
   }
-}
+
+
+  Widget _buildAuthorWidget() {
+    final name = widget.resource.uploadedByName;
+    final email = widget.resource.uploadedByEmail;
+
+    if (name == null) return const SizedBox.shrink();
+
+    if (email == null) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        child: Semantics(
+          label: 'by $name',
+          button: false,
+          child: Text(
+            'by $name',
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              color: AppTheme.textMuted,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: Tooltip(
+        message: 'View profile for $name',
+        child: InkWell(
+          borderRadius: BorderRadius.circular(4),
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => UserProfileScreen(
+                  userEmail: email!,
+                  userName: name,
+                ),
+              ),
+            );
+          },
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+              child: Semantics(
+                label: 'Open profile for $name',
+                button: true,
+                child: Text(
+                  'by $name',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: AppTheme.textMuted,
+                    decoration: TextDecoration.underline,
+                    decorationColor: AppTheme.textMuted,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  
+
+  }
+} // End of _ResourceCardState
 
 // Embedded PDF Viewer Dialog
 class _PDFViewerDialog extends StatelessWidget {

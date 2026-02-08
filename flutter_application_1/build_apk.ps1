@@ -1,8 +1,17 @@
 # Set Java Home
-$env:JAVA_HOME = "C:\Program Files\Eclipse Adoptium\jdk-17.0.17.10-hotspot"
+$JavaHome = $env:JAVA_HOME
+if (-not $JavaHome) {
+    $JavaHome = "C:\Program Files\Eclipse Adoptium\jdk-17.0.17.10-hotspot"
+}
+
+if (-not (Test-Path $JavaHome)) {
+    Write-Host "Error: JAVA_HOME path does not exist: $JavaHome" -ForegroundColor Red
+    exit 1
+}
+
+$env:JAVA_HOME = $JavaHome
 
 Write-Host "Java Home set to: $env:JAVA_HOME" -ForegroundColor Cyan
-
 # Clean
 Write-Host "Cleaning project..." -ForegroundColor Green
 flutter clean

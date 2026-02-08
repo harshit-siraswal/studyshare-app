@@ -3,6 +3,8 @@ import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../config/app_config.dart';
 
 class AuthService {
   final firebase_auth.FirebaseAuth _auth = firebase_auth.FirebaseAuth.instance;
@@ -13,11 +15,10 @@ class AuthService {
   AuthService() {
     // Only initialize GoogleSignIn on mobile (not web)
     if (!kIsWeb) {
-      // CRITICAL: serverClientId is the Web Client ID from google-services.json
-      // This is required for Android to work with Firebase Auth
       _googleSignIn = GoogleSignIn(
-        scopes: ['email', 'profile'],
-        serverClientId: '28032445048-kg3k969ha8c9kc88hta90tddf5178n1o.apps.googleusercontent.com',
+        // CRITICAL: serverClientId is the Web Client ID from google-services.json
+        // This is required for Android to work with Firebase Auth
+        serverClientId: AppConfig.googleServerClientId,
       );
     }
   }
@@ -180,6 +181,14 @@ class AuthService {
       }
       // Always sign out of Firebase
       await _auth.signOut();
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('premium_until');
+        await prefs.remove('premium_tier');
+        await prefs.remove('premium_email');
+      } catch (e) {
+        debugPrint('Failed to clear premium cache: $e');
+      }
     } catch (e) {
       debugPrint('Error signing out: $e');
       rethrow;
@@ -248,16 +257,6 @@ class AuthService {
         return;
       }
 
-      // Ensure Supabase is initialized
-      try {
-           // We can't easily check 'mounted' on singleton in this context without BuildContext,
-           // but we can check if client is accessible.
-           // However, _supabase is initialized in member variable.
-      } catch (e) {
-          debugPrint('Supabase not initialized: $e');
-          return;
-      }
-
       // Check if user already exists
       final existingUser = await _supabase
           .from('users')
@@ -268,12 +267,13 @@ class AuthService {
 
       if (existingUser == null) {
         // Create new user record
+        final now = DateTime.now().toIso8601String();
         await _supabase.from('users').insert({
           'email': email,
           'display_name': user.displayName ?? email.split('@')[0],
           'profile_photo_url': user.photoURL,
-          'created_at': DateTime.now().toIso8601String(),
-          'updated_at': DateTime.now().toIso8601String(),
+          'created_at': now,
+          'updated_at': now,
         }).timeout(const Duration(seconds: 5));
         debugPrint('User saved to database: $email');
       } else {

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'dart:math';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:async';
+import 'package:video_player/video_player.dart';
 import '../config/theme.dart';
 
 /// A branded loading widget inspired by Alma's loading screen.
@@ -25,9 +25,9 @@ class BrandedLoader extends StatefulWidget {
 class _BrandedLoaderState extends State<BrandedLoader>
     with TickerProviderStateMixin {
   late AnimationController _pulseController;
-  late AnimationController _rotateController;
   late Animation<double> _pulseAnimation;
-  late Animation<double> _rotateAnimation;
+  VideoPlayerController? _videoController;
+  bool _videoReady = false;
   
   int _currentQuoteIndex = 0;
   Timer? _quoteTimer;
@@ -62,14 +62,7 @@ class _BrandedLoaderState extends State<BrandedLoader>
     _pulseAnimation = Tween<double>(begin: 0.8, end: 1.0).animate(
       CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
     );
-    
-    // Gentle rotation for visual interest
-    _rotateController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 8),
-    )..repeat();
-    
-    _rotateAnimation = Tween<double>(begin: 0, end: 1).animate(_rotateController);
+    _initVideo();
     
     // Rotate quotes every 2.5 seconds
     if (widget.showQuotes) {
@@ -86,9 +79,29 @@ class _BrandedLoaderState extends State<BrandedLoader>
   @override
   void dispose() {
     _pulseController.dispose();
-    _rotateController.dispose();
     _quoteTimer?.cancel();
+    _videoController?.dispose();
     super.dispose();
+  }
+
+  Future<void> _initVideo() async {
+    final controller = VideoPlayerController.asset('assets/videos/brand_loader.mp4');
+    try {
+      await controller.setLooping(true);
+      await controller.setVolume(0);
+      await controller.initialize();
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
+      setState(() {
+        _videoController = controller;
+        _videoReady = true;
+      });
+      await controller.play();
+    } catch (_) {
+      await controller.dispose();
+    }
   }
 
   @override
@@ -166,60 +179,25 @@ class _BrandedLoaderState extends State<BrandedLoader>
     return AnimatedBuilder(
       animation: _pulseAnimation,
       builder: (context, child) {
-        return Container(
-          width: 100,
-          height: 100,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(24),
-            boxShadow: [
-              BoxShadow(
-                color: AppTheme.primary.withValues(alpha: 0.3 * _pulseAnimation.value),
-                blurRadius: 30 * _pulseAnimation.value,
-                spreadRadius: 5 * _pulseAnimation.value,
-              ),
-              BoxShadow(
-                color: AppTheme.accent.withValues(alpha: 0.2 * _pulseAnimation.value),
-                blurRadius: 40 * _pulseAnimation.value,
-                spreadRadius: 10 * _pulseAnimation.value,
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(24),
-            child: AnimatedBuilder(
-              animation: _rotateAnimation,
-              builder: (context, child) {
-                return Transform.rotate(
-                  angle: _rotateAnimation.value * 2 * pi,
-                  child: Transform.scale(
-                     scale: 0.9 + (0.1 * _pulseAnimation.value),
-                    child: Image.asset(
-                      'assets/icon/app_icon.png',
-                      width: 100,
-                      height: 100,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        // Fallback to gradient icon if image fails
-                        return Container(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [AppTheme.primary, AppTheme.accent],
-                            ),
-                            borderRadius: BorderRadius.circular(24),
-                          ),
-                          child: const Icon(
-                            Icons.auto_stories_rounded,
-                            size: 48,
-                            color: Colors.white,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                );
-              },
+        final scale = 0.92 + (0.08 * _pulseAnimation.value);
+        return Transform.scale(
+          scale: scale,
+          child: Container(
+            width: 100,
+            height: 100,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [
+                BoxShadow(
+                  color: AppTheme.primary.withValues(alpha: 0.25 * _pulseAnimation.value),
+                  blurRadius: 26 * _pulseAnimation.value,
+                  spreadRadius: 3 * _pulseAnimation.value,
+                ),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(24),
+              child: _buildVideoOrFallback(100),
             ),
           ),
         );
@@ -250,27 +228,7 @@ class _BrandedLoaderState extends State<BrandedLoader>
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(16),
-                  child: Image.asset(
-                    'assets/icon/app_icon.png',
-                    width: 56,
-                    height: 56,
-                    fit: BoxFit.cover,
-                    errorBuilder: (context, error, stackTrace) {
-                      return Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            colors: [AppTheme.primary, AppTheme.accent],
-                          ),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: const Icon(
-                          Icons.auto_stories_rounded,
-                          size: 28,
-                          color: Colors.white,
-                        ),
-                      );
-                    },
-                  ),
+                  child: _buildVideoOrFallback(56),
                 ),
               );
             },
@@ -285,6 +243,41 @@ class _BrandedLoaderState extends State<BrandedLoader>
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildVideoOrFallback(double size) {
+    if (_videoReady && _videoController != null && _videoController!.value.isInitialized) {
+      final videoSize = _videoController!.value.size;
+      return FittedBox(
+        fit: BoxFit.contain,
+        child: SizedBox(
+          width: videoSize.width,
+          height: videoSize.height,
+          child: VideoPlayer(_videoController!),
+        ),
+      );
+    }
+
+    return Image.asset(
+      'assets/icon/app_icon.png',
+      width: size,
+      height: size,
+      fit: BoxFit.contain,
+      errorBuilder: (context, error, stackTrace) {
+        return Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [AppTheme.primary, AppTheme.accent],
+            ),
+          ),
+          child: Icon(
+            Icons.auto_stories_rounded,
+            size: size * 0.5,
+            color: Colors.white,
+          ),
+        );
+      },
     );
   }
 }

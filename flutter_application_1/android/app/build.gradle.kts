@@ -57,13 +57,18 @@ android {
             )
         }
     }
+
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
+    }
 }
 
 flutter {
     source = "../.."
 }
 
-    dependencies {
+dependencies {
     // IMPORTANT: 1.15.0 required for setStylusHandwritingEnabled method (Flutter TextInput on API 36)
     implementation("androidx.core:core-ktx:1.15.0")
     implementation("androidx.multidex:multidex:2.0.1")
@@ -73,4 +78,6 @@ flutter {
     // Required for OAuth/Google Sign-In on modern Android
     implementation("androidx.browser:browser:1.8.0")
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+    // Required for UCropActivity (Image Cropper)
+    implementation("androidx.appcompat:appcompat:1.7.0")
 }

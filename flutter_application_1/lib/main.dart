@@ -6,14 +6,15 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:google_fonts/google_fonts.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:hive_flutter/hive_flutter.dart';
-import 'package:device_info_plus/device_info_plus.dart';
-import 'package:universal_io/io.dart'; 
+import 'package:url_launcher/url_launcher.dart'; // Deep linking
 import 'dart:convert';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:dynamic_color/dynamic_color.dart';
+import 'dart:io' show Platform;
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 import 'l10n/app_localizations.dart';
 import 'config/app_config.dart';
@@ -29,6 +30,7 @@ import 'services/push_notification_service.dart';
 import 'services/backend_api_service.dart';
 import 'providers/theme_provider.dart';
 import 'widgets/global_timer_overlay.dart';
+import 'widgets/branded_loader.dart';
 
 /// Request necessary app permissions
 /// Returns true if all critical permissions are granted or not required
@@ -74,11 +76,44 @@ Future<bool> _requestPermissions() async {
   return true; // iOS or other platforms, handled by plist or similar
 }
 
+// Top-level navigator key for global access
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
+
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Hive.initFlutter();
-  await DownloadService().init();
   
+  // Validate configuration and log any warnings
+  // Validate configuration
+  final configResult = AppConfig.validate();
+  
+  if (!configResult.isValid) {
+    for (final error in configResult.errors) {
+      // Use debugPrint for logged output (print may be stripped or swallowed)
+      debugPrint('CRITICAL CONFIG ERROR: $error'); 
+    }
+    throw Exception('App Configuration Failed: ${configResult.errors.join(", ")}');
+  }
+
+  for (final warning in configResult.warnings) {
+    debugPrint('Configuration Warning: $warning');
+  }
+
+  try {
+    await Hive.initFlutter();
+  } catch (e) {
+    debugPrint('Hive initialization error: $e');
+    rethrow; // Hive is required for app functionality
+  }
+
+  try {
+    await DownloadService().init();
+  } catch (e) {
+    debugPrint('DownloadService initialization error: $e');
+    // Non-critical: log and continue, downloads will fail gracefully
+  }
+
   // Set system UI overlay style
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
@@ -91,11 +126,15 @@ void main() async {
 enum AppState { loading, noConnection, permissionError, supabaseError, ready }
 
 class AppRoot extends StatefulWidget {
+  // Expose key if needed via static accessor, but top-level is fine too
+  static GlobalKey<NavigatorState> get navKey => navigatorKey;
+
   const AppRoot({super.key});
 
   @override
   State<AppRoot> createState() => _AppRootState();
 }
+
 
 class _AppRootState extends State<AppRoot> {
   AppState _appState = AppState.loading;
@@ -171,7 +210,6 @@ class _AppRootState extends State<AppRoot> {
       }
       return;
     }
-
     // Get shared preferences
     try {
       _prefs = await SharedPreferences.getInstance();
@@ -179,12 +217,12 @@ class _AppRootState extends State<AppRoot> {
       debugPrint('SharedPreferences error: $e');
       if (mounted) {
         setState(() {
-          _appState = AppState.supabaseError;
-
+          _appState = AppState.supabaseError; // Or add a new AppState.prefsError
         });
       }
       return;
     }
+
 
     // Initialize Push Notifications (after Firebase is ready)
     if (!kIsWeb) {
@@ -200,7 +238,10 @@ class _AppRootState extends State<AppRoot> {
             // Register token with backend
             try {
               final platform = Platform.isIOS ? 'ios' : 'android';
-              await backendApi.registerFcmToken(token: token, platform: platform);
+              await backendApi.registerFcmToken(
+                token: token, 
+                platform: platform,
+              );
               debugPrint('FCM token registered with backend');
             } catch (e) {
               debugPrint('Failed to register FCM token: $e');
@@ -209,10 +250,33 @@ class _AppRootState extends State<AppRoot> {
           onMessageReceived: (message) {
             debugPrint('Foreground message: ${message.notification?.title}');
           },
-          onNotificationTap: (message) {
+          onNotificationTap: (message) async {
             // Handle navigation based on message data
             debugPrint('Notification tapped: ${message.data}');
-            // TODO: Navigate to appropriate screen based on message.data['actionUrl']
+            
+            try {
+              // Safe extraction
+              final dynamic actionUrlRaw = message.data['actionUrl'];
+              final String? actionUrl = actionUrlRaw?.toString();
+              
+              if (actionUrl != null && actionUrl.isNotEmpty) {
+                 if (actionUrl.startsWith('/')) {
+                   // Internal navigation using global navigator key
+                   debugPrint('Internal navigation to $actionUrl requested');
+                   await navigatorKey.currentState?.pushNamed(actionUrl);
+                 } else {
+                   // External navigation
+                   final uri = Uri.parse(actionUrl);
+                   if (await canLaunchUrl(uri)) {
+                     await launchUrl(uri, mode: LaunchMode.externalApplication);
+                   } else {
+                     debugPrint('Could not launch deep link: $actionUrl');
+                   }
+                 }
+              }
+            } catch (e) {
+               debugPrint('Error handling notification tap: $e');
+            }
           },
         );
         debugPrint('Push notifications initialized');
@@ -310,7 +374,7 @@ class _AppRootState extends State<AppRoot> {
       // Return a temporary splash or loading indicator while initializing
       return const MaterialApp(
         debugShowCheckedModeBanner: false,
-        home: Scaffold(body: Center(child: CircularProgressIndicator())),
+        home: Scaffold(body: BrandedLoader(message: 'Starting MyStudySpace...', showQuotes: false)),
       );
     }
 
@@ -324,7 +388,7 @@ class _AppRootState extends State<AppRoot> {
 class StudySpaceApp extends StatelessWidget {
   final SharedPreferences prefs;
   final ThemeProvider themeProvider;
-  
+
   const StudySpaceApp({super.key, required this.prefs, required this.themeProvider});
 
   @override
@@ -332,21 +396,26 @@ class StudySpaceApp extends StatelessWidget {
     return ListenableBuilder(
       listenable: themeProvider,
       builder: (context, _) {
-        return MaterialApp(
-          title: AppConfig.appName,
-          debugShowCheckedModeBanner: false,
-          localizationsDelegates: const [
-            AppLocalizations.delegate,
-            GlobalMaterialLocalizations.delegate,
-            GlobalWidgetsLocalizations.delegate,
-            GlobalCupertinoLocalizations.delegate,
-          ],
-          supportedLocales: const [Locale('en')],
-          theme: AppTheme.lightTheme,
-          darkTheme: AppTheme.darkTheme,
-          themeMode: themeProvider.themeMode,
-          home: AppRouter(prefs: prefs, themeProvider: themeProvider),
-          builder: (context, child) => GlobalTimerOverlay(child: child ?? const SizedBox.shrink()),
+        return DynamicColorBuilder(
+          builder: (lightDynamic, darkDynamic) {
+            return MaterialApp(
+              title: AppConfig.appName,
+              debugShowCheckedModeBanner: false,
+              localizationsDelegates: const [
+                AppLocalizations.delegate,
+                GlobalMaterialLocalizations.delegate,
+                GlobalWidgetsLocalizations.delegate,
+                GlobalCupertinoLocalizations.delegate,
+              ],
+              supportedLocales: const [Locale('en')],
+              navigatorKey: navigatorKey,
+              theme: AppTheme.lightTheme(lightDynamic),
+              darkTheme: AppTheme.darkTheme(darkDynamic),
+              themeMode: themeProvider.themeMode,
+              home: AppRouter(prefs: prefs, themeProvider: themeProvider),
+              builder: (context, child) => GlobalTimerOverlay(child: child ?? const SizedBox.shrink()),
+            );
+          },
         );
       },
     );
@@ -513,71 +582,10 @@ class SplashScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    
-    return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : AppTheme.lightSurface,
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // App Logo with Notion-style animation
-            TweenAnimationBuilder<double>(
-              tween: Tween(begin: 0.8, end: 1.0),
-              duration: const Duration(milliseconds: 600),
-              curve: Curves.easeOutBack,
-              builder: (context, scale, child) {
-                return Transform.scale(scale: scale, child: child);
-              },
-              child: Container(
-                width: 100,
-                height: 100,
-                decoration: BoxDecoration(
-                  color: AppTheme.primary,
-                  borderRadius: BorderRadius.circular(24),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppTheme.primary.withValues(alpha: 0.3),
-                      blurRadius: 30,
-                      offset: const Offset(0, 10),
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.school_rounded,
-                  size: 50,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-            const SizedBox(height: 24),
-            Text(
-              AppConfig.appName,
-              style: GoogleFonts.inter(
-                fontSize: 32,
-                fontWeight: FontWeight.bold,
-                color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Your Academic Companion',
-              style: GoogleFonts.inter(
-                fontSize: 16,
-                color: AppTheme.textMuted,
-              ),
-            ),
-            const SizedBox(height: 48),
-            const SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
-                strokeWidth: 2,
-              ),
-            ),
-          ],
-        ),
+    return const Scaffold(
+      body: BrandedLoader(
+        message: 'Preparing your study space...',
+        showQuotes: false,
       ),
     );
   }

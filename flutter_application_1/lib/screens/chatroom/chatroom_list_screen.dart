@@ -3,11 +3,13 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
 import '../../services/supabase_service.dart';
 import '../../services/backend_api_service.dart';
-import '../../config/theme.dart'; // Added theme import if needed
+
 import '../profile/saved_posts_screen.dart';
 import '../../services/subscription_service.dart';
 import 'chatroom_screen.dart';
 import 'discover_rooms_screen.dart';
+
+
 
 class ChatroomListScreen extends StatefulWidget {
   final String collegeId;
@@ -200,23 +202,30 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
           if (!_isSearchFocused) ...[
             const SizedBox(width: 12),
             // Saved Button
-            GestureDetector(
-              onTap: () => Navigator.push(
-                context, 
-                MaterialPageRoute(
-                  builder: (_) => SavedPostsScreen(userEmail: widget.userEmail),
-                ),
-              ),
-              child: Container(
-                width: 48, 
-                height: 48,
-                decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF1C1C1E) : Colors.white, 
-                  borderRadius: BorderRadius.circular(30),
-                ),
-                child: Icon(
-                  Icons.bookmark_border_rounded, 
-                  color: isDark ? Colors.white : Colors.black,
+            Tooltip(
+              message: 'Saved Posts',
+              child: Material(
+                color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                child: InkWell(
+                  onTap: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => SavedPostsScreen(userEmail: widget.userEmail),
+                      ),
+                    );
+                    _loadRooms();
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: Icon(
+                      Icons.bookmark_border_rounded,
+                      color: isDark ? Colors.white : Colors.black,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -242,7 +251,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
 
   Widget _buildRoomList(bool isDark, Color cardColor) {
     return ListView.separated(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 0),
+      padding: const EdgeInsets.only(left: 20, right: 20, top: 0, bottom: 100), // Added bottom padding for floating nav
       itemCount: _filteredRooms.length,
       separatorBuilder: (context, index) => const SizedBox(height: 16),
       itemBuilder: (context, index) {
@@ -411,6 +420,12 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
   }
 
   void _showJoinRoomDialog() {
+     if (_isReadOnly) {
+       ScaffoldMessenger.of(context).showSnackBar(
+         const SnackBar(content: Text('Read-only access. Use your college email to join rooms.')),
+       );
+       return;
+     }
      // Implementation same as before but minimal style
      final isDark = Theme.of(context).brightness == Brightness.dark;
      final codeController = TextEditingController();
@@ -435,16 +450,20 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
            TextButton(
              onPressed: () async {
                 // Join logic
-                if(codeController.text.isNotEmpty) {
-                    try {
-                        await BackendApiService().joinChatRoom(codeController.text.trim(), widget.userEmail, widget.collegeId);
-                        if(mounted) { Navigator.pop(context); _loadRooms(); }
-                    } catch(e) {
-                        // Error
-                    }
-                }
-             }, 
-             child: const Text('Join'),
+                     if(codeController.text.isNotEmpty) {
+                         try {
+                             await BackendApiService().joinChatRoom(codeController.text.trim(), widget.userEmail, widget.collegeId);
+                             if(mounted) { Navigator.pop(context); _loadRooms(); }
+                         } catch(e) {
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Failed to join room: $e')),
+                            );
+                          }
+                         }
+                     }
+                 }, 
+                 child: const Text('Join'),
            ),
          ],
        ),
@@ -452,6 +471,12 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
   }
   
   void _showCreateRoomDialog() async {
+      if (_isReadOnly) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Read-only access. Use your college email to create rooms.')),
+        );
+        return;
+      }
       // Minimal implementation
       final isDark = Theme.of(context).brightness == Brightness.dark;
       final nameCtrl = TextEditingController();
@@ -521,7 +546,8 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                  onPressed: () async {
                     if(nameCtrl.text.isNotEmpty) {
                         try {
-                           final duration = isPermanent ? -1 : 7;
+                           // Duration
+                           final duration = isPermanent ? SupabaseService.kUnlimitedDuration : SupabaseService.kDefaultExpiryDays;
                            await _supabaseService.createChatRoom(
                              name: nameCtrl.text, 
                              description: '', 
@@ -532,7 +558,11 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                            );
                            if(mounted) { Navigator.pop(context); _loadRooms(); }
                         } catch (e) {
-                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Failed to create room. Please try again.')),
+                          );
+                          // Log the actual error for debugging
+                          debugPrint('Create room error: $e');
                         }
                     }
                  },
@@ -557,8 +587,8 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
     );
   }
 
-  void _navigateToDiscoverRooms() {
-    Navigator.push(
+  Future<void> _navigateToDiscoverRooms() async {
+    await Navigator.push(
       context, 
       MaterialPageRoute(
         builder: (_) => DiscoverRoomsScreen(
@@ -568,6 +598,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
         ),
       ),
     );
+    _loadRooms();
   }
 
   Widget _buildEmptyState(bool isDark) {

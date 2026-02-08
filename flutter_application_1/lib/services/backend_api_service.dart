@@ -85,7 +85,7 @@ class BackendApiService {
     }
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      final msg = data['message']?.toString() ?? 'API request failed';
+      final msg = data['message']?.toString() ?? data['error']?.toString() ?? 'API request failed';
       throw Exception(msg);
     }
     return data;
@@ -112,7 +112,8 @@ class BackendApiService {
         'description': description,
         'isPrivate': isPrivate,
         'collegeId': collegeId,
-        'durationInDays': durationInDays,
+
+        if (durationInDays != null) 'durationInDays': durationInDays,
         if (tags != null) 'tags': tags,
       },
       contextForRecaptcha: context,
@@ -126,7 +127,7 @@ class BackendApiService {
     required BuildContext context,
   }) async {
     return _requestJson(
-      '/api/chat/rooms/$roomId/leave',
+      '/api/chat/rooms/${Uri.encodeComponent(roomId)}/leave',
       method: 'POST',
       contextForRecaptcha: context,
       recaptchaAction: 'leave_chat_room',
@@ -147,33 +148,14 @@ class BackendApiService {
         'roomId': roomId,
         'content': content,
         if (imageUrl != null) 'imageUrl': imageUrl,
-        if (authorName != null) 'authorName': authorName,
-      },
+        if (authorName != null) 'authorName': authorName,      },
       contextForRecaptcha: context,
       recaptchaAction: 'post_chat_message',
-    );
-  }
+    );  }
 
   Future<List<Map<String, dynamic>>> getChatComments(String messageId) async {
-    final data = await _requestJson('/api/chat/comments/$messageId', method: 'GET');
+    final data = await _requestJson('/api/chat/comments/${Uri.encodeComponent(messageId)}', method: 'GET');
     final list = (data['comments'] as List?) ?? const [];
-    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
-  }
-
-  /// Search chat rooms by query or tag
-  Future<List<Map<String, dynamic>>> searchChatRooms({
-    required String collegeId,
-    String? query,
-    String? tag,
-  }) async {
-    final queryParams = <String, String>{'collegeId': collegeId};
-    if (query != null && query.isNotEmpty) queryParams['q'] = query;
-    if (tag != null && tag.isNotEmpty) queryParams['tag'] = tag;
-    
-    final queryString = queryParams.entries.map((e) => '${e.key}=${Uri.encodeComponent(e.value)}').join('&');
-    
-    final data = await _requestJson('/api/chat/rooms/search?$queryString', method: 'GET');
-    final list = (data['rooms'] as List?) ?? const [];
     return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
@@ -183,7 +165,7 @@ class BackendApiService {
     required BuildContext context,
   }) async {
     return _requestJson(
-      '/api/chat/messages/$messageId/vote',
+      '/api/chat/messages/${Uri.encodeComponent(messageId)}/vote',
       method: 'PUT',
       body: {'direction': direction},
       contextForRecaptcha: context,
@@ -237,13 +219,23 @@ class BackendApiService {
         if (parentId != null) 'parentId': parentId,
       },
       contextForRecaptcha: context,
-      recaptchaAction: 'add_chat_comment',
+      recaptchaAction: 'post_chat_message',
     );
   }
 
   // ----------------------------
   // Resources
   // ----------------------------
+
+  Future<Map<String, dynamic>> getResourceUploadUrl({
+    required String filename,
+  }) async {
+    return _requestJson(
+      '/api/resources/upload-url',
+      method: 'POST',
+      body: {'filename': filename},
+    );
+  }
 
   Future<Map<String, dynamic>> createResource(
     Map<String, dynamic> input, {
@@ -305,7 +297,7 @@ class BackendApiService {
     BuildContext? context,
   }) async {
     await _requestJson(
-      '/api/bookmarks/item/$itemId',
+      '/api/bookmarks/item/${Uri.encodeComponent(itemId)}',
       method: 'DELETE',
       contextForRecaptcha: context,
       recaptchaAction: 'remove_bookmark',
@@ -315,7 +307,7 @@ class BackendApiService {
   Future<bool> checkBookmark(String itemId) async {
     try {
       final data = await _requestJson(
-        '/api/bookmarks/check/$itemId',
+        '/api/bookmarks/check/${Uri.encodeComponent(itemId)}',
         method: 'GET',
       );
       return data['isBookmarked'] == true;
@@ -328,6 +320,14 @@ class BackendApiService {
   // Notices
   // ----------------------------
 
+  String _noticePath(String noticeId, {String? commentId}) {
+    final path = '/api/notices/${Uri.encodeComponent(noticeId)}';
+    if (commentId != null) {
+      return '$path/comments/${Uri.encodeComponent(commentId)}';
+    }
+    return path;
+  }
+
   Future<List<Map<String, dynamic>>> getNotices(String collegeId) async {
     final data = await _requestJson('/api/notices?college_id=${Uri.encodeQueryComponent(collegeId)}', method: 'GET');
     final list = (data['notices'] as List?) ?? const [];
@@ -338,7 +338,7 @@ class BackendApiService {
   // ----------------------------
 
   Future<List<Map<String, dynamic>>> getNoticeComments(String noticeId) async {
-    final data = await _requestJson('/api/notices/$noticeId/comments', method: 'GET');
+    final data = await _requestJson('${_noticePath(noticeId)}/comments', method: 'GET');
     final list = (data['comments'] as List?) ?? const [];
     return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
@@ -350,7 +350,7 @@ class BackendApiService {
     required BuildContext context,
   }) async {
     return _requestJson(
-      '/api/notices/$noticeId/comments',
+      '${_noticePath(noticeId)}/comments',
       method: 'POST',
       body: {
         'content': content,
@@ -367,7 +367,7 @@ class BackendApiService {
     required BuildContext context,
   }) async {
     await _requestJson(
-      '/api/notices/$noticeId/comments/$commentId',
+      _noticePath(noticeId, commentId: commentId),
       method: 'DELETE',
       contextForRecaptcha: context,
       recaptchaAction: 'delete_notice_comment',
@@ -379,7 +379,7 @@ class BackendApiService {
     required BuildContext context,
   }) async {
     return _requestJson(
-      '/api/notices/$noticeId/like',
+      '${_noticePath(noticeId)}/like',
       method: 'POST',
       contextForRecaptcha: context,
       recaptchaAction: 'like_notice',
@@ -387,7 +387,7 @@ class BackendApiService {
   }
 
   Future<Map<String, dynamic>> getNoticeLikes(String noticeId) async {
-    return _requestJson('/api/notices/$noticeId/likes', method: 'GET');
+    return _requestJson('${_noticePath(noticeId)}/likes', method: 'GET');
   }
 
   Future<Map<String, dynamic>> likeNoticeComment({
@@ -396,7 +396,7 @@ class BackendApiService {
     required BuildContext context,
   }) async {
     return _requestJson(
-      '/api/notices/$noticeId/comments/$commentId/like',
+      '${_noticePath(noticeId, commentId: commentId)}/like',
       method: 'POST',
       contextForRecaptcha: context,
       recaptchaAction: 'like_notice_comment',
@@ -490,7 +490,7 @@ class BackendApiService {
   }
 
   Future<Map<String, dynamic>> getUserVotes(String roomId) async {
-    return _requestJson('/api/chat/rooms/$roomId/votes', method: 'GET');
+    return _requestJson('/api/chat/rooms/${Uri.encodeComponent(roomId)}/votes', method: 'GET');
   }
 
   // Reporting
@@ -516,33 +516,169 @@ class BackendApiService {
     return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
-  Future<void> markNotificationRead(int id) async {
-    await _requestJson('/api/notifications/$id/read', method: 'POST');
+  Future<void> markNotificationRead(int id, {BuildContext? contextForRecaptcha}) async {
+    await _requestJson(
+      '/api/notifications/$id/read',
+      method: 'POST',
+      contextForRecaptcha: contextForRecaptcha,
+      recaptchaAction: 'mark_notification_read',
+    );
   }
 
-  Future<void> markAllNotificationsRead() async {
-    await _requestJson('/api/notifications/read-all', method: 'POST');
+  Future<void> markAllNotificationsRead({BuildContext? contextForRecaptcha}) async {
+    await _requestJson(
+      '/api/notifications/read-all',
+      method: 'POST',
+      contextForRecaptcha: contextForRecaptcha,
+      recaptchaAction: 'mark_all_notifications_read',
+    );
+  }
+
+  Future<void> deleteNotification(int id, {BuildContext? contextForRecaptcha}) async {
+    await _requestJson(
+      '/api/notifications/$id',
+      method: 'DELETE',
+      contextForRecaptcha: contextForRecaptcha,
+      recaptchaAction: 'delete_notification',
+    );
   }
 
   // Follows
-  Future<void> sendFollowRequest(String targetId, BuildContext context) async {
+  Future<void> sendFollowRequest(String targetEmail, BuildContext context) async {
     await _requestJson(
-        '/api/follows/requests', 
+        '/api/follow/request', // Corrected from /api/follows/requests
         method: 'POST', 
-        body: {'targetId': targetId},
+        body: {'targetEmail': targetEmail}, // Changed targetId to targetEmail per API
         contextForRecaptcha: context,
         recaptchaAction: 'follow_user'
     );
   }
 
-  Future<void> acceptFollowRequest(int requestId) async {
-    await _requestJson('/api/follows/requests/$requestId/accept', method: 'POST');
+  Future<void> acceptFollowRequest(int requestId, {BuildContext? context}) async {
+    await _requestJson(
+      '/api/follow/approve/${requestId.toString()}', // Corrected endpoint
+      method: 'POST',
+      contextForRecaptcha: context,
+      recaptchaAction: 'accept_follow_request',
+    );
   }
   
-  Future<void> rejectFollowRequest(int requestId) async {
-    await _requestJson('/api/follows/requests/$requestId/reject', method: 'POST');
+  Future<void> rejectFollowRequest(int requestId, {BuildContext? context}) async {
+    await _requestJson(
+      '/api/follow/reject/${requestId.toString()}', // Corrected endpoint
+      method: 'POST',
+      contextForRecaptcha: context,
+      recaptchaAction: 'reject_follow_request',
+    );
   }
 
+  Future<List<Map<String, dynamic>>> getSavedPosts() async {
+    final data = await _requestJson('/api/chat/saved', method: 'GET');
+    final list = (data['savedPosts'] as List?) ?? const [];
+    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  // ----------------------------
+  // AI (Study Tools + RAG Chat)
+  // ----------------------------
+
+  Future<Map<String, dynamic>> getAiSummary({
+    required String fileId,
+    String? collegeId,
+    bool? useOcr,
+    bool? forceOcr,
+    String? ocrProvider,
+    bool? force,
+    bool? includeSource,
+    String? videoUrl,
+  }) async {
+    return _requestJson(
+      '/api/ai/summary',
+      method: 'POST',
+      body: {
+        'file_id': fileId,
+        if (collegeId != null) 'college_id': collegeId,
+        if (useOcr != null) 'use_ocr': useOcr,
+        if (forceOcr != null) 'force_ocr': forceOcr,
+        if (ocrProvider != null) 'ocr_provider': ocrProvider,
+        if (force != null) 'force': force,
+        if (includeSource != null) 'include_source': includeSource,
+        if (videoUrl != null) 'video_url': videoUrl,
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>> getAiQuiz({
+    required String fileId,
+    String? collegeId,
+    bool? useOcr,
+    bool? forceOcr,
+    String? ocrProvider,
+    bool? force,
+    bool? includeSource,
+    String? videoUrl,
+  }) async {
+    return _requestJson(
+      '/api/ai/quiz',
+      method: 'POST',
+      body: {
+        'file_id': fileId,
+        if (collegeId != null) 'college_id': collegeId,
+        if (useOcr != null) 'use_ocr': useOcr,
+        if (forceOcr != null) 'force_ocr': forceOcr,
+        if (ocrProvider != null) 'ocr_provider': ocrProvider,
+        if (force != null) 'force': force,
+        if (includeSource != null) 'include_source': includeSource,
+        if (videoUrl != null) 'video_url': videoUrl,
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>> getAiFlashcards({
+    required String fileId,
+    String? collegeId,
+    bool? useOcr,
+    bool? forceOcr,
+    String? ocrProvider,
+    bool? force,
+    bool? includeSource,
+    String? videoUrl,
+  }) async {
+    return _requestJson(
+      '/api/ai/flashcards',
+      method: 'POST',
+      body: {
+        'file_id': fileId,
+        if (collegeId != null) 'college_id': collegeId,
+        if (useOcr != null) 'use_ocr': useOcr,
+        if (forceOcr != null) 'force_ocr': forceOcr,
+        if (ocrProvider != null) 'ocr_provider': ocrProvider,
+        if (force != null) 'force': force,
+        if (includeSource != null) 'include_source': includeSource,
+        if (videoUrl != null) 'video_url': videoUrl,
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>> queryRag({
+    required String question,
+    String? collegeId,
+    int? topK,
+    double? minScore,
+    bool? allowWeb,
+  }) async {
+    return _requestJson(
+      '/api/rag/query',
+      method: 'POST',
+      body: {
+        'question': question,
+        if (collegeId != null) 'college_id': collegeId,
+        if (topK != null) 'top_k': topK,
+        if (minScore != null) 'min_score': minScore,
+        if (allowWeb != null) 'allow_web': allowWeb,
+      },
+    );
+  }
   // ----------------------------
   // Push Notifications (FCM)
   // ----------------------------
@@ -559,6 +695,7 @@ class BackendApiService {
         'token': token,
         'platform': platform,
       },
+      // Recaptcha context removed as it cannot be a string
     );
   }
 
@@ -567,8 +704,52 @@ class BackendApiService {
     await _requestJson(
       '/api/notifications/fcm-token',
       method: 'DELETE',
-      body: {'token': token},
+      body: {
+        'token': token,
+      },
+      // Recaptcha context removed
     );
   }
-}
+  Future<Map<String, dynamic>> joinChatRoomById(String roomId) async {
+    return _requestJson(
+      '/api/chat/join-room',
+      method: 'POST',
+      body: {'roomId': roomId},
+    );
+  }
 
+  // ----------------------------
+  // Follows & Users
+  // ----------------------------
+
+  Future<Map<String, dynamic>> checkFollowStatus(String email) async {
+    // Corrected endpoint
+    return _requestJson('/api/follow/status/${Uri.encodeComponent(email)}', method: 'GET');
+  }
+  Future<Map<String, dynamic>> getFollowers() async {
+    return _requestJson('/api/follow/followers', method: 'GET');
+  }
+
+  Future<Map<String, dynamic>> getFollowing() async {
+    return _requestJson('/api/follow/following', method: 'GET');
+  }
+
+  Future<List<Map<String, dynamic>>> getPendingRequests() async {
+    final data = await _requestJson('/api/follow/pending', method: 'GET');
+    final list = (data['requests'] as List?) ?? const [];
+    return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  Future<void> unfollowUser(String email, {BuildContext? context}) async {
+    await _requestJson(
+      '/api/follow/${Uri.encodeComponent(email)}',
+      method: 'DELETE',
+      contextForRecaptcha: context,
+      recaptchaAction: 'unfollow_user',
+    );
+  }
+
+  Future<void> cancelFollowRequest(String requestId) async {
+    await _requestJson('/api/follow/request/${Uri.encodeComponent(requestId)}', method: 'DELETE');
+  }
+}
