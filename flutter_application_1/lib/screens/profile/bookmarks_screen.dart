@@ -124,12 +124,23 @@ class _BookmarksScreenState extends State<BookmarksScreen> with SingleTickerProv
     List<Map<String, dynamic>> filtered = List.from(_allBookmarks);
     
     // Filter invalid entries first (where both potential targets are missing)
-    filtered.removeWhere((b) => b['resource_id'] == null && b['notice_id'] == null);
+    filtered.removeWhere((b) =>
+        b['resource_id'] == null &&
+        b['notice_id'] == null &&
+        b['type'] == null &&
+        b['content'] == null);
 
-    if (type == 'resource') {
-      filtered = filtered.where((b) => b['resource_id'] != null).toList();
-    } else if (type == 'notice') {
-      filtered = filtered.where((b) => b['notice_id'] != null).toList();
+    if (type != 'all') {
+      filtered = filtered.where((b) {
+        final resolvedType = (b['type'] ??
+                (b['resource_id'] != null
+                    ? 'resource'
+                    : b['notice_id'] != null
+                        ? 'notice'
+                        : null))
+            ?.toString();
+        return resolvedType == type;
+      }).toList();
     }
     
     // Always sort by created_at descending
@@ -151,8 +162,17 @@ class _BookmarksScreenState extends State<BookmarksScreen> with SingleTickerProv
       itemBuilder: (context, index) {
         final bookmark = filtered[index];
         
-        if (bookmark['resource_id'] != null && bookmark['resource'] != null) {
-          final resource = Resource.fromJson(bookmark['resource']);
+        final resolvedType = (bookmark['type'] ??
+                (bookmark['resource_id'] != null
+                    ? 'resource'
+                    : bookmark['notice_id'] != null
+                        ? 'notice'
+                        : null))
+            ?.toString();
+        final content = bookmark['content'] ?? bookmark['resource'] ?? bookmark['notice'];
+
+        if (resolvedType == 'resource' && content != null) {
+          final resource = Resource.fromJson(Map<String, dynamic>.from(content));
           return Padding(
             padding: const EdgeInsets.only(bottom: 16),
             child: ResourceCard(
@@ -160,8 +180,8 @@ class _BookmarksScreenState extends State<BookmarksScreen> with SingleTickerProv
               userEmail: _supabase.currentUserEmail ?? '',
             ),
           );
-        } else if (bookmark['notice_id'] != null && bookmark['notice'] != null) {
-          final noticeMap = bookmark['notice'] as Map<String, dynamic>;
+        } else if (resolvedType == 'notice' && content != null) {
+          final noticeMap = Map<String, dynamic>.from(content);
           
           // Resolve DepartmentAccount
           final deptId = noticeMap['department'] as String? ?? 'general';

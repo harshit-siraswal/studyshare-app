@@ -31,6 +31,8 @@ import 'services/backend_api_service.dart';
 import 'providers/theme_provider.dart';
 import 'widgets/global_timer_overlay.dart';
 import 'widgets/branded_loader.dart';
+import 'utils/app_navigator.dart';
+import 'services/supabase_service.dart';
 
 /// Request necessary app permissions
 /// Returns true if all critical permissions are granted or not required
@@ -77,9 +79,6 @@ Future<bool> _requestPermissions() async {
 }
 
 // Top-level navigator key for global access
-final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
-
-
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -127,7 +126,7 @@ enum AppState { loading, noConnection, permissionError, supabaseError, ready }
 
 class AppRoot extends StatefulWidget {
   // Expose key if needed via static accessor, but top-level is fine too
-  static GlobalKey<NavigatorState> get navKey => navigatorKey;
+  static GlobalKey<NavigatorState> get navKey => appNavigatorKey;
 
   const AppRoot({super.key});
 
@@ -263,7 +262,7 @@ class _AppRootState extends State<AppRoot> {
                  if (actionUrl.startsWith('/')) {
                    // Internal navigation using global navigator key
                    debugPrint('Internal navigation to $actionUrl requested');
-                   await navigatorKey.currentState?.pushNamed(actionUrl);
+                   await appNavigatorKey.currentState?.pushNamed(actionUrl);
                  } else {
                    // External navigation
                    final uri = Uri.parse(actionUrl);
@@ -408,7 +407,7 @@ class StudySpaceApp extends StatelessWidget {
                 GlobalCupertinoLocalizations.delegate,
               ],
               supportedLocales: const [Locale('en')],
-              navigatorKey: navigatorKey,
+              navigatorKey: appNavigatorKey,
               theme: AppTheme.lightTheme(lightDynamic),
               darkTheme: AppTheme.darkTheme(darkDynamic),
               themeMode: themeProvider.themeMode,
@@ -520,6 +519,7 @@ class _AppRouterState extends State<AppRouter> {
 
   @override
   Widget build(BuildContext context) {
+    SupabaseService().attachContext(context);
     if (_isLoading) {
       return const SplashScreen();
     }

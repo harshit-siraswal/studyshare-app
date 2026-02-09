@@ -1,11 +1,10 @@
+import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'dart:async';
-import 'package:video_player/video_player.dart';
 import '../config/theme.dart';
 
-/// A branded loading widget inspired by Alma's loading screen.
-/// Features animated app logo with gradient pulse and rotating motivational quotes.
+/// A branded loading widget with a custom orbital animation.
 class BrandedLoader extends StatefulWidget {
   final String? message;
   final bool showQuotes;
@@ -23,12 +22,8 @@ class BrandedLoader extends StatefulWidget {
 }
 
 class _BrandedLoaderState extends State<BrandedLoader>
-    with TickerProviderStateMixin {
-  late AnimationController _pulseController;
-  late Animation<double> _pulseAnimation;
-  VideoPlayerController? _videoController;
-  bool _videoReady = false;
-  
+    with SingleTickerProviderStateMixin {
+  late AnimationController _orbitController;
   int _currentQuoteIndex = 0;
   Timer? _quoteTimer;
 
@@ -52,19 +47,12 @@ class _BrandedLoaderState extends State<BrandedLoader>
   @override
   void initState() {
     super.initState();
-    
-    // Pulse animation for the logo glow
-    _pulseController = AnimationController(
+
+    _orbitController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1500),
-    )..repeat(reverse: true);
-    
-    _pulseAnimation = Tween<double>(begin: 0.8, end: 1.0).animate(
-      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
-    );
-    _initVideo();
-    
-    // Rotate quotes every 2.5 seconds
+      duration: const Duration(milliseconds: 1200),
+    )..repeat();
+
     if (widget.showQuotes) {
       _quoteTimer = Timer.periodic(const Duration(milliseconds: 2500), (_) {
         if (mounted) {
@@ -78,40 +66,19 @@ class _BrandedLoaderState extends State<BrandedLoader>
 
   @override
   void dispose() {
-    _pulseController.dispose();
+    _orbitController.dispose();
     _quoteTimer?.cancel();
-    _videoController?.dispose();
     super.dispose();
-  }
-
-  Future<void> _initVideo() async {
-    final controller = VideoPlayerController.asset('assets/videos/brand_loader.mp4');
-    try {
-      await controller.setLooping(true);
-      await controller.setVolume(0);
-      await controller.initialize();
-      if (!mounted) {
-        await controller.dispose();
-        return;
-      }
-      setState(() {
-        _videoController = controller;
-        _videoReady = true;
-      });
-      await controller.play();
-    } catch (_) {
-      await controller.dispose();
-    }
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     if (widget.compact) {
       return _buildCompactLoader(isDark);
     }
-    
+
     return Container(
       width: double.infinity,
       height: double.infinity,
@@ -128,12 +95,8 @@ class _BrandedLoaderState extends State<BrandedLoader>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Animated Logo with glow
-            _buildAnimatedLogo(isDark),
-            
-            const SizedBox(height: 32),
-            
-            // Loading message
+            _buildOrbitLoader(size: 104, isDark: isDark),
+            const SizedBox(height: 28),
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 400),
               child: Text(
@@ -146,11 +109,8 @@ class _BrandedLoaderState extends State<BrandedLoader>
                 ),
               ),
             ),
-            
             if (widget.showQuotes) ...[
-              const SizedBox(height: 48),
-              
-              // Motivational quote
+              const SizedBox(height: 40),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 40),
                 child: AnimatedSwitcher(
@@ -175,65 +135,13 @@ class _BrandedLoaderState extends State<BrandedLoader>
     );
   }
 
-  Widget _buildAnimatedLogo(bool isDark) {
-    return AnimatedBuilder(
-      animation: _pulseAnimation,
-      builder: (context, child) {
-        final scale = 0.92 + (0.08 * _pulseAnimation.value);
-        return Transform.scale(
-          scale: scale,
-          child: Container(
-            width: 100,
-            height: 100,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(24),
-              boxShadow: [
-                BoxShadow(
-                  color: AppTheme.primary.withValues(alpha: 0.25 * _pulseAnimation.value),
-                  blurRadius: 26 * _pulseAnimation.value,
-                  spreadRadius: 3 * _pulseAnimation.value,
-                ),
-              ],
-            ),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(24),
-              child: _buildVideoOrFallback(100),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   Widget _buildCompactLoader(bool isDark) {
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          AnimatedBuilder(
-            animation: _pulseAnimation,
-            builder: (context, child) {
-              return Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppTheme.primary.withValues(alpha: 0.2 * _pulseAnimation.value),
-                      blurRadius: 16 * _pulseAnimation.value,
-                      spreadRadius: 2 * _pulseAnimation.value,
-                    ),
-                  ],
-                ),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: _buildVideoOrFallback(56),
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 16),
+          _buildOrbitLoader(size: 64, isDark: isDark),
+          const SizedBox(height: 14),
           Text(
             widget.message ?? 'Loading...',
             style: GoogleFonts.inter(
@@ -246,35 +154,73 @@ class _BrandedLoaderState extends State<BrandedLoader>
     );
   }
 
-  Widget _buildVideoOrFallback(double size) {
-    if (_videoReady && _videoController != null && _videoController!.value.isInitialized) {
-      final videoSize = _videoController!.value.size;
-      return FittedBox(
-        fit: BoxFit.contain,
-        child: SizedBox(
-          width: videoSize.width,
-          height: videoSize.height,
-          child: VideoPlayer(_videoController!),
-        ),
-      );
-    }
+  Widget _buildOrbitLoader({required double size, required bool isDark}) {
+    const dotCount = 10;
+    final dotSize = size * 0.12;
+    final radius = size * 0.34;
+    final dotColor = isDark ? Colors.white : AppTheme.primary;
 
-    return Image.asset(
-      'assets/icon/app_icon.png',
-      width: size,
-      height: size,
-      fit: BoxFit.contain,
-      errorBuilder: (context, error, stackTrace) {
-        return Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [AppTheme.primary, AppTheme.accent],
+    return AnimatedBuilder(
+      animation: _orbitController,
+      builder: (context, child) {
+        final t = _orbitController.value;
+        final pulse = 0.92 + 0.08 * math.sin(t * 2 * math.pi);
+
+        return Transform.scale(
+          scale: pulse,
+          child: SizedBox(
+            width: size,
+            height: size,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: Padding(
+                    padding: EdgeInsets.all(size * 0.18),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: dotColor.withValues(alpha: 0.2),
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                ...List.generate(dotCount, (i) {
+                  final angle = (2 * math.pi / dotCount) * i;
+                  final phase = (t + i / dotCount) % 1.0;
+                  final opacity = 0.25 + 0.75 * Curves.easeInOut.transform(phase);
+                  final scale = 0.6 + 0.6 * Curves.easeInOut.transform(phase);
+
+                  return Positioned(
+                    left: size / 2 + radius * math.cos(angle) - dotSize / 2,
+                    top: size / 2 + radius * math.sin(angle) - dotSize / 2,
+                    child: Opacity(
+                      opacity: opacity,
+                      child: Transform.scale(
+                        scale: scale,
+                        child: Container(
+                          width: dotSize,
+                          height: dotSize,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: dotColor,
+                            boxShadow: [
+                              BoxShadow(
+                                color: dotColor.withValues(alpha: 0.3),
+                                blurRadius: 8,
+                                spreadRadius: 1,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ],
             ),
-          ),
-          child: Icon(
-            Icons.auto_stories_rounded,
-            size: size * 0.5,
-            color: Colors.white,
           ),
         );
       },
@@ -296,7 +242,7 @@ class BrandedProgressIndicator extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [

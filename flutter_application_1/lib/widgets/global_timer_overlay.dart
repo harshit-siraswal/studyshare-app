@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'dart:math' as math;
 import '../controllers/study_timer_controller.dart';
+import '../utils/app_navigator.dart';
 
 /// Global Timer Overlay - Wraps the app and shows floating timer on all screens
 class GlobalTimerOverlay extends StatefulWidget {
@@ -172,10 +173,13 @@ class _GlobalTimerOverlayState extends State<GlobalTimerOverlay>
   void _showTimerControlDialog(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
+    final dialogContext = appNavigatorKey.currentState?.overlay?.context
+        ?? appNavigatorKey.currentContext
+        ?? context;
+
     showDialog(
-      context: context,
+      context: dialogContext,
       barrierColor: Colors.black54,
-       // Use root navigator to ensure it displays over everything
       useRootNavigator: true,
       builder: (dialogContext) => Dialog(
         backgroundColor: Colors.transparent,

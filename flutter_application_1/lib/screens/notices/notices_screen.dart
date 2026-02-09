@@ -394,7 +394,7 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
                       : _filteredNotices.isEmpty 
                           ? _buildEmptyState(isDark)
                           : ListView.builder(
-                              padding: const EdgeInsets.all(16),
+                              padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
                               itemCount: _filteredNotices.length,
                               itemBuilder: (context, index) {
                                 final notice = _filteredNotices[index];
@@ -420,7 +420,7 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
                   
                   // Tab 2: Departments List
                   ListView.builder(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    padding: const EdgeInsets.only(top: 12, bottom: 120),
                     itemCount: _departmentAccounts.length,
                     itemBuilder: (context, index) {
                       final account = _departmentAccounts[index];
@@ -582,7 +582,7 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
   Widget _buildLoadingSkeleton(bool isDark) {
     return ListView(
       physics: const NeverScrollableScrollPhysics(),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
       children: [
         const Center(
           child: BrandedLoader(

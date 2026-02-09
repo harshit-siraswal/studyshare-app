@@ -75,7 +75,7 @@ class _ResourceSearchScreenState extends State<ResourceSearchScreen> with Single
   
   Future<void> _loadSubjects() async {
     if (_selectedBranch != null) {
-      final subjects = await _supabaseService.getUniqueValues('subject', widget.collegeId);
+      final subjects = await _supabaseService.getUniqueValues('subject', widget.collegeId, branch: _selectedBranch);
       if (mounted) setState(() => _subjects = subjects);
     } else {
       if (mounted) setState(() => _subjects = []);

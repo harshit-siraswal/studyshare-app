@@ -66,12 +66,14 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
   String? _selectedBranch;
   String? _selectedSubject;
   String? _selectedType;
+  String _selectedSort = 'Recent';
 
   // Filter options
   List<String> _semesters = [];
   List<String> _branches = [];
   List<String> _subjects = [];
   final List<String> _types = ['All', 'Notes', 'Video', 'PYQ', 'Downloads'];
+  final List<String> _sortOptions = ['Recent', 'Most upvotes', 'Teacher'];
 
   @override
   void initState() {
@@ -124,7 +126,7 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
 
   Future<void> _loadSubjects() async {
     if (_selectedBranch != null && _selectedBranch != 'All') {
-      final subjects = await _supabaseService.getUniqueValues('subject', widget.collegeId);
+      final subjects = await _supabaseService.getUniqueValues('subject', widget.collegeId, branch: _selectedBranch);
       setState(() {
         _subjects = ['All', ...subjects];
       });
@@ -158,6 +160,7 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
         subject: _selectedSubject != 'All' ? _selectedSubject : null,
         type: _selectedType != 'All' ? _selectedType?.toLowerCase() : null,
         searchQuery: _searchController.text.isNotEmpty ? _searchController.text : null,
+        sortBy: _mapSortOption(_selectedSort),
         offset: 0,
       );
       
@@ -196,6 +199,7 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
         subject: _selectedSubject != 'All' ? _selectedSubject : null,
         type: _selectedType != 'All' ? _selectedType?.toLowerCase() : null,
         searchQuery: _searchController.text.isNotEmpty ? _searchController.text : null,
+        sortBy: _mapSortOption(_selectedSort),
         offset: _resources.length,
       );
       
@@ -623,8 +627,8 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
 
     final hasActiveFilters = (_selectedSemester != null && _selectedSemester != 'All') ||
         (_selectedBranch != null && _selectedBranch != 'All') ||
-        _selectedSubject != null ||
-        (_selectedType != null && _selectedType != 'All');
+        (_selectedSubject != null && _selectedSubject != 'All') ||
+        (_selectedType != null && _selectedType != 'All') || _selectedSort != 'Recent';
 
     return GestureDetector(
       onTap: () {
@@ -708,6 +712,17 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
         ),
       ),
     );
+  }
+
+  String? _mapSortOption(String? sortLabel) {
+    switch (sortLabel) {
+      case 'Most upvotes':
+        return 'upvotes';
+      case 'Teacher':
+        return 'teacher';
+      default:
+        return null;
+    }
   }
 
   // Horizontal list of resource type filters
@@ -813,6 +828,7 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
                       _selectedBranch = null;
                       _selectedSubject = null;
                       _selectedType = null;
+                      _selectedSort = 'Recent';
                       _loadResources(refresh: true);
                     });
                     Navigator.pop(context);
@@ -844,54 +860,84 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
                   const SizedBox(height: 12),
                   _buildFilterDropdown(
                     value: _selectedSemester ?? 'All',
-                    items: _semesters,
-                    onChanged: (val) {
+                    items: _semesters.isEmpty ? ['All'] : _semesters,
+                    onChanged: (value) {
                       setState(() {
-                        _selectedSemester = val == 'All' ? null : val;
-                        _loadResources(refresh: true);
+                        _selectedSemester = value == 'All' ? null : value;
                       });
-                      (context as Element).markNeedsBuild();
+                      _loadResources(refresh: true);
                     },
                     isDark: isDark,
                   ),
-                    
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 20),
 
-                  // Branch - Dropdown Select
                   Text('Branch', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: subTitleColor)),
                   const SizedBox(height: 12),
                   _buildFilterDropdown(
                     value: _selectedBranch ?? 'All',
-                    items: _branches,
-                    onChanged: (val) {
+                    items: _branches.isEmpty ? ['All'] : _branches,
+                    onChanged: (value) {
                       setState(() {
-                        _selectedBranch = val == 'All' ? null : val;
-                        _loadResources(refresh: true);
-                        _loadSubjects();
+                        _selectedBranch = value == 'All' ? null : value;
+                        _selectedSubject = null;
                       });
-                      (context as Element).markNeedsBuild();
+                      _loadSubjects();
+                      _loadResources(refresh: true);
                     },
                     isDark: isDark,
                   ),
-                    
-                   const SizedBox(height: 24),
-                   
-                   // Subject - Dropdown Select (always visible, disabled if no branch)
-                   Text('Subject', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: subTitleColor)),
-                   const SizedBox(height: 12),
-                   _buildFilterDropdown(
-                     value: _selectedSubject ?? 'Select...',
-                     items: _subjects.isEmpty ? ['Select a branch first'] : _subjects,
-                     onChanged: _selectedBranch == null || _selectedBranch == 'All' ? null : (val) {
-                       setState(() {
-                         _selectedSubject = val == 'All' ? null : val;
-                         _loadResources(refresh: true);
-                       });
-                       (context as Element).markNeedsBuild();
-                     },
-                     isDark: isDark,
-                     enabled: _selectedBranch != null && _selectedBranch != 'All',
-                   ),
+                  const SizedBox(height: 20),
+
+                  Text('Subject', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: subTitleColor)),
+                  const SizedBox(height: 12),
+                  _buildFilterDropdown(
+                    value: _selectedSubject ?? 'All',
+                    items: _subjects.isEmpty ? ['All'] : _subjects,
+                    onChanged: (_selectedBranch != null && _selectedBranch != 'All')
+                        ? (value) {
+                            setState(() {
+                              _selectedSubject = value == 'All' ? null : value;
+                            });
+                            _loadResources(refresh: true);
+                          }
+                        : null,
+                    isDark: isDark,
+                    enabled: _selectedBranch != null && _selectedBranch != 'All',
+                  ),
+                  const SizedBox(height: 20),
+
+                  Text('Type', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: subTitleColor)),
+                  const SizedBox(height: 12),
+                  _buildFilterDropdown(
+                    value: _selectedType ?? 'All',
+                    items: _types,
+                    onChanged: (value) {
+                      setState(() {
+                        _selectedType = value == 'All' ? null : value;
+                      });
+                      _loadResources(refresh: true);
+                    },
+                    isDark: isDark,
+                  ),
+                  const SizedBox(height: 24),
+
+                  Text('Sort by', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w600, color: subTitleColor)),
+                  const SizedBox(height: 12),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: _sortOptions.map((option) => _buildCompactFilterChip(
+                      option,
+                      _selectedSort == option,
+                      (selected) {
+                        if (!selected) return;
+                        setState(() {
+                          _selectedSort = option;
+                          _loadResources(refresh: true);
+                        });
+                      },
+                    )).toList(),
+                  ),
                 ],
               ),
             ),
@@ -1229,6 +1275,7 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
                 _selectedBranch = null;
                 _selectedSubject = null;
                 _selectedType = null;
+                _selectedSort = 'Recent';
                 _searchController.clear();
               });
               _loadResources(refresh: true);

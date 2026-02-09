@@ -80,6 +80,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet> with SingleTicker
   String _ocrProvider = 'google';
   bool _includeSource = false;
   bool _showAnswers = false;
+  final Map<int, String> _selectedAnswers = {};
 
   String? _sourceText;
   String? _sourceType;
@@ -438,27 +439,86 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet> with SingleTicker
               ...q.options.asMap().entries.map((entry) {
                 final label = String.fromCharCode(65 + entry.key);
                 final opt = entry.value;
-                final isCorrect = _showAnswers && q.correct.toUpperCase() == label;
+                final selected = _selectedAnswers[idx] == label;
+                final correct = q.correct.toUpperCase() == label;
+                final reveal = _showAnswers || selected;
+                final isCorrect = reveal && correct;
+                final isWrong = selected && !correct && reveal;
+                final borderColor = isCorrect
+                    ? AppTheme.success
+                    : isWrong
+                        ? AppTheme.error
+                        : (isDark ? AppTheme.darkBorder : AppTheme.lightBorder);
+                final fillColor = isCorrect
+                    ? AppTheme.success.withValues(alpha: 0.15)
+                    : isWrong
+                        ? AppTheme.error.withValues(alpha: 0.15)
+                        : (isDark ? AppTheme.darkCard : Colors.white);
+                final textColor = isCorrect
+                    ? AppTheme.success
+                    : isWrong
+                        ? AppTheme.error
+                        : (isDark ? Colors.white : AppTheme.lightTextPrimary);
                 return Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '$label. ',
-                        style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600),
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: InkWell(
+                    onTap: () {
+                      setState(() {
+                        _selectedAnswers[idx] = label;
+                      });
+                    },
+                    borderRadius: BorderRadius.circular(12),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: fillColor,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: borderColor, width: 1),
                       ),
-                      Expanded(
-                        child: Text(
-                          opt,
-                          style: GoogleFonts.inter(
-                            fontSize: 12,
-                            color: isCorrect ? AppTheme.success : null,
-                            fontWeight: isCorrect ? FontWeight.w600 : FontWeight.normal,
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 26,
+                            height: 26,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: isCorrect
+                                  ? AppTheme.success.withValues(alpha: 0.2)
+                                  : isWrong
+                                      ? AppTheme.error.withValues(alpha: 0.2)
+                                      : (isDark ? AppTheme.darkSurface : AppTheme.lightSurface),
+                              border: Border.all(color: borderColor),
+                            ),
+                            child: Text(
+                              label,
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: textColor,
+                              ),
+                            ),
                           ),
-                        ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              opt,
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                color: textColor,
+                                fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+                              ),
+                            ),
+                          ),
+                          if (isCorrect)
+                            const Icon(Icons.check_circle, size: 18, color: AppTheme.success),
+                          if (isWrong)
+                            const Icon(Icons.cancel, size: 18, color: AppTheme.error),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 );
               }).toList(),

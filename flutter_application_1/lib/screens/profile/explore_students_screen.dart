@@ -4,6 +4,7 @@ import 'dart:async';
 import '../../config/theme.dart';
 import '../../services/supabase_service.dart';
 import '../../widgets/user_avatar.dart';
+import 'user_profile_screen.dart';
 
 class ExploreStudentsScreen extends StatefulWidget {
   final String collegeDomain;
@@ -154,66 +155,81 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
   }
 
   Widget _buildStudentCard(Map<String, dynamic> student, bool isDark) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkCard : AppTheme.lightSurface,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          UserAvatar(
-            photoUrl: student['profile_photo_url'],
-            radius: 24,
-            displayName: student['display_name'] ?? 'User',
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  student['display_name'] ?? 'Unknown',
-                  style: GoogleFonts.inter(
-                    color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 16,
-                  ),
-                ),
-                if (student['username'] != null)
-                  Text(
-                    '@${student['username']}',
-                    style: GoogleFonts.inter(
-                      color: Colors.grey,
-                      fontSize: 14,
-                    ),
-                  ),
-                if (student['bio'] != null && student['bio'].toString().isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4.0),
-                    child: Text(
-                      student['bio'],
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
-                        color: isDark ? AppTheme.darkTextMuted : AppTheme.lightTextMuted,
-                        fontSize: 13,
-                      ),
-                    ),
-                  ),
-              ],
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () {
+        final email = student['email'] as String?;
+        if (email == null || email.isEmpty) return;
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => UserProfileScreen(
+              userEmail: email,
+              userName: student['display_name'],
+              userPhotoUrl: student['profile_photo_url'],
             ),
           ),
-          // Follow Button (Placeholder for now)
-          // We can add actual follow logic if the API supports it
-        ],
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isDark ? AppTheme.darkCard : AppTheme.lightSurface,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            UserAvatar(
+              photoUrl: student['profile_photo_url'],
+              radius: 24,
+              displayName: student['display_name'] ?? 'User',
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    student['display_name'] ?? 'Unknown',
+                    style: GoogleFonts.inter(
+                      color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 16,
+                    ),
+                  ),
+                  if (student['username'] != null)
+                    Text(
+                      '@${student['username']}',
+                      style: GoogleFonts.inter(
+                        color: Colors.grey,
+                        fontSize: 14,
+                      ),
+                    ),
+                  if (student['bio'] != null && student['bio'].toString().isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4.0),
+                      child: Text(
+                        student['bio'],
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.inter(
+                          color: isDark ? AppTheme.darkTextMuted : AppTheme.lightTextMuted,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

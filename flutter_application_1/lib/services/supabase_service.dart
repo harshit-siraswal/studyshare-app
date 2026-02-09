@@ -36,6 +36,59 @@ class SupabaseService {
 
   String? get currentUserEmail => _client.auth.currentUser?.email;
 
+  Future<List<String>> _resolveUserIdentifiers(String email) async {
+    try {
+      final user = await _client
+          .from('users')
+          .select('*')
+          .eq('email', email)
+          .maybeSingle();
+
+      if (user == null) return [];
+
+      final ids = <String>{};
+      final id = user['id'];
+      if (id != null) ids.add(id.toString());
+      final firebaseUid = user['firebase_uid'];
+      if (firebaseUid != null) ids.add(firebaseUid.toString());
+
+      return ids.toList();
+    } catch (e) {
+      debugPrint('Error resolving user identifiers: $e');
+      return [];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchUsersByIds(List<String> ids) async {
+    if (ids.isEmpty) return [];
+
+    try {
+      final response = await _client
+          .from('users')
+          .select('id, email, display_name, profile_photo_url, username, photo_url')
+          .in('id', ids);
+      if (response is List && response.isNotEmpty) {
+        return List<Map<String, dynamic>>.from(response);
+      }
+    } catch (e) {
+      debugPrint('Error fetching users by id: $e');
+    }
+
+    try {
+      final response = await _client
+          .from('users')
+          .select('id, email, display_name, profile_photo_url, username, photo_url')
+          .in('firebase_uid', ids);
+      if (response is List && response.isNotEmpty) {
+        return List<Map<String, dynamic>>.from(response);
+      }
+    } catch (e) {
+      debugPrint('Error fetching users by firebase uid: $e');
+    }
+
+    return [];
+  }
+
   // ============ COLLEGES ============
   
   /// Get all active colleges
@@ -86,6 +139,7 @@ class SupabaseService {
     String? subject,
     String? type,
     String? searchQuery,
+    String? sortBy,
     int limit = 20,
     int offset = 0,
   }) async {
@@ -114,9 +168,19 @@ class SupabaseService {
         query = query.ilike('title', '%$searchQuery%');
       }
       
-      final response = await query
-          .order('created_at', ascending: false)
-          .range(offset, offset + limit - 1);
+      if (sortBy == 'upvotes') {
+        query = query
+            .order('upvotes', ascending: false)
+            .order('created_at', ascending: false);
+      } else if (sortBy == 'teacher') {
+        query = query
+            .order('uploaded_by_name', ascending: true)
+            .order('created_at', ascending: false);
+      } else {
+        query = query.order('created_at', ascending: false);
+      }
+
+      final response = await query.range(offset, offset + limit - 1);
       
       debugPrint('SupabaseService.getResources: returned ${(response as List).length} resources');
       
@@ -139,19 +203,67 @@ class SupabaseService {
     int offset = 0,
   }) async {
     try {
-      // First get list of users this user follows
+      final identifiers = await _resolveUserIdentifiers(userEmail);
+      List<String> followingIds = [];
+
+      for (final id in identifiers) {
+        final followsResponse = await _client
+            .from('follows')
+            .select('following_id')
+            .eq('follower_id', id)
+            .eq('status', 'accepted');
+
+        final ids = (followsResponse as List)
+            .map((r) => r['following_id'] as String?)
+            .whereType<String>()
+            .toList();
+
+        if (ids.isNotEmpty) {
+          followingIds = ids;
+          break;
+        }
+      }
+
+      if (followingIds.isNotEmpty) {
+        final usersResponse = await _fetchUsersByIds(followingIds);
+        final followingEmails = usersResponse
+            .map((r) => r['email'] as String?)
+            .whereType<String>()
+            .toList();
+
+        if (followingEmails.isNotEmpty) {
+          final response = await _client
+              .from('resources')
+              .select()
+              .eq('college_id', collegeId)
+              .eq('status', 'approved')
+              .filter('uploaded_by_email', 'in', followingEmails)
+              .order('created_at', ascending: false)
+              .range(offset, offset + limit - 1);
+
+          return (response as List)
+              .map((json) => Resource.fromJson(json))
+              .toList();
+        }
+      }
+    } catch (e) {
+      debugPrint('Error fetching following feed (id): $e');
+    }
+
+    // Fallback: email-based follows
+    try {
       final followsResponse = await _client
           .from('follows')
           .select('following_email')
           .eq('follower_email', userEmail);
-      
+
       final followingEmails = (followsResponse as List)
-          .map((r) => r['following_email'] as String)
+          .map((r) => r['following_email'] as String?)
+          .whereType<String>()
           .toList();
-      
+
       if (followingEmails.isEmpty) return [];
-      
-      // Then get resources uploaded by those users
+
       final response = await _client
           .from('resources')
           .select()
@@ -160,12 +272,12 @@ class SupabaseService {
           .filter('uploaded_by_email', 'in', followingEmails)
           .order('created_at', ascending: false)
           .range(offset, offset + limit - 1);
-      
+
       return (response as List)
           .map((json) => Resource.fromJson(json))
           .toList();
     } catch (e) {
-      debugPrint('Error fetching following feed: $e');
+      debugPrint('Error fetching following feed (email): $e');
       return [];
     }
   }
@@ -481,60 +593,99 @@ class SupabaseService {
 
   Future<List<Map<String, dynamic>>> getFollowers(String userEmail) async {
     try {
-      // If userEmail is current user, use Backend API
       if (userEmail == currentUserEmail) {
-         final res = await _api.getFollowers();
-         return List<Map<String, dynamic>>.from(res['followers'] ?? []);
+        final res = await _api.getFollowers();
+        return List<Map<String, dynamic>>.from(res['followers'] ?? []);
       }
-      // If viewing generic profile, we might need a different API or direct query if public
-      // Assuming public read on follows table
-       final response = await _client
-          .from('follows')
-          .select('follower_email, users!follower_email(display_name, profile_photo_url, username, email)')
-          .eq('following_email', userEmail);
-          
-       return (response as List).map((r) {
-         final u = r['users'];
-         final photoUrl = u['profile_photo_url'] ?? u['photo_url'];
-         return {
-           'email': u['email'],
-           'display_name': u['display_name'],
-           'profile_photo_url': photoUrl,
-           'photo_url': photoUrl,
-           'username': u['username'],
-         };
-       }).toList();
+
+      final identifiers = await _resolveUserIdentifiers(userEmail);
+      if (identifiers.isEmpty) return [];
+
+      List<String> followerIds = [];
+      for (final id in identifiers) {
+        final response = await _client
+            .from('follows')
+            .select('follower_id')
+            .eq('following_id', id)
+            .eq('status', 'accepted');
+
+        final ids = (response as List)
+            .map((r) => r['follower_id'] as String?)
+            .whereType<String>()
+            .toList();
+
+        if (ids.isNotEmpty) {
+          followerIds = ids;
+          break;
+        }
+      }
+
+      if (followerIds.isEmpty) return [];
+
+      final usersResponse = await _fetchUsersByIds(followerIds);
+
+      return usersResponse.map((u) {
+        final photoUrl = u['profile_photo_url'] ?? u['photo_url'];
+        return {
+          'email': u['email'],
+          'display_name': u['display_name'],
+          'profile_photo_url': photoUrl,
+          'photo_url': photoUrl,
+          'username': u['username'],
+        };
+      }).toList();
     } catch (e) {
-       debugPrint('Error getting followers: $e');
-       return [];
+      debugPrint('Error getting followers: $e');
+      return [];
     }
   }
 
   Future<List<Map<String, dynamic>>> getFollowing(String userEmail) async {
     try {
-       if (userEmail == currentUserEmail) {
-         final res = await _api.getFollowing();
-         return List<Map<String, dynamic>>.from(res['following'] ?? []);
+      if (userEmail == currentUserEmail) {
+        final res = await _api.getFollowing();
+        return List<Map<String, dynamic>>.from(res['following'] ?? []);
       }
-       final response = await _client
-          .from('follows')
-          .select('following_email, users!following_email(display_name, profile_photo_url, username, email)')
-          .eq('follower_email', userEmail);
-          
-       return (response as List).map((r) {
-         final u = r['users'];
-         final photoUrl = u['profile_photo_url'] ?? u['photo_url'];
-         return {
-           'email': u['email'],
-           'display_name': u['display_name'],
-           'profile_photo_url': photoUrl,
-           'photo_url': photoUrl,
-           'username': u['username'],
-         };
-       }).toList();
+
+      final identifiers = await _resolveUserIdentifiers(userEmail);
+      if (identifiers.isEmpty) return [];
+
+      List<String> followingIds = [];
+      for (final id in identifiers) {
+        final response = await _client
+            .from('follows')
+            .select('following_id')
+            .eq('follower_id', id)
+            .eq('status', 'accepted');
+
+        final ids = (response as List)
+            .map((r) => r['following_id'] as String?)
+            .whereType<String>()
+            .toList();
+
+        if (ids.isNotEmpty) {
+          followingIds = ids;
+          break;
+        }
+      }
+
+      if (followingIds.isEmpty) return [];
+
+      final usersResponse = await _fetchUsersByIds(followingIds);
+
+      return usersResponse.map((u) {
+        final photoUrl = u['profile_photo_url'] ?? u['photo_url'];
+        return {
+          'email': u['email'],
+          'display_name': u['display_name'],
+          'profile_photo_url': photoUrl,
+          'photo_url': photoUrl,
+          'username': u['username'],
+        };
+      }).toList();
     } catch (e) {
-       debugPrint('Error getting following: $e');
-       return [];
+      debugPrint('Error getting following: $e');
+      return [];
     }
   }
 
@@ -612,11 +763,20 @@ class SupabaseService {
   /// Get followers count
   Future<int> getFollowersCount(String userEmail) async {
     try {
-      final response = await _client
-          .from('follows') // Still using follows table
-          .count(CountOption.exact)
-          .eq('following_email', userEmail);
-      return response;
+      final identifiers = await _resolveUserIdentifiers(userEmail);
+      if (identifiers.isEmpty) return 0;
+
+      var maxCount = 0;
+      for (final id in identifiers) {
+        final response = await _client
+            .from('follows')
+            .count(CountOption.exact)
+            .eq('following_id', id)
+            .eq('status', 'accepted');
+        if (response > maxCount) maxCount = response;
+      }
+
+      return maxCount;
     } catch (e) {
       return 0;
     }
@@ -625,11 +785,20 @@ class SupabaseService {
   /// Get following count
   Future<int> getFollowingCount(String userEmail) async {
     try {
-      final response = await _client
-          .from('follows')
-          .count(CountOption.exact)
-          .eq('follower_email', userEmail);
-      return response;
+      final identifiers = await _resolveUserIdentifiers(userEmail);
+      if (identifiers.isEmpty) return 0;
+
+      var maxCount = 0;
+      for (final id in identifiers) {
+        final response = await _client
+            .from('follows')
+            .count(CountOption.exact)
+            .eq('follower_id', id)
+            .eq('status', 'accepted');
+        if (response > maxCount) maxCount = response;
+      }
+
+      return maxCount;
     } catch (e) {
       return 0;
     }
@@ -1611,27 +1780,20 @@ Future<List<Map<String, dynamic>>> getSyllabus({
   /// Toggle bookmark for a resource - returns new bookmark state
   Future<bool> toggleBookmark(String userEmail, String resourceId) async {
     try {
-      final isBookmarked = await this.isBookmarked(userEmail, resourceId);
-      
-      if (isBookmarked) {
-        await _client
-            .from('bookmarks')
-            .delete()
-            .eq('user_email', userEmail)
-            .eq('resource_id', resourceId);
+      final ctx = _ctx;
+      if (ctx == null) throw Exception('Security context not initialized');
+
+      final isMarked = await _api.checkBookmark(resourceId);
+      if (isMarked) {
+        await _api.removeBookmarkByItem(itemId: resourceId, context: ctx);
         return false;
-      } else {
-        await _client.from('bookmarks').insert({
-          'user_email': userEmail,
-          'resource_id': resourceId,
-          'type': 'resource',
-          'created_at': DateTime.now().toIso8601String(),
-        });
-        return true;
       }
+
+      await _api.addBookmark(itemId: resourceId, type: 'resource', context: ctx);
+      return true;
     } catch (e) {
       debugPrint('Error toggling bookmark: $e');
-      rethrow;
+      return false;
     }
   }
 
@@ -1640,13 +1802,7 @@ Future<List<Map<String, dynamic>>> getSyllabus({
   /// Check if a resource is bookmarked by the user
   Future<bool> isBookmarked(String userEmail, String resourceId) async {
     try {
-      final existing = await _client
-          .from('bookmarks')
-          .select('id')
-          .eq('user_email', userEmail)
-          .eq('resource_id', resourceId)
-          .maybeSingle();
-      return existing != null;
+      return await _api.checkBookmark(resourceId);
     } catch (e) {
       debugPrint('Error checking bookmark: $e');
       return false;
