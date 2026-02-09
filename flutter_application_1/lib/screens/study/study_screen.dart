@@ -459,8 +459,10 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
     );
   }
 
-  Widget _buildHeader() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    Widget _buildHeader() {
+      final isDark = Theme.of(context).brightness == Brightness.dark;
+      final collegeName = widget.collegeName.trim();
+      final useCompactText = collegeName.length > 24;
     
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
@@ -483,19 +485,20 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
                   children: [
                     const Icon(Icons.school_rounded, size: 16, color: AppTheme.primary),
                     const SizedBox(width: 6),
-                    Flexible(
-                      child: Text(
-                        widget.collegeName.length > 15 
-                            ? '${widget.collegeName.substring(0, 12)}...'
-                            : widget.collegeName,
-                        style: GoogleFonts.inter(
-                          color: AppTheme.primary,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
+                      Flexible(
+                        child: Text(
+                          collegeName.isEmpty ? 'My College' : collegeName,
+                          style: GoogleFonts.inter(
+                            color: AppTheme.primary,
+                            fontSize: useCompactText ? 12 : 13,
+                            fontWeight: FontWeight.w600,
+                            height: 1.15,
+                          ),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          softWrap: true,
                         ),
-                        overflow: TextOverflow.ellipsis,
                       ),
-                    ),
                     if (widget.onChangeCollege != null) ...[
                       const SizedBox(width: 4),
                       const Icon(Icons.arrow_drop_down_rounded, size: 16, color: AppTheme.primary),
@@ -933,8 +936,8 @@ class _StudyScreenState extends State<StudyScreen> with SingleTickerProviderStat
                         if (!selected) return;
                         setState(() {
                           _selectedSort = option;
-                          _loadResources(refresh: true);
                         });
+                        _loadResources(refresh: true);
                       },
                     )).toList(),
                   ),

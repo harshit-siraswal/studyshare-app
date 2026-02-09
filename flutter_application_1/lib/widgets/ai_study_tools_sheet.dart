@@ -81,7 +81,6 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet> with SingleTicker
   bool _includeSource = false;
   bool _showAnswers = false;
   final Map<int, String> _selectedAnswers = {};
-
   String? _sourceText;
   String? _sourceType;
   String? _sourceProvider;
@@ -170,6 +169,8 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet> with SingleTicker
             .toList();
         setState(() {
           _quiz = parsed;
+          _selectedAnswers.clear();
+          _showAnswers = false;
           _cachedMap['quiz'] = response['cached'] == true;
         });
       } else {

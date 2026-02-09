@@ -171,8 +171,6 @@ class _GlobalTimerOverlayState extends State<GlobalTimerOverlay>
   }
 
   void _showTimerControlDialog(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
     final dialogContext = appNavigatorKey.currentState?.overlay?.context
         ?? appNavigatorKey.currentContext
         ?? context;
@@ -181,14 +179,17 @@ class _GlobalTimerOverlayState extends State<GlobalTimerOverlay>
       context: dialogContext,
       barrierColor: Colors.black54,
       useRootNavigator: true,
-      builder: (dialogContext) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.all(16),
-        child: Container(
-          width: 280,
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+      builder: (ctx) {
+        final isDark = Theme.of(ctx).brightness == Brightness.dark;
+        
+        return Dialog(
+          backgroundColor: Colors.transparent,
+          insetPadding: const EdgeInsets.all(16),
+          child: Container(
+            width: 280,
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
             borderRadius: BorderRadius.circular(24),
             boxShadow: [
               BoxShadow(
@@ -209,7 +210,7 @@ class _GlobalTimerOverlayState extends State<GlobalTimerOverlay>
                   child: Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: IconButton(
-                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      onPressed: () => Navigator.of(ctx).pop(),
                       icon: Icon(
                         Icons.close_rounded,
                         size: 24,
@@ -266,7 +267,7 @@ class _GlobalTimerOverlayState extends State<GlobalTimerOverlay>
                       color: const Color(0xFFEF4444),
                       onTap: () {
                         _timerController.resetTimer();
-                        Navigator.of(dialogContext).pop();
+                        Navigator.of(ctx).pop();
                         setState(() => _showBubble = false);
                       },
                     ),
@@ -287,7 +288,8 @@ class _GlobalTimerOverlayState extends State<GlobalTimerOverlay>
             ],
           ),
         ),
-      ),
+      );
+    },
     );
   }
 

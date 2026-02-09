@@ -171,59 +171,80 @@ class _BrandedLoaderState extends State<BrandedLoader>
           child: SizedBox(
             width: size,
             height: size,
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: Padding(
-                    padding: EdgeInsets.all(size * 0.18),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: dotColor.withValues(alpha: 0.2),
-                          width: 2,
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                ...List.generate(dotCount, (i) {
-                  final angle = (2 * math.pi / dotCount) * i;
-                  final phase = (t + i / dotCount) % 1.0;
-                  final opacity = 0.25 + 0.75 * Curves.easeInOut.transform(phase);
-                  final scale = 0.6 + 0.6 * Curves.easeInOut.transform(phase);
-
-                  return Positioned(
-                    left: size / 2 + radius * math.cos(angle) - dotSize / 2,
-                    top: size / 2 + radius * math.sin(angle) - dotSize / 2,
-                    child: Opacity(
-                      opacity: opacity,
-                      child: Transform.scale(
-                        scale: scale,
-                        child: Container(
-                          width: dotSize,
-                          height: dotSize,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: dotColor,
-                            boxShadow: [
-                              BoxShadow(
-                                color: dotColor.withValues(alpha: 0.3),
-                                blurRadius: 8,
-                                spreadRadius: 1,
-                              ),
-                            ],
+            child: RepaintBoundary(
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: Padding(
+                      padding: EdgeInsets.all(size * 0.18),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: dotColor.withValues(alpha: 0.2),
+                            width: 2,
                           ),
                         ),
                       ),
                     ),
-                  );
-                }),
-              ],
+                  ),
+                  ...List.generate(dotCount, (i) => _buildAnimatedDot(
+                    size: size,
+                    dotSize: dotSize,
+                    radius: radius,
+                    dotColor: dotColor,
+                    dotCount: dotCount,
+                    index: i,
+                    t: t,
+                  )),
+                ],
+              ),
             ),
           ),
         );
       },
+    );
+  }
+
+  Widget _buildAnimatedDot({
+    required double size,
+    required double dotSize,
+    required double radius,
+    required Color dotColor,
+    required int dotCount,
+    required int index,
+    required double t,
+  }) {
+    final angle = (2 * math.pi / dotCount) * index;
+    final phase = (t + index / dotCount) % 1.0;
+    final opacity = 0.25 + 0.75 * Curves.easeInOut.transform(phase);
+    final scale = 0.6 + 0.6 * Curves.easeInOut.transform(phase);
+
+    return Positioned(
+      left: size / 2 + radius * math.cos(angle) - dotSize / 2,
+      top: size / 2 + radius * math.sin(angle) - dotSize / 2,
+      child: AnimatedOpacity(
+        opacity: opacity,
+        duration: const Duration(milliseconds: 16),
+        child: Transform.scale(
+          scale: scale,
+          child: Container(
+            width: dotSize,
+            height: dotSize,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: dotColor,
+              boxShadow: [
+                BoxShadow(
+                  color: dotColor.withValues(alpha: 0.3),
+                  blurRadius: 8,
+                  spreadRadius: 1,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

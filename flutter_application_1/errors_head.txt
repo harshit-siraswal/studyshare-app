@@ -1,0 +1,50 @@
+﻿Analyzing flutter_application_1...                              
+
+warning - Dead code - lib\config\theme.dart:397:5 - dead_code
+   info - The import of 'package:flutter/foundation.dart' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/widgets.dart' - lib\controllers\study_timer_controller.dart:2:8 - unnecessary_import
+   info - The imported package 'intl' isn't a dependency of the importing package - lib\l10n\app_localizations.dart:2:8 - depend_on_referenced_packages
+warning - The value of the local variable 'permanentlyDenied' isn't used - lib\main.dart:62:10 - unused_local_variable
+warning - The declaration '<unnamed>' isn't referenced - lib\main.dart:117:7 - unused_element
+  error - Missing concrete implementation of 'abstract class State<T extends StatefulWidget> with Diagnosticable.build' - lib\main.dart:117:7 - non_abstract_class_inherits_abstract_member
+  error - Expected a class member - lib\main.dart:210:5 - expected_class_member
+  error - Expected an identifier - lib\main.dart:210:8 - missing_identifier
+  error - Expected an identifier - lib\main.dart:210:9 - missing_identifier
+  error - Expected to find ')' - lib\main.dart:210:10 - expected_token
+  error - The await expression can only be used in an async function - lib\main.dart:218:9 - await_in_wrong_context
+  error - Expected a class member - lib\main.dart:268:5 - expected_class_member
+  error - Expected an identifier - lib\main.dart:268:8 - missing_identifier
+   info - Missing type annotation - lib\main.dart:268:9 - strict_top_level_inference
+  error - Undefined name '_appState' - lib\main.dart:277:9 - undefined_identifier
+  error - Undefined name 'initApp' - lib\main.dart:278:42 - undefined_identifier
+  error - Undefined name '_appState' - lib\main.dart:281:9 - undefined_identifier
+  error - Undefined name 'initApp' - lib\main.dart:310:32 - undefined_identifier
+  error - Undefined name '_appState' - lib\main.dart:321:9 - undefined_identifier
+  error - Undefined name 'initApp' - lib\main.dart:335:30 - undefined_identifier
+  error - Undefined name '_appState' - lib\main.dart:352:9 - undefined_identifier
+  error - Undefined name '_prefs' - lib\main.dart:352:42 - undefined_identifier
+  error - Undefined name '_themeProvider' - lib\main.dart:352:60 - undefined_identifier
+  error - Undefined name '_prefs' - lib\main.dart:362:35 - undefined_identifier
+  error - Undefined name '_themeProvider' - lib\main.dart:362:59 - undefined_identifier
+  error - Expected a method, getter, setter or operator declaration - lib\main.dart:365:1 - expected_executable
+warning - Unused import: '../../config/theme.dart' - lib\screens\chatroom\chatroom_list_screen.dart:6:8 - unused_import
+  error - The method 'getChatRooms' isn't defined for the type 'SupabaseService' - lib\screens\chatroom\chatroom_list_screen.dart:75:44 - undefined_method
+warning - The declaration '_showCreateOrJoinDialog' isn't referenced - lib\screens\chatroom\chatroom_list_screen.dart:383:8 - unused_element
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_list_screen.dart:450:53 - use_build_context_synchronously
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre - lib\screens\chatroom\chatroom_list_screen.dart:499:18 - deprecated_member_use
+   info - 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre - lib\screens\chatroom\chatroom_list_screen.dart:523:18 - deprecated_member_use
+  error - The method 'createChatRoom' isn't defined for the type 'SupabaseService' - lib\screens\chatroom\chatroom_list_screen.dart:535:51 - undefined_method
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_list_screen.dart:543:56 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_list_screen.dart:545:48 - use_build_context_synchronously
+   info - Unnecessary use of multiple underscores - lib\screens\chatroom\chatroom_list_screen.dart:565:29 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\screens\chatroom\chatroom_list_screen.dart:566:24 - unnecessary_underscores
+  error - The method 'getRoomPosts' isn't defined for the type 'SupabaseService' - lib\screens\chatroom\chatroom_screen.dart:110:26 - undefined_method
+  error - The method 'getRoomInfo' isn't defined for the type 'SupabaseService' - lib\screens\chatroom\chatroom_screen.dart:111:26 - undefined_method
+  error - The method 'isRoomAdmin' isn't defined for the type 'SupabaseService' - lib\screens\chatroom\chatroom_screen.dart:112:26 - undefined_method
+  error - The method 'getUserVotes' isn't defined for the type 'SupabaseService' - lib\screens\chatroom\chatroom_screen.dart:115:26 - undefined_method
+  error - The method 'joinRoom' isn't defined for the type 'SupabaseService' - lib\screens\chatroom\chatroom_screen.dart:167:30 - undefined_method
+   info - Don't use 'BuildContext's across async gaps - lib\screens\chatroom\chatroom_screen.dart:171:31 - use_build_context_synchronously
+  error - The method 'votePost' isn't defined for the type 'SupabaseService' - lib\screens\chatroom\chatroom_screen.dart:258:30 - undefined_method
+  error - The method 'unsavePost' isn't defined for the type 'SupabaseService' - lib\screens\chatroom\chatroom_screen.dart:288:32 - undefined_method
+  error - The method 'savePost' isn't defined for the type 'SupabaseService' - lib\screens\chatroom\chatroom_screen.dart:290:32 - undefined_method
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:777:41 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:783:41 - use_build_context_synchronously

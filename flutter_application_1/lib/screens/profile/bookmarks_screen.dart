@@ -128,7 +128,9 @@ class _BookmarksScreenState extends State<BookmarksScreen> with SingleTickerProv
         b['resource_id'] == null &&
         b['notice_id'] == null &&
         b['type'] == null &&
-        b['content'] == null);
+        b['content'] == null &&
+        b['resource'] == null &&
+        b['notice'] == null);
 
     if (type != 'all') {
       filtered = filtered.where((b) {

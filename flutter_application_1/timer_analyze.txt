@@ -1,0 +1,13 @@
+Analyzing floating_timer_bubble.dart...                         
+
+warning - The label 'onPanEnd' isn't used - lib\widgets\floating_timer_bubble.dart:89:9 - unused_label
+  error - Expected to find ';' - lib\widgets\floating_timer_bubble.dart:95:9 - expected_token
+  error - Expected an identifier - lib\widgets\floating_timer_bubble.dart:95:10 - missing_identifier
+  error - Unexpected text ';' - lib\widgets\floating_timer_bubble.dart:95:10 - unexpected_token
+warning - The label 'child' isn't used - lib\widgets\floating_timer_bubble.dart:96:9 - unused_label
+  error - Expected to find ';' - lib\widgets\floating_timer_bubble.dart:159:9 - expected_token
+  error - Expected an identifier - lib\widgets\floating_timer_bubble.dart:159:10 - missing_identifier
+  error - Unexpected text ';' - lib\widgets\floating_timer_bubble.dart:159:10 - unexpected_token
+  error - Expected to find '}' - lib\widgets\floating_timer_bubble.dart:160:7 - expected_token
+
+9 issues found. (ran in 6.7s)

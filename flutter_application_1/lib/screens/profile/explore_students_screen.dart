@@ -171,7 +171,7 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
           ),
         );
       },
-      child: Container(
+      child: Ink(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: isDark ? AppTheme.darkCard : AppTheme.lightSurface,
@@ -208,11 +208,10 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
                     Text(
                       '@${student['username']}',
                       style: GoogleFonts.inter(
-                        color: Colors.grey,
+                        color: isDark ? AppTheme.darkTextMuted : AppTheme.lightTextMuted,
                         fontSize: 14,
                       ),
-                    ),
-                  if (student['bio'] != null && student['bio'].toString().isNotEmpty)
+                    ),                  if (student['bio'] != null && student['bio'].toString().isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 4.0),
                       child: Text(
