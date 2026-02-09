@@ -40,10 +40,9 @@ class SupabaseService {
     try {
       final user = await _client
           .from('users')
-          .select('*')
+          .select('id, firebase_uid')
           .eq('email', email)
           .maybeSingle();
-
       if (user == null) return [];
 
       final ids = <String>{};
@@ -63,30 +62,44 @@ class SupabaseService {
     if (ids.isEmpty) return [];
 
     try {
-      final response = await _client
-          .from('users')
-          .select('id, email, display_name, profile_photo_url, username, photo_url')
-          .in('id', ids);
-      if (response is List && response.isNotEmpty) {
-        return List<Map<String, dynamic>>.from(response);
-      }
-    } catch (e) {
-      debugPrint('Error fetching users by id: $e');
-    }
+      // Run both queries in parallel to fetch users by id or firebase_uid
+      final results = await Future.wait([
+        _client
+            .from('users')
+            .select('id, email, display_name, profile_photo_url, username, photo_url')
+            .inFilter('id', ids)
+            .catchError((e) {
+              debugPrint('Error fetching users by id: $e');
+              return [];
+            }),
+        _client
+            .from('users')
+            .select('id, email, display_name, profile_photo_url, username, photo_url')
+            .inFilter('firebase_uid', ids)
+            .catchError((e) {
+              debugPrint('Error fetching users by firebase uid: $e');
+              return [];
+            }),
+      ]);
 
-    try {
-      final response = await _client
-          .from('users')
-          .select('id, email, display_name, profile_photo_url, username, photo_url')
-          .in('firebase_uid', ids);
-      if (response is List && response.isNotEmpty) {
-        return List<Map<String, dynamic>>.from(response);
+      // Merge results and deduplicate by user id
+      final Map<String, Map<String, dynamic>> deduped = {};
+      for (final result in results) {
+        if (result is List) {
+          for (final user in result) {
+            final userId = user['id'];
+            if (userId != null) {
+              deduped[userId] = user;
+            }
+          }
+        }
       }
-    } catch (e) {
-      debugPrint('Error fetching users by firebase uid: $e');
-    }
 
-    return [];
+      return deduped.values.toList();
+    } catch (e) {
+      debugPrint('Error fetching users by ids: $e');
+      return [];
+    }
   }
 
   // ============ COLLEGES ============
@@ -168,19 +181,17 @@ class SupabaseService {
         query = query.ilike('title', '%$searchQuery%');
       }
       
-      if (sortBy == 'upvotes') {
-        query = query
-            .order('upvotes', ascending: false)
-            .order('created_at', ascending: false);
-      } else if (sortBy == 'teacher') {
-        query = query
-            .order('uploaded_by_name', ascending: true)
-            .order('created_at', ascending: false);
-      } else {
-        query = query.order('created_at', ascending: false);
-      }
+      final orderedQuery = sortBy == 'upvotes'
+          ? query
+              .order('upvotes', ascending: false)
+              .order('created_at', ascending: false)
+          : sortBy == 'teacher'
+              ? query
+                  .order('uploaded_by_name', ascending: true)
+                  .order('created_at', ascending: false)
+              : query.order('created_at', ascending: false);
 
-      final response = await query.range(offset, offset + limit - 1);
+      final response = await orderedQuery.range(offset, offset + limit - 1);
       
       debugPrint('SupabaseService.getResources: returned ${(response as List).length} resources');
       
@@ -636,6 +647,54 @@ class SupabaseService {
       }).toList();
     } catch (e) {
       debugPrint('Error getting followers: $e');
+    }
+
+    // Fallback: email-based follows (older schema)
+    try {
+      List<String> followerEmails = [];
+
+      try {
+        final response = await _client
+            .from('follows')
+            .select('follower_email')
+            .eq('following_email', userEmail)
+            .eq('status', 'accepted');
+
+        followerEmails = (response as List)
+            .map((r) => r['follower_email'] as String?)
+            .whereType<String>()
+            .toList();
+      } catch (e) {
+        final response = await _client
+            .from('follows')
+            .select('follower_email')
+            .eq('following_email', userEmail);
+
+        followerEmails = (response as List)
+            .map((r) => r['follower_email'] as String?)
+            .whereType<String>()
+            .toList();
+      }
+
+      if (followerEmails.isEmpty) return [];
+
+      final usersResponse = await _client
+          .from('users')
+          .select('email, display_name, profile_photo_url, username, photo_url')
+          .inFilter('email', followerEmails);
+
+      return (usersResponse as List).map((u) {
+        final photoUrl = u['profile_photo_url'] ?? u['photo_url'];
+        return {
+          'email': u['email'],
+          'display_name': u['display_name'],
+          'profile_photo_url': photoUrl,
+          'photo_url': photoUrl,
+          'username': u['username'],
+        };
+      }).toList();
+    } catch (e) {
+      debugPrint('Error getting followers (email fallback): $e');
       return [];
     }
   }
@@ -685,6 +744,54 @@ class SupabaseService {
       }).toList();
     } catch (e) {
       debugPrint('Error getting following: $e');
+    }
+
+    // Fallback: email-based follows (older schema)
+    try {
+      List<String> followingEmails = [];
+
+      try {
+        final response = await _client
+            .from('follows')
+            .select('following_email')
+            .eq('follower_email', userEmail)
+            .eq('status', 'accepted');
+
+        followingEmails = (response as List)
+            .map((r) => r['following_email'] as String?)
+            .whereType<String>()
+            .toList();
+      } catch (e) {
+        final response = await _client
+            .from('follows')
+            .select('following_email')
+            .eq('follower_email', userEmail);
+
+        followingEmails = (response as List)
+            .map((r) => r['following_email'] as String?)
+            .whereType<String>()
+            .toList();
+      }
+
+      if (followingEmails.isEmpty) return [];
+
+      final usersResponse = await _client
+          .from('users')
+          .select('email, display_name, profile_photo_url, username, photo_url')
+          .inFilter('email', followingEmails);
+
+      return (usersResponse as List).map((u) {
+        final photoUrl = u['profile_photo_url'] ?? u['photo_url'];
+        return {
+          'email': u['email'],
+          'display_name': u['display_name'],
+          'profile_photo_url': photoUrl,
+          'photo_url': photoUrl,
+          'username': u['username'],
+        };
+      }).toList();
+    } catch (e) {
+      debugPrint('Error getting following (email fallback): $e');
       return [];
     }
   }
@@ -1793,9 +1900,8 @@ Future<List<Map<String, dynamic>>> getSyllabus({
       return true;
     } catch (e) {
       debugPrint('Error toggling bookmark: $e');
-      return false;
-    }
-  }
+      rethrow;
+    }  }
 
 
 
