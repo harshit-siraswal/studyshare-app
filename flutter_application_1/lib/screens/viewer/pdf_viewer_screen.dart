@@ -1,14 +1,18 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:flutter/foundation.dart'; // For kIsWeb
+import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+
 import '../../config/theme.dart';
-import '../../widgets/branded_loader.dart';
+import '../../services/backend_api_service.dart';
 import '../../services/subscription_service.dart';
-import '../../widgets/paywall_dialog.dart';
 import '../../widgets/ai_study_tools_sheet.dart';
+import '../../widgets/branded_loader.dart';
+import '../../widgets/paywall_dialog.dart';
 
 class PdfViewerScreen extends StatefulWidget {
   final String pdfUrl;
@@ -30,31 +34,38 @@ class PdfViewerScreen extends StatefulWidget {
 
 class _PdfViewerScreenState extends State<PdfViewerScreen> {
   final GlobalKey<SfPdfViewerState> _pdfViewerKey = GlobalKey();
+  final BackendApiService _api = BackendApiService();
+  final SubscriptionService _subscriptionService = SubscriptionService();
+
   late PdfViewerController _pdfViewerController;
   late PdfTextSearchResult _searchResult;
   WebViewController? _webViewController;
-  
+
   bool _isLoading = true;
   bool _hasError = false;
   String _errorMessage = '';
-  bool _isNightMode = false;  
-  // Search State
+  bool _isNightMode = false;
+
   bool _showSearch = false;
   final TextEditingController _searchController = TextEditingController();
+  Timer? _searchDebounce;
+  int _searchSequence = 0;
+
+  bool _isOcrSearching = false;
+  List<Map<String, dynamic>> _ocrMatches = [];
+  String? _ocrSearchError;
 
   String get _urlPath => Uri.tryParse(widget.pdfUrl)?.path.toLowerCase() ?? '';
 
-  bool get _isPdf {
-    return _urlPath.endsWith('.pdf');
-  }
+  bool get _isPdf => _urlPath.endsWith('.pdf');
 
   bool get _isOfficeDoc {
-    return _urlPath.endsWith('.doc') || 
-           _urlPath.endsWith('.docx') || 
-           _urlPath.endsWith('.ppt') || 
-           _urlPath.endsWith('.pptx') || 
-           _urlPath.endsWith('.xls') || 
-           _urlPath.endsWith('.xlsx');
+    return _urlPath.endsWith('.doc') ||
+        _urlPath.endsWith('.docx') ||
+        _urlPath.endsWith('.ppt') ||
+        _urlPath.endsWith('.pptx') ||
+        _urlPath.endsWith('.xls') ||
+        _urlPath.endsWith('.xlsx');
   }
 
   @override
@@ -68,8 +79,14 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     }
   }
 
+  @override
+  void dispose() {
+    _searchDebounce?.cancel();
+    _searchController.dispose();
+    super.dispose();
+  }
+
   void _initWebView() {
-    // encodeURIComponent equivalent
     final encodedUrl = Uri.encodeComponent(widget.pdfUrl);
     final googleDocsUrl = 'https://docs.google.com/gview?embedded=true&url=$encodedUrl';
 
@@ -78,55 +95,193 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       ..setBackgroundColor(const Color(0x00000000))
       ..setNavigationDelegate(
         NavigationDelegate(
-          onPageStarted: (String url) {
+          onPageStarted: (_) {
             if (mounted) setState(() => _isLoading = true);
           },
-          onPageFinished: (String url) {
+          onPageFinished: (_) {
             if (mounted) setState(() => _isLoading = false);
           },
-          onWebResourceError: (WebResourceError error) {
-            debugPrint('WebView Error: ${error.description}');
-            // Show error UI only for main frame failures
-            if (error.isForMainFrame ?? false) {
+          onWebResourceError: (error) {
+            if (error.isForMainFrame == true) {
               if (mounted) {
                 setState(() {
                   _isLoading = false;
                   _hasError = true;
-                  _errorMessage = error.description ?? 'Failed to load document';
+                  _errorMessage = error.description;
                 });
               }
             }
-          },        ),
+          },
+        ),
       )
       ..loadRequest(Uri.parse(googleDocsUrl));
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  void _handleSearch(String query) {
-     if (query.isEmpty) return;
-     if (_isPdf) {
-       setState(() {
-         _searchResult = _pdfViewerController.searchText(query);
-       });
-     }
-  }
-  
-  void _showSearchDialog() {
+  void _toggleSearch() {
     setState(() {
       _showSearch = !_showSearch;
       if (!_showSearch) {
-        if (_isPdf) {
-          _pdfViewerController.clearSelection();
-          _searchResult.clear();
-        }
-        _searchController.clear();
+        _clearSearchState();
       }
     });
+  }
+
+  void _clearSearchState() {
+    if (_isPdf) {
+      _pdfViewerController.clearSelection();
+      _searchResult.clear();
+    }
+    _searchController.clear();
+    _searchDebounce?.cancel();
+    _ocrMatches = [];
+    _ocrSearchError = null;
+    _isOcrSearching = false;
+  }
+
+  void _onSearchChanged(String query) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 280), () {
+      _performSearch(query);
+    });
+  }
+
+  Future<void> _performSearch(String query) async {
+    final trimmed = query.trim();
+    final requestId = ++_searchSequence;
+
+    if (trimmed.isEmpty) {
+      if (!mounted) return;
+      setState(_clearSearchState);
+      return;
+    }
+
+    if (_isPdf) {
+      final result = _pdfViewerController.searchText(trimmed);
+      result.addListener(() {
+        if (mounted) setState(() {});
+      });
+      setState(() {
+        _searchResult = result;
+        _ocrMatches = [];
+        _ocrSearchError = null;
+        _isOcrSearching = false;
+      });
+
+      await Future.delayed(const Duration(milliseconds: 420));
+      if (!mounted || requestId != _searchSequence) return;
+
+      if (_searchResult.totalInstanceCount == 0) {
+        await _runOcrFallbackSearch(trimmed, requestId);
+      }
+    }
+  }
+
+  Future<void> _runOcrFallbackSearch(String query, int requestId) async {
+    if (!_isPdf || widget.resourceId == null || widget.resourceId!.isEmpty) return;
+
+    setState(() {
+      _isOcrSearching = true;
+      _ocrSearchError = null;
+      _ocrMatches = [];
+    });
+
+    try {
+      final data = await _api.findInAiText(
+        fileId: widget.resourceId!,
+        query: query,
+        collegeId: widget.collegeId,
+        useOcr: true,
+        forceOcr: true,
+        ocrProvider: 'google',
+      );
+
+      if (!mounted || requestId != _searchSequence) return;
+
+      final rawMatches = (data['matches'] as List?) ?? const [];
+      final matches = rawMatches
+          .whereType<Map>()
+          .map((m) => Map<String, dynamic>.from(m))
+          .toList();
+
+      setState(() {
+        _ocrMatches = matches;
+        _isOcrSearching = false;
+      });
+    } catch (e) {
+      if (!mounted || requestId != _searchSequence) return;
+      debugPrint('OCR search failed: $e');
+      setState(() {
+        _isOcrSearching = false;
+        _ocrSearchError = e.toString().replaceFirst('Exception: ', '');
+      });
+    }
+  }
+
+  void _openOcrMatchesSheet() {
+    if (_ocrMatches.isEmpty) return;
+    final isDark = _isNightMode;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
+      builder: (context) {
+        return SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(context).size.height * 0.55,
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 10, 8),
+                  child: Row(
+                    children: [
+                      Text(
+                        'OCR Matches (${_ocrMatches.length})',
+                        style: GoogleFonts.inter(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: isDark ? Colors.white : const Color(0xFF0F172A),
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                    itemCount: _ocrMatches.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final snippet = _ocrMatches[index]['snippet']?.toString() ?? '';
+                      return Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: isDark ? AppTheme.darkCard : const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: isDark ? AppTheme.darkBorder : const Color(0xFFE2E8F0)),
+                        ),
+                        child: Text(
+                          snippet,
+                          style: GoogleFonts.inter(
+                            fontSize: 13,
+                            height: 1.5,
+                            color: isDark ? Colors.white70 : const Color(0xFF334155),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   void _openAiTools() {
@@ -144,60 +299,52 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     );
   }
 
-  final SubscriptionService _subscriptionService = SubscriptionService();
   Future<void> _handleDownload() async {
     final isPremium = await _subscriptionService.isPremium();
-    
     if (!mounted) return;
 
     if (!isPremium) {
-      // Capture context safety for async callback
       final messenger = ScaffoldMessenger.of(context);
-      
       showDialog(
         context: context,
         builder: (context) => PaywallDialog(
           onSuccess: () {
-             if (!mounted) return;
-             // Use captured messenger
-             messenger.showSnackBar(const SnackBar(content: Text('Premium Unlocked! Downloading...')));
-             // Retry download - recursion is okay here as isPremium should be true now
-             _handleDownload();
-          },        ),
+            if (!mounted) return;
+            messenger.showSnackBar(const SnackBar(content: Text('Premium unlocked! Downloading...')));
+            _handleDownload();
+          },
+        ),
       );
-    } else {
-       try {
-         final uri = Uri.parse(widget.pdfUrl);
-         if (await canLaunchUrl(uri)) {
-           await launchUrl(uri, mode: LaunchMode.externalApplication);
-         } else {
-           if (mounted) {
-             ScaffoldMessenger.of(context).showSnackBar(
-               const SnackBar(content: Text('Unable to open link. Please try again.')),
-             );
-           }
-         }
-       } catch (e) {
-          debugPrint('Error downloading URL: $e');
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Unable to open link.')),
-            );
-          }
-       }
+      return;
+    }
+
+    try {
+      final uri = Uri.parse(widget.pdfUrl);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to open link. Please try again.')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Failed to launch URL: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to open link.')),
+        );
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    // Night mode colors
     final bgColor = _isNightMode ? const Color(0xFF121212) : AppTheme.lightBackground;
     final textColor = _isNightMode ? Colors.white : Colors.black;
     final appBarColor = _isNightMode ? const Color(0xFF1E1E1E) : Colors.white;
 
     return Scaffold(
       backgroundColor: bgColor,
-      // Timer is handled globally by GlobalTimerOverlay
       appBar: AppBar(
         backgroundColor: appBarColor,
         elevation: 0,
@@ -206,92 +353,104 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
           icon: const Icon(Icons.arrow_back_ios_new_rounded),
           onPressed: () {
             if (_showSearch) {
-              _showSearchDialog(); // Use back to close search if open
+              _toggleSearch();
             } else {
               Navigator.pop(context);
             }
           },
         ),
-        title: _showSearch 
-          ? TextField(
-              controller: _searchController,
-              autofocus: true,
-              style: GoogleFonts.inter(color: textColor),
-              cursorColor: textColor,
-              onSubmitted: _handleSearch,
-              decoration: InputDecoration(
-                hintText: 'Search...',
-                hintStyle: TextStyle(color: textColor.withValues(alpha: 0.5)),
-                filled: true,
-                fillColor: _isNightMode ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                isDense: true,
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.clear, size: 20),
-                  onPressed: () {
-                     _searchController.clear();
-                     if(_isPdf) _pdfViewerController.clearSelection();
-                  },
+        title: Text(
+          widget.title,
+          style: GoogleFonts.inter(color: textColor, fontSize: 16, fontWeight: FontWeight.w600),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        bottom: _showSearch
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(70),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      color: _isNightMode ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.search_rounded, color: textColor.withValues(alpha: 0.75), size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: _searchController,
+                            autofocus: true,
+                            onChanged: _onSearchChanged,
+                            onSubmitted: _performSearch,
+                            style: GoogleFonts.inter(color: textColor, fontSize: 15),
+                            cursorColor: textColor,
+                            decoration: InputDecoration(
+                              hintText: 'Find in PDF...',
+                              hintStyle: GoogleFonts.inter(color: textColor.withValues(alpha: 0.5), fontSize: 14),
+                              border: InputBorder.none,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.clear, size: 20),
+                          onPressed: () {
+                            _searchController.clear();
+                            _performSearch('');
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(30),
-                  borderSide: BorderSide.none,
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(30),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-            )
-            : Text(
-              widget.title,
-              style: GoogleFonts.inter(
-                color: textColor,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
+              )
+            : null,
         actions: [
-          // Only show search button for PDFs
-          if (!_showSearch && _isPdf)
+          if (_isPdf)
             IconButton(
-              icon: const Icon(Icons.search_rounded),
-              onPressed: _showSearchDialog,
-              tooltip: 'Search',
+              icon: Icon(_showSearch ? Icons.close_rounded : Icons.search_rounded),
+              onPressed: _toggleSearch,
+              tooltip: 'Find in PDF',
             ),
-
+          if (_showSearch && _isPdf)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: Center(
+                child: Text(
+                  '${_searchResult.currentInstanceIndex}/${_searchResult.totalInstanceCount}',
+                  style: GoogleFonts.inter(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: textColor.withValues(alpha: 0.8),
+                  ),
+                ),
+              ),
+            ),
+          if (_showSearch && _isPdf) ...[
+            IconButton(
+              icon: const Icon(Icons.keyboard_arrow_up_rounded),
+              onPressed: _searchResult.hasResult ? () => _searchResult.previousInstance() : null,
+            ),
+            IconButton(
+              icon: const Icon(Icons.keyboard_arrow_down_rounded),
+              onPressed: _searchResult.hasResult ? () => _searchResult.nextInstance() : null,
+            ),
+          ],
           if (widget.resourceId != null && widget.resourceId!.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.auto_awesome),
               onPressed: _openAiTools,
               tooltip: 'AI Study Tools',
             ),
-
           IconButton(
-             icon: const Icon(Icons.download_rounded),
-             onPressed: _handleDownload,
-             tooltip: 'Download',
+            icon: const Icon(Icons.download_rounded),
+            onPressed: _handleDownload,
+            tooltip: 'Download',
           ),
-            
-          // Search Navigation (Only when searching AND PDF)
-          if (_showSearch && _isPdf) ...[
-             IconButton(
-               icon: const Icon(Icons.keyboard_arrow_up_rounded),
-               onPressed: _searchResult.hasResult 
-                   ? () => _searchResult.previousInstance() 
-                   : null,
-             ),
-             IconButton(
-               icon: const Icon(Icons.keyboard_arrow_down_rounded),
-               onPressed: _searchResult.hasResult 
-                   ? () => _searchResult.nextInstance() 
-                   : null,
-             ),
-          ],
-          
-          if (_isPdf) // Only support night mode toggle for PDF native viewer for now
+          if (_isPdf)
             IconButton(
               icon: Icon(_isNightMode ? Icons.light_mode : Icons.dark_mode_rounded),
               onPressed: () => setState(() => _isNightMode = !_isNightMode),
@@ -301,23 +460,21 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       ),
       body: Stack(
         children: [
-          // CONTENT
-
-          // CONTENT is handled below with conditional logic based on error state
-
-
-            
-          // Error State
-
           if (_hasError)
             _buildErrorState()
           else if (_isPdf)
-             _buildPdfContent()
+            _buildPdfContent()
           else if (_isOfficeDoc && _webViewController != null && !kIsWeb)
-             _buildWebViewContent()
-          else 
-             _buildUnsupportedOrWebContent(),
-
+            WebViewWidget(controller: _webViewController!)
+          else
+            _buildUnsupportedContent(),
+          if (_showSearch && (_isOcrSearching || _ocrMatches.isNotEmpty || _ocrSearchError != null))
+            Positioned(
+              top: 0,
+              left: 12,
+              right: 12,
+              child: _buildOcrStatusCard(),
+            ),
           if (_isLoading)
             const Center(child: BrandedLoader(message: 'Loading Document...')),
         ],
@@ -325,18 +482,62 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     );
   }
 
+  Widget _buildOcrStatusCard() {
+    final isDark = _isNightMode;
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: _isNightMode ? AppTheme.darkCard : Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _isNightMode ? AppTheme.darkBorder : const Color(0xFFE2E8F0)),
+      ),
+      child: Row(
+        children: [
+          if (_isOcrSearching)
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else if (_ocrMatches.isNotEmpty)
+            const Icon(Icons.find_in_page_rounded, color: AppTheme.primary, size: 18)
+          else
+            const Icon(Icons.info_outline_rounded, color: AppTheme.error, size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _isOcrSearching
+                  ? 'No embedded text match. Searching OCR text...'
+                  : _ocrMatches.isNotEmpty
+                      ? 'Found ${_ocrMatches.length} OCR matches for this PDF.'
+                      : (_ocrSearchError ?? 'No OCR match found'),
+              style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600),
+            ),
+          ),
+          if (_ocrMatches.isNotEmpty)
+            TextButton(
+              onPressed: _openOcrMatchesSheet,
+              child: const Text('View'),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildPdfContent() {
-    return _isNightMode 
-      ? ColorFiltered(
-          colorFilter: const ColorFilter.matrix([
-            -1,  0,  0, 0, 255,
-             0, -1,  0, 0, 255,
-             0,  0, -1, 0, 255,
-             0,  0,  0, 1,   0,
-          ]),
-          child: _buildSfPdfViewer(),
-        )
-      : _buildSfPdfViewer();
+    if (_isNightMode) {
+      return ColorFiltered(
+        colorFilter: const ColorFilter.matrix([
+          -1, 0, 0, 0, 255,
+          0, -1, 0, 0, 255,
+          0, 0, -1, 0, 255,
+          0, 0, 0, 1, 0,
+        ]),
+        child: _buildSfPdfViewer(),
+      );
+    }
+    return _buildSfPdfViewer();
   }
 
   Widget _buildSfPdfViewer() {
@@ -344,7 +545,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       widget.pdfUrl,
       key: _pdfViewerKey,
       controller: _pdfViewerController,
-      onDocumentLoaded: (PdfDocumentLoadedDetails details) {
+      onDocumentLoaded: (_) {
         if (mounted) {
           setState(() {
             _isLoading = false;
@@ -352,8 +553,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
           });
         }
       },
-      onDocumentLoadFailed: (PdfDocumentLoadFailedDetails details) {
-        debugPrint('PDF Load Error: ${details.error}');
+      onDocumentLoadFailed: (details) {
         if (mounted) {
           setState(() {
             _isLoading = false;
@@ -366,53 +566,25 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     );
   }
 
-  Widget _buildWebViewContent() {
-    return WebViewWidget(controller: _webViewController!);
-  }
-
-  Widget _buildUnsupportedOrWebContent() {
-    // For unsupported types or Web platform fallback
+  Widget _buildUnsupportedContent() {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.description, size: 64, color: Colors.grey),
-          const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: () async {
-              try {
-                final uri = Uri.parse(widget.pdfUrl);
-                if (await canLaunchUrl(uri)) {
-                  await launchUrl(uri, mode: LaunchMode.externalApplication);
-                } else {
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Unable to open link. Please try again.')),
-                    );
-                  }
-                }
-              } catch (e) {
-                debugPrint('Error launching URL: $e');
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Unable to open link. Please try again.')),
-                  );
-                }
-              }
-            },
-            icon: const Icon(Icons.open_in_new),
-            label: const Text('Open External'),
-          )
-        ],
+      child: ElevatedButton.icon(
+        onPressed: () async {
+          final uri = Uri.parse(widget.pdfUrl);
+          if (await canLaunchUrl(uri)) {
+            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          }
+        },
+        icon: const Icon(Icons.open_in_new),
+        label: const Text('Open External'),
       ),
     );
   }
 
-
   Widget _buildErrorState() {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24.0),
+        padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -420,50 +592,13 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
             const SizedBox(height: 16),
             Text(
               'Failed to load document',
-              style: GoogleFonts.inter(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: _isNightMode ? Colors.white : Colors.black,
-              ),
+              style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
             Text(
               _errorMessage.isNotEmpty ? _errorMessage : 'An unknown error occurred',
-              style: GoogleFonts.inter(
-                fontSize: 14,
-                color: AppTheme.textMuted,
-              ),
               textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton.icon(
-              onPressed: () async {
-                 try {
-                  final uri = Uri.parse(widget.pdfUrl);
-                  if (await canLaunchUrl(uri)) {
-                    await launchUrl(uri, mode: LaunchMode.externalApplication);
-                  } else {
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Unable to open link. Please try again.')),
-                      );
-                    }
-                  }
-                 } catch (e) {
-                   debugPrint('Error launching URL: $e');
-                   if (mounted) {
-                     ScaffoldMessenger.of(context).showSnackBar(
-                       const SnackBar(content: Text('Unable to open link. Please try again.')),
-                     );
-                   }
-                 }
-              },
-              icon: const Icon(Icons.open_in_new),
-              label: const Text('Open External'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-                foregroundColor: Colors.white,
-              ),
+              style: GoogleFonts.inter(fontSize: 14, color: AppTheme.textMuted),
             ),
           ],
         ),
@@ -471,4 +606,3 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     );
   }
 }
-

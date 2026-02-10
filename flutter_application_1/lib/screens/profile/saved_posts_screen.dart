@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../config/theme.dart';
@@ -10,10 +9,7 @@ import 'package:intl/intl.dart';
 class SavedPostsScreen extends StatefulWidget {
   final String userEmail;
 
-  const SavedPostsScreen({
-    super.key,
-    required this.userEmail,
-  });
+  const SavedPostsScreen({super.key, required this.userEmail});
 
   @override
   State<SavedPostsScreen> createState() => _SavedPostsScreenState();
@@ -22,7 +18,7 @@ class SavedPostsScreen extends StatefulWidget {
 class _SavedPostsScreenState extends State<SavedPostsScreen> {
   final SupabaseService _supabaseService = SupabaseService();
   final AuthService _authService = AuthService();
-  
+
   List<Map<String, dynamic>> _savedPosts = [];
   bool _isLoading = true;
 
@@ -52,7 +48,7 @@ class _SavedPostsScreenState extends State<SavedPostsScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Scaffold(
       backgroundColor: isDark ? Colors.black : AppTheme.lightBackground,
       appBar: AppBar(
@@ -66,75 +62,84 @@ class _SavedPostsScreenState extends State<SavedPostsScreen> {
         backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_rounded, color: isDark ? Colors.white : Colors.black),
+          icon: Icon(
+            Icons.arrow_back_ios_rounded,
+            color: isDark ? Colors.white : Colors.black,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _savedPosts.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.bookmark_border, size: 64, color: AppTheme.textMuted),
-                      const SizedBox(height: 16),
-                      Text(
-                        'No saved posts yet',
-                        style: GoogleFonts.inter(fontSize: 16, color: AppTheme.textMuted),
-                      ),
-                    ],
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.bookmark_border,
+                    size: 64,
+                    color: AppTheme.textMuted,
                   ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _savedPosts.length,
-                  itemBuilder: (context, index) {
-                    final savedItem = _savedPosts[index];
-                    final post = savedItem['room_messages'] as Map<String, dynamic>?;
-                    
-                    if (post == null) return const SizedBox();
+                  const SizedBox(height: 16),
+                  Text(
+                    'No saved posts yet',
+                    style: GoogleFonts.inter(
+                      fontSize: 16,
+                      color: AppTheme.textMuted,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          : ListView.builder(
+              padding: const EdgeInsets.all(16),
+              itemCount: _savedPosts.length,
+              itemBuilder: (context, index) {
+                final savedItem = _savedPosts[index];
+                final post =
+                    savedItem['room_messages'] as Map<String, dynamic>?;
 
-                    return _buildSavedPostCard(post, isDark);
-                  },
-                ),
+                if (post == null) return const SizedBox();
+
+                return _buildSavedPostCard(post, isDark);
+              },
+            ),
     );
   }
 
   Widget _buildSavedPostCard(Map<String, dynamic> post, bool isDark) {
     final content = post['content'] ?? '';
     final authorName = post['author_name'] ?? 'Unknown';
-    final createdAt = post['created_at'] != null 
-        ? DateTime.parse(post['created_at']) 
-        : DateTime.now();
-    final timeAgo = _formatTimeAgo(createdAt);
-    final postId = post['id'];
+    final createdAt = DateTime.tryParse(post['created_at'] ?? '') ?? DateTime.now();    final timeAgo = _formatTimeAgo(createdAt);
 
     // Extract title if present (first line)
     String title = '';
     String body = content;
     final lines = content.split('\n');
     if (lines.isNotEmpty && lines[0].length < 100) {
-       title = lines[0];
-       body = lines.skip(1).join('\n').trim();
+      title = lines[0];
+      body = lines.skip(1).join('\n').trim();
     }
 
     return GestureDetector(
       onTap: () {
-        // We need collegeDomain for PostDetailScreen. 
+        // We need collegeDomain for PostDetailScreen.
         // We can try to infer it or just pass empty if not actively used for view.
         // Assuming user is logged in, we can use their domain or fetch the college.
         // For simplicity, passing a placeholder or extracting from user email if available.
         final userEmail = _authService.userEmail ?? '';
         final domain = userEmail.split('@').last;
-        
+
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (_) => PostDetailScreen(
               post: post,
               userEmail: userEmail,
-              collegeDomain: domain, 
+              collegeDomain: domain,
+              roomId: post['room_id']?.toString() ?? '',
+              isRoomAdmin: false,
             ),
           ),
         );
@@ -205,8 +210,7 @@ class _SavedPostsScreenState extends State<SavedPostsScreen> {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
-            if (title.isNotEmpty && body.isNotEmpty)
-              const SizedBox(height: 6),
+            if (title.isNotEmpty && body.isNotEmpty) const SizedBox(height: 6),
             if (body.isNotEmpty)
               Text(
                 body,

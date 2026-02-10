@@ -42,9 +42,9 @@ Future<bool> _requestPermissions() async {
   if (Platform.isAndroid) {
     final androidInfo = await DeviceInfoPlugin().androidInfo;
     final sdkInt = androidInfo.version.sdkInt;
-    
+
     Map<Permission, PermissionStatus> statuses = {};
-    
+
     if (sdkInt >= 33) {
       // Android 13+: Request granular media permissions
       statuses = await [
@@ -54,15 +54,13 @@ Future<bool> _requestPermissions() async {
       ].request();
     } else {
       // Android 12 and below: Request storage permission
-      statuses = await [
-        Permission.storage,
-      ].request();
+      statuses = await [Permission.storage].request();
     }
-    
+
     // Check results
     bool allGranted = true;
     bool permanentlyDenied = false;
-    
+
     statuses.forEach((permission, status) {
       if (!status.isGranted) {
         allGranted = false;
@@ -74,7 +72,7 @@ Future<bool> _requestPermissions() async {
 
     return allGranted;
   }
-  
+
   return true; // iOS or other platforms, handled by plist or similar
 }
 
@@ -82,17 +80,19 @@ Future<bool> _requestPermissions() async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Validate configuration and log any warnings
   // Validate configuration
   final configResult = AppConfig.validate();
-  
+
   if (!configResult.isValid) {
     for (final error in configResult.errors) {
       // Use debugPrint for logged output (print may be stripped or swallowed)
-      debugPrint('CRITICAL CONFIG ERROR: $error'); 
+      debugPrint('CRITICAL CONFIG ERROR: $error');
     }
-    throw Exception('App Configuration Failed: ${configResult.errors.join(", ")}');
+    throw Exception(
+      'App Configuration Failed: ${configResult.errors.join(", ")}',
+    );
   }
 
   for (final warning in configResult.warnings) {
@@ -114,15 +114,17 @@ void main() async {
   }
 
   // Set system UI overlay style
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: Colors.transparent,
-    statusBarIconBrightness: Brightness.light,
-  ));
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+    ),
+  );
 
   runApp(const AppRoot());
 }
 
-enum AppState { loading, noConnection, permissionError, supabaseError, ready }
+enum AppState { loading, noConnection, permissionError, initializationError, ready }
 
 class AppRoot extends StatefulWidget {
   // Expose key if needed via static accessor, but top-level is fine too
@@ -133,7 +135,6 @@ class AppRoot extends StatefulWidget {
   @override
   State<AppRoot> createState() => _AppRootState();
 }
-
 
 class _AppRootState extends State<AppRoot> {
   AppState _appState = AppState.loading;
@@ -203,8 +204,7 @@ class _AppRootState extends State<AppRoot> {
       debugPrint('Supabase initialization error: $e');
       if (mounted) {
         setState(() {
-          _appState = AppState.supabaseError;
-
+          _appState = AppState.initializationError;
         });
       }
       return;
@@ -216,29 +216,30 @@ class _AppRootState extends State<AppRoot> {
       debugPrint('SharedPreferences error: $e');
       if (mounted) {
         setState(() {
-          _appState = AppState.supabaseError; // Or add a new AppState.prefsError
+          _appState = AppState.initializationError;
         });
       }
       return;
     }
 
-
     // Initialize Push Notifications (after Firebase is ready)
     if (!kIsWeb) {
       try {
         // Set up background message handler
-        FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-        
+        FirebaseMessaging.onBackgroundMessage(
+          firebaseMessagingBackgroundHandler,
+        );
+
         final pushService = PushNotificationService();
         final backendApi = BackendApiService();
-        
+
         await pushService.initialize(
           onTokenRefresh: (token) async {
             // Register token with backend
             try {
               final platform = Platform.isIOS ? 'ios' : 'android';
               await backendApi.registerFcmToken(
-                token: token, 
+                token: token,
                 platform: platform,
               );
               debugPrint('FCM token registered with backend');
@@ -252,29 +253,29 @@ class _AppRootState extends State<AppRoot> {
           onNotificationTap: (message) async {
             // Handle navigation based on message data
             debugPrint('Notification tapped: ${message.data}');
-            
+
             try {
               // Safe extraction
               final dynamic actionUrlRaw = message.data['actionUrl'];
               final String? actionUrl = actionUrlRaw?.toString();
-              
+
               if (actionUrl != null && actionUrl.isNotEmpty) {
-                 if (actionUrl.startsWith('/')) {
-                   // Internal navigation using global navigator key
-                   debugPrint('Internal navigation to $actionUrl requested');
-                   await appNavigatorKey.currentState?.pushNamed(actionUrl);
-                 } else {
-                   // External navigation
-                   final uri = Uri.parse(actionUrl);
-                   if (await canLaunchUrl(uri)) {
-                     await launchUrl(uri, mode: LaunchMode.externalApplication);
-                   } else {
-                     debugPrint('Could not launch deep link: $actionUrl');
-                   }
-                 }
+                if (actionUrl.startsWith('/')) {
+                  // Internal navigation using global navigator key
+                  debugPrint('Internal navigation to $actionUrl requested');
+                  await appNavigatorKey.currentState?.pushNamed(actionUrl);
+                } else {
+                  // External navigation
+                  final uri = Uri.parse(actionUrl);
+                  if (await canLaunchUrl(uri)) {
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  } else {
+                    debugPrint('Could not launch deep link: $actionUrl');
+                  }
+                }
               }
             } catch (e) {
-               debugPrint('Error handling notification tap: $e');
+              debugPrint('Error handling notification tap: $e');
             }
           },
         );
@@ -308,7 +309,11 @@ class _AppRootState extends State<AppRoot> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.settings_suggest_rounded, size: 64, color: Colors.orange),
+                  const Icon(
+                    Icons.settings_suggest_rounded,
+                    size: 64,
+                    color: Colors.orange,
+                  ),
                   const SizedBox(height: 16),
                   const Text(
                     'Permissions Required',
@@ -326,10 +331,7 @@ class _AppRootState extends State<AppRoot> {
                     child: const Text('Open Settings'),
                   ),
                   const SizedBox(height: 8),
-                  TextButton(
-                    onPressed: initApp,
-                    child: const Text('Retry'),
-                  ),
+                  TextButton(onPressed: initApp, child: const Text('Retry')),
                 ],
               ),
             ),
@@ -338,7 +340,7 @@ class _AppRootState extends State<AppRoot> {
       );
     }
 
-    if (_appState == AppState.supabaseError) {
+    if (_appState == AppState.initializationError) {
       return MaterialApp(
         home: Scaffold(
           body: Center(
@@ -347,14 +349,18 @@ class _AppRootState extends State<AppRoot> {
               children: [
                 const Icon(Icons.error_outline, size: 64, color: Colors.red),
                 const SizedBox(height: 16),
-                const Text('Failed to initialize app', style: TextStyle(fontSize: 18)),
-                const SizedBox(height: 8),
-                const Text('An unexpected error occurred. Please restart the app.', style: TextStyle(color: Colors.grey, fontSize: 14), textAlign: TextAlign.center),
-                const SizedBox(height: 24),
-                ElevatedButton(
-                  onPressed: initApp,
-                  child: const Text('Retry'),
+                const Text(
+                  'Failed to initialize app',
+                  style: TextStyle(fontSize: 18),
                 ),
+                const SizedBox(height: 8),
+                const Text(
+                  'An unexpected error occurred. Please restart the app.',
+                  style: TextStyle(color: Colors.grey, fontSize: 14),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton(onPressed: initApp, child: const Text('Retry')),
                 const SizedBox(height: 12),
                 TextButton(
                   onPressed: () {
@@ -369,11 +375,19 @@ class _AppRootState extends State<AppRoot> {
       );
     }
 
-    if (_appState == AppState.loading || _prefs == null || _themeProvider == null) {
+    if (_appState == AppState.loading ||
+        _prefs == null ||
+        _themeProvider == null) {
       // Return a temporary splash or loading indicator while initializing
       return const MaterialApp(
         debugShowCheckedModeBanner: false,
-        home: Scaffold(body: BrandedLoader(message: 'Starting MyStudySpace...', showQuotes: false)),
+        home: Scaffold(
+          body: AppSplashAnimation(
+            title: 'MyStudySpace',
+            subtitle: 'Connect. Learn. Share.',
+            loadingLabel: 'Starting MyStudySpace...',
+          ),
+        ),
       );
     }
 
@@ -388,7 +402,11 @@ class StudySpaceApp extends StatelessWidget {
   final SharedPreferences prefs;
   final ThemeProvider themeProvider;
 
-  const StudySpaceApp({super.key, required this.prefs, required this.themeProvider});
+  const StudySpaceApp({
+    super.key,
+    required this.prefs,
+    required this.themeProvider,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -412,7 +430,8 @@ class StudySpaceApp extends StatelessWidget {
               darkTheme: AppTheme.darkTheme(darkDynamic),
               themeMode: themeProvider.themeMode,
               home: AppRouter(prefs: prefs, themeProvider: themeProvider),
-              builder: (context, child) => GlobalTimerOverlay(child: child ?? const SizedBox.shrink()),
+              builder: (context, child) =>
+                  GlobalTimerOverlay(child: child ?? const SizedBox.shrink()),
             );
           },
         );
@@ -424,8 +443,12 @@ class StudySpaceApp extends StatelessWidget {
 class AppRouter extends StatefulWidget {
   final SharedPreferences prefs;
   final ThemeProvider themeProvider;
-  
-  const AppRouter({super.key, required this.prefs, required this.themeProvider});
+
+  const AppRouter({
+    super.key,
+    required this.prefs,
+    required this.themeProvider,
+  });
 
   @override
   State<AppRouter> createState() => _AppRouterState();
@@ -434,8 +457,9 @@ class AppRouter extends StatefulWidget {
 class _AppRouterState extends State<AppRouter> {
   final AuthService _authService = AuthService();
   bool _isLoading = true;
-  
-  bool get _hasSeenOnboarding => widget.prefs.getBool('hasSeenOnboarding') ?? false;
+
+  bool get _hasSeenOnboarding =>
+      widget.prefs.getBool('hasSeenOnboarding') ?? false;
 
   Map<String, dynamic>? get _selectedCollegeData {
     final String? jsonString = widget.prefs.getString('selectedCollege');
@@ -450,9 +474,15 @@ class _AppRouterState extends State<AppRouter> {
   }
 
   // Support reading from new JSON key with fallback to legacy separate keys
-  String? get _selectedCollegeId => _selectedCollegeData?['id'] ?? widget.prefs.getString('selectedCollegeId');
-  String? get _selectedCollegeName => _selectedCollegeData?['name'] ?? widget.prefs.getString('selectedCollegeName');
-  String? get _selectedCollegeDomain => _selectedCollegeData?['domain'] ?? widget.prefs.getString('selectedCollegeDomain');
+  String? get _selectedCollegeId =>
+      _selectedCollegeData?['id'] ??
+      widget.prefs.getString('selectedCollegeId');
+  String? get _selectedCollegeName =>
+      _selectedCollegeData?['name'] ??
+      widget.prefs.getString('selectedCollegeName');
+  String? get _selectedCollegeDomain =>
+      _selectedCollegeData?['domain'] ??
+      widget.prefs.getString('selectedCollegeDomain');
 
   @override
   void initState() {
@@ -478,26 +508,27 @@ class _AppRouterState extends State<AppRouter> {
     final legacyDomain = widget.prefs.getString('selectedCollegeDomain');
 
     try {
-      final jsonString = jsonEncode({
-        'id': id,
-        'name': name,
-        'domain': domain,
-      });
+      final jsonString = jsonEncode({'id': id, 'name': name, 'domain': domain});
       await widget.prefs.setString('selectedCollege', jsonString);
       // Clean up old keys if they exist
       await Future.wait([
-         widget.prefs.remove('selectedCollegeId'),
-         widget.prefs.remove('selectedCollegeName'),
-         widget.prefs.remove('selectedCollegeDomain'),
+        widget.prefs.remove('selectedCollegeId'),
+        widget.prefs.remove('selectedCollegeName'),
+        widget.prefs.remove('selectedCollegeDomain'),
       ]);
     } catch (e) {
       debugPrint('Error saving college selection: $e');
       // Rollback: remove broken new key and restore legacy if needed
       await widget.prefs.remove('selectedCollege');
-      if (legacyId != null) await widget.prefs.setString('selectedCollegeId', legacyId);
-      if (legacyName != null) await widget.prefs.setString('selectedCollegeName', legacyName);
-      if (legacyDomain != null) await widget.prefs.setString('selectedCollegeDomain', legacyDomain);
-    }
+      if (legacyId != null) {
+        await widget.prefs.setString('selectedCollegeId', legacyId);
+      }
+      if (legacyName != null) {
+        await widget.prefs.setString('selectedCollegeName', legacyName);
+      }
+      if (legacyDomain != null) {
+        await widget.prefs.setString('selectedCollegeDomain', legacyDomain);
+      }    }
     setState(() {});
   }
 
@@ -540,15 +571,19 @@ class _AppRouterState extends State<AppRouter> {
       initialData: _authService.currentUser,
       builder: (context, snapshot) {
         // With initialData, we don't need to check waiting state for the first frame flicker
-        
+
         final user = snapshot.data;
-        
+
         if (user == null) {
           // Double check college data exists before showing login
-          if (_selectedCollegeId == null || _selectedCollegeName == null || _selectedCollegeDomain == null) {
-            return CollegeSelectionScreen(onCollegeSelected: _onCollegeSelected);
+          if (_selectedCollegeId == null ||
+              _selectedCollegeName == null ||
+              _selectedCollegeDomain == null) {
+            return CollegeSelectionScreen(
+              onCollegeSelected: _onCollegeSelected,
+            );
           }
-          
+
           return LoginScreen(
             collegeName: _selectedCollegeName!,
             collegeDomain: _selectedCollegeDomain!,
@@ -559,8 +594,8 @@ class _AppRouterState extends State<AppRouter> {
 
         // Ensure we have college info before showing home
         if (_selectedCollegeId == null || _selectedCollegeDomain == null) {
-             // This case is rare but if user is logged in but prefs are cleared
-             return CollegeSelectionScreen(onCollegeSelected: _onCollegeSelected);
+          // This case is rare but if user is logged in but prefs are cleared
+          return CollegeSelectionScreen(onCollegeSelected: _onCollegeSelected);
         }
 
         // Logged in: Show home
@@ -583,9 +618,10 @@ class SplashScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Scaffold(
-      body: BrandedLoader(
-        message: 'Preparing your study space...',
-        showQuotes: false,
+      body: AppSplashAnimation(
+        title: 'MyStudySpace',
+        subtitle: 'Connect. Learn. Share.',
+        loadingLabel: 'Preparing your study space...',
       ),
     );
   }
@@ -608,31 +644,32 @@ class _NoConnectionScreenState extends State<NoConnectionScreen> {
     try {
       final result = await Connectivity().checkConnectivity();
       if (!result.contains(ConnectivityResult.none)) {
-          // Connected! Call the retry callback which should restart the app flow
-          if (mounted) setState(() => _isRetrying = false);
-          widget.onRetry();
+        // Connected! Call the retry callback which should restart the app flow
+        if (mounted) setState(() => _isRetrying = false);
+        widget.onRetry();
       } else {
-          if (mounted) {
-              setState(() => _isRetrying = false);
-              ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Still no connection. Please try again.')),
-              );
-          }
-
+        if (mounted) {
+          setState(() => _isRetrying = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Still no connection. Please try again.'),
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isRetrying = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-           SnackBar(content: Text('Connection check failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Connection check failed: $e')));
       }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-     return MaterialApp(
+    return MaterialApp(
       debugShowCheckedModeBanner: false,
       home: Scaffold(
         body: Center(
@@ -641,14 +678,25 @@ class _NoConnectionScreenState extends State<NoConnectionScreen> {
             children: [
               const Icon(Icons.wifi_off, size: 64, color: Colors.red),
               const SizedBox(height: 16),
-              const Text('No Internet Connection', style: TextStyle(fontSize: 18), textAlign: TextAlign.center),
+              const Text(
+                'No Internet Connection',
+                style: TextStyle(fontSize: 18),
+                textAlign: TextAlign.center,
+              ),
               const SizedBox(height: 8),
-              const Text('Please check your internet and try again', textAlign: TextAlign.center),
+              const Text(
+                'Please check your internet and try again',
+                textAlign: TextAlign.center,
+              ),
               const SizedBox(height: 24),
               ElevatedButton.icon(
                 onPressed: _isRetrying ? null : _handleRetry,
-                icon: _isRetrying 
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) 
+                icon: _isRetrying
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
                     : const Icon(Icons.refresh),
                 label: Text(_isRetrying ? 'Checking...' : 'Retry'),
               ),

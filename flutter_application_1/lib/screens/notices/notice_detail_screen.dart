@@ -16,6 +16,8 @@ import '../../models/department_account.dart';
 import '../profile/user_profile_screen.dart';
 import '../../widgets/comment_input_box.dart'; 
 import '../../services/cloudinary_service.dart';
+import '../../utils/sticker_comment_codec.dart';
+import '../../widgets/full_screen_image_viewer.dart';
 
 class NoticeDetailScreen extends StatefulWidget {
   final Map<String, dynamic> notice;
@@ -632,13 +634,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                   ],
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  content,
-                  style: GoogleFonts.inter(
-                    fontSize: 14,
-                    color: textColor.withValues(alpha: 0.9),
-                  ),
-                ),
+                _buildCommentContent(content.toString(), isDark, textColor, commentId),
                 const SizedBox(height: 4),
                 // Actions (Reply)
                  Row(
@@ -681,6 +677,61 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     );
   }
 
+  Widget _buildCommentContent(String rawContent, bool isDark, Color textColor, String commentId) {
+    final stickerUrl = StickerCommentCodec.extractUrl(rawContent);
+    if (stickerUrl != null) {
+      final heroTag = 'notice_sticker_${commentId}_$stickerUrl';
+      return GestureDetector(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => FullScreenImageViewer(
+                imageUrl: stickerUrl,
+                heroTag: heroTag,
+              ),
+            ),
+          );
+        },
+        child: Hero(
+          tag: heroTag,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: CachedNetworkImage(
+              imageUrl: stickerUrl,
+              width: 150,
+              height: 150,
+              fit: BoxFit.cover,
+              placeholder: (context, url) => Container(
+                width: 150,
+                height: 150,
+                color: isDark ? Colors.white10 : Colors.grey.shade200,
+                child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+              ),
+              errorWidget: (context, url, error) {
+                return Text(
+                  rawContent,
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    color: textColor.withValues(alpha: 0.9),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Text(
+      rawContent,
+      style: GoogleFonts.inter(
+        fontSize: 14,
+        color: textColor.withValues(alpha: 0.9),
+      ),
+    );
+  }
+
   Future<void> _handleStickerSelection(File stickerFile) async {
      if (_isReadOnly) return;
      
@@ -699,7 +750,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
 
        await _supabaseService.addNoticeComment(
          noticeId: widget.notice['id'].toString(),
-         content: '![Sticker]($url)',
+         content: StickerCommentCodec.encode(url),
          userEmail: _authService.userEmail!,
          userName: _authService.displayName ?? _authService.userEmail!.split('@')[0],
          parentId: parentId,

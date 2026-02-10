@@ -391,6 +391,11 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         onTap = _toggleFollow;
         break;
       case FollowStatus.pending:
+        text = 'Requested';
+        bgColor = Colors.transparent;
+        textColor = isDark ? Colors.white70 : Colors.black87;
+        onTap = _toggleFollow;
+        break;
       case FollowStatus.notFollowing:
         text = 'Follow';
         bgColor = isDark ? Colors.white : Colors.black;
@@ -481,6 +486,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     final oldFollowers = _followersCount;
     
     final isFollowing = oldStatus == FollowStatus.following;
+    final isPending = oldStatus == FollowStatus.pending;
     
     // OPTIMISTIC UPDATE
     setState(() {
@@ -488,8 +494,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       if (isFollowing) {
         _followStatus = FollowStatus.notFollowing;
         _followersCount = (_followersCount - 1).clamp(0, 999999);
+      } else if (isPending) {
+        _followStatus = FollowStatus.notFollowing;
       } else {
-        // Assume pending for request flow
         _followStatus = FollowStatus.pending; 
       }
     });
@@ -497,6 +504,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     try {
       if (isFollowing) {
         await _supabaseService.unfollowUser(widget.userEmail);
+      } else if (isPending) {
+        await _supabaseService.cancelFollowRequest(currentUserEmail, widget.userEmail);
       } else {
         await _supabaseService.sendFollowRequest(currentUserEmail, widget.userEmail);
       }

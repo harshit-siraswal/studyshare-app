@@ -660,6 +660,28 @@ class BackendApiService {
     );
   }
 
+  Future<Map<String, dynamic>> findInAiText({
+    required String fileId,
+    required String query,
+    String? collegeId,
+    bool? useOcr,
+    bool? forceOcr,
+    String? ocrProvider,
+  }) async {
+    return _requestJson(
+      '/api/ai/find',
+      method: 'POST',
+      body: {
+        'file_id': fileId,
+        'query': query,
+        if (collegeId != null) 'college_id': collegeId,
+        if (useOcr != null) 'use_ocr': useOcr,
+        if (forceOcr != null) 'force_ocr': forceOcr,
+        if (ocrProvider != null) 'ocr_provider': ocrProvider,
+      },
+    );
+  }
+
   Future<Map<String, dynamic>> queryRag({
     required String question,
     String? collegeId,

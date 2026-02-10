@@ -61,7 +61,7 @@ class _FollowButtonState extends State<FollowButton> {
         setState(() {
           final statusStr = res['status'] as String?;
           _status = _parseStatus(statusStr);
-          _requestId = res['requestId'];
+          _requestId = res['requestId']?.toString();
           _isLoading = false;
         });
       }
