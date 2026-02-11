@@ -26,9 +26,30 @@ class StickerPack {
   String? get previewUrl => stickerUrls.isNotEmpty ? stickerUrls.first : null;
 }
 
+class StickerPackImportResult {
+  final String packId;
+  final String packName;
+  final int importedCount;
+  final int skippedCount;
+
+  const StickerPackImportResult({
+    required this.packId,
+    required this.packName,
+    required this.importedCount,
+    required this.skippedCount,
+  });
+}
+
 class StickerService {
   static const String _stickerDirName = 'stickers';
   static const String _installedPacksKey = 'installed_sticker_packs_v1';
+  static const Set<String> _supportedStickerExtensions = {
+    '.png',
+    '.jpg',
+    '.jpeg',
+    '.webp',
+    '.gif',
+  };
 
   static const List<StickerPack> availablePacks = [
     StickerPack(
@@ -79,18 +100,21 @@ class StickerService {
       final dir = await getStickerDirectory();
       final entities = await dir.list(recursive: true).toList();
 
-      final futures = <Future<({File file, DateTime modified})?>>[]; 
+      final futures = <Future<({File file, DateTime modified})?>>[];
 
       for (final entity in entities) {
         if (entity is File) {
           final ext = path.extension(entity.path).toLowerCase();
-          if (['.png', '.jpg', '.jpeg', '.webp', '.gif'].contains(ext)) {
+          if (_supportedStickerExtensions.contains(ext)) {
             futures.add(() async {
               try {
                 final stat = await entity.stat();
                 return (file: entity, modified: stat.modified);
               } catch (_) {
-                return (file: entity, modified: DateTime.fromMillisecondsSinceEpoch(0));
+                return (
+                  file: entity,
+                  modified: DateTime.fromMillisecondsSinceEpoch(0),
+                );
               }
             }());
           }
@@ -98,18 +122,21 @@ class StickerService {
       }
 
       final results = await Future.wait(futures);
-      
+
       final stickerFiles = <File>[];
       final fileData = <File, DateTime>{};
-      
+
       for (final result in results) {
         if (result != null) {
           stickerFiles.add(result.file);
           fileData[result.file] = result.modified;
         }
       }
-      
-      stickerFiles.sort((a, b) => (fileData[b] ?? DateTime(0)).compareTo(fileData[a] ?? DateTime(0)));
+
+      stickerFiles.sort(
+        (a, b) =>
+            (fileData[b] ?? DateTime(0)).compareTo(fileData[a] ?? DateTime(0)),
+      );
       return stickerFiles;
     } catch (e) {
       debugPrint('Error loading local stickers: $e');
@@ -146,7 +173,9 @@ class StickerService {
       }
 
       final sourceFile = File(sourcePath);
-      final ext = path.extension(sourceFile.path).toLowerCase().isEmpty ? '.png' : path.extension(sourceFile.path).toLowerCase();
+      final ext = path.extension(sourceFile.path).toLowerCase().isEmpty
+          ? '.png'
+          : path.extension(sourceFile.path).toLowerCase();
       final dir = await getStickerDirectory();
       final filename = 'custom_${DateTime.now().millisecondsSinceEpoch}$ext';
       final destinationPath = path.join(dir.path, filename);
@@ -170,10 +199,12 @@ class StickerService {
       await packDir.create(recursive: true);
     }
 
-    final dio = Dio(BaseOptions(
-      connectTimeout: const Duration(seconds: 20),
-      receiveTimeout: const Duration(seconds: 20),
-    ));
+    final dio = Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 20),
+        receiveTimeout: const Duration(seconds: 20),
+      ),
+    );
 
     // Create parallel download futures
     final downloadFutures = pack.stickerUrls.asMap().entries.map((entry) async {
@@ -203,7 +234,8 @@ class StickerService {
 
     if (installedCount > 0) {
       final prefs = await SharedPreferences.getInstance();
-      final current = prefs.getStringList(_installedPacksKey)?.toSet() ?? <String>{};
+      final current =
+          prefs.getStringList(_installedPacksKey)?.toSet() ?? <String>{};
       current.add(pack.id);
       await prefs.setStringList(_installedPacksKey, current.toList());
     }
@@ -224,9 +256,84 @@ class StickerService {
 
     // Always update preferences to allow re-download
     final prefs = await SharedPreferences.getInstance();
-    final current = prefs.getStringList(_installedPacksKey)?.toSet() ?? <String>{};
+    final current =
+        prefs.getStringList(_installedPacksKey)?.toSet() ?? <String>{};
     current.remove(packId);
     await prefs.setStringList(_installedPacksKey, current.toList());
+  }
+
+  bool isStickerPath(String pathValue) {
+    final extension = path.extension(pathValue).toLowerCase();
+    return _supportedStickerExtensions.contains(extension);
+  }
+
+  Future<StickerPackImportResult> importPackFromPaths({
+    required List<String> paths,
+    String? packName,
+  }) async {
+    final validPaths = <String>[];
+    for (final pathValue in paths) {
+      if (pathValue.trim().isEmpty) continue;
+      if (isStickerPath(pathValue)) {
+        validPaths.add(pathValue);
+      }
+    }
+
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final generatedId = 'shared_$timestamp';
+    final label = (packName == null || packName.trim().isEmpty)
+        ? 'Imported Pack'
+        : packName.trim();
+    final dir = await getStickerDirectory();
+    final packDir = Directory(path.join(dir.path, 'pack_$generatedId'));
+    if (!await packDir.exists()) {
+      await packDir.create(recursive: true);
+    }
+
+    var importedCount = 0;
+    var skippedCount = 0;
+
+    for (int i = 0; i < validPaths.length; i++) {
+      try {
+        final source = File(validPaths[i]);
+        if (!await source.exists()) {
+          skippedCount++;
+          continue;
+        }
+
+        final ext = path.extension(source.path).toLowerCase();
+        if (!_supportedStickerExtensions.contains(ext)) {
+          skippedCount++;
+          continue;
+        }
+
+        final filename = '${generatedId}_$i$ext';
+        final destination = path.join(packDir.path, filename);
+        await source.copy(destination);
+        importedCount++;
+      } catch (_) {
+        skippedCount++;
+      }
+    }
+
+    if (importedCount == 0) {
+      if (await packDir.exists()) {
+        await packDir.delete(recursive: true);
+      }
+    } else {
+      final prefs = await SharedPreferences.getInstance();
+      final current =
+          prefs.getStringList(_installedPacksKey)?.toSet() ?? <String>{};
+      current.add(generatedId);
+      await prefs.setStringList(_installedPacksKey, current.toList());
+    }
+
+    return StickerPackImportResult(
+      packId: generatedId,
+      packName: label,
+      importedCount: importedCount,
+      skippedCount: skippedCount,
+    );
   }
 
   Future<bool> deleteSticker(File sticker) async {
@@ -251,7 +358,7 @@ class StickerService {
   String _safeExtensionFromUrl(String url) {
     final uri = Uri.tryParse(url);
     final ext = path.extension(uri?.path ?? '').toLowerCase();
-    if (['.png', '.jpg', '.jpeg', '.webp', '.gif'].contains(ext)) {
+    if (_supportedStickerExtensions.contains(ext)) {
       return ext;
     }
     return '.png';

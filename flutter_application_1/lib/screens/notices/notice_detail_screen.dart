@@ -14,19 +14,23 @@ import '../../services/supabase_service.dart';
 import '../../services/auth_service.dart';
 import '../../models/department_account.dart';
 import '../profile/user_profile_screen.dart';
-import '../../widgets/comment_input_box.dart'; 
+import '../../widgets/comment_input_box.dart';
 import '../../services/cloudinary_service.dart';
 import '../../utils/sticker_comment_codec.dart';
 import '../../widgets/full_screen_image_viewer.dart';
+import '../../widgets/emoji_reactions.dart';
+import 'department_account_screen.dart';
 
 class NoticeDetailScreen extends StatefulWidget {
   final Map<String, dynamic> notice;
   final DepartmentAccount account;
+  final String collegeId;
 
   const NoticeDetailScreen({
     super.key,
     required this.notice,
     required this.account,
+    required this.collegeId,
   });
 
   @override
@@ -45,7 +49,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
   bool _isLoading = true;
   bool _isPosting = false;
   bool _isSaved = false;
-  
+
   // Reply state
   String? _replyToId;
   String? _replyToName;
@@ -68,7 +72,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
       final prefs = await SharedPreferences.getInstance();
       final domain = prefs.getString('selectedCollegeDomain') ?? '';
       final email = _authService.userEmail ?? '';
-      
+
       // If no domain set or no email, user can still comment if they're authenticated
       if (email.isEmpty) {
         _isReadOnly = true;
@@ -78,7 +82,9 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
       } else {
         // Check if email ends with @domain or just domain
         final domainToCheck = domain.startsWith('@') ? domain : '@$domain';
-        _isReadOnly = !email.toLowerCase().endsWith(domainToCheck.toLowerCase());
+        _isReadOnly = !email.toLowerCase().endsWith(
+          domainToCheck.toLowerCase(),
+        );
       }
       if (mounted) setState(() {});
     } catch (_) {
@@ -86,7 +92,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
       _isReadOnly = _authService.userEmail == null;
     }
   }
-  
+
   @override
   void dispose() {
     _commentController.dispose();
@@ -98,8 +104,9 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
   void _extractMedia() {
     final List<String> urls = [];
     // Check for single image
-    if (widget.notice['image_url'] != null && widget.notice['image_url'].toString().isNotEmpty) {
-        urls.add(widget.notice['image_url']);
+    if (widget.notice['image_url'] != null &&
+        widget.notice['image_url'].toString().isNotEmpty) {
+      urls.add(widget.notice['image_url']);
     }
     // Check for media array
     if (widget.notice['media_urls'] != null) {
@@ -112,15 +119,18 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
       }
     }
     setState(() {
-        _mediaUrls = urls.toSet().toList(); // Remove duplicates
+      _mediaUrls = urls.toSet().toList(); // Remove duplicates
     });
   }
 
   Future<void> _checkSavedStatus() async {
     final email = _authService.userEmail;
     if (email == null) return;
-    
-    final saved = await _supabaseService.isNoticeSaved(widget.notice['id'].toString(), email);
+
+    final saved = await _supabaseService.isNoticeSaved(
+      widget.notice['id'].toString(),
+      email,
+    );
     if (mounted) {
       setState(() => _isSaved = saved);
     }
@@ -132,13 +142,19 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
       _showError('You must be signed in to save notices');
       return;
     }
-    
+
     try {
       if (_isSaved) {
-        await _supabaseService.unsaveNotice(widget.notice['id'].toString(), email);
+        await _supabaseService.unsaveNotice(
+          widget.notice['id'].toString(),
+          email,
+        );
         if (mounted) setState(() => _isSaved = false);
       } else {
-        await _supabaseService.saveNotice(widget.notice['id'].toString(), email);
+        await _supabaseService.saveNotice(
+          widget.notice['id'].toString(),
+          email,
+        );
         if (mounted) {
           setState(() => _isSaved = true);
           ScaffoldMessenger.of(context).showSnackBar(
@@ -153,7 +169,9 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
 
   Future<void> _loadComments() async {
     try {
-      final comments = await _supabaseService.getNoticeComments(widget.notice['id'].toString());
+      final comments = await _supabaseService.getNoticeComments(
+        widget.notice['id'].toString(),
+      );
       if (mounted) {
         setState(() {
           _comments = comments;
@@ -189,9 +207,20 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => UserProfileScreen(
-          userEmail: email,
-          userName: displayName,
+        builder: (context) =>
+            UserProfileScreen(userEmail: email, userName: displayName),
+      ),
+    );
+  }
+
+  void _openDepartmentProfile() {
+    if (widget.collegeId.trim().isEmpty) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => DepartmentAccountScreen(
+          account: widget.account,
+          collegeId: widget.collegeId,
         ),
       ),
     );
@@ -207,7 +236,9 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
       return;
     }
     if (_isReadOnly) {
-      _showError('Read-only users cannot comment. Use your college email to unlock.');
+      _showError(
+        'Read-only users cannot comment. Use your college email to unlock.',
+      );
       return;
     }
 
@@ -224,9 +255,9 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
 
       _commentController.clear();
       _cancelReply(); // Reset reply state
-      
+
       await _loadComments();
-      
+
       // Scroll to bottom only if it was a top-level comment
       if (_replyToId == null && _scrollController.hasClients) {
         _scrollController.animateTo(
@@ -241,10 +272,12 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
       if (mounted) setState(() => _isPosting = false);
     }
   }
-  
+
   void _showError(String message) {
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     }
   }
 
@@ -279,7 +312,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
 
   Future<void> _shareAsImage() async {
     final controller = ScreenshotController();
-    
+
     // Create a generated image
     try {
       final bytes = await controller.captureFromWidget(
@@ -293,35 +326,82 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                 // Header
-                 Row(children: [
+                // Header
+                Row(
+                  children: [
                     CircleAvatar(
-                      backgroundColor: widget.account.color, 
+                      backgroundColor: widget.account.color,
                       radius: 20,
-                      child: Text(widget.account.avatarLetter, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+                      child: Text(
+                        widget.account.avatarLetter,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
                     const SizedBox(width: 12),
-                    Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(widget.account.name, style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black)),
-                        Text('MyStudySpace Notice', style: GoogleFonts.inter(color: Colors.grey, fontSize: 12)),
-                    ])
-                 ]),
-                 const SizedBox(height: 20),
-                 // Title
-                 Text(widget.notice['title'] ?? 'Untitled', style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black)),
-                 const SizedBox(height: 12),
-                 // Content
-                 Text(widget.notice['content'] ?? '', style: GoogleFonts.inter(fontSize: 16, color: const Color(0xFF334155), height: 1.5)),
-                 const SizedBox(height: 30),
-                 const Divider(),
-                 const SizedBox(height: 8),
-                 Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                        Text('via MyStudySpace', style: GoogleFonts.inter(color: AppTheme.primary, fontWeight: FontWeight.bold)),
-                        Text(_formatTimeAgo(widget.notice['created_at']), style: GoogleFonts.inter(color: Colors.grey)),
-                    ]
-                 )
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.account.name,
+                          style: GoogleFonts.inter(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                            color: Colors.black,
+                          ),
+                        ),
+                        Text(
+                          'MyStudySpace Notice',
+                          style: GoogleFonts.inter(
+                            color: Colors.grey,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                // Title
+                Text(
+                  widget.notice['title'] ?? 'Untitled',
+                  style: GoogleFonts.inter(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // Content
+                Text(
+                  widget.notice['content'] ?? '',
+                  style: GoogleFonts.inter(
+                    fontSize: 16,
+                    color: const Color(0xFF334155),
+                    height: 1.5,
+                  ),
+                ),
+                const SizedBox(height: 30),
+                const Divider(),
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'via MyStudySpace',
+                      style: GoogleFonts.inter(
+                        color: AppTheme.primary,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    Text(
+                      _formatTimeAgo(widget.notice['created_at']),
+                      style: GoogleFonts.inter(color: Colors.grey),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
@@ -333,8 +413,10 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
       final tempDir = await getTemporaryDirectory();
       final file = await File('${tempDir.path}/notice_share.png').create();
       await file.writeAsBytes(bytes);
-      
-      await Share.shareXFiles([XFile(file.path)], text: 'Check out this notice on MyStudySpace!');
+
+      await Share.shareXFiles([
+        XFile(file.path),
+      ], text: 'Check out this notice on MyStudySpace!');
     } catch (e) {
       _showError('Failed to generate image: $e');
     }
@@ -343,15 +425,21 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textColor = isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
-    final secondaryColor = isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary;
-    
+    final textColor = isDark
+        ? AppTheme.darkTextPrimary
+        : AppTheme.lightTextPrimary;
+    final secondaryColor = isDark
+        ? AppTheme.darkTextSecondary
+        : AppTheme.lightTextSecondary;
+
     final title = widget.notice['title'] ?? 'Untitled';
     final content = widget.notice['content'] ?? '';
     final createdAt = widget.notice['created_at'];
 
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
+      backgroundColor: isDark
+          ? AppTheme.darkBackground
+          : AppTheme.lightBackground,
       appBar: AppBar(
         backgroundColor: isDark ? AppTheme.darkBackground : Colors.white,
         title: Text('Notice Details', style: TextStyle(color: textColor)),
@@ -359,7 +447,9 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
         elevation: 0,
         actions: [
           IconButton(
-            icon: Icon(_isSaved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded),
+            icon: Icon(
+              _isSaved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+            ),
             color: _isSaved ? AppTheme.primary : textColor,
             onPressed: _toggleSaved,
           ),
@@ -380,7 +470,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                 // Notice Header (Author Info)
                 _buildAuthorHeader(textColor, secondaryColor, createdAt),
                 const SizedBox(height: 20),
-                
+
                 // Title
                 Text(
                   title,
@@ -392,27 +482,31 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                
+
                 // Content Body
                 Text(
                   content,
                   style: GoogleFonts.inter(
                     fontSize: 16,
-                    color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF334155),
+                    color: isDark
+                        ? const Color(0xFFE2E8F0)
+                        : const Color(0xFF334155),
                     height: 1.6,
                   ),
                 ),
                 const SizedBox(height: 20),
-                
+
                 // Media Gallery
                 if (_mediaUrls.isNotEmpty) ...[
-                   _buildMediaGallery(),
-                   const SizedBox(height: 24),
+                  _buildMediaGallery(),
+                  const SizedBox(height: 24),
                 ],
-                
-                Divider(color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder),
+
+                Divider(
+                  color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+                ),
                 const SizedBox(height: 16),
-                
+
                 // Comments Section Header
                 Text(
                   'Comments (${_comments.length} threads)',
@@ -423,17 +517,26 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                
+
                 // Comments List
                 if (_isLoading)
-                  const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()))
+                  const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(20),
+                      child: CircularProgressIndicator(),
+                    ),
+                  )
                 else if (_comments.isEmpty)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 40),
                     child: Center(
                       child: Column(
                         children: [
-                          Icon(Icons.chat_bubble_outline, size: 48, color: secondaryColor.withValues(alpha: 0.5)),
+                          Icon(
+                            Icons.chat_bubble_outline,
+                            size: 48,
+                            color: secondaryColor.withValues(alpha: 0.5),
+                          ),
                           const SizedBox(height: 16),
                           Text(
                             'No comments yet.\nBe the first to start the discussion!',
@@ -445,13 +548,16 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                     ),
                   )
                 else
-                  ..._comments.map((c) => _buildCommentTree(c, isDark, textColor, secondaryColor)),
-                  
+                  ..._comments.map(
+                    (c) =>
+                        _buildCommentTree(c, isDark, textColor, secondaryColor),
+                  ),
+
                 const SizedBox(height: 20),
               ],
             ),
           ),
-          
+
           // Comment Input Area
           SafeArea(
             top: false,
@@ -462,43 +568,59 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     );
   }
 
-  Widget _buildAuthorHeader(Color textColor, Color secondaryColor, String? createdAt) {
+  Widget _buildAuthorHeader(
+    Color textColor,
+    Color secondaryColor,
+    String? createdAt,
+  ) {
     return Row(
       children: [
-        CircleAvatar(
-          backgroundColor: widget.account.color,
-          radius: 20,
-          child: Text(
-            widget.account.avatarLetter,
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        InkWell(
+          onTap: _openDepartmentProfile,
+          borderRadius: BorderRadius.circular(24),
+          child: CircleAvatar(
+            backgroundColor: widget.account.color,
+            radius: 20,
+            child: Text(
+              widget.account.avatarLetter,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ),
         ),
         const SizedBox(width: 12),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
+        Expanded(
+          child: InkWell(
+            onTap: _openDepartmentProfile,
+            borderRadius: BorderRadius.circular(8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  widget.account.name,
-                  style: GoogleFonts.inter(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                    color: textColor,
-                  ),
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        widget.account.name,
+                        style: GoogleFonts.inter(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          color: textColor,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(Icons.verified, size: 14, color: AppTheme.primary),
+                  ],
                 ),
-                const SizedBox(width: 4),
-                Icon(Icons.verified, size: 14, color: AppTheme.primary),
+                Text(
+                  _formatTimeAgo(createdAt),
+                  style: GoogleFonts.inter(color: secondaryColor, fontSize: 12),
+                ),
               ],
             ),
-            Text(
-              _formatTimeAgo(createdAt),
-              style: GoogleFonts.inter(
-                color: secondaryColor,
-                fontSize: 12,
-              ),
-            ),
-          ],
+          ),
         ),
       ],
     );
@@ -568,14 +690,20 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     );
   }
 
-  Widget _buildCommentTree(Map<String, dynamic> comment, bool isDark, Color textColor, Color secondaryColor) {
+  Widget _buildCommentTree(
+    Map<String, dynamic> comment,
+    bool isDark,
+    Color textColor,
+    Color secondaryColor,
+  ) {
     // Backend returns a flat list of comments with 'parent_id'.
     // The getNoticeComments method already converts this into a nested structure with a 'replies' list.
     // So here we assume each comment map has a 'replies' key containing a List<Map<String, dynamic>>.
-    
+
     // Check for replies array
-    final replies = (comment['replies'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-    
+    final replies =
+        (comment['replies'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -584,80 +712,167 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
           Padding(
             padding: const EdgeInsets.only(left: 16, top: 8),
             child: Column(
-              children: replies.map((r) => _buildCommentTree(r, isDark, textColor, secondaryColor)).toList(),
+              children: replies
+                  .map(
+                    (r) =>
+                        _buildCommentTree(r, isDark, textColor, secondaryColor),
+                  )
+                  .toList(),
             ),
           ),
       ],
     );
   }
 
-  Widget _buildCommentItem(Map<String, dynamic> comment, bool isDark, Color textColor, Color secondaryColor) {
+  Widget _buildCommentItem(
+    Map<String, dynamic> comment,
+    bool isDark,
+    Color textColor,
+    Color secondaryColor,
+  ) {
     final senderName = comment['user_name'] ?? 'Unknown';
     final content = comment['content'] ?? '';
     final createdAt = comment['created_at'];
-    final commentId = comment['id'] ?? '';
+    final commentId = comment['id']?.toString() ?? '';
     final userEmail = comment['user_email'] ?? '';
-    
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          CircleAvatar(
-            radius: 16,
-            backgroundColor: AppTheme.primary.withValues(alpha: 0.2),
-            child: Text(
-              senderName.isNotEmpty ? senderName[0].toUpperCase() : '?',
-              style: TextStyle(fontSize: 12, color: AppTheme.primary, fontWeight: FontWeight.bold),
+    final dismissKey = commentId.isNotEmpty
+        ? commentId
+        : '${createdAt?.toString() ?? DateTime.now().microsecondsSinceEpoch}-${senderName.hashCode}';
+
+    return Dismissible(
+      key: ValueKey('notice-comment-$dismissKey'),
+      direction: commentId.isEmpty
+          ? DismissDirection.none
+          : DismissDirection.startToEnd,
+      dismissThresholds: const {DismissDirection.startToEnd: 0.22},
+      confirmDismiss: (_) async {
+        if (commentId.isEmpty) return false;
+        _initiateReply(commentId, senderName.toString());
+        return false;
+      },
+      background: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        alignment: Alignment.centerLeft,
+        decoration: BoxDecoration(
+          color: AppTheme.primary.withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.reply_rounded, color: AppTheme.primary),
+            const SizedBox(width: 8),
+            Text(
+              'Reply',
+              style: GoogleFonts.inter(
+                fontWeight: FontWeight.w600,
+                color: AppTheme.primary,
+              ),
             ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Text(
-                      senderName,
-                      style: GoogleFonts.inter(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 14,
-                        color: textColor,
-                      ),
+          ],
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            GestureDetector(
+              onTap: userEmail.isEmpty
+                  ? null
+                  : () => _openUserProfile(
+                      userEmail.toString(),
+                      senderName.toString(),
                     ),
-                    const SizedBox(width: 8),
-                    Text(
-                      _formatTimeAgo(createdAt),
-                      style: GoogleFonts.inter(fontSize: 10, color: secondaryColor),
-                    ),
-                  ],
+              child: CircleAvatar(
+                radius: 16,
+                backgroundColor: AppTheme.primary.withValues(alpha: 0.2),
+                child: Text(
+                  senderName.toString().isNotEmpty
+                      ? senderName.toString()[0].toUpperCase()
+                      : '?',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.primary,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-                const SizedBox(height: 4),
-                _buildCommentContent(content.toString(), isDark, textColor, commentId),
-                const SizedBox(height: 4),
-                // Actions (Reply)
-                 Row(
-                  children: [
-                    GestureDetector(
-                      onTap: () {
-                        if (commentId.isNotEmpty) {
-                          _initiateReply(commentId, senderName);
-                        }
-                      },
-                      child: Text(
-                        'Reply',
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      GestureDetector(
+                        onTap: userEmail.isEmpty
+                            ? null
+                            : () => _openUserProfile(
+                                userEmail.toString(),
+                                senderName.toString(),
+                              ),
+                        child: Text(
+                          senderName.toString(),
+                          style: GoogleFonts.inter(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                            color: textColor,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _formatTimeAgo(createdAt),
                         style: GoogleFonts.inter(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
+                          fontSize: 10,
                           color: secondaryColor,
                         ),
                       ),
-                    ),
-                    if (userEmail.isNotEmpty) ...[
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  _buildCommentContent(
+                    content.toString(),
+                    isDark,
+                    textColor,
+                    commentId,
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: EmojiReactions(
+                          commentId: commentId,
+                          commentType: 'notice',
+                          compact: true,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      GestureDetector(
+                        onTap: () {
+                          if (commentId.isNotEmpty) {
+                            _initiateReply(commentId, senderName.toString());
+                          }
+                        },
+                        child: Text(
+                          'Reply',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: secondaryColor,
+                          ),
+                        ),
+                      ),
+                      if (userEmail.toString().isNotEmpty) ...[
                         const SizedBox(width: 12),
                         GestureDetector(
-                          onTap: () => _openUserProfile(userEmail, senderName),
+                          onTap: () => _openUserProfile(
+                            userEmail.toString(),
+                            senderName.toString(),
+                          ),
                           child: Text(
                             'View Profile',
                             style: GoogleFonts.inter(
@@ -666,18 +881,24 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                             ),
                           ),
                         ),
-                    ]
-                  ],
-                ),
-              ],
+                      ],
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildCommentContent(String rawContent, bool isDark, Color textColor, String commentId) {
+  Widget _buildCommentContent(
+    String rawContent,
+    bool isDark,
+    Color textColor,
+    String commentId,
+  ) {
     final stickerUrl = StickerCommentCodec.extractUrl(rawContent);
     if (stickerUrl != null) {
       final heroTag = 'notice_sticker_${commentId}_$stickerUrl';
@@ -686,10 +907,8 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (context) => FullScreenImageViewer(
-                imageUrl: stickerUrl,
-                heroTag: heroTag,
-              ),
+              builder: (context) =>
+                  FullScreenImageViewer(imageUrl: stickerUrl, heroTag: heroTag),
             ),
           );
         },
@@ -706,7 +925,9 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                 width: 150,
                 height: 150,
                 color: isDark ? Colors.white10 : Colors.grey.shade200,
-                child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                child: const Center(
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
               ),
               errorWidget: (context, url, error) {
                 return Text(
@@ -733,44 +954,45 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
   }
 
   Future<void> _handleStickerSelection(File stickerFile) async {
-     if (_isReadOnly) return;
-     
-     setState(() => _isPosting = true);
-     
-     // Save reply ID before clearing it
-     final String? parentId = _replyToId;
-     
-     try {
-       final bytes = await stickerFile.readAsBytes();
-       final filename = 'sticker_${DateTime.now().millisecondsSinceEpoch}.png';
-       
-       final url = await CloudinaryService.uploadBytes(bytes, filename);
-       
-       if (_authService.userEmail == null) throw Exception('User not signed in');
+    if (_isReadOnly) return;
 
-       await _supabaseService.addNoticeComment(
-         noticeId: widget.notice['id'].toString(),
-         content: StickerCommentCodec.encode(url),
-         userEmail: _authService.userEmail!,
-         userName: _authService.displayName ?? _authService.userEmail!.split('@')[0],
-         parentId: parentId,
-       );
+    setState(() => _isPosting = true);
 
-       _cancelReply();
-       await _loadComments();
-       
-       if (parentId == null && _scrollController.hasClients) {
-          _scrollController.animateTo(
-            _scrollController.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeOut,
-          );
-       }
-     } catch (e) {
-       _showError('Failed to post sticker: $e');
-     } finally {
-       if (mounted) setState(() => _isPosting = false);
-     }
+    // Save reply ID before clearing it
+    final String? parentId = _replyToId;
+
+    try {
+      final bytes = await stickerFile.readAsBytes();
+      final filename = 'sticker_${DateTime.now().millisecondsSinceEpoch}.png';
+
+      final url = await CloudinaryService.uploadBytes(bytes, filename);
+
+      if (_authService.userEmail == null) throw Exception('User not signed in');
+
+      await _supabaseService.addNoticeComment(
+        noticeId: widget.notice['id'].toString(),
+        content: StickerCommentCodec.encode(url),
+        userEmail: _authService.userEmail!,
+        userName:
+            _authService.displayName ?? _authService.userEmail!.split('@')[0],
+        parentId: parentId,
+      );
+
+      _cancelReply();
+      await _loadComments();
+
+      if (parentId == null && _scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    } catch (e) {
+      _showError('Failed to post sticker: $e');
+    } finally {
+      if (mounted) setState(() => _isPosting = false);
+    }
   }
 
   Widget _buildInputArea(bool isDark, Color textColor, Color secondaryColor) {
@@ -783,7 +1005,9 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
       onCancelReply: _cancelReply,
       onSubmit: _postComment,
       onStickerSelected: _handleStickerSelection,
-      hintText: _replyToName != null ? 'Write your reply...' : 'Add a comment...',
+      hintText: _replyToName != null
+          ? 'Write your reply...'
+          : 'Add a comment...',
     );
   }
 }
@@ -792,10 +1016,7 @@ class _MediaViewerScreen extends StatelessWidget {
   final List<String> galleryItems;
   final int initialIndex;
 
-  const _MediaViewerScreen({
-    required this.galleryItems,
-    this.initialIndex = 0,
-  });
+  const _MediaViewerScreen({required this.galleryItems, this.initialIndex = 0});
 
   @override
   Widget build(BuildContext context) {
@@ -814,15 +1035,14 @@ class _MediaViewerScreen extends StatelessWidget {
             initialScale: PhotoViewComputedScale.contained,
             minScale: PhotoViewComputedScale.contained,
             maxScale: PhotoViewComputedScale.covered * 2,
-            heroAttributes: PhotoViewHeroAttributes(tag: 'media_${galleryItems[index]}'),
+            heroAttributes: PhotoViewHeroAttributes(
+              tag: 'media_${galleryItems[index]}',
+            ),
           );
         },
         itemCount: galleryItems.length,
-        loadingBuilder: (context, event) => const Center(
-          child: CircularProgressIndicator(
-            color: Colors.white,
-          ),
-        ),
+        loadingBuilder: (context, event) =>
+            const Center(child: CircularProgressIndicator(color: Colors.white)),
         pageController: PageController(initialPage: initialIndex),
       ),
     );

@@ -689,9 +689,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  _buildCommentStarterGuide(isDark),
-                  const SizedBox(height: 12),
-
                   _isLoading
                       ? const Center(child: CircularProgressIndicator())
                       : _comments.isEmpty
@@ -985,30 +982,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               ),
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCommentStarterGuide(bool isDark) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF151922) : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark ? Colors.white12 : Colors.grey.shade200,
-        ),
-      ),
-      child: Text(
-        widget.isRoomAdmin
-            ? 'Quick start: swipe right on a comment to reply, long-press for reactions and moderation tools, or use Reply/React inline.'
-            : 'Quick start: swipe right on a comment to reply, long-press for reactions, or use Reply/React inline.',
-        style: GoogleFonts.inter(
-          fontSize: 12,
-          color: AppTheme.textMuted,
-          height: 1.4,
         ),
       ),
     );
@@ -1379,7 +1352,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       onStickerSelected: _handleStickerSelection,
       hintText: _replyToName != null
           ? 'Write your reply...'
-          : 'Add a comment... (Swipe comments to reply)',
+          : 'Add a comment...',
     );
   }
 

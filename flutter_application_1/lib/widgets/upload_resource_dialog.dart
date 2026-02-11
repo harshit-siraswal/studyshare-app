@@ -1,30 +1,34 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:file_picker/file_picker.dart';
+import 'dart:io';
 import '../config/theme.dart';
 import '../services/supabase_service.dart';
 import '../services/auth_service.dart';
 import '../services/backend_api_service.dart';
 import 'package:http/http.dart' as http;
 import 'success_overlay.dart';
+import '../utils/contribution_badge.dart';
 
 class UploadResourceDialog extends StatefulWidget {
   final String collegeId;
   final String userEmail;
   final VoidCallback? onUploadComplete;
+  final PlatformFile? prefilledFile;
 
   const UploadResourceDialog({
     super.key,
     required this.collegeId,
     required this.userEmail,
     this.onUploadComplete,
+    this.prefilledFile,
   });
 
   @override
   State<UploadResourceDialog> createState() => _UploadResourceDialogState();
 }
 
-class _UploadResourceDialogState extends State<UploadResourceDialog> 
+class _UploadResourceDialogState extends State<UploadResourceDialog>
     with SingleTickerProviderStateMixin {
   // Form state
   int _typeIndex = 0; // 0=notes, 1=video
@@ -38,36 +42,92 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
   String _topic = '';
   String _videoUrl = '';
   PlatformFile? _selectedFile;
-  
+
   bool _isUploading = false;
   double _uploadProgress = 0;
-  
+  bool _prefilledFileUnsupported = false;
+
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
-
-  // Filter options with emojis
-  static const filterOptions = [
-    {'label': 'All', 'emoji': '📚'},
-    {'label': 'Notes', 'emoji': '📝'},
-    {'label': 'Videos', 'emoji': '🎥'},
-    {'label': 'PYQs', 'emoji': '📄'},
-  ];
+  late TextEditingController _titleController;
 
   // Compact config data
   static const semesters = ['1', '2', '3', '4', '5', '6', '7', '8'];
+  static const _allowedFileExtensions = [
+    'pdf',
+    'doc',
+    'docx',
+    'ppt',
+    'pptx',
+    'odt',
+    'odp',
+    'txt',
+  ];
   static const branches = {
-    'CSE': 'cse', 'ECE': 'ece', 'EEE': 'eee', 'ME': 'me',
-    'CE': 'ce', 'AIML': 'aiml', 'DS': 'ds', 'IT': 'it',
+    'CSE': 'cse',
+    'ECE': 'ece',
+    'EEE': 'eee',
+    'ME': 'me',
+    'CE': 'ce',
+    'AIML': 'aiml',
+    'DS': 'ds',
+    'IT': 'it',
   };
   static const subjects = {
-    'cse': ["Data Structures", "Algorithms", "DBMS", "Operating Systems", "Computer Networks", "Software Engineering"],
-    'ece': ["Digital Electronics", "Signals & Systems", "Communication Systems", "VLSI", "Microprocessors"],
-    'eee': ["Power Systems", "Control Systems", "Electrical Machines", "Power Electronics"],
-    'me': ["Thermodynamics", "Fluid Mechanics", "Machine Design", "Manufacturing"],
-    'ce': ["Structural Analysis", "Surveying", "Construction Management", "Geotechnical Engineering"],
-    'aiml': ["Machine Learning", "Deep Learning", "NLP", "Computer Vision", "Data Mining"],
-    'ds': ["Statistics", "Data Mining", "Big Data Analytics", "Machine Learning", "Data Visualization"],
-    'it': ["Web Development", "Database Systems", "Networking", "Cloud Computing", "Cybersecurity"],
+    'cse': [
+      "Data Structures",
+      "Algorithms",
+      "DBMS",
+      "Operating Systems",
+      "Computer Networks",
+      "Software Engineering",
+    ],
+    'ece': [
+      "Digital Electronics",
+      "Signals & Systems",
+      "Communication Systems",
+      "VLSI",
+      "Microprocessors",
+    ],
+    'eee': [
+      "Power Systems",
+      "Control Systems",
+      "Electrical Machines",
+      "Power Electronics",
+    ],
+    'me': [
+      "Thermodynamics",
+      "Fluid Mechanics",
+      "Machine Design",
+      "Manufacturing",
+    ],
+    'ce': [
+      "Structural Analysis",
+      "Surveying",
+      "Construction Management",
+      "Geotechnical Engineering",
+    ],
+    'aiml': [
+      "Machine Learning",
+      "Deep Learning",
+      "NLP",
+      "Computer Vision",
+      "Data Mining",
+    ],
+    'ds': [
+      "Statistics",
+      "Data Mining",
+      "Big Data Analytics",
+      "Machine Learning",
+      "Data Visualization",
+    ],
+    'it': [
+      "Web Development",
+      "Database Systems",
+      "Networking",
+      "Cloud Computing",
+      "Cybersecurity",
+    ],
   };
 
   List<String> get availableSubjects => subjects[_branch] ?? [];
@@ -75,28 +135,59 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
   @override
   void initState() {
     super.initState();
+    _titleController = TextEditingController();
     _animController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
     );
     _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
     _animController.forward();
+
+    final prefilledFile = widget.prefilledFile;
+    if (prefilledFile != null) {
+      final ext = _fileExtension(prefilledFile.name);
+      if (_allowedFileExtensions.contains(ext)) {
+        _selectedFile = prefilledFile;
+        _title = _titleFromFileName(prefilledFile.name);
+        _titleController.text = _title;
+      } else {
+        _prefilledFileUnsupported = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _showError('Shared file type is not supported for resources yet.');
+          }
+        });
+      }
+    }
   }
 
   @override
   void dispose() {
     _animController.dispose();
+    _titleController.dispose();
     super.dispose();
+  }
+
+  String _fileExtension(String filename) {
+    final parts = filename.split('.');
+    if (parts.length < 2) return '';
+    return parts.last.toLowerCase();
+  }
+
+  String _titleFromFileName(String filename) {
+    final dot = filename.lastIndexOf('.');
+    final base = dot > 0 ? filename.substring(0, dot) : filename;
+    return base.replaceAll('_', ' ').trim();
   }
 
   Future<void> _pickFile() async {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['pdf', 'doc', 'docx'],
+        allowedExtensions: _allowedFileExtensions,
         withData: true,
       );
-      
+
       if (result != null && result.files.isNotEmpty) {
         final file = result.files.first;
         if (file.size > 10 * 1024 * 1024) {
@@ -120,11 +211,16 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     final lower = filename.toLowerCase();
     if (lower.endsWith('.pdf')) return 'application/pdf';
     if (lower.endsWith('.doc')) return 'application/msword';
-    if (lower.endsWith('.docx')) return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    if (lower.endsWith('.docx'))
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
     if (lower.endsWith('.ppt')) return 'application/vnd.ms-powerpoint';
-    if (lower.endsWith('.pptx')) return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
-    if (lower.endsWith('.odt')) return 'application/vnd.oasis.opendocument.text';
-    if (lower.endsWith('.odp')) return 'application/vnd.oasis.opendocument.presentation';
+    if (lower.endsWith('.pptx'))
+      return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    if (lower.endsWith('.odt'))
+      return 'application/vnd.oasis.opendocument.text';
+    if (lower.endsWith('.odp'))
+      return 'application/vnd.oasis.opendocument.presentation';
+    if (lower.endsWith('.txt')) return 'text/plain';
     return 'application/octet-stream';
   }
 
@@ -133,31 +229,60 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     if (_semester.isEmpty) return _showError('Select semester');
     if (_branch.isEmpty) return _showError('Select branch');
     if (_subject.isEmpty) return _showError('Select subject');
-    if (_typeIndex == 0 && _selectedFile == null) return _showError('Attach a file to contribute');
-    if (_typeIndex == 1 && _videoUrl.isEmpty) return _showError('Enter video URL');
+    if (_typeIndex == 0 && _selectedFile == null)
+      return _showError('Attach a file to contribute');
+    if (_typeIndex == 1 && _videoUrl.isEmpty)
+      return _showError('Enter video URL');
+    if (_typeIndex == 0 &&
+        _selectedFile != null &&
+        _selectedFile!.size > 10 * 1024 * 1024) {
+      return _showError('File must be under 10MB');
+    }
 
-    setState(() { _isUploading = true; _uploadProgress = 0.1; });
+    setState(() {
+      _isUploading = true;
+      _uploadProgress = 0.1;
+    });
 
     try {
       final supabaseService = SupabaseService();
       final authService = AuthService();
       final backendApi = BackendApiService();
-      
+      int? previousContributionCount;
+      ContributionBadge? previousBadge;
+      try {
+        final previousStats = await supabaseService.getUserStats(
+          widget.userEmail,
+        );
+        final dynamic rawPreviousCount =
+            previousStats['contributions'] ?? previousStats['uploads'];
+        if (rawPreviousCount is int) {
+          previousContributionCount = rawPreviousCount;
+          previousBadge = ContributionBadgeCatalog.resolve(rawPreviousCount);
+        }
+      } catch (_) {
+        // Keep flow resilient if pre-fetch fails.
+      }
+
       // Progress: preparing
       setState(() => _uploadProgress = 0.2);
-      
+
       // Upload file to R2 if notes/pyq
       String? filePath;
       if (_typeIndex == 0 && _selectedFile != null) {
         setState(() => _uploadProgress = 0.4);
         try {
           final file = _selectedFile!;
-          final bytes = file.bytes;
+          final bytes =
+              file.bytes ??
+              (file.path != null ? await File(file.path!).readAsBytes() : null);
           if (bytes == null) {
             throw Exception('File bytes not available');
           }
 
-          final presign = await backendApi.getResourceUploadUrl(filename: file.name);
+          final presign = await backendApi.getResourceUploadUrl(
+            filename: file.name,
+          );
           final uploadUrl = presign['uploadUrl']?.toString();
           final publicUrl = presign['publicUrl']?.toString();
 
@@ -181,13 +306,16 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
           filePath = publicUrl;
         } catch (e) {
           _showError('File submission failed: $e');
-          setState(() { _isUploading = false; _uploadProgress = 0; });
+          setState(() {
+            _isUploading = false;
+            _uploadProgress = 0;
+          });
           return;
         }
       }
-      
+
       setState(() => _uploadProgress = 0.7);
-      
+
       // Create resource in Supabase
       await supabaseService.createResource(
         collegeId: widget.collegeId,
@@ -204,19 +332,52 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
         topic: _topic.trim().isEmpty ? null : _topic.trim(),
         description: _description.trim(),
       );
-      
+
+      int? contributionCount;
+      ContributionBadge? contributionBadge;
+      bool badgeUnlocked = false;
+      try {
+        final stats = await supabaseService.getUserStats(widget.userEmail);
+        final dynamic rawCount = stats['contributions'] ?? stats['uploads'];
+        if (rawCount is int) {
+          contributionCount = rawCount;
+          contributionBadge = ContributionBadgeCatalog.resolve(rawCount);
+          if (previousBadge != null &&
+              contributionBadge.id != previousBadge.id &&
+              contributionCount > (previousContributionCount ?? -1)) {
+            badgeUnlocked = true;
+          }
+        }
+      } catch (_) {
+        // Keep success flow resilient even if stats refresh fails.
+      }
+
       setState(() => _uploadProgress = 1.0);
       await Future.delayed(const Duration(milliseconds: 200));
 
       if (mounted) {
         Navigator.pop(context); // Close upload dialog
-        
+
         // Show success animation
         showDialog(
           context: context,
           barrierDismissible: false,
           builder: (context) => SuccessOverlay(
-            message: 'Resource submitted successfully!',
+            variant: badgeUnlocked
+                ? SuccessOverlayVariant.badgeUnlocked
+                : SuccessOverlayVariant.contribution,
+            title: badgeUnlocked ? 'Badge Unlocked' : 'Contribution Added',
+            message: badgeUnlocked
+                ? '${contributionBadge?.label ?? 'New'} badge unlocked with $contributionCount contribution${contributionCount == 1 ? '' : 's'}!'
+                : (contributionCount == null
+                      ? 'Resource submitted successfully!'
+                      : 'Resource submitted. You now have $contributionCount contribution${contributionCount == 1 ? '' : 's'}.'),
+            badgeLabel: contributionBadge == null
+                ? null
+                : '${contributionBadge.label} Badge',
+            autoDismissDelay: badgeUnlocked
+                ? const Duration(milliseconds: 3200)
+                : const Duration(milliseconds: 2400),
             onDismiss: () {
               Navigator.pop(context); // Close success overlay
               widget.onUploadComplete?.call();
@@ -227,14 +388,18 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     } catch (e) {
       if (mounted) _showError('Submission failed: ${e.toString()}');
     } finally {
-      if (mounted) setState(() { _isUploading = false; _uploadProgress = 0; });
+      if (mounted)
+        setState(() {
+          _isUploading = false;
+          _uploadProgress = 0;
+        });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return FadeTransition(
       opacity: _fadeAnim,
       child: Container(
@@ -258,13 +423,17 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
-            
+
             // Content
             Flexible(
               child: SingleChildScrollView(
                 padding: EdgeInsets.fromLTRB(
-                  20, 16, 20, 
-                  MediaQuery.of(context).viewInsets.bottom + MediaQuery.of(context).padding.bottom + 20
+                  20,
+                  16,
+                  20,
+                  MediaQuery.of(context).viewInsets.bottom +
+                      MediaQuery.of(context).padding.bottom +
+                      20,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -278,7 +447,11 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                             color: AppTheme.primary,
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: const Icon(Icons.upload_rounded, color: Colors.white, size: 20),
+                          child: const Icon(
+                            Icons.upload_rounded,
+                            color: Colors.white,
+                            size: 20,
+                          ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
@@ -290,59 +463,148 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                                 style: GoogleFonts.inter(
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
-                                  color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
+                                  color: isDark
+                                      ? AppTheme.textLight
+                                      : AppTheme.textPrimary,
                                 ),
                               ),
                               Text(
                                 'Help your peers learn',
-                                style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textMuted),
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  color: AppTheme.textMuted,
+                                ),
                               ),
                             ],
                           ),
                         ),
                       ],
                     ),
+                    if (widget.prefilledFile != null &&
+                        !_prefilledFileUnsupported) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: AppTheme.primary.withValues(alpha: 0.22),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.share_rounded,
+                              size: 18,
+                              color: AppTheme.primary,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Shared file attached: ${widget.prefilledFile!.name}',
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.primary,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 20),
-                    
 
                     // Type Toggle (compact)
                     Container(
                       padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
-                        color: isDark ? AppTheme.darkCard : Colors.grey.shade200,
+                        color: isDark
+                            ? AppTheme.darkCard
+                            : Colors.grey.shade200,
                         borderRadius: BorderRadius.circular(24),
                       ),
                       child: Row(
                         children: [
-                          _buildTypeChip(0, Icons.description_rounded, 'Notes', isDark),
-                          _buildTypeChip(1, Icons.play_circle_rounded, 'Video', isDark),
+                          _buildTypeChip(
+                            0,
+                            Icons.description_rounded,
+                            'Notes',
+                            isDark,
+                          ),
+                          _buildTypeChip(
+                            1,
+                            Icons.play_circle_rounded,
+                            'Video',
+                            isDark,
+                          ),
                         ],
                       ),
                     ),
                     const SizedBox(height: 16),
-                    
+
                     // Title
                     _buildInput(
+                      controller: _titleController,
                       hint: 'Resource title',
                       onChanged: (v) => _title = v,
                       prefixIcon: Icons.title_rounded,
                       isDark: isDark,
                     ),
                     const SizedBox(height: 12),
-                    
+
                     // Semester & Branch Row
                     Row(
                       children: [
-                        Expanded(child: _buildChipSelector('Sem', semesters, _semester, (v) => setState(() => _semester = v), isDark)),
+                        Expanded(
+                          child: _buildChipSelector(
+                            'Sem',
+                            semesters,
+                            _semester,
+                            (v) => setState(() => _semester = v),
+                            isDark,
+                          ),
+                        ),
                         const SizedBox(width: 8),
-                        Expanded(child: _buildChipSelector('Branch', branches.keys.toList(), _branch.isEmpty ? '' : branches.entries.firstWhere((e) => e.value == _branch, orElse: () => const MapEntry('', '')).key, (v) => setState(() { _branch = branches[v] ?? ''; _subject = ''; }), isDark)),
+                        Expanded(
+                          child: _buildChipSelector(
+                            'Branch',
+                            branches.keys.toList(),
+                            _branch.isEmpty
+                                ? ''
+                                : branches.entries
+                                      .firstWhere(
+                                        (e) => e.value == _branch,
+                                        orElse: () => const MapEntry('', ''),
+                                      )
+                                      .key,
+                            (v) => setState(() {
+                              _branch = branches[v] ?? '';
+                              _subject = '';
+                            }),
+                            isDark,
+                          ),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 12),
-                    
+
                     // Subject
                     if (_branch.isNotEmpty)
-                      _buildChipSelector('Subject', availableSubjects, _subject, (v) => setState(() => _subject = v), isDark),
+                      _buildChipSelector(
+                        'Subject',
+                        availableSubjects,
+                        _subject,
+                        (v) => setState(() => _subject = v),
+                        isDark,
+                      ),
                     if (_branch.isNotEmpty) const SizedBox(height: 12),
 
                     // Chapter & Topic
@@ -368,18 +630,28 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                       ),
                       const SizedBox(height: 12),
                     ],
-                    
+
                     // Resource Type (for notes)
                     if (_typeIndex == 0)
                       Row(
                         children: [
-                          _buildMiniChip('Notes', _resourceType == 'notes', () => setState(() => _resourceType = 'notes'), isDark),
+                          _buildMiniChip(
+                            'Notes',
+                            _resourceType == 'notes',
+                            () => setState(() => _resourceType = 'notes'),
+                            isDark,
+                          ),
                           const SizedBox(width: 8),
-                          _buildMiniChip('PYQ', _resourceType == 'pyq', () => setState(() => _resourceType = 'pyq'), isDark),
+                          _buildMiniChip(
+                            'PYQ',
+                            _resourceType == 'pyq',
+                            () => setState(() => _resourceType = 'pyq'),
+                            isDark,
+                          ),
                         ],
                       ),
                     if (_typeIndex == 0) const SizedBox(height: 16),
-                    
+
                     // File Upload / Video URL
                     if (_typeIndex == 0)
                       _buildFileUpload(isDark)
@@ -402,17 +674,33 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                       isDark: isDark,
                     ),
                     const SizedBox(height: 20),
-                    
+
                     // Progress with stages
                     if (_isUploading) ...[
                       // Stage indicators
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          _buildStageIndicator('Preparing', _uploadProgress >= 0.1, _uploadProgress >= 0.2),
-                          _buildStageIndicator('Sending file', _uploadProgress >= 0.2, _uploadProgress >= 0.7),
-                          _buildStageIndicator('Saving', _uploadProgress >= 0.7, _uploadProgress >= 0.95),
-                          _buildStageIndicator('Done', _uploadProgress >= 0.95, _uploadProgress >= 1.0),
+                          _buildStageIndicator(
+                            'Preparing',
+                            _uploadProgress >= 0.1,
+                            _uploadProgress >= 0.2,
+                          ),
+                          _buildStageIndicator(
+                            'Sending file',
+                            _uploadProgress >= 0.2,
+                            _uploadProgress >= 0.7,
+                          ),
+                          _buildStageIndicator(
+                            'Saving',
+                            _uploadProgress >= 0.7,
+                            _uploadProgress >= 0.95,
+                          ),
+                          _buildStageIndicator(
+                            'Done',
+                            _uploadProgress >= 0.95,
+                            _uploadProgress >= 1.0,
+                          ),
                         ],
                       ),
                       const SizedBox(height: 12),
@@ -421,9 +709,20 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                         children: [
                           Text(
                             _getUploadStageText(),
-                            style: GoogleFonts.inter(color: AppTheme.primary, fontSize: 12, fontWeight: FontWeight.w500),
+                            style: GoogleFonts.inter(
+                              color: AppTheme.primary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
-                          Text('${(_uploadProgress * 100).toInt()}%', style: GoogleFonts.inter(color: AppTheme.primary, fontSize: 12, fontWeight: FontWeight.bold)),
+                          Text(
+                            '${(_uploadProgress * 100).toInt()}%',
+                            style: GoogleFonts.inter(
+                              color: AppTheme.primary,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
                         ],
                       ),
                       const SizedBox(height: 8),
@@ -431,25 +730,39 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                         borderRadius: BorderRadius.circular(4),
                         child: LinearProgressIndicator(
                           value: _uploadProgress,
-                          backgroundColor: isDark ? AppTheme.darkCard : Colors.grey.shade200,
-                          valueColor: const AlwaysStoppedAnimation(AppTheme.primary),
+                          backgroundColor: isDark
+                              ? AppTheme.darkCard
+                              : Colors.grey.shade200,
+                          valueColor: const AlwaysStoppedAnimation(
+                            AppTheme.primary,
+                          ),
                           minHeight: 6,
                         ),
                       ),
                       const SizedBox(height: 16),
                     ],
-                    
+
                     // Buttons
                     Row(
                       children: [
                         Expanded(
                           child: OutlinedButton(
-                            onPressed: _isUploading ? null : () => Navigator.pop(context),
+                            onPressed: _isUploading
+                                ? null
+                                : () => Navigator.pop(context),
                             style: OutlinedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                              side: BorderSide(color: isDark ? Colors.white24 : Colors.grey.shade300),
-                              foregroundColor: isDark ? Colors.white : AppTheme.textPrimary,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              side: BorderSide(
+                                color: isDark
+                                    ? Colors.white24
+                                    : Colors.grey.shade300,
+                              ),
+                              foregroundColor: isDark
+                                  ? Colors.white
+                                  : AppTheme.textPrimary,
                             ),
                             child: const Text('Cancel'),
                           ),
@@ -461,15 +774,32 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                             onPressed: _isUploading ? null : _handleSubmit,
                             style: ElevatedButton.styleFrom(
                               padding: const EdgeInsets.symmetric(vertical: 14),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                            ),                            child: _isUploading
-                                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                            ),
+                            child: _isUploading
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: Colors.white,
+                                    ),
+                                  )
                                 : Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      const Icon(Icons.volunteer_activism_rounded, size: 18),
+                                      const Icon(
+                                        Icons.volunteer_activism_rounded,
+                                        size: 18,
+                                      ),
                                       const SizedBox(width: 6),
-                                      Text(_typeIndex == 0 ? 'Contribute' : 'Share'),
+                                      Text(
+                                        _typeIndex == 0
+                                            ? 'Contribute'
+                                            : 'Share',
+                                      ),
                                     ],
                                   ),
                           ),
@@ -490,7 +820,9 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     final isSelected = _typeIndex == index;
     // For unselected state in light mode, textMuted is fine (grayish).
     // isSelected will be Primary + White Text.
-    final unselectedTextColor = isDark ? AppTheme.textMuted : AppTheme.textPrimary.withValues(alpha: 0.6);
+    final unselectedTextColor = isDark
+        ? AppTheme.textMuted
+        : AppTheme.textPrimary.withValues(alpha: 0.6);
     return Expanded(
       child: GestureDetector(
         onTap: _isUploading ? null : () => setState(() => _typeIndex = index),
@@ -504,7 +836,11 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(icon, size: 16, color: isSelected ? Colors.white : unselectedTextColor),
+              Icon(
+                icon,
+                size: 16,
+                color: isSelected ? Colors.white : unselectedTextColor,
+              ),
               const SizedBox(width: 6),
               Text(
                 label,
@@ -526,16 +862,18 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     // Active/Complete uses Primary/Success (OK). Inactive uses darkCard -> need light alternative.
     // However, this method doesn't take isDark as param, need to pass or infer?
     // Let's assume passed-in context or just use neutral grey for inactive.
-    
+
     return Column(
       children: [
         Container(
           width: 24,
           height: 24,
           decoration: BoxDecoration(
-            color: isComplete 
-                ? AppTheme.success 
-                : (isActive ? AppTheme.primary : AppTheme.textMuted.withValues(alpha: 0.2)),
+            color: isComplete
+                ? AppTheme.success
+                : (isActive
+                      ? AppTheme.primary
+                      : AppTheme.textMuted.withValues(alpha: 0.2)),
             shape: BoxShape.circle,
           ),
           child: Icon(
@@ -568,6 +906,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     required String hint,
     required Function(String) onChanged,
     required bool isDark,
+    TextEditingController? controller,
     IconData? prefixIcon,
     TextInputType? keyboardType,
     int maxLines = 1,
@@ -577,6 +916,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     final textColor = isDark ? Colors.white : AppTheme.textPrimary;
 
     return TextField(
+      controller: controller,
       onChanged: onChanged,
       enabled: !_isUploading,
       keyboardType: keyboardType,
@@ -591,20 +931,39 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide.none,
         ),
-        prefixIcon: prefixIcon != null ? Icon(prefixIcon, size: 18, color: hintColor) : null,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        prefixIcon: prefixIcon != null
+            ? Icon(prefixIcon, size: 18, color: hintColor)
+            : null,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
       ),
     );
   }
 
-  Widget _buildChipSelector(String label, List<String> items, String selected, Function(String) onSelect, bool isDark) {
+  Widget _buildChipSelector(
+    String label,
+    List<String> items,
+    String selected,
+    Function(String) onSelect,
+    bool isDark,
+  ) {
     final cardColor = isDark ? AppTheme.darkCard : Colors.grey.shade100;
     final borderColor = isDark ? AppTheme.glassBorder : Colors.transparent;
     final textColor = isDark ? Colors.white : AppTheme.textPrimary;
     final hintColor = AppTheme.textMuted;
 
     return GestureDetector(
-      onTap: _isUploading ? null : () => _showBottomSheetPicker(label, items, selected, onSelect, isDark),
+      onTap: _isUploading
+          ? null
+          : () => _showBottomSheetPicker(
+              label,
+              items,
+              selected,
+              onSelect,
+              isDark,
+            ),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
@@ -630,7 +989,13 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     );
   }
 
-  void _showBottomSheetPicker(String label, List<String> items, String selected, Function(String) onSelect, bool isDark) {
+  void _showBottomSheetPicker(
+    String label,
+    List<String> items,
+    String selected,
+    Function(String) onSelect,
+    bool isDark,
+  ) {
     showModalBottomSheet(
       context: context,
       backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
@@ -675,14 +1040,19 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                       item,
                       style: GoogleFonts.inter(
                         fontSize: 16,
-                        color: isSelected 
-                            ? AppTheme.primary 
+                        color: isSelected
+                            ? AppTheme.primary
                             : (isDark ? Colors.white : AppTheme.textPrimary),
-                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                        fontWeight: isSelected
+                            ? FontWeight.w600
+                            : FontWeight.normal,
                       ),
                     ),
                     trailing: isSelected
-                        ? const Icon(Icons.check_circle, color: AppTheme.primary)
+                        ? const Icon(
+                            Icons.check_circle,
+                            color: AppTheme.primary,
+                          )
                         : null,
                     onTap: () {
                       onSelect(item);
@@ -698,10 +1068,17 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     );
   }
 
-  Widget _buildMiniChip(String label, bool isSelected, VoidCallback onTap, bool isDark) {
+  Widget _buildMiniChip(
+    String label,
+    bool isSelected,
+    VoidCallback onTap,
+    bool isDark,
+  ) {
     final unselectedBg = isDark ? AppTheme.darkCard : Colors.grey.shade100;
     final unselectedBorder = isDark ? AppTheme.glassBorder : Colors.transparent;
-    final unselectedText = isDark ? AppTheme.textMuted : AppTheme.textPrimary.withValues(alpha: 0.6);
+    final unselectedText = isDark
+        ? AppTheme.textMuted
+        : AppTheme.textPrimary.withValues(alpha: 0.6);
 
     return GestureDetector(
       onTap: _isUploading ? null : onTap,
@@ -709,9 +1086,13 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: isSelected ? AppTheme.primary.withValues(alpha: 0.2) : unselectedBg,
+          color: isSelected
+              ? AppTheme.primary.withValues(alpha: 0.2)
+              : unselectedBg,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: isSelected ? AppTheme.primary : unselectedBorder),
+          border: Border.all(
+            color: isSelected ? AppTheme.primary : unselectedBorder,
+          ),
         ),
         child: Text(
           label,
@@ -729,7 +1110,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     final bg = isDark ? AppTheme.darkCard : Colors.grey.shade100;
     final borderColor = isDark ? AppTheme.glassBorder : Colors.transparent;
     final textColor = isDark ? Colors.white : AppTheme.textPrimary;
-    
+
     return GestureDetector(
       onTap: _isUploading ? null : _pickFile,
       child: AnimatedContainer(
@@ -752,7 +1133,11 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                       color: AppTheme.success.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.check_rounded, color: AppTheme.success, size: 18),
+                    child: const Icon(
+                      Icons.check_rounded,
+                      color: AppTheme.success,
+                      size: 18,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -761,33 +1146,60 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                       children: [
                         Text(
                           _selectedFile!.name,
-                          style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.w600, color: textColor),
+                          style: GoogleFonts.inter(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: textColor,
+                          ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                         Text(
                           '${(_selectedFile!.size / 1024 / 1024).toStringAsFixed(1)} MB',
-                          style: GoogleFonts.inter(fontSize: 11, color: AppTheme.textMuted),
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            color: AppTheme.textMuted,
+                          ),
                         ),
                       ],
                     ),
                   ),
                   IconButton(
                     onPressed: () => setState(() => _selectedFile = null),
-                    icon: const Icon(Icons.close_rounded, size: 18, color: AppTheme.textMuted),
+                    icon: const Icon(
+                      Icons.close_rounded,
+                      size: 18,
+                      color: AppTheme.textMuted,
+                    ),
                   ),
                 ],
               )
             : Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.cloud_upload_rounded, color: AppTheme.textMuted.withValues(alpha: 0.5), size: 28),
+                  Icon(
+                    Icons.cloud_upload_rounded,
+                    color: AppTheme.textMuted.withValues(alpha: 0.5),
+                    size: 28,
+                  ),
                   const SizedBox(width: 12),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Tap to select file', style: GoogleFonts.inter(fontSize: 13, color: textColor)),
-                      Text('PDF, DOC up to 10MB', style: GoogleFonts.inter(fontSize: 11, color: AppTheme.textMuted)),
+                      Text(
+                        'Tap to select file',
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          color: textColor,
+                        ),
+                      ),
+                      Text(
+                        'PDF, DOC, PPT, TXT up to 10MB',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          color: AppTheme.textMuted,
+                        ),
+                      ),
                     ],
                   ),
                 ],
@@ -798,8 +1210,14 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
 }
 
 /// Show upload dialog
-void showUploadDialog(BuildContext context, String collegeId, String userEmail, {VoidCallback? onComplete}) {
-  showModalBottomSheet(
+Future<void> showUploadDialog(
+  BuildContext context,
+  String collegeId,
+  String userEmail, {
+  VoidCallback? onComplete,
+  PlatformFile? prefilledFile,
+}) async {
+  await showModalBottomSheet(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
@@ -807,6 +1225,7 @@ void showUploadDialog(BuildContext context, String collegeId, String userEmail, 
       collegeId: collegeId,
       userEmail: userEmail,
       onUploadComplete: onComplete,
+      prefilledFile: prefilledFile,
     ),
   );
 }

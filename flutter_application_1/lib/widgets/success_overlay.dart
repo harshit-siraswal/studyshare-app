@@ -1,128 +1,80 @@
 import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import '../l10n/app_localizations.dart';
+
 import '../config/theme.dart';
+import '../l10n/app_localizations.dart';
+
+enum SuccessOverlayVariant {
+  general,
+  contribution,
+  badgeUnlocked,
+  premiumUpgrade,
+  stickerImport,
+}
 
 class SuccessOverlay extends StatefulWidget {
   final String message;
   final VoidCallback onDismiss;
+  final SuccessOverlayVariant variant;
+  final String? title;
+  final String? badgeLabel;
+  final Duration autoDismissDelay;
 
   const SuccessOverlay({
     super.key,
     required this.message,
     required this.onDismiss,
+    this.variant = SuccessOverlayVariant.general,
+    this.title,
+    this.badgeLabel,
+    this.autoDismissDelay = const Duration(milliseconds: 2400),
   });
 
   @override
   State<SuccessOverlay> createState() => _SuccessOverlayState();
 }
 
-class _SuccessOverlayState extends State<SuccessOverlay> with TickerProviderStateMixin {
-  late AnimationController _mainController;
-  late AnimationController _particleController;
-  late AnimationController _pulseController;
-  
-  late Animation<double> _scaleAnimation;
-  late Animation<double> _checkAnimation;
-  late Animation<double> _checkStrokeAnimation;
-  late Animation<double> _fadeAnimation;
-  late Animation<double> _pulseAnimation;
-
-  final List<_Particle> _particles = [];
+class _SuccessOverlayState extends State<SuccessOverlay>
+    with TickerProviderStateMixin {
+  late final AnimationController _entryController;
+  late final AnimationController _particleController;
+  late final AnimationController _pulseController;
+  late final _OverlayVisuals _visuals;
+  late final List<_Particle> _particles;
   final Random _random = Random();
 
   @override
   void initState() {
     super.initState();
-    
-    // Generate celebration particles
-    for (int i = 0; i < 20; i++) {
-      _particles.add(_Particle(
+    _visuals = _OverlayVisuals.forVariant(widget.variant);
+    _particles = List.generate(24, (_) {
+      return _Particle(
         angle: _random.nextDouble() * 2 * pi,
-        speed: 100 + _random.nextDouble() * 150,
-        color: [
-          AppTheme.primary,
-          AppTheme.accent,
-          AppTheme.success,
-          Colors.amber,
-          Colors.pink,
-        ][_random.nextInt(5)],
-        size: 4 + _random.nextDouble() * 6,
-      ));
-    }
-
-    // Main animation controller
-    _mainController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    );
-
-    // Particle explosion controller
-    _particleController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1500),
-    );
-
-    // Pulse effect controller
-    _pulseController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 800),
-    );
-
-    // Card scale with bounce
-    _scaleAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _mainController,
-        curve: const Interval(0.0, 0.4, curve: Curves.elasticOut),
-      ),
-    );
-
-    // Fade in background
-    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _mainController,
-        curve: const Interval(0.0, 0.2, curve: Curves.easeOut),
-      ),
-    );
-
-    // Check mark stroke drawing animation
-    _checkStrokeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _mainController,
-        curve: const Interval(0.35, 0.65, curve: Curves.easeInOut),
-      ),
-    );
-
-    // Check icon pop-in
-    _checkAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _mainController,
-        curve: const Interval(0.6, 0.8, curve: Curves.elasticOut),
-      ),
-    );
-
-    // Pulse ring animation
-    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.5).animate(
-      CurvedAnimation(
-        parent: _pulseController,
-        curve: Curves.easeOut,
-      ),
-    );
-
-    // Start animations
-    _mainController.forward();
-    _particleController.forward();
-    
-    // Start pulse after initial animation
-    Future.delayed(const Duration(milliseconds: 600), () {
-      if (mounted) {
-        _pulseController.repeat(reverse: true);
-      }
+        speed: 80 + _random.nextDouble() * 160,
+        size: 4 + _random.nextDouble() * 8,
+        color: _visuals
+            .particlePalette[_random.nextInt(_visuals.particlePalette.length)],
+      );
     });
 
-    // Auto-dismiss
-    Future.delayed(const Duration(milliseconds: 2500), () {
+    _entryController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 560),
+    )..forward();
+
+    _particleController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1300),
+    )..forward();
+
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+
+    Future.delayed(widget.autoDismissDelay, () {
       if (mounted) {
         widget.onDismiss();
       }
@@ -131,7 +83,7 @@ class _SuccessOverlayState extends State<SuccessOverlay> with TickerProviderStat
 
   @override
   void dispose() {
-    _mainController.dispose();
+    _entryController.dispose();
     _particleController.dispose();
     _pulseController.dispose();
     super.dispose();
@@ -139,195 +91,177 @@ class _SuccessOverlayState extends State<SuccessOverlay> with TickerProviderStat
 
   @override
   Widget build(BuildContext context) {
-    final successLabel = AppLocalizations.of(context)!.success;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+    final successLabel = AppLocalizations.of(context)!.success;
+    final title = widget.title ?? _visuals.title ?? successLabel;
+
     return Material(
       color: Colors.transparent,
       child: AnimatedBuilder(
-        animation: Listenable.merge([_mainController, _particleController, _pulseController]),
+        animation: Listenable.merge([
+          _entryController,
+          _particleController,
+          _pulseController,
+        ]),
         builder: (context, child) {
+          final entry = Curves.easeOutCubic.transform(_entryController.value);
+          final burst = Curves.easeOut.transform(_particleController.value);
+          final cardScale = Tween<double>(
+            begin: 0.82,
+            end: 1.0,
+          ).transform(entry);
+          final pulseScale = Tween<double>(
+            begin: 0.9,
+            end: 1.2,
+          ).transform(_pulseController.value);
+
           return Container(
-            color: Colors.black.withValues(alpha: 0.6 * _fadeAnimation.value),
+            color: Colors.black.withValues(alpha: 0.56 * entry),
             child: Stack(
               alignment: Alignment.center,
               children: [
-                // Celebration particles
                 ..._particles.map((particle) {
-                  final progress = _particleController.value;
-                  final x = cos(particle.angle) * particle.speed * progress;
-                  final y = sin(particle.angle) * particle.speed * progress - 
-                           (50 * progress * progress); // Add gravity effect
-                  
+                  final x = cos(particle.angle) * particle.speed * burst;
+                  final y =
+                      sin(particle.angle) * particle.speed * burst -
+                      (48 * burst * burst);
+
                   return Positioned(
-                    left: MediaQuery.of(context).size.width / 2 + x,
-                    top: MediaQuery.of(context).size.height / 2 + y - 40,
+                    left: (MediaQuery.of(context).size.width / 2) + x,
+                    top: (MediaQuery.of(context).size.height / 2) + y - 32,
                     child: Opacity(
-                      opacity: (1 - progress).clamp(0.0, 1.0),
-                      child: Transform.rotate(
-                        angle: progress * 4 * pi,
-                        child: Container(
-                          width: particle.size,
-                          height: particle.size,
-                          decoration: BoxDecoration(
-                            color: particle.color,
-                            borderRadius: BorderRadius.circular(2),
-                          ),
+                      opacity: (1 - burst).clamp(0.0, 1.0),
+                      child: Container(
+                        width: particle.size,
+                        height: particle.size,
+                        decoration: BoxDecoration(
+                          color: particle.color,
+                          borderRadius: BorderRadius.circular(3),
                         ),
                       ),
                     ),
                   );
                 }),
-                
-                // Main card
                 Transform.scale(
-                  scale: _scaleAnimation.value,
+                  scale: cardScale,
                   child: Container(
-                    margin: const EdgeInsets.symmetric(horizontal: 40),
-                    padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 32),
+                    margin: const EdgeInsets.symmetric(horizontal: 30),
+                    padding: const EdgeInsets.fromLTRB(26, 24, 26, 22),
                     decoration: BoxDecoration(
                       color: isDark ? AppTheme.darkCard : Colors.white,
-                      borderRadius: BorderRadius.circular(28),
+                      borderRadius: BorderRadius.circular(24),
                       boxShadow: [
                         BoxShadow(
-                          color: AppTheme.success.withValues(alpha: 0.3),
+                          color: _visuals.primary.withValues(alpha: 0.28),
                           blurRadius: 30,
-                          offset: const Offset(0, 15),
+                          offset: const Offset(0, 14),
                         ),
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.1),
-                          blurRadius: 20,
-                          offset: const Offset(0, 8),
+                          color: Colors.black.withValues(alpha: 0.12),
+                          blurRadius: 18,
+                          offset: const Offset(0, 10),
                         ),
                       ],
                     ),
                     child: Semantics(
                       container: true,
                       liveRegion: true,
-                      label: '$successLabel ${widget.message}',
+                      label: '$title ${widget.message}',
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          // Animated success circle with pulse ring
                           Stack(
                             alignment: Alignment.center,
                             children: [
-                              // Pulse rings
-                              if (_checkAnimation.value > 0.5) ...[
-                                Transform.scale(
-                                  scale: _pulseAnimation.value * 1.2,
-                                  child: Container(
-                                    width: 90,
-                                    height: 90,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      border: Border.all(
-                                        color: AppTheme.success.withValues(
-                                          alpha: (1 - (_pulseAnimation.value - 1) * 2).clamp(0.0, 0.3),
-                                        ),
-                                        width: 2,
+                              Transform.scale(
+                                scale: pulseScale,
+                                child: Container(
+                                  width: 88,
+                                  height: 88,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: _visuals.primary.withValues(
+                                        alpha: 0.22,
                                       ),
+                                      width: 2,
                                     ),
                                   ),
                                 ),
-                              ],
-                              // Main circle
+                              ),
                               Container(
-                                width: 90,
-                                height: 90,
+                                width: 82,
+                                height: 82,
                                 decoration: BoxDecoration(
                                   gradient: LinearGradient(
                                     begin: Alignment.topLeft,
                                     end: Alignment.bottomRight,
                                     colors: [
-                                      AppTheme.success,
-                                      AppTheme.success.withValues(alpha: 0.8),
+                                      _visuals.primary,
+                                      _visuals.secondary,
                                     ],
                                   ),
                                   shape: BoxShape.circle,
-                                  boxShadow: [
-                                    BoxShadow(
-                                      color: AppTheme.success.withValues(alpha: 0.4),
-                                      blurRadius: 20,
-                                      offset: const Offset(0, 8),
-                                    ),
-                                  ],
                                 ),
-                                child: CustomPaint(
-                                  painter: _CheckPainter(
-                                    progress: _checkStrokeAnimation.value,
-                                    checkScale: _checkAnimation.value,
-                                  ),
+                                child: Icon(
+                                  _visuals.icon,
+                                  color: Colors.white,
+                                  size: 40,
                                 ),
                               ),
                             ],
                           ),
-                          const SizedBox(height: 28),
-                          
-                          // Success title with shimmer effect
-                          ShaderMask(
-                            shaderCallback: (bounds) {
-                              return LinearGradient(
-                                colors: [
-                                  AppTheme.success,
-                                  AppTheme.success.withValues(alpha: 0.7),
-                                  AppTheme.success,
-                                ],
-                                stops: [
-                                  0.0,
-                                  _mainController.value,
-                                  1.0,
-                                ],
-                              ).createShader(bounds);
-                            },
-                            child: Text(
-                              successLabel,
-                              style: GoogleFonts.inter(
-                                fontSize: 26,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                              ),
+                          const SizedBox(height: 18),
+                          Text(
+                            title,
+                            style: GoogleFonts.inter(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w800,
+                              color: isDark
+                                  ? Colors.white
+                                  : const Color(0xFF0F172A),
                             ),
+                            textAlign: TextAlign.center,
                           ),
-                          const SizedBox(height: 12),
-                          
-                          // Message with fade-in
-                          Opacity(
-                            opacity: _checkAnimation.value.clamp(0.0, 1.0),
-                            child: Transform.translate(
-                              offset: Offset(0, 10 * (1 - _checkAnimation.value)),
+                          const SizedBox(height: 10),
+                          Text(
+                            widget.message,
+                            style: GoogleFonts.inter(
+                              fontSize: 14,
+                              height: 1.45,
+                              color: isDark
+                                  ? AppTheme.textMuted
+                                  : const Color(0xFF64748B),
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          if (widget.badgeLabel != null &&
+                              widget.badgeLabel!.trim().isNotEmpty) ...[
+                            const SizedBox(height: 14),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 8,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _visuals.primary.withValues(alpha: 0.14),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: _visuals.primary.withValues(
+                                    alpha: 0.3,
+                                  ),
+                                ),
+                              ),
                               child: Text(
-                                widget.message,
-                                textAlign: TextAlign.center,
+                                widget.badgeLabel!,
                                 style: GoogleFonts.inter(
-                                  fontSize: 15,
-                                  height: 1.4,
-                                  color: isDark ? AppTheme.textMuted : Colors.grey[600],
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: _visuals.primary,
                                 ),
                               ),
                             ),
-                          ),
-                          
-                          const SizedBox(height: 20),
-                          
-                          // Decorative dots
-                          Opacity(
-                            opacity: _checkAnimation.value.clamp(0.0, 1.0),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: List.generate(3, (i) {
-                                return Container(
-                                  margin: const EdgeInsets.symmetric(horizontal: 4),
-                                  width: 6,
-                                  height: 6,
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.success.withValues(alpha: 0.6 - i * 0.15),
-                                    shape: BoxShape.circle,
-                                  ),
-                                );
-                              }),
-                            ),
-                          ),
+                          ],
                         ],
                       ),
                     ),
@@ -342,75 +276,102 @@ class _SuccessOverlayState extends State<SuccessOverlay> with TickerProviderStat
   }
 }
 
-/// Particle for celebration effect
 class _Particle {
   final double angle;
   final double speed;
-  final Color color;
   final double size;
+  final Color color;
 
-  _Particle({
+  const _Particle({
     required this.angle,
     required this.speed,
-    required this.color,
     required this.size,
+    required this.color,
   });
 }
 
-/// Custom painter for animated checkmark
-class _CheckPainter extends CustomPainter {
-  final double progress;
-  final double checkScale;
+class _OverlayVisuals {
+  final Color primary;
+  final Color secondary;
+  final IconData icon;
+  final String? title;
+  final List<Color> particlePalette;
 
-  _CheckPainter({required this.progress, required this.checkScale});
+  const _OverlayVisuals({
+    required this.primary,
+    required this.secondary,
+    required this.icon,
+    required this.title,
+    required this.particlePalette,
+  });
 
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    
-    // Draw the checkmark stroke by stroke
-    final paint = Paint()
-      ..color = Colors.white
-      ..strokeWidth = 4.5
-      ..strokeCap = StrokeCap.round
-      ..style = PaintingStyle.stroke;
-
-    if (checkScale > 0) {
-      final scale = checkScale.clamp(0.0, 1.0);
-      
-      // Checkmark path points (relative to center)
-      final start = Offset(center.dx - 16 * scale, center.dy + 2 * scale);
-      final mid = Offset(center.dx - 4 * scale, center.dy + 14 * scale);
-      final end = Offset(center.dx + 18 * scale, center.dy - 10 * scale);
-
-      final path = Path();
-      
-      if (progress < 0.5) {
-        // First stroke (going down to mid)
-        final t = progress * 2;
-        path.moveTo(start.dx, start.dy);
-        path.lineTo(
-          start.dx + (mid.dx - start.dx) * t,
-          start.dy + (mid.dy - start.dy) * t,
+  factory _OverlayVisuals.forVariant(SuccessOverlayVariant variant) {
+    switch (variant) {
+      case SuccessOverlayVariant.contribution:
+        return const _OverlayVisuals(
+          primary: Color(0xFF059669),
+          secondary: Color(0xFF10B981),
+          icon: Icons.volunteer_activism_rounded,
+          title: 'Contribution Added',
+          particlePalette: [
+            Color(0xFF059669),
+            Color(0xFF10B981),
+            Color(0xFF34D399),
+            Color(0xFF6EE7B7),
+          ],
         );
-      } else {
-        // Full first stroke + partial second stroke
-        path.moveTo(start.dx, start.dy);
-        path.lineTo(mid.dx, mid.dy);
-        
-        final t = (progress - 0.5) * 2;
-        path.lineTo(
-          mid.dx + (end.dx - mid.dx) * t,
-          mid.dy + (end.dy - mid.dy) * t,
+      case SuccessOverlayVariant.premiumUpgrade:
+        return const _OverlayVisuals(
+          primary: Color(0xFFF59E0B),
+          secondary: Color(0xFFF97316),
+          icon: Icons.workspace_premium_rounded,
+          title: 'Pro Activated',
+          particlePalette: [
+            Color(0xFFF59E0B),
+            Color(0xFFF97316),
+            Color(0xFFFBBF24),
+            Color(0xFFFDE68A),
+          ],
         );
-      }
-
-      canvas.drawPath(path, paint);
+      case SuccessOverlayVariant.badgeUnlocked:
+        return const _OverlayVisuals(
+          primary: Color(0xFF7C3AED),
+          secondary: Color(0xFFA855F7),
+          icon: Icons.emoji_events_rounded,
+          title: 'Badge Unlocked',
+          particlePalette: [
+            Color(0xFF7C3AED),
+            Color(0xFFA855F7),
+            Color(0xFFC084FC),
+            Color(0xFFE9D5FF),
+          ],
+        );
+      case SuccessOverlayVariant.stickerImport:
+        return const _OverlayVisuals(
+          primary: Color(0xFF2563EB),
+          secondary: Color(0xFF3B82F6),
+          icon: Icons.emoji_emotions_rounded,
+          title: 'Stickers Installed',
+          particlePalette: [
+            Color(0xFF2563EB),
+            Color(0xFF3B82F6),
+            Color(0xFF60A5FA),
+            Color(0xFF93C5FD),
+          ],
+        );
+      case SuccessOverlayVariant.general:
+        return const _OverlayVisuals(
+          primary: AppTheme.success,
+          secondary: Color(0xFF22C55E),
+          icon: Icons.check_rounded,
+          title: null,
+          particlePalette: [
+            AppTheme.success,
+            Color(0xFF22C55E),
+            Color(0xFF34D399),
+            Color(0xFF6EE7B7),
+          ],
+        );
     }
-  }
-
-  @override
-  bool shouldRepaint(covariant _CheckPainter oldDelegate) {
-    return oldDelegate.progress != progress || oldDelegate.checkScale != checkScale;
   }
 }

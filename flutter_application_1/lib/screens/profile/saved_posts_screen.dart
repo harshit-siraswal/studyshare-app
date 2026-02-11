@@ -96,12 +96,7 @@ class _SavedPostsScreenState extends State<SavedPostsScreen> {
               padding: const EdgeInsets.all(16),
               itemCount: _savedPosts.length,
               itemBuilder: (context, index) {
-                final savedItem = _savedPosts[index];
-                final post =
-                    savedItem['room_messages'] as Map<String, dynamic>?;
-
-                if (post == null) return const SizedBox();
-
+                final post = _savedPosts[index];
                 return _buildSavedPostCard(post, isDark);
               },
             ),
@@ -111,7 +106,10 @@ class _SavedPostsScreenState extends State<SavedPostsScreen> {
   Widget _buildSavedPostCard(Map<String, dynamic> post, bool isDark) {
     final content = post['content'] ?? '';
     final authorName = post['author_name'] ?? 'Unknown';
-    final createdAt = DateTime.tryParse(post['created_at'] ?? '') ?? DateTime.now();    final timeAgo = _formatTimeAgo(createdAt);
+    final createdRaw = post['_saved_at'] ?? post['created_at'] ?? '';
+    final createdAt =
+        DateTime.tryParse(createdRaw.toString()) ?? DateTime.now();
+    final timeAgo = _formatTimeAgo(createdAt);
 
     // Extract title if present (first line)
     String title = '';
@@ -138,7 +136,8 @@ class _SavedPostsScreenState extends State<SavedPostsScreen> {
               post: post,
               userEmail: userEmail,
               collegeDomain: domain,
-              roomId: post['room_id']?.toString() ?? '',
+              roomId: (post['_saved_room_id'] ?? post['room_id'] ?? '')
+                  .toString(),
               isRoomAdmin: false,
             ),
           ),

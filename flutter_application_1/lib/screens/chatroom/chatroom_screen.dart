@@ -555,7 +555,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                     ),
                   ),
                 ),
-              if (_isMember) _buildRoomStarterTips(isDark),
               Expanded(
                 child: _isLoading
                     ? const Center(child: CircularProgressIndicator())
@@ -674,41 +673,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
     );
   }
 
-  Widget _buildRoomStarterTips(bool isDark) {
-    return Container(
-      width: double.infinity,
-      margin: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF151922) : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark ? Colors.white12 : Colors.grey.shade200,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Quick start',
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: isDark ? Colors.white : Colors.black87,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            _isAdmin
-                ? 'Open comments for swipe-reply, long-press actions, and member moderation. Tap the top-right menu to manage room members.'
-                : 'Open comments for swipe-reply, long-press actions, and quick emoji reactions.',
-            style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textMuted),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildPostList(bool isDark) {
     // Filter posts based on search query
     final query = _searchController.text.toLowerCase();
@@ -769,11 +733,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
     final postId = post['id'].toString();
     final fullContent = post['content'] as String? ?? '';
     final dbTitle = post['title'] as String?;
-
-    String displayContent = fullContent;
-    if (dbTitle != null && dbTitle.isNotEmpty) {
-      displayContent = "$dbTitle\n$fullContent";
-    }
+    final titleText = (dbTitle ?? '').trim();
+    final bodyText = fullContent.trim();
+    final displayContent = titleText.isEmpty
+        ? bodyText
+        : '$titleText\n$bodyText';
 
     final authorName = post['author_name'] ?? 'User';
     final authorInitial = authorName.toString().isNotEmpty
@@ -783,18 +747,17 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         DateTime.tryParse(post['created_at']?.toString() ?? '') ??
         DateTime.now();
     final upvotes = (post['upvotes'] ?? 0) as int;
-    final voteScore = upvotes - ((post['downvotes'] ?? 0) as int);
+    final downvotes = (post['downvotes'] ?? 0) as int;
     final commentCount = (post['comment_count'] ?? 0) as int;
     final isSaved = _savedPosts[postId] ?? false;
 
     final textColor = isDark ? Colors.white : Colors.black;
     final secondaryTextColor = isDark ? Colors.white38 : Colors.black54;
-    final cardColor = isDark ? const Color(0xFF151922) : Colors.white;
     final borderColor = isDark
-        ? Colors.white.withValues(alpha: 0.05)
-        : Colors.grey.shade200;
+        ? Colors.white.withValues(alpha: 0.08)
+        : const Color(0xFFE2E8F0);
 
-    return GestureDetector(
+    return InkWell(
       onTap: () {
         Navigator.push(
           context,
@@ -810,288 +773,321 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         ).then((_) => _loadRoomData(silent: true));
       },
       child: Container(
-        margin: const EdgeInsets.only(bottom: 18),
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(12, 14, 12, 10),
         decoration: BoxDecoration(
-          color: cardColor,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: borderColor),
-          boxShadow: isDark
-              ? null
-              : [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 14,
-                    offset: const Offset(0, 6),
-                  ),
-                ],
+          border: Border(bottom: BorderSide(color: borderColor)),
         ),
-        child: Column(
+        child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
-            Row(
-              children: [
-                GestureDetector(
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => UserProfileScreen(
-                          userEmail: post['author_email'] ?? '',
-                          userName: authorName,
-                          userPhotoUrl: post['author_photo_url'],
-                        ),
-                      ),
-                    );
-                  },
-                  child: Row(
+            GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => UserProfileScreen(
+                      userEmail: post['author_email'] ?? '',
+                      userName: authorName,
+                      userPhotoUrl: post['author_photo_url'],
+                    ),
+                  ),
+                );
+              },
+              child: CircleAvatar(
+                radius: 18,
+                backgroundColor: const Color(0xFF1D4ED8),
+                child: Text(
+                  authorInitial,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     children: [
-                      CircleAvatar(
-                        radius: 20,
-                        backgroundColor: Colors.purple.shade900,
+                      Expanded(
                         child: Text(
-                          authorInitial,
-                          style: const TextStyle(
-                            color: Colors.white,
+                          authorName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.inter(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
+                            color: textColor,
                           ),
                         ),
                       ),
-                      const SizedBox(width: 14),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            authorName,
-                            style: GoogleFonts.inter(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              color: textColor,
+                      const SizedBox(width: 8),
+                      Text(
+                        _formatTime(createdAt),
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: secondaryTextColor,
+                        ),
+                      ),
+            GestureDetector(
+              onTap: () {
+                final authorEmail = post['author_email']?.toString() ?? '';
+                if (authorEmail.isEmpty) return;
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => UserProfileScreen(
+                      userEmail: authorEmail,
+                      userName: authorName,
+                      userPhotoUrl: post['author_photo_url'],
+                    ),
+                  ),
+                );
+              },                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Copied to clipboard'),
+                              ),
+                            );
+                          } else if (value == 'report') {
+                            _showReportDialog(
+                              context,
+                              postId,
+                              post['author_id'] ?? '',
+                            );
+                          }
+                        },
+                        itemBuilder: (context) => [
+                          PopupMenuItem(
+                            value: 'copy',
+                            child: Row(
+                              children: [
+                                Icon(
+                                  Icons.copy_rounded,
+                                  color: textColor,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 10),
+                                Text(
+                                  'Copy Text',
+                                  style: GoogleFonts.inter(color: textColor),
+                                ),
+                              ],
                             ),
                           ),
-                          Text(
-                            _formatTime(createdAt),
-                            style: GoogleFonts.inter(
-                              fontSize: 13,
-                              color: secondaryTextColor,
+                          PopupMenuItem(
+                            value: 'report',
+                            child: Row(
+                              children: [
+                                const Icon(
+                                  Icons.flag_outlined,
+                                  color: Colors.redAccent,
+                                  size: 18,
+                                ),
+                                const SizedBox(width: 10),
+                                Text(
+                                  'Report',
+                                  style: GoogleFonts.inter(
+                                    color: Colors.redAccent,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
                       ),
                     ],
                   ),
-                ),
-                const Spacer(),
-                PopupMenuButton<String>(
-                  icon: Icon(
-                    Icons.more_horiz,
-                    color: secondaryTextColor,
-                    size: 22,
-                  ),
-                  color: isDark ? const Color(0xFF1E293B) : Colors.white,
-                  onSelected: (value) {
-                    if (value == 'copy') {
-                      Clipboard.setData(ClipboardData(text: displayContent));
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Copied to clipboard')),
-                      );
-                    } else if (value == 'report') {
-                      _showReportDialog(
-                        context,
-                        postId,
-                        post['author_id'] ?? '',
-                      );
-                    }
-                  },
-                  itemBuilder: (context) => [
-                    PopupMenuItem(
-                      value: 'copy',
-                      child: Row(
-                        children: [
-                          Icon(Icons.copy, color: textColor, size: 18),
-                          const SizedBox(width: 12),
-                          Text(
-                            'Copy Text',
-                            style: GoogleFonts.inter(color: textColor),
-                          ),
-                        ],
-                      ),
-                    ),
-                    PopupMenuItem(
-                      value: 'report',
-                      child: Row(
-                        children: [
-                          const Icon(
-                            Icons.flag_outlined,
-                            color: Colors.redAccent,
-                            size: 18,
-                          ),
-                          const SizedBox(width: 12),
-                          Text(
-                            'Report',
-                            style: GoogleFonts.inter(color: Colors.redAccent),
-                          ),
-                        ],
+                  if (titleText.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      titleText,
+                      style: GoogleFonts.inter(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: textColor,
+                        height: 1.3,
                       ),
                     ),
                   ],
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 16),
-
-            // Content
-            SelectableLinkify(
-              text: displayContent,
-              onOpen: (link) async {
-                final uri = Uri.tryParse(link.url);
-                if (uri == null) return;
-                try {
-                  if (await canLaunchUrl(uri)) {
-                    await launchUrl(uri, mode: LaunchMode.externalApplication);
-                  } else {
-                    debugPrint('Cannot launch URL: $uri');
-                  }
-                } catch (e) {
-                  debugPrint('Failed to launch URL: $e');
-                }
-              },
-              style: GoogleFonts.inter(
-                fontSize: 16,
-                color: textColor.withValues(alpha: 0.9),
-                height: 1.5,
-              ),
-              linkStyle: GoogleFonts.inter(
-                color: Colors.blueAccent,
-                decoration: TextDecoration.underline,
-              ),
-              maxLines: 6,
-            ),
-
-            if (post['image_url'] != null &&
-                post['image_url'].toString().isNotEmpty) ...[
-              const SizedBox(height: 16),
-              GestureDetector(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => FullScreenImageViewer(
-                        imageUrl: post['image_url'],
-                        heroTag: 'post_image_$postId',
+                  if (bodyText.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    SelectableLinkify(
+                      text: bodyText,
+                      onOpen: (link) async {
+                        final uri = Uri.tryParse(link.url);
+                        if (uri == null) return;
+                        try {
+                          if (await canLaunchUrl(uri)) {
+                            await launchUrl(
+                              uri,
+                              mode: LaunchMode.externalApplication,
+                            );
+                          } else {
+                            debugPrint('Cannot launch URL: $uri');
+                          }
+                        } catch (e) {
+                          debugPrint('Failed to launch URL: $e');
+                        }
+                      },
+                      style: GoogleFonts.inter(
+                        fontSize: 15,
+                        color: textColor.withValues(alpha: 0.92),
+                        height: 1.45,
+                      ),
+                      linkStyle: GoogleFonts.inter(
+                        color: const Color(0xFF3B82F6),
+                        decoration: TextDecoration.underline,
                       ),
                     ),
-                  );
-                },
-                child: Hero(
-                  tag: 'post_image_$postId',
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.network(
-                      post['image_url'],
-                      height: 210,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                      loadingBuilder: (context, child, loadingProgress) {
-                        if (loadingProgress == null) return child;
-                        return Container(
-                          height: 210,
-                          color: isDark ? Colors.white10 : Colors.grey.shade200,
-                          child: const Center(
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                  ],
+                  if (post['image_url'] != null &&
+                      post['image_url'].toString().isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => FullScreenImageViewer(
+                              imageUrl: post['image_url'],
+                              heroTag: 'post_image_$postId',
+                            ),
                           ),
                         );
                       },
-                      errorBuilder: (context, error, stackTrace) => Container(
-                        height: 210,
-                        color: isDark ? Colors.white10 : Colors.grey.shade200,
-                        child: Icon(
-                          Icons.broken_image,
-                          color: secondaryTextColor,
+                      child: Hero(
+                        tag: 'post_image_$postId',
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: Image.network(
+                            post['image_url'],
+                            height: 206,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                            loadingBuilder: (context, child, loadingProgress) {
+                              if (loadingProgress == null) return child;
+                              return Container(
+                                height: 206,
+                                color: isDark
+                                    ? Colors.white10
+                                    : Colors.grey.shade200,
+                                child: const Center(
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              );
+                            },
+                            errorBuilder: (context, error, stackTrace) =>
+                                Container(
+                                  height: 206,
+                                  color: isDark
+                                      ? Colors.white10
+                                      : Colors.grey.shade200,
+                                  child: Icon(
+                                    Icons.broken_image,
+                                    color: secondaryTextColor,
+                                  ),
+                                ),
+                          ),
                         ),
                       ),
                     ),
+                  ],
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildPostAction(
+                          icon: Icons.chat_bubble_outline_rounded,
+                          label: '$commentCount',
+                          color: secondaryTextColor,
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => PostDetailScreen(
+                                  post: post,
+                                  userEmail: widget.userEmail,
+                                  collegeDomain: widget.collegeDomain,
+                                  roomId: widget.roomId,
+                                  isRoomAdmin: _isAdmin,
+                                ),
+                              ),
+                            ).then((_) => _loadRoomData(silent: true));
+                          },
+                        ),
+                      ),
+                      Expanded(
+                        child: _buildPostAction(
+                          icon: Icons.arrow_upward_rounded,
+                          label: '$upvotes',
+                          color: (_userVotes[postId] == 1)
+                              ? const Color(0xFFFB923C)
+                              : secondaryTextColor,
+                          onTap: () => _handleVote(postId, 1),
+                        ),
+                      ),
+                      Expanded(
+                        child: _buildPostAction(
+                          icon: Icons.arrow_downward_rounded,
+                          label: '$downvotes',
+                          color: (_userVotes[postId] == -1)
+                              ? const Color(0xFF38BDF8)
+                              : secondaryTextColor,
+                          onTap: () => _handleVote(postId, -1),
+                        ),
+                      ),
+                      Expanded(
+                        child: _buildPostAction(
+                          icon: isSaved
+                              ? Icons.bookmark_rounded
+                              : Icons.bookmark_border_rounded,
+                          label: isSaved ? 'Saved' : 'Save',
+                          color: isSaved
+                              ? AppTheme.primary
+                              : secondaryTextColor,
+                          onTap: () => _handleBookmark(postId),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
+                ],
               ),
-            ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
-            const SizedBox(height: 18),
-
-            // Footer (Actions)
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    // Upvote
-                    IconButton(
-                      icon: const Icon(Icons.arrow_upward, size: 22),
-                      color: (_userVotes[postId] == 1)
-                          ? Colors.orange
-                          : secondaryTextColor,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                      onPressed: () => _handleVote(postId, 1),
-                    ),
-                    const SizedBox(width: 10),
-                    Text(
-                      '$voteScore',
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        color: textColor,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    // Downvote
-                    IconButton(
-                      icon: const Icon(Icons.arrow_downward, size: 22),
-                      color: (_userVotes[postId] == -1)
-                          ? Colors.blue
-                          : secondaryTextColor,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                      onPressed: () => _handleVote(postId, -1),
-                    ),
-                  ],
-                ),
-
-                // Comments
-                Row(
-                  children: [
-                    Icon(
-                      Icons.chat_bubble_outline,
-                      color: secondaryTextColor,
-                      size: 21,
-                    ),
-                    const SizedBox(width: 7),
-                    Text(
-                      '$commentCount',
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        color: secondaryTextColor,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-
-                // Bookmark
-                IconButton(
-                  icon: Icon(
-                    isSaved ? Icons.bookmark : Icons.bookmark_border,
-                    size: 22,
-                  ),
-                  color: isSaved ? AppTheme.primary : secondaryTextColor,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
-                  onPressed: () => _handleBookmark(postId),
-                ),
-              ],
+  Widget _buildPostAction({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 18, color: color),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
             ),
           ],
         ),
@@ -1569,6 +1565,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                 'Total Members',
                 '${_roomInfo?['member_count'] ?? 0}',
                 isDark,
+                onTap: _isAdmin
+                    ? () {
+                        Navigator.pop(dialogCtx);
+                        _showManageMembersSheet();
+                      }
+                    : null,
               ),
               const SizedBox(height: 16),
               _buildInfoRow(
@@ -1817,6 +1819,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
     List<Map<String, dynamic>> members = [];
     bool isLoading = true;
     bool isRemoving = false;
+    bool isUpdatingRole = false;
     bool didStartLoading = false;
     String? loadError;
 
@@ -1922,15 +1925,30 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                         itemBuilder: (context, index) {
                           final member = members[index];
                           final email = (member['user_email'] ?? '').toString();
-                          final role = (member['role'] ?? 'member').toString();
+                          final role = (member['role'] ?? 'member')
+                              .toString()
+                              .toLowerCase();
                           final isSelf =
                               email.toLowerCase() ==
                               widget.userEmail.toLowerCase();
+                          final ownerEmail = (_roomInfo?['created_by'] ?? '')
+                              .toString()
+                              .toLowerCase();
+                          final isOwner =
+                              ownerEmail.isNotEmpty &&
+                              ownerEmail == email.toLowerCase();
                           final canRemove =
-                              role != 'admin' &&
                               !isSelf &&
+                              !isOwner &&
                               email.isNotEmpty &&
-                              !isRemoving;
+                              !isRemoving &&
+                              !isUpdatingRole;
+                          final canToggleRole =
+                              !isSelf &&
+                              !isOwner &&
+                              email.isNotEmpty &&
+                              !isRemoving &&
+                              !isUpdatingRole;
                           final isActive =
                               email.isNotEmpty &&
                               activeUsers.contains(email.toLowerCase());
@@ -1992,7 +2010,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                                       ),
                                       const SizedBox(height: 2),
                                       Text(
-                                        '${role.toUpperCase()}${isActive ? ' • Active now' : ''}',
+                                        '${role.toUpperCase()}${isActive ? ' - Active now' : ''}',
                                         style: GoogleFonts.inter(
                                           fontSize: 11,
                                           color: isActive
@@ -2011,96 +2029,186 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                                       color: AppTheme.textMuted,
                                     ),
                                   )
-                                else if (canRemove)
-                                  TextButton.icon(
-                                    onPressed: () async {
-                                      final confirm = await showDialog<bool>(
-                                        context: sheetCtx,
-                                        builder: (ctx) => AlertDialog(
-                                          title: const Text('Remove member?'),
-                                          content: Text(
-                                            'Remove $email from this room?',
+                                else
+                                  Wrap(
+                                    spacing: 4,
+                                    runSpacing: 4,
+                                    alignment: WrapAlignment.end,
+                                    children: [
+                                      if (canToggleRole)
+                                        TextButton(
+                                          onPressed: () async {
+                                            final nextRole = role == 'admin'
+                                                ? 'member'
+                                                : 'admin';
+                                            if (sheetCtx.mounted) {
+                                              setModalState(
+                                                () => isUpdatingRole = true,
+                                              );
+                                            }
+                                            try {
+                                              await _supabaseService
+                                                  .updateRoomMemberRole(
+                                                    roomId: widget.roomId,
+                                                    userEmail: email,
+                                                    role: nextRole,
+                                                  );
+                                              if (sheetCtx.mounted) {
+                                                setModalState(() {
+                                                  isUpdatingRole = false;
+                                                  members[index] = {
+                                                    ...member,
+                                                    'role': nextRole,
+                                                  };
+                                                });
+                                              }
+                                              await _loadRoomData(silent: true);
+                                              if (mounted) {
+                                                ScaffoldMessenger.of(
+                                                  context,
+                                                ).showSnackBar(
+                                                  SnackBar(
+                                                    content: Text(
+                                                      '${nextRole == 'admin' ? 'Promoted' : 'Updated'} $email',
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+                                            } catch (e) {
+                                              if (sheetCtx.mounted) {
+                                                setModalState(
+                                                  () => isUpdatingRole = false,
+                                                );
+                                              }
+                                              if (mounted) {
+                                                ScaffoldMessenger.of(
+                                                  context,
+                                                ).showSnackBar(
+                                                  SnackBar(
+                                                    content: Text(
+                                                      'Failed to update role: $e',
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+                                            }
+                                          },
+                                          child: Text(
+                                            role == 'admin'
+                                                ? 'Remove Admin'
+                                                : 'Make Admin',
+                                            style: GoogleFonts.inter(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w600,
+                                              color: AppTheme.primary,
+                                            ),
                                           ),
-                                          actions: [
-                                            TextButton(
-                                              onPressed: () =>
-                                                  Navigator.pop(ctx, false),
-                                              child: const Text('Cancel'),
-                                            ),
-                                            TextButton(
-                                              onPressed: () =>
-                                                  Navigator.pop(ctx, true),
-                                              child: const Text(
-                                                'Remove',
-                                                style: TextStyle(
-                                                  color: Colors.red,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
                                         ),
-                                      );
-
-                                      if (confirm != true) return;
-
-                                      if (sheetCtx.mounted) {
-                                        setModalState(() => isRemoving = true);
-                                      }
-
-                                      try {
-                                        await _supabaseService.removeRoomMember(
-                                          roomId: widget.roomId,
-                                          userEmail: email,
-                                        );
-
-                                        if (mounted) {
-                                          ScaffoldMessenger.of(
-                                            context,
-                                          ).showSnackBar(
-                                            SnackBar(
-                                              content: Text(
-                                                'Removed $email from room',
+                                      if (canRemove)
+                                        TextButton.icon(
+                                          onPressed: () async {
+                                            final confirm = await showDialog<bool>(
+                                              context: sheetCtx,
+                                              builder: (ctx) => AlertDialog(
+                                                title: const Text(
+                                                  'Remove member?',
+                                                ),
+                                                content: Text(
+                                                  'Remove $email from this room?',
+                                                ),
+                                                actions: [
+                                                  TextButton(
+                                                    onPressed: () =>
+                                                        Navigator.pop(
+                                                          ctx,
+                                                          false,
+                                                        ),
+                                                    child: const Text('Cancel'),
+                                                  ),
+                                                  TextButton(
+                                                    onPressed: () =>
+                                                        Navigator.pop(
+                                                          ctx,
+                                                          true,
+                                                        ),
+                                                    child: const Text(
+                                                      'Remove',
+                                                      style: TextStyle(
+                                                        color: Colors.red,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
-                                            ),
-                                          );
-                                        }
+                                            );
 
-                                        await _loadRoomData(silent: true);
+                                            if (confirm != true) return;
 
-                                        if (sheetCtx.mounted) {
-                                          setModalState(() {
-                                            isRemoving = false;
-                                            members.removeAt(index);
-                                          });
-                                        }
-                                      } catch (e) {
-                                        if (mounted) {
-                                          ScaffoldMessenger.of(
-                                            context,
-                                          ).showSnackBar(
-                                            SnackBar(
-                                              content: Text(
-                                                'Failed to remove member: $e',
-                                              ),
+                                            if (sheetCtx.mounted) {
+                                              setModalState(
+                                                () => isRemoving = true,
+                                              );
+                                            }
+
+                                            try {
+                                              await _supabaseService
+                                                  .removeRoomMember(
+                                                    roomId: widget.roomId,
+                                                    userEmail: email,
+                                                  );
+
+                                              if (mounted) {
+                                                ScaffoldMessenger.of(
+                                                  context,
+                                                ).showSnackBar(
+                                                  SnackBar(
+                                                    content: Text(
+                                                      'Removed $email from room',
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+
+                                              await _loadRoomData(silent: true);
+
+                                              if (sheetCtx.mounted) {
+                                                setModalState(() {
+                                                  isRemoving = false;
+                                                  members.removeAt(index);
+                                                });
+                                              }
+                                            } catch (e) {
+                                              if (mounted) {
+                                                ScaffoldMessenger.of(
+                                                  context,
+                                                ).showSnackBar(
+                                                  SnackBar(
+                                                    content: Text(
+                                                      'Failed to remove member: $e',
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+                                              if (sheetCtx.mounted) {
+                                                setModalState(
+                                                  () => isRemoving = false,
+                                                );
+                                              }
+                                            }
+                                          },
+                                          icon: const Icon(
+                                            Icons.person_remove_outlined,
+                                            size: 16,
+                                            color: Colors.redAccent,
+                                          ),
+                                          label: const Text(
+                                            'Remove',
+                                            style: TextStyle(
+                                              color: Colors.redAccent,
                                             ),
-                                          );
-                                        }
-                                        if (sheetCtx.mounted) {
-                                          setModalState(() {
-                                            isRemoving = false;
-                                          });
-                                        }
-                                      }
-                                    },
-                                    icon: const Icon(
-                                      Icons.person_remove_outlined,
-                                      size: 16,
-                                      color: Colors.redAccent,
-                                    ),
-                                    label: const Text(
-                                      'Remove',
-                                      style: TextStyle(color: Colors.redAccent),
-                                    ),
+                                          ),
+                                        ),
+                                    ],
                                   ),
                               ],
                             ),
@@ -2133,8 +2241,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
     return email.isNotEmpty ? email : 'Member';
   }
 
-  Widget _buildInfoRow(IconData icon, String label, String value, bool isDark) {
-    return Row(
+  Widget _buildInfoRow(
+    IconData icon,
+    String label,
+    String value,
+    bool isDark, {
+    VoidCallback? onTap,
+  }) {
+    final child = Row(
       children: [
         Container(
           padding: const EdgeInsets.all(8),
@@ -2147,24 +2261,45 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
           child: Icon(icon, size: 20, color: AppTheme.textMuted),
         ),
         const SizedBox(width: 16),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textMuted),
-            ),
-            Text(
-              value,
-              style: GoogleFonts.inter(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: isDark ? Colors.white : const Color(0xFF1E293B),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  color: AppTheme.textMuted,
+                ),
               ),
-            ),
-          ],
+              Text(
+                value,
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : const Color(0xFF1E293B),
+                ),
+              ),
+            ],
+          ),
         ),
+        if (onTap != null)
+          Icon(
+            Icons.chevron_right_rounded,
+            size: 18,
+            color: AppTheme.textMuted,
+          ),
       ],
+    );
+
+    if (onTap == null) return child;
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: child,
+      ),
     );
   }
 

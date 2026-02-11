@@ -13,12 +13,14 @@ import '../screens/notices/notice_detail_screen.dart';
 class NoticeCard extends StatefulWidget {
   final Map<String, dynamic> notice;
   final DepartmentAccount account;
+  final String? collegeId;
   final bool isDark;
-  
+
   const NoticeCard({
     super.key,
     required this.notice,
     required this.account,
+    this.collegeId,
     required this.isDark,
   });
 
@@ -29,32 +31,35 @@ class NoticeCard extends StatefulWidget {
 class _NoticeCardState extends State<NoticeCard> {
   final SupabaseService _supabaseService = SupabaseService();
   final AuthService _authService = AuthService();
-  
+
   bool _isSaved = false;
   bool _isLoading = false;
-  
+
   @override
   void initState() {
     super.initState();
     _checkSavedStatus();
   }
-  
+
   Future<void> _checkSavedStatus() async {
     final email = _authService.userEmail;
     if (email == null) return;
-    
-    final saved = await _supabaseService.isNoticeSaved(widget.notice['id'], email);
+
+    final saved = await _supabaseService.isNoticeSaved(
+      widget.notice['id'],
+      email,
+    );
     if (mounted) {
       setState(() => _isSaved = saved);
     }
   }
-  
+
   Future<void> _toggleSaved() async {
     final email = _authService.userEmail;
     if (email == null) return;
-    
+
     setState(() => _isLoading = true);
-    
+
     try {
       if (_isSaved) {
         await _supabaseService.unsaveNotice(widget.notice['id'], email);
@@ -62,7 +67,7 @@ class _NoticeCardState extends State<NoticeCard> {
       } else {
         await _supabaseService.saveNotice(widget.notice['id'], email);
         setState(() => _isSaved = true);
-        
+
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Notice saved to bookmarks')),
         );
@@ -70,32 +75,39 @@ class _NoticeCardState extends State<NoticeCard> {
     } catch (e, stackTrace) {
       debugPrint('Error toggling saved status: $e\n$stackTrace');
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Something went wrong. Please try again.')),
+        const SnackBar(
+          content: Text('Something went wrong. Please try again.'),
+        ),
       );
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
-  
-
-
-
 
   @override
   Widget build(BuildContext context) {
-    final textColor = widget.isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
-    final secondaryColor = widget.isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary;
+    final textColor = widget.isDark
+        ? AppTheme.darkTextPrimary
+        : AppTheme.lightTextPrimary;
+    final secondaryColor = widget.isDark
+        ? AppTheme.darkTextSecondary
+        : AppTheme.lightTextSecondary;
     final cardColor = widget.isDark ? AppTheme.darkCard : Colors.white;
-    final borderColor = widget.isDark ? AppTheme.darkBorder : AppTheme.lightBorder;
-    
+    final borderColor = widget.isDark
+        ? AppTheme.darkBorder
+        : AppTheme.lightBorder;
+
     final title = widget.notice['title'] ?? 'Untitled';
     final content = widget.notice['content'] ?? '';
     final createdAt = widget.notice['created_at'];
     final timeAgo = _formatTimeAgo(createdAt);
     final priority = widget.notice['priority']?.toString();
-    final rawCount = widget.notice['comments'] ?? widget.notice['comment_count'];
-    final commentCount = rawCount is int ? rawCount : int.tryParse(rawCount?.toString() ?? '');
-    
+    final rawCount =
+        widget.notice['comments'] ?? widget.notice['comment_count'];
+    final commentCount = rawCount is int
+        ? rawCount
+        : int.tryParse(rawCount?.toString() ?? '');
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
@@ -121,6 +133,10 @@ class _NoticeCardState extends State<NoticeCard> {
                 builder: (context) => NoticeDetailScreen(
                   notice: widget.notice,
                   account: widget.account,
+                  collegeId:
+                      widget.collegeId ??
+                      widget.notice['college_id']?.toString() ??
+                      '',
                 ),
               ),
             );
@@ -136,7 +152,9 @@ class _NoticeCardState extends State<NoticeCard> {
                   width: 4,
                   decoration: BoxDecoration(
                     color: widget.account.color,
-                    borderRadius: const BorderRadius.horizontal(left: Radius.circular(16)),
+                    borderRadius: const BorderRadius.horizontal(
+                      left: Radius.circular(16),
+                    ),
                   ),
                 ),
               ),
@@ -186,12 +204,23 @@ class _NoticeCardState extends State<NoticeCard> {
                                     ),
                                   ),
                                   const SizedBox(width: 4),
-                                  Icon(Icons.verified_rounded, size: 12, color: AppTheme.primary),
+                                  Icon(
+                                    Icons.verified_rounded,
+                                    size: 12,
+                                    color: AppTheme.primary,
+                                  ),
                                   const SizedBox(width: 6),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 2,
+                                    ),
                                     decoration: BoxDecoration(
-                                      color: widget.isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.06),
+                                      color: widget.isDark
+                                          ? Colors.white10
+                                          : Colors.black.withValues(
+                                              alpha: 0.06,
+                                            ),
                                       borderRadius: BorderRadius.circular(10),
                                     ),
                                     child: Text(
@@ -209,14 +238,22 @@ class _NoticeCardState extends State<NoticeCard> {
                                 children: [
                                   Text(
                                     timeAgo,
-                                    style: GoogleFonts.inter(fontSize: 11, color: secondaryColor),
+                                    style: GoogleFonts.inter(
+                                      fontSize: 11,
+                                      color: secondaryColor,
+                                    ),
                                   ),
                                   if (priority == 'urgent') ...[
                                     const SizedBox(width: 8),
                                     Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 2,
+                                      ),
                                       decoration: BoxDecoration(
-                                        color: AppTheme.error.withValues(alpha: 0.15),
+                                        color: AppTheme.error.withValues(
+                                          alpha: 0.15,
+                                        ),
                                         borderRadius: BorderRadius.circular(10),
                                       ),
                                       child: Text(
@@ -237,38 +274,40 @@ class _NoticeCardState extends State<NoticeCard> {
                       ],
                     ),
                     const SizedBox(height: 12),
-                
-                // Title
-                Text(
-                  title,
-                  style: GoogleFonts.inter(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: textColor,
-                  ),
-                ),
-                if (content.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    content,
-                    style: GoogleFonts.inter(
-                      fontSize: 14,
-                      color: secondaryColor,
-                      height: 1.4,
+
+                    // Title
+                    Text(
+                      title,
+                      style: GoogleFonts.inter(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w600,
+                        color: textColor,
+                      ),
                     ),
-                    maxLines: 4,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-                
-                const SizedBox(height: 12),
-                
+                    if (content.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        content,
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          color: secondaryColor,
+                          height: 1.4,
+                        ),
+                        maxLines: 4,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+
+                    const SizedBox(height: 12),
+
                     // Actions
                     Row(
                       children: [
                         _buildActionButton(
                           icon: Icons.mode_comment_outlined,
-                          count: commentCount != null ? '$commentCount' : 'Comment',
+                          count: commentCount != null
+                              ? '$commentCount'
+                              : 'Comment',
                           color: secondaryColor,
                           onTap: () {
                             Navigator.push(
@@ -277,6 +316,10 @@ class _NoticeCardState extends State<NoticeCard> {
                                 builder: (context) => NoticeDetailScreen(
                                   notice: widget.notice,
                                   account: widget.account,
+                                  collegeId:
+                                      widget.collegeId ??
+                                      widget.notice['college_id']?.toString() ??
+                                      '',
                                 ),
                               ),
                             );
@@ -290,9 +333,13 @@ class _NoticeCardState extends State<NoticeCard> {
                           child: Padding(
                             padding: const EdgeInsets.all(8.0),
                             child: Icon(
-                              _isSaved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded,
+                              _isSaved
+                                  ? Icons.bookmark_rounded
+                                  : Icons.bookmark_border_rounded,
                               size: 20,
-                              color: _isSaved ? AppTheme.primary : secondaryColor,
+                              color: _isSaved
+                                  ? AppTheme.primary
+                                  : secondaryColor,
                             ),
                           ),
                         ),
@@ -314,10 +361,10 @@ class _NoticeCardState extends State<NoticeCard> {
       ),
     );
   }
-  
+
   Widget _buildActionButton({
-    required IconData icon, 
-    required String? count, 
+    required IconData icon,
+    required String? count,
     required Color color,
     required VoidCallback onTap,
   }) {
@@ -331,10 +378,7 @@ class _NoticeCardState extends State<NoticeCard> {
             Icon(icon, size: 16, color: color),
             if (count != null) ...[
               const SizedBox(width: 4),
-              Text(
-                count,
-                style: GoogleFonts.inter(fontSize: 11, color: color),
-              ),
+              Text(count, style: GoogleFonts.inter(fontSize: 11, color: color)),
             ],
           ],
         ),
@@ -348,7 +392,7 @@ class _NoticeCardState extends State<NoticeCard> {
       final date = DateTime.parse(dateString);
       final now = DateTime.now();
       final diff = now.difference(date);
-      
+
       if (diff.inMinutes < 1) return 'just now';
       if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
       if (diff.inHours < 24) return '${diff.inHours}h ago';
@@ -447,9 +491,7 @@ class _NoticeCardState extends State<NoticeCard> {
                     ),
                     Text(
                       _formatTimeAgo(widget.notice['created_at']),
-                      style: GoogleFonts.inter(
-                        color: Colors.grey,
-                      ),
+                      style: GoogleFonts.inter(color: Colors.grey),
                     ),
                   ],
                 ),
@@ -465,19 +507,17 @@ class _NoticeCardState extends State<NoticeCard> {
       final file = await File('${tempDir.path}/notice_share.png').create();
       await file.writeAsBytes(bytes);
 
-      await Share.shareXFiles(
-        [XFile(file.path)],
-        text: 'Check out this notice on MyStudySpace!',
-      );
-      
+      await Share.shareXFiles([
+        XFile(file.path),
+      ], text: 'Check out this notice on MyStudySpace!');
+
       // Clean up temporary file
-      await file.delete();    } catch (e) {
+      await file.delete();
+    } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to generate image: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to generate image: $e')));
     }
   }
 }
-
-

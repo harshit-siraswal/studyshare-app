@@ -19,17 +19,18 @@ class FollowingScreen extends StatefulWidget {
   State<FollowingScreen> createState() => _FollowingScreenState();
 }
 
-class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProviderStateMixin {
+class _FollowingScreenState extends State<FollowingScreen>
+    with SingleTickerProviderStateMixin {
   final SupabaseService _supabaseService = SupabaseService();
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
-  
+
   List<Map<String, dynamic>> _following = [];
   List<Map<String, dynamic>> _followers = [];
-  
+
   List<Map<String, dynamic>> _filteredFollowing = [];
   List<Map<String, dynamic>> _filteredFollowers = [];
-  
+
   bool _isLoading = true;
   String _sortBy = 'Recent';
   String? _errorMessage;
@@ -41,7 +42,11 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
     super.initState();
     // Clamp initial index to valid range
     final initialIndex = widget.initialTab.clamp(0, 1);
-    _tabController = TabController(length: 2, vsync: this, initialIndex: initialIndex);
+    _tabController = TabController(
+      length: 2,
+      vsync: this,
+      initialIndex: initialIndex,
+    );
     _tabController.addListener(_handleTabSelection); // Add listener
     _loadData();
     _searchController.addListener(_onSearchChanged);
@@ -70,7 +75,9 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
   }
 
   String _getUserDisplayName(Map<String, dynamic> user) {
-    return user['display_name'] ?? user['email']?.toString().split('@')[0] ?? '';
+    return user['display_name'] ??
+        user['email']?.toString().split('@')[0] ??
+        '';
   }
 
   void _applyFilters() {
@@ -78,8 +85,8 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
     _filteredFollowing = _filterList(_following);
     _filteredFollowers = _filterList(_followers);
 
-    
     // Sort
+    _filteredFollowing = _sortList(_filteredFollowing);
     _filteredFollowers = _sortList(_filteredFollowers);
   }
 
@@ -125,10 +132,7 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
     try {
       final following = await _supabaseService.getFollowing(widget.userEmail);
       final followers = await _supabaseService.getFollowers(widget.userEmail);
-      // Subscriptions could be premium follows or department follows
-      // For now, we'll use following as subscriptions placeholder
-      final subscriptions = following.where((f) => f['is_subscribed'] == true).toList();
-      
+
       if (mounted) {
         setState(() {
           _following = following;
@@ -141,10 +145,12 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
       if (mounted) {
         setState(() {
           _isLoading = false;
-          _errorMessage = 'Unable to load data. Please check your connection and try again.';
+          _errorMessage =
+              'Unable to load data. Please check your connection and try again.';
         });
         debugPrint('Error loading following data: $e');
-      }    }
+      }
+    }
   }
 
   void _showSortOptions(BuildContext context, bool isDark) {
@@ -181,26 +187,34 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
               ),
             ),
             const SizedBox(height: 16),
-            ..._sortOptions.map((option) => ListTile(
-              leading: Icon(
-                _sortBy == option ? Icons.check_circle : Icons.circle_outlined,
-                color: _sortBy == option ? AppTheme.primary : AppTheme.textMuted,
-              ),
-              title: Text(
-                option,
-                style: GoogleFonts.inter(
-                  color: isDark ? Colors.white : Colors.black,
-                  fontWeight: _sortBy == option ? FontWeight.w600 : FontWeight.normal,
+            ..._sortOptions.map(
+              (option) => ListTile(
+                leading: Icon(
+                  _sortBy == option
+                      ? Icons.check_circle
+                      : Icons.circle_outlined,
+                  color: _sortBy == option
+                      ? AppTheme.primary
+                      : AppTheme.textMuted,
                 ),
+                title: Text(
+                  option,
+                  style: GoogleFonts.inter(
+                    color: isDark ? Colors.white : Colors.black,
+                    fontWeight: _sortBy == option
+                        ? FontWeight.w600
+                        : FontWeight.normal,
+                  ),
+                ),
+                onTap: () {
+                  setState(() {
+                    _sortBy = option;
+                    _applyFilters();
+                  });
+                  Navigator.pop(context);
+                },
               ),
-              onTap: () {
-                setState(() {
-                  _sortBy = option;
-                  _applyFilters();
-                });
-                Navigator.pop(context);
-              },
-            )),
+            ),
             const SizedBox(height: 20),
           ],
         ),
@@ -211,9 +225,11 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : const Color(0xFFF8FAFC),
+      backgroundColor: isDark
+          ? AppTheme.darkBackground
+          : const Color(0xFFF8FAFC),
       appBar: AppBar(
         backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
         elevation: 0,
@@ -237,11 +253,16 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
             children: [
               // Search bar
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
                 child: Container(
                   height: 44,
                   decoration: BoxDecoration(
-                    color: isDark ? Colors.black.withValues(alpha: 0.3) : Colors.grey.shade100,
+                    color: isDark
+                        ? Colors.black.withValues(alpha: 0.3)
+                        : Colors.grey.shade100,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: TextField(
@@ -253,7 +274,11 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
                     decoration: InputDecoration(
                       hintText: 'Search people...',
                       hintStyle: GoogleFonts.inter(color: AppTheme.textMuted),
-                      prefixIcon: const Icon(Icons.search, color: AppTheme.textMuted, size: 20),
+                      prefixIcon: const Icon(
+                        Icons.search,
+                        color: AppTheme.textMuted,
+                        size: 20,
+                      ),
                       suffixIcon: _searchQuery.isNotEmpty
                           ? IconButton(
                               icon: const Icon(Icons.clear, size: 18),
@@ -261,7 +286,10 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
                             )
                           : null,
                       border: InputBorder.none,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
                     ),
                   ),
                 ),
@@ -273,10 +301,19 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
                 unselectedLabelColor: AppTheme.textMuted,
                 indicatorColor: AppTheme.primary,
                 indicatorWeight: 3,
-                labelStyle: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 13),
+                labelStyle: GoogleFonts.inter(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                ),
                 tabs: [
-                  Tab(text: 'Followers ${_filteredFollowers.isNotEmpty ? "(${_filteredFollowers.length})" : ""}'),
-                  Tab(text: 'Following ${_filteredFollowing.isNotEmpty ? "(${_filteredFollowing.length})" : ""}'),
+                  Tab(
+                    text:
+                        'Followers ${_filteredFollowers.isNotEmpty ? "(${_filteredFollowers.length})" : ""}',
+                  ),
+                  Tab(
+                    text:
+                        'Following ${_filteredFollowing.isNotEmpty ? "(${_filteredFollowing.length})" : ""}',
+                  ),
                 ],
               ),
             ],
@@ -285,61 +322,76 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
       ),
       body: SafeArea(
         child: Column(
-        children: [
-          // Sort bar
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  _isLoading ? 'Loading...' : '${_getCurrentListCount()} people',
-                  style: GoogleFonts.inter(
-                    fontSize: 13,
-                    color: AppTheme.textMuted,
-                  ),
-                ),
-                GestureDetector(
-                  onTap: () => _showSortOptions(context, isDark),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(8),
+          children: [
+            // Sort bar
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    _isLoading
+                        ? 'Loading...'
+                        : '${_getCurrentListCount()} people',
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      color: AppTheme.textMuted,
                     ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.sort, size: 16, color: isDark ? Colors.white70 : Colors.black54),
-                        const SizedBox(width: 6),
-                        Text(
-                          _sortBy,
-                          style: GoogleFonts.inter(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
+                  ),
+                  GestureDetector(
+                    onTap: () => _showSortOptions(context, isDark),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? Colors.white.withValues(alpha: 0.1)
+                            : Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.sort,
+                            size: 16,
                             color: isDark ? Colors.white70 : Colors.black54,
                           ),
-                        ),
-                        const SizedBox(width: 4),
-                        Icon(Icons.keyboard_arrow_down, size: 16, color: isDark ? Colors.white70 : Colors.black54),
-                      ],
+                          const SizedBox(width: 6),
+                          Text(
+                            _sortBy,
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: isDark ? Colors.white70 : Colors.black54,
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.keyboard_arrow_down,
+                            size: 16,
+                            color: isDark ? Colors.white70 : Colors.black54,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          // Tab content
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _buildUserList(_filteredFollowers, isDark, 'followers'),
-                _buildUserList(_filteredFollowing, isDark, 'following'),
-              ],
+            // Tab content
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  _buildUserList(_filteredFollowers, isDark, 'followers'),
+                  _buildUserList(_filteredFollowing, isDark, 'following'),
+                ],
+              ),
             ),
-          ),
-        ],
-      ),
+          ],
+        ),
       ),
     );
   }
@@ -355,7 +407,11 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
     }
   }
 
-  Widget _buildUserList(List<Map<String, dynamic>> users, bool isDark, String type) {
+  Widget _buildUserList(
+    List<Map<String, dynamic>> users,
+    bool isDark,
+    String type,
+  ) {
     if (_isLoading) {
       return _buildLoadingSkeleton(isDark);
     }
@@ -367,7 +423,11 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.error_outline_rounded, size: 48, color: AppTheme.error),
+              Icon(
+                Icons.error_outline_rounded,
+                size: 48,
+                color: AppTheme.error,
+              ),
               const SizedBox(height: 16),
               Text(
                 'Something went wrong',
@@ -383,7 +443,8 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
                 textAlign: TextAlign.center,
                 style: GoogleFonts.inter(color: AppTheme.textMuted),
               ),
-              const SizedBox(height: 24),              ElevatedButton(
+              const SizedBox(height: 24),
+              ElevatedButton(
                 onPressed: _loadData,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primary,
@@ -402,14 +463,10 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              _getEmptyIcon(type),
-              size: 48,
-              color: AppTheme.textMuted,
-            ),
+            Icon(_getEmptyIcon(type), size: 48, color: AppTheme.textMuted),
             const SizedBox(height: 16),
             Text(
-              _searchQuery.isNotEmpty 
+              _searchQuery.isNotEmpty
                   ? 'No results found'
                   : _getEmptyMessage(type),
               style: GoogleFonts.inter(
@@ -421,7 +478,10 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
               const SizedBox(height: 8),
               Text(
                 'Try a different search term',
-                style: GoogleFonts.inter(fontSize: 14, color: AppTheme.textMuted),
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  color: AppTheme.textMuted,
+                ),
               ),
             ],
           ],
@@ -470,7 +530,7 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
     final name = _getUserDisplayName(user);
     final email = user['email'] ?? '';
     final hasNewPost = user['has_new_post'] == true;
-    
+
     return GestureDetector(
       onTap: () => _openUserProfile(email, name),
       child: Container(
@@ -498,9 +558,12 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
                   height: 48,
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
-                      colors: hasNewPost 
+                      colors: hasNewPost
                           ? [AppTheme.primary, AppTheme.accent]
-                          : [AppTheme.primary.withValues(alpha: 0.7), AppTheme.secondary],
+                          : [
+                              AppTheme.primary.withValues(alpha: 0.7),
+                              AppTheme.secondary,
+                            ],
                     ),
                     borderRadius: BorderRadius.circular(14),
                   ),
@@ -512,7 +575,8 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
                         fontWeight: FontWeight.bold,
                         color: Colors.white,
                       ),
-                    ),                  ),
+                    ),
+                  ),
                 ),
                 if (hasNewPost)
                   Positioned(
@@ -525,7 +589,9 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
                         color: AppTheme.success,
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                          color: isDark
+                              ? const Color(0xFF1E293B)
+                              : Colors.white,
                           width: 2,
                         ),
                       ),
@@ -534,7 +600,7 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
               ],
             ),
             const SizedBox(width: 14),
-            
+
             // Info
             Expanded(
               child: Column(
@@ -548,7 +614,9 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
                           style: GoogleFonts.inter(
                             fontSize: 15,
                             fontWeight: FontWeight.w600,
-                            color: isDark ? Colors.white : const Color(0xFF1E293B),
+                            color: isDark
+                                ? Colors.white
+                                : const Color(0xFF1E293B),
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -556,7 +624,10 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
                       if (hasNewPost) ...[
                         const SizedBox(width: 8),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: AppTheme.primary.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(6),
@@ -585,7 +656,7 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
                 ],
               ),
             ),
-            
+
             // View button
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -613,10 +684,8 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => UserProfileScreen(
-          userEmail: email,
-          userName: displayName,
-        ),
+        builder: (context) =>
+            UserProfileScreen(userEmail: email, userName: displayName),
       ),
     );
   }
@@ -629,7 +698,9 @@ class _FollowingScreenState extends State<FollowingScreen> with SingleTickerProv
         padding: const EdgeInsets.only(bottom: 12),
         child: Shimmer.fromColors(
           baseColor: isDark ? const Color(0xFF1E293B) : Colors.grey.shade200,
-          highlightColor: isDark ? const Color(0xFF334155) : Colors.grey.shade100,
+          highlightColor: isDark
+              ? const Color(0xFF334155)
+              : Colors.grey.shade100,
           child: Container(
             height: 76,
             decoration: BoxDecoration(

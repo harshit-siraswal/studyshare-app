@@ -7,6 +7,7 @@ import '../../services/backend_api_service.dart';
 import '../../providers/theme_provider.dart';
 import '../../models/resource.dart';
 import '../../widgets/resource_card.dart';
+import '../../utils/contribution_badge.dart';
 import 'bookmarks_screen.dart';
 import 'following_screen.dart';
 import 'edit_profile_screen.dart';
@@ -17,7 +18,6 @@ import 'explore_students_screen.dart';
 import 'saved_posts_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
-
   final String collegeName;
   final String collegeDomain;
   final VoidCallback onLogout;
@@ -44,18 +44,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final BackendApiService _api = BackendApiService();
   final SubscriptionService _subscriptionService = SubscriptionService();
 
-  bool _isLoggingOut = false;
   bool _profileLoading = true;
   String? _profilePhotoUrl;
   String? _profileDisplayName;
   String? _profileBio;
-  
+
   // Real stats
   int _uploadCount = 0;
   int _followersCount = 0;
   int _followingCount = 0;
-  bool _statsLoading = true;
-  
+  ContributionBadge _contributionBadge = ContributionBadgeCatalog.resolve(0);
+
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
@@ -90,35 +89,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _loadStats() async {
     if (_authService.userEmail == null) {
-      if (mounted) setState(() => _statsLoading = false);
       return;
     }
     try {
-      final stats = await _supabaseService.getUserStats(_authService.userEmail!);
-      final followingCount = await _supabaseService.getFollowingCount(_authService.userEmail!);
-      final followersCount = await _supabaseService.getFollowersCount(_authService.userEmail!);
+      final stats = await _supabaseService.getUserStats(
+        _authService.userEmail!,
+      );
+      final followingCount = await _supabaseService.getFollowingCount(
+        _authService.userEmail!,
+      );
+      final followersCount = await _supabaseService.getFollowersCount(
+        _authService.userEmail!,
+      );
       if (mounted) {
         setState(() {
           _uploadCount = stats['uploads'] ?? stats['contributions'] ?? 0;
           _followersCount = followersCount;
           _followingCount = followingCount;
-          _statsLoading = false;
+          _contributionBadge = ContributionBadgeCatalog.resolve(_uploadCount);
         });
       }
     } catch (e) {
-      if (mounted) setState(() => _statsLoading = false);
+      debugPrint('Failed to refresh profile stats: $e');
     }
   }
 
   String get _userEmail => _authService.userEmail ?? 'guest@example.com';
-  String get _displayName => _profileDisplayName ?? _authService.displayName ?? 'User';
+  String get _displayName =>
+      _profileDisplayName ?? _authService.displayName ?? 'User';
   String? get _photoUrl => _profilePhotoUrl ?? _authService.photoUrl;
-  
-  
 
   Future<void> _handleLogout() async {
-    setState(() => _isLoggingOut = true);
-    
     try {
       await _authService.signOut();
       if (mounted) {
@@ -126,7 +127,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _isLoggingOut = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to sign out: ${e.toString()}'),
@@ -136,8 +136,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
     }
   }
-
-
 
   @override
   Widget build(BuildContext context) {
@@ -174,105 +172,101 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               );
             },
-            icon: Icon(
-              Icons.people_outline_rounded,
-              color: textColor,
-            ),
+            icon: Icon(Icons.people_outline_rounded, color: textColor),
           ),
           IconButton(
             icon: Icon(Icons.settings_outlined, color: textColor),
             onPressed: () async {
-               // Open Settings Screen
-               await Navigator.push(
-                 context,
-                 MaterialPageRoute(
-                   builder: (_) => SettingsScreen(
-                     onLogout: _handleLogout,
-                     userEmail: _userEmail,
-                     displayName: _profileDisplayName,
-                     photoUrl: _profilePhotoUrl,
-                     bio: _profileBio,
-                     themeProvider: widget.themeProvider,
-                   ),
-                 ),
-               );
-               // Refresh profile on return in case edits occurred
-               if (mounted) _loadProfile();
+              // Open Settings Screen
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => SettingsScreen(
+                    onLogout: _handleLogout,
+                    userEmail: _userEmail,
+                    displayName: _profileDisplayName,
+                    photoUrl: _profilePhotoUrl,
+                    bio: _profileBio,
+                    themeProvider: widget.themeProvider,
+                  ),
+                ),
+              );
+              // Refresh profile on return in case edits occurred
+              if (mounted) _loadProfile();
             },
           ),
         ],
       ),
-      body: _profileLoading 
-        ? const Center(child: CircularProgressIndicator())
-        : RefreshIndicator(
-            onRefresh: () async {
-              await _loadProfile();
-              await _loadStats();
-              setState(() {});
-            },
-            child: SingleChildScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Column(
-                children: [
-                   const SizedBox(height: 20),
-                   _buildProfileHeader(textColor, subTextColor),
-                   const SizedBox(height: 24),
-                   _buildStatsRow(textColor, subTextColor),
-                   const SizedBox(height: 24),
-                   
-                   const SizedBox(height: 24),
-                   // Premium Badge / Status
-                   FutureBuilder<bool>(
-                     future: _subscriptionService.isPremium(),
-                     builder: (context, snapshot) {
-                       final isPremium = snapshot.data ?? false;
-                       return isPremium 
-                          ? _buildPremiumBadge() 
-                          : _buildUpgradeCard();
-                     },
-                   ),
-                   const SizedBox(height: 24),
-                   // Search & Filter
-                   _buildSearchBar(isDark),
-                   const SizedBox(height: 16),
-                   // Offline Toggle (Only if Premium, or disabled if Free)
-                   _buildOfflineToggle(textColor),
-                   const SizedBox(height: 16),
-                   
-                   // Saved Posts Link
-                   _buildSavedPostsLink(textColor),
-                   const SizedBox(height: 16),
+      body: _profileLoading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: () async {
+                await _loadProfile();
+                await _loadStats();
+                setState(() {});
+              },
+              child: SingleChildScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  children: [
+                    const SizedBox(height: 20),
+                    _buildProfileHeader(textColor, subTextColor),
+                    const SizedBox(height: 24),
+                    _buildStatsRow(textColor, subTextColor),
+                    const SizedBox(height: 24),
+                    _buildContributionBadgeCard(textColor, subTextColor),
+                    const SizedBox(height: 24),
+                    // Premium Badge / Status
+                    FutureBuilder<bool>(
+                      future: _subscriptionService.isPremium(),
+                      builder: (context, snapshot) {
+                        final isPremium = snapshot.data ?? false;
+                        return isPremium
+                            ? _buildPremiumBadge()
+                            : _buildUpgradeCard();
+                      },
+                    ),
+                    const SizedBox(height: 24),
+                    // Search & Filter
+                    _buildSearchBar(isDark),
+                    const SizedBox(height: 16),
+                    // Offline Toggle (Only if Premium, or disabled if Free)
+                    _buildOfflineToggle(textColor),
+                    const SizedBox(height: 16),
 
-                   // Contributions Header
-                   Align(
-                     alignment: Alignment.centerLeft,
-                     child: Text(
-                       'Contributions',
-                       style: GoogleFonts.inter(
-                         fontSize: 18,
-                         fontWeight: FontWeight.w600,
-                         color: textColor,
-                       ),
-                     ),
-                   ),
-                   const SizedBox(height: 10),
-                   _buildContributionsList(),
-                   const SizedBox(height: 40),
-                ],
+                    // Saved Posts Link
+                    _buildSavedPostsLink(textColor),
+                    const SizedBox(height: 16),
+
+                    // Contributions Header
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Contributions',
+                        style: GoogleFonts.inter(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: textColor,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    _buildContributionsList(),
+                    const SizedBox(height: 40),
+                  ],
+                ),
               ),
             ),
-          ),
     );
   }
-
 
   Widget _buildProfileHeader(Color textColor, Color subTextColor) {
     return FutureBuilder<bool>(
       future: _subscriptionService.isPremium(),
       builder: (context, snapshot) {
         final isPremium = snapshot.data ?? false;
-        
+
         return Column(
           children: [
             Stack(
@@ -285,7 +279,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFFFFD700).withValues(alpha: 0.5),
+                            color: const Color(
+                              0xFFFFD700,
+                            ).withValues(alpha: 0.5),
                             blurRadius: 20,
                             spreadRadius: 2,
                           ),
@@ -293,35 +289,40 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ),
                   ),
-                  
+
                 Container(
                   width: 104, // Slightly larger for border
                   height: 104,
                   padding: const EdgeInsets.all(3), // Space for the ring
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    gradient: isPremium 
+                    gradient: isPremium
                         ? const LinearGradient(
-                            colors: [Color(0xFFFFD700), Color(0xFFFFA500), Color(0xFFFFD700)],
+                            colors: [
+                              Color(0xFFFFD700),
+                              Color(0xFFFFA500),
+                              Color(0xFFFFD700),
+                            ],
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
                           )
                         : null,
                     color: isPremium ? null : Colors.transparent,
                   ),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: isPremium ? Colors.white : textColor.withValues(alpha: 0.1), 
-                          width: isPremium ? 2 : 1
-                        ),
-                        color: textColor.withValues(alpha: 0.05),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isPremium
+                            ? Colors.white
+                            : textColor.withValues(alpha: 0.1),
+                        width: isPremium ? 2 : 1,
                       ),
-                      child: ClipOval(
-                        child: _photoUrl != null
-                            ? 
-                              Image.network(
+                      color: textColor.withValues(alpha: 0.05),
+                    ),
+                    child: ClipOval(
+                      child: _photoUrl != null
+                          ? Image.network(
                               _photoUrl!,
                               cacheWidth: 400,
                               fit: BoxFit.cover,
@@ -348,16 +349,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 ),
                               ),
                             ),
-                      ),
                     ),
                   ),
-                
+                ),
+
                 Positioned(
                   bottom: 0,
                   right: 0,
                   child: GestureDetector(
                     onTap: () async {
-                       final updated = await Navigator.push(
+                      final updated = await Navigator.push(
                         context,
                         MaterialPageRoute(
                           builder: (_) => EditProfileScreen(
@@ -376,9 +377,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       decoration: BoxDecoration(
                         color: AppTheme.primary,
                         shape: BoxShape.circle,
-                        border: Border.all(color: Theme.of(context).scaffoldBackgroundColor, width: 2),
+                        border: Border.all(
+                          color: Theme.of(context).scaffoldBackgroundColor,
+                          width: 2,
+                        ),
                       ),
-                      child: const Icon(Icons.edit, size: 14, color: Colors.white),
+                      child: const Icon(
+                        Icons.edit,
+                        size: 14,
+                        color: Colors.white,
+                      ),
                     ),
                   ),
                 ),
@@ -397,53 +405,82 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
                 if (isPremium) ...[
-                   const SizedBox(width: 6),
-                   const Icon(Icons.verified, color: Color(0xFFFFD700), size: 20),
+                  const SizedBox(width: 6),
+                  const Icon(
+                    Icons.verified,
+                    color: Color(0xFFFFD700),
+                    size: 20,
+                  ),
                 ],
+                const SizedBox(width: 8),
+                Tooltip(
+                  message:
+                      '${_contributionBadge.label}: ${_contributionBadge.description}',
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _contributionBadge.color.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: _contributionBadge.color.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _contributionBadge.icon,
+                          size: 14,
+                          color: _contributionBadge.color,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          _contributionBadge.label,
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: _contributionBadge.color,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 4),
             Text(
               '@${_profileDisplayName?.replaceAll(" ", "").toLowerCase() ?? "user"}',
-              style: GoogleFonts.inter(
-                fontSize: 14,
-                color: subTextColor,
-              ),
+              style: GoogleFonts.inter(fontSize: 14, color: subTextColor),
             ),
             const SizedBox(height: 4),
             Text(
               _authService.userEmail ?? '', // Show Email
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                color: subTextColor,
-              ),
+              style: GoogleFonts.inter(fontSize: 13, color: subTextColor),
             ),
             const SizedBox(height: 4),
-             Text(
+            Text(
               widget.collegeName,
               textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
-                fontSize: 14,
-                color: subTextColor,
-              ),
+              style: GoogleFonts.inter(fontSize: 14, color: subTextColor),
             ),
             if (_profileBio != null && _profileBio!.isNotEmpty) ...[
-               const SizedBox(height: 12),
-               Padding(
-                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                 child: Text(
-                   _profileBio!,
-                   textAlign: TextAlign.center,
-                   style: GoogleFonts.inter(
-                     fontSize: 14,
-                     color: textColor,
-                   ),
-                 ),
-               ),
+              const SizedBox(height: 12),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  _profileBio!,
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(fontSize: 14, color: textColor),
+                ),
+              ),
             ],
           ],
         );
-      }
+      },
     );
   }
 
@@ -451,32 +488,58 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: [
-        _buildStatItem('Contributions', _uploadCount.toString(), textColor, subTextColor, () {
-          // Already on profile showing contributions, maybe scroll down?
-        }),
-        _buildStatItem('Followers', _followersCount.toString(), textColor, subTextColor, () async {
-          await Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => FollowingScreen(userEmail: _userEmail),
-            ),
-          );
-          if (mounted) _loadStats();
-        }),
-        _buildStatItem('Following', _followingCount.toString(), textColor, subTextColor, () async {
-           await Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => FollowingScreen(userEmail: _userEmail),
-            ),
-          );
-          if (mounted) _loadStats();
-        }),
+        _buildStatItem(
+          'Contributions',
+          _uploadCount.toString(),
+          textColor,
+          subTextColor,
+          () {
+            // Already on profile showing contributions, maybe scroll down?
+          },
+        ),
+        _buildStatItem(
+          'Followers',
+          _followersCount.toString(),
+          textColor,
+          subTextColor,
+          () async {
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) =>
+                    FollowingScreen(userEmail: _userEmail, initialTab: 0),
+              ),
+            );
+            if (mounted) _loadStats();
+          },
+        ),
+        _buildStatItem(
+          'Following',
+          _followingCount.toString(),
+          textColor,
+          subTextColor,
+          () async {
+            await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) =>
+                    FollowingScreen(userEmail: _userEmail, initialTab: 1),
+              ),
+            );
+            if (mounted) _loadStats();
+          },
+        ),
       ],
     );
   }
 
-  Widget _buildStatItem(String label, String value, Color textColor, Color subTextColor, VoidCallback onTap) {
+  Widget _buildStatItem(
+    String label,
+    String value,
+    Color textColor,
+    Color subTextColor,
+    VoidCallback onTap,
+  ) {
     return GestureDetector(
       onTap: onTap,
       child: Column(
@@ -484,18 +547,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Text(
             value,
             style: GoogleFonts.inter(
-               fontSize: 18,
-               fontWeight: FontWeight.bold,
-               color: textColor,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: textColor,
             ),
           ),
           const SizedBox(height: 4),
           Text(
             label,
             style: GoogleFonts.inter(
-               fontSize: 12,
-               color: subTextColor,
-               fontWeight: FontWeight.w500,
+              fontSize: 12,
+              color: subTextColor,
+              fontWeight: FontWeight.w500,
             ),
           ),
         ],
@@ -523,6 +586,87 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  Widget _buildContributionBadgeCard(Color textColor, Color subTextColor) {
+    final next = _contributionBadge.nextThreshold;
+    final progress = ContributionBadgeCatalog.progressToNext(_uploadCount);
+    final remaining = next == null ? 0 : (next - _uploadCount).clamp(0, 9999);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.getCardColor(context),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.getBorderColor(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: _contributionBadge.color.withValues(alpha: 0.14),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  _contributionBadge.icon,
+                  color: _contributionBadge.color,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '${_contributionBadge.label} Badge',
+                  style: GoogleFonts.inter(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: textColor,
+                  ),
+                ),
+              ),
+              Text(
+                '$_uploadCount posts',
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: _contributionBadge.color,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            _contributionBadge.description,
+            style: GoogleFonts.inter(fontSize: 13, color: subTextColor),
+          ),
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 7,
+              backgroundColor: _contributionBadge.color.withValues(alpha: 0.12),
+              valueColor: AlwaysStoppedAnimation<Color>(
+                _contributionBadge.color,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            next == null
+                ? 'Top badge unlocked. Keep inspiring your peers.'
+                : '$remaining more contribution${remaining == 1 ? '' : 's'} to unlock the next badge.',
+            style: GoogleFonts.inter(fontSize: 12, color: subTextColor),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildUpgradeCard() {
     return Container(
       width: double.infinity,
@@ -545,30 +689,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 8),
           Text(
             'Analytics & Offline Downloads',
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              color: Colors.black54,
-            ),
+            style: GoogleFonts.inter(fontSize: 14, color: Colors.black54),
           ),
           const SizedBox(height: 16),
           ElevatedButton(
             onPressed: () {
-               showModalBottomSheet(
-                 context: context, 
-                 isScrollControlled: true,
-                 backgroundColor: Colors.transparent,
-                 builder: (_) => PaywallDialog(
-                   onSuccess: () {
-                     // Refresh to show premium badge/ring if successful
-                     setState(() {});
-                   },
-                 ),
-               );
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                backgroundColor: Colors.transparent,
+                builder: (_) => PaywallDialog(
+                  onSuccess: () {
+                    // Refresh to show premium badge/ring if successful
+                    setState(() {});
+                  },
+                ),
+              );
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.black,
               foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(30),
+              ),
               padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
             ),
             child: const Text('Upgrade Now'),
@@ -616,11 +759,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         const Spacer(),
         GestureDetector(
           onTap: () {
-             Navigator.push(
+            Navigator.push(
               context,
-              MaterialPageRoute(
-                builder: (_) => const BookmarksScreen(),
-              ),
+              MaterialPageRoute(builder: (_) => const BookmarksScreen()),
             );
           },
           child: Row(
@@ -630,11 +771,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 style: GoogleFonts.inter(
                   fontSize: 14,
                   color: AppTheme.primary,
-                  fontWeight: FontWeight.w600
+                  fontWeight: FontWeight.w600,
                 ),
               ),
               const SizedBox(width: 4),
-              Icon(Icons.arrow_forward_ios_rounded, size: 12, color: AppTheme.primary),
+              Icon(
+                Icons.arrow_forward_ios_rounded,
+                size: 12,
+                color: AppTheme.primary,
+              ),
             ],
           ),
         ),
@@ -649,14 +794,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
         }
-        
+
         if (snapshot.hasError) {
-          return Center(child: Text('Error loading contributions: ${snapshot.error}'));
+          return Center(
+            child: Text('Error loading contributions: ${snapshot.error}'),
+          );
         }
-        
+
         var resources = snapshot.data ?? [];
         if (_searchQuery.isNotEmpty) {
-          resources = resources.where((r) => r.title.toLowerCase().contains(_searchQuery)).toList();
+          resources = resources
+              .where((r) => r.title.toLowerCase().contains(_searchQuery))
+              .toList();
         }
 
         if (resources.isEmpty) {
@@ -665,7 +814,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               padding: const EdgeInsets.symmetric(vertical: 20),
               child: Text(
                 'No contributions yet. Start sharing knowledge!',
-                 style: GoogleFonts.inter(color: Colors.grey),
+                style: GoogleFonts.inter(color: Colors.grey),
               ),
             ),
           );
@@ -677,15 +826,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
           itemCount: resources.length,
           separatorBuilder: (_, __) => const SizedBox(height: 12),
           itemBuilder: (context, index) {
-             final resource = resources[index];
-             return ResourceCard(
-               resource: resource,
-               userEmail: _authService.userEmail!,
-               onVoteChanged: () {
-                  // Optionally refresh stats or local state if needed
-                  setState(() {}); 
-               },
-             );
+            final resource = resources[index];
+            return ResourceCard(
+              resource: resource,
+              userEmail: _authService.userEmail!,
+              onVoteChanged: () {
+                // Optionally refresh stats or local state if needed
+                setState(() {});
+              },
+            );
           },
         );
       },
@@ -700,17 +849,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Navigator.push(
             context,
             MaterialPageRoute(
-              builder: (_) => SavedPostsScreen(
-                userEmail: _userEmail,
-              ),
+              builder: (_) => SavedPostsScreen(userEmail: _userEmail),
             ),
           );
         },
-        borderRadius: BorderRadius.circular(8), // Add some radius for better visual
+        borderRadius: BorderRadius.circular(
+          8,
+        ), // Add some radius for better visual
         child: Semantics(
           button: true,
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4), // Ensure hit target size
+            padding: const EdgeInsets.symmetric(
+              vertical: 8,
+              horizontal: 4,
+            ), // Ensure hit target size
             child: Row(
               children: [
                 Icon(Icons.bookmark_border_rounded, color: textColor, size: 24),
@@ -724,7 +876,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
                 const Spacer(),
-                Icon(Icons.arrow_forward_ios_rounded, size: 16, color: AppTheme.primary),
+                Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  size: 16,
+                  color: AppTheme.primary,
+                ),
               ],
             ),
           ),
@@ -735,6 +891,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   String getInitials(String name) {
     if (name.isEmpty) return 'U';
-    return name.trim().split(' ').map((e) => e[0]).take(2).join('').toUpperCase();
+    return name
+        .trim()
+        .split(' ')
+        .map((e) => e[0])
+        .take(2)
+        .join('')
+        .toUpperCase();
   }
 }

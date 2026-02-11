@@ -7,7 +7,7 @@ import 'success_overlay.dart';
 
 class PaywallDialog extends StatefulWidget {
   final VoidCallback onSuccess;
-  
+
   const PaywallDialog({super.key, required this.onSuccess});
 
   @override
@@ -32,55 +32,66 @@ class _PaywallDialogState extends State<PaywallDialog> {
       return;
     }
     setState(() => _isLoading = true);
-    
+
     // Use user's phone if available, else usage existing placeholder
     final phone = _auth.currentUser?.phoneNumber ?? '9999999999';
-    
+
     // In a real app we'd pass the amount based on plan
-    final result = await _subService.buyPremium(context, email, phone, planId: _selectedPlan);
+    final result = await _subService.buyPremium(
+      context,
+      email,
+      phone,
+      planId: _selectedPlan,
+    );
 
     if (mounted) {
       setState(() => _isLoading = false);
       if (result) {
         Navigator.pop(context); // Close paywall
-        
+
         // Use a builder to ensure context is valid if dialog needs it
         if (mounted) {
           showDialog(
             context: context,
             barrierDismissible: false,
             builder: (context) => SuccessOverlay(
-               message: 'Premium Activated! Welcome to the club.',
-               onDismiss: () {
-                 Navigator.pop(context); 
-                 widget.onSuccess();
-               },
+              variant: SuccessOverlayVariant.premiumUpgrade,
+              title: 'Pro Activated',
+              message:
+                  'Premium activated successfully. Enjoy all pro features.',
+              badgeLabel: 'Premium Member',
+              onDismiss: () {
+                Navigator.pop(context);
+                widget.onSuccess();
+              },
             ),
           );
         }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Payment failed. Please try again or contact support.'),
+            content: Text(
+              'Payment failed. Please try again or contact support.',
+            ),
             backgroundColor: Colors.red,
           ),
         );
       }
     }
   }
-  
+
   Future<void> _restorePurchase() async {
-     setState(() => _isLoading = true);
-     // Simulate restore
-     await Future.delayed(const Duration(seconds: 2));
-     if (mounted) {
-       setState(() => _isLoading = false);
-       Navigator.pop(context);
-       widget.onSuccess();
-       ScaffoldMessenger.of(context).showSnackBar(
-         const SnackBar(content: Text('Purchases restored successfully')),
-       );
-     }
+    setState(() => _isLoading = true);
+    // Simulate restore
+    await Future.delayed(const Duration(seconds: 2));
+    if (mounted) {
+      setState(() => _isLoading = false);
+      Navigator.pop(context);
+      widget.onSuccess();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Purchases restored successfully')),
+      );
+    }
   }
 
   @override
@@ -103,16 +114,16 @@ class _PaywallDialogState extends State<PaywallDialog> {
               // Header
               Row(
                 children: [
-                   const Spacer(),
-                   IconButton(
-                     onPressed: () => Navigator.pop(context),
-                     icon: const Icon(Icons.close_rounded, color: Colors.grey),
-                     padding: EdgeInsets.zero,
-                     constraints: const BoxConstraints(),
-                   ),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close_rounded, color: Colors.grey),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
                 ],
               ),
-              
+
               Text(
                 'StudySpace Premium',
                 style: GoogleFonts.inter(
@@ -132,7 +143,7 @@ class _PaywallDialogState extends State<PaywallDialog> {
                 ),
               ),
               const SizedBox(height: 32),
-              
+
               // Monthly Plan
               _buildPlanCard(
                 id: 'monthly',
@@ -143,7 +154,7 @@ class _PaywallDialogState extends State<PaywallDialog> {
                 isDark: isDark,
               ),
               const SizedBox(height: 16),
-              
+
               // Quarterly Plan (Highlighted)
               _buildPlanCard(
                 id: 'quarterly',
@@ -155,24 +166,24 @@ class _PaywallDialogState extends State<PaywallDialog> {
                 orangeColor: orangeColor,
                 isDark: isDark,
               ),
-              
+
               const SizedBox(height: 32),
-              
+
               Center(
-                 child: TextButton(
-                   onPressed: _restorePurchase,
-                   child: Text(
-                     'Restore Purchase',
-                     style: GoogleFonts.inter(
-                       fontSize: 14,
-                       fontWeight: FontWeight.w600,
-                       color: Colors.grey,
-                     ),
-                   ),
-                 ),
+                child: TextButton(
+                  onPressed: _restorePurchase,
+                  child: Text(
+                    'Restore Purchase',
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey,
+                    ),
+                  ),
+                ),
               ),
               const SizedBox(height: 20),
-              
+
               // Action Button
               SizedBox(
                 width: double.infinity,
@@ -182,44 +193,62 @@ class _PaywallDialogState extends State<PaywallDialog> {
                     backgroundColor: orangeColor,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 18),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(24),
+                    ),
                     elevation: 0,
                   ),
-                  child: _isLoading 
+                  child: _isLoading
                       ? const SizedBox(
-                          width: 24, 
-                          height: 24, 
-                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
                         )
                       : Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
                               'Continue',
-                              style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold),
+                              style: GoogleFonts.inter(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                             if (_selectedPlan == 'monthly')
                               Text(
                                 'Cancel Anytime',
-                                style: GoogleFonts.inter(fontSize: 12, color: Colors.white70),
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  color: Colors.white70,
+                                ),
                               ),
                           ],
                         ),
                 ),
               ),
               const SizedBox(height: 16),
-              
+
               // Back Button
               GestureDetector(
                 onTap: () => Navigator.pop(context),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.arrow_back_rounded, size: 16, color: Colors.grey),
+                    Icon(
+                      Icons.arrow_back_rounded,
+                      size: 16,
+                      color: Colors.grey,
+                    ),
                     const SizedBox(width: 4),
                     Text(
                       'Back',
-                      style: GoogleFonts.inter(color: Colors.grey, fontWeight: FontWeight.w600),
+                      style: GoogleFonts.inter(
+                        color: Colors.grey,
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                   ],
                 ),
@@ -242,7 +271,7 @@ class _PaywallDialogState extends State<PaywallDialog> {
     required bool isDark,
   }) {
     final isSelected = _selectedPlan == id;
-    
+
     return GestureDetector(
       onTap: () => setState(() => _selectedPlan = id),
       child: Stack(
@@ -254,18 +283,23 @@ class _PaywallDialogState extends State<PaywallDialog> {
             decoration: BoxDecoration(
               color: isSelected && isHighlighted
                   ? const Color(0xFFFFF7ED) // Light orange bg for highlighted
-                  : (isDark ? Colors.white.withValues(alpha: 0.05) : Colors.white),
-              borderRadius: BorderRadius.circular(24),              border: Border.all(
-                color: isSelected ? orangeColor : (isDark ? Colors.white10 : Colors.grey.shade200),
+                  : (isDark
+                        ? Colors.white.withValues(alpha: 0.05)
+                        : Colors.white),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: isSelected
+                    ? orangeColor
+                    : (isDark ? Colors.white10 : Colors.grey.shade200),
                 width: isSelected ? 2 : 1,
               ),
               boxShadow: [
-                 if (!isDark)
-                   BoxShadow(
-                     color: Colors.black.withValues(alpha: 0.03),
-                     blurRadius: 10,
-                     offset: const Offset(0, 4),
-                   ),
+                if (!isDark)
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.03),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
               ],
             ),
             child: Row(
@@ -278,16 +312,16 @@ class _PaywallDialogState extends State<PaywallDialog> {
                     shape: BoxShape.circle,
                     color: isSelected ? orangeColor : Colors.transparent,
                     border: Border.all(
-                       color: isSelected ? orangeColor : Colors.grey.shade400,
-                       width: 2,
+                      color: isSelected ? orangeColor : Colors.grey.shade400,
+                      width: 2,
                     ),
                   ),
-                  child: isSelected 
+                  child: isSelected
                       ? const Icon(Icons.check, size: 16, color: Colors.white)
                       : null,
                 ),
                 const SizedBox(width: 16),
-                
+
                 // Content
                 Expanded(
                   child: Column(
@@ -314,7 +348,7 @@ class _PaywallDialogState extends State<PaywallDialog> {
                     ],
                   ),
                 ),
-                
+
                 // Price
                 Text(
                   price,
@@ -327,13 +361,16 @@ class _PaywallDialogState extends State<PaywallDialog> {
               ],
             ),
           ),
-          
+
           if (badgeText != null)
             Positioned(
               top: -12,
               right: 16,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: orangeColor,
                   borderRadius: BorderRadius.circular(12),

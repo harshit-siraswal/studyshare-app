@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
+
 import '../../config/theme.dart';
 
 class OnboardingScreen extends StatefulWidget {
@@ -19,42 +20,42 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final List<OnboardingPage> _pages = [
     OnboardingPage(
       icon: Icons.library_books_rounded,
-      iconColor: AppTheme.primary,
+      iconColor: Colors.white,
       title: 'All your study in one place',
       description:
-          'Access notes, videos, and previous year questions curated by your own college community.',
-      gradient: const [Color(0xFF8B5CF6), Color(0xFFA78BFA)],
+          'Access notes, videos, and previous year questions curated by your college community.',
+      gradient: const [Color(0xFF1D4ED8), Color(0xFF3B82F6)],
     ),
     OnboardingPage(
       icon: Icons.chat_bubble_rounded,
-      iconColor: AppTheme.secondary,
+      iconColor: Colors.white,
       title: 'Learn with your classmates',
       description:
-          'Join topic-based rooms to discuss doubts, share insights, and prepare together—without leaving the app.',
-      gradient: const [Color(0xFF10B981), Color(0xFF34D399)],
+          'Join topic-based rooms to discuss doubts, share insights, and prepare together without leaving the app.',
+      gradient: const [Color(0xFF1E40AF), Color(0xFF2563EB)],
     ),
     OnboardingPage(
       icon: Icons.notifications_active_rounded,
-      iconColor: AppTheme.accent,
+      iconColor: Colors.white,
       title: 'Never miss an important notice',
       description:
-          'Get a clean feed of college announcements, department updates, and events—right where you study.',
-      gradient: const [Color(0xFFF59E0B), Color(0xFFFBBF24)],
+          'Get a clean feed of college announcements, department updates, and events right where you study.',
+      gradient: const [Color(0xFF0EA5E9), Color(0xFF2563EB)],
     ),
     OnboardingPage(
       icon: Icons.bookmark_rounded,
-      iconColor: const Color(0xFFEC4899),
+      iconColor: Colors.white,
       title: 'Save what matters',
       description:
           'Bookmark key resources and build your own personalized library for exams, projects, and revisions.',
-      gradient: const [Color(0xFFEC4899), Color(0xFFF472B6)],
+      gradient: const [Color(0xFF1E3A8A), Color(0xFF2563EB)],
     ),
   ];
 
   void _nextPage() {
     if (_currentPage < _pages.length - 1) {
       _pageController.nextPage(
-        duration: const Duration(milliseconds: 400),
+        duration: const Duration(milliseconds: 380),
         curve: Curves.easeInOut,
       );
     } else {
@@ -75,55 +76,68 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : AppTheme.lightSurface,
-      body: SafeArea(
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: isDark
+                ? const [Color(0xFF030712), Color(0xFF020617)]
+                : const [Color(0xFFEFF6FF), Color(0xFFF8FAFC)],
+          ),
+        ),
+        child: SafeArea(
           child: Column(
             children: [
-              // Skip button
               Align(
                 alignment: Alignment.topRight,
                 child: Padding(
                   padding: const EdgeInsets.all(16),
-                  child: TextButton(
+                  child: FilledButton.tonal(
                     onPressed: _skip,
+                    style: FilledButton.styleFrom(
+                      backgroundColor: isDark
+                          ? Colors.white.withValues(alpha: 0.1)
+                          : Colors.white,
+                      foregroundColor: isDark
+                          ? Colors.white70
+                          : const Color(0xFF1E3A8A),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
                     child: Text(
                       'Skip',
                       style: GoogleFonts.inter(
-                        color: AppTheme.textMuted,
-                        fontSize: 16,
-                        fontWeight: FontWeight.w500,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ),
                 ),
               ),
-
-              // Page content
               Expanded(
                 child: PageView.builder(
                   controller: _pageController,
-                  onPageChanged: (page) => setState(() => _currentPage = page),
                   itemCount: _pages.length,
-                  itemBuilder: (context, index) {
-                    return _buildPage(_pages[index]);
-                  },
+                  onPageChanged: (page) => setState(() => _currentPage = page),
+                  itemBuilder: (context, index) => _buildPage(_pages[index]),
                 ),
               ),
-
-              // Bottom section
               Padding(
                 padding: const EdgeInsets.all(24),
                 child: Column(
                   children: [
-                    // Page indicator
                     SmoothPageIndicator(
                       controller: _pageController,
                       count: _pages.length,
                       effect: ExpandingDotsEffect(
                         activeDotColor: AppTheme.primary,
-                        dotColor: AppTheme.darkBorder,
+                        dotColor: isDark
+                            ? Colors.white24
+                            : const Color(0xFFCBD5E1),
                         dotHeight: 8,
                         dotWidth: 8,
                         expansionFactor: 4,
@@ -131,8 +145,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                       ),
                     ),
                     const SizedBox(height: 32),
-
-                    // Next/Get Started button
                     SizedBox(
                       width: double.infinity,
                       height: 56,
@@ -140,6 +152,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         onPressed: _nextPage,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppTheme.primary,
+                          foregroundColor: Colors.white,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(16),
                           ),
@@ -159,7 +172,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                             ),
                             if (_currentPage < _pages.length - 1) ...[
                               const SizedBox(width: 8),
-                              const Icon(Icons.arrow_forward_rounded, size: 20),
+                              const Icon(
+                                Icons.arrow_forward_rounded,
+                                size: 20,
+                                color: Colors.white,
+                              ),
                             ],
                           ],
                         ),
@@ -172,26 +189,27 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ],
           ),
         ),
+      ),
     );
   }
 
   Widget _buildPage(OnboardingPage page) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32),
+      padding: const EdgeInsets.symmetric(horizontal: 30),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          // Animated icon container
           TweenAnimationBuilder<double>(
-            tween: Tween(begin: 0.8, end: 1.0),
-            duration: const Duration(milliseconds: 600),
-            curve: Curves.easeOut,
+            tween: Tween(begin: 0.86, end: 1.0),
+            duration: const Duration(milliseconds: 620),
+            curve: Curves.easeOutBack,
             builder: (context, value, child) {
               return Transform.scale(
                 scale: value,
                 child: Container(
-                  width: 160,
-                  height: 160,
+                  width: 164,
+                  height: 164,
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
@@ -201,46 +219,37 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     borderRadius: BorderRadius.circular(40),
                     boxShadow: [
                       BoxShadow(
-                        color: page.gradient[0].withValues(alpha: 0.4),
-                        blurRadius: 40,
-                        offset: const Offset(0, 20),
+                        color: page.gradient[0].withValues(alpha: 0.32),
+                        blurRadius: 38,
+                        offset: const Offset(0, 18),
                       ),
                     ],
                   ),
-                  child: Icon(
-                    page.icon,
-                    size: 80,
-                    color: page.iconColor,
-                  ),
+                  child: Icon(page.icon, size: 72, color: page.iconColor),
                 ),
               );
             },
           ),
-          const SizedBox(height: 48),
-
-          // Title
+          const SizedBox(height: 46),
           Text(
             page.title,
             textAlign: TextAlign.center,
             style: GoogleFonts.inter(
-              fontSize: 28,
-              fontWeight: FontWeight.bold,
-              color: Theme.of(context).brightness == Brightness.dark 
-                  ? AppTheme.textLight 
-                  : AppTheme.textPrimary,
-              height: 1.2,
+              fontSize: 34,
+              fontWeight: FontWeight.w800,
+              color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
+              height: 1.12,
+              letterSpacing: -0.5,
             ),
           ),
           const SizedBox(height: 16),
-
-          // Description
           Text(
             page.description,
             textAlign: TextAlign.center,
             style: GoogleFonts.inter(
-              fontSize: 16,
+              fontSize: 17,
               color: AppTheme.textMuted,
-              height: 1.6,
+              height: 1.5,
             ),
           ),
         ],

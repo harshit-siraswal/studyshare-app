@@ -121,6 +121,7 @@ flutter:
 
   # Assets for the application
   assets:
+    - assets/icon/
     - assets/images/
     - assets/sounds/
     - assets/videos/
@@ -150,5 +151,4 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
-
 

@@ -1,11 +1,13 @@
 import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../config/theme.dart';
 import '../services/sticker_service.dart';
+import 'success_overlay.dart';
 
 class StickerPicker extends StatefulWidget {
   final ValueChanged<File> onStickerSelected;
@@ -26,6 +28,7 @@ class _StickerPickerState extends State<StickerPicker>
   bool _isLoading = true;
   String? _errorMessage;
   String? _packActionInProgress;
+  String _stickerQuery = '';
 
   @override
   void initState() {
@@ -38,6 +41,18 @@ class _StickerPickerState extends State<StickerPicker>
   void dispose() {
     _tabController.dispose();
     super.dispose();
+  }
+
+  List<File> get _filteredStickers {
+    if (_stickerQuery.trim().isEmpty) return _stickers;
+    final query = _stickerQuery.toLowerCase();
+    return _stickers
+        .where(
+          (file) =>
+              file.path.toLowerCase().contains(query) ||
+              file.uri.pathSegments.last.toLowerCase().contains(query),
+        )
+        .toList();
   }
 
   Future<void> _loadAll() async {
@@ -71,9 +86,81 @@ class _StickerPickerState extends State<StickerPicker>
 
     await _loadAll();
     if (!mounted) return;
+    _showSuccessOverlay(
+      title: 'Sticker Added',
+      message: 'Your sticker has been added to My Stickers.',
+      variant: SuccessOverlayVariant.stickerImport,
+    );
+  }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Sticker added')),
+  Future<void> _importPackFromFiles() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: FileType.custom,
+        allowedExtensions: const ['png', 'jpg', 'jpeg', 'webp', 'gif'],
+      );
+
+      if (result == null || result.files.isEmpty) return;
+      final filePaths = result.files
+          .map((file) => file.path)
+          .whereType<String>()
+          .where((path) => path.trim().isNotEmpty)
+          .toList();
+      if (filePaths.isEmpty) return;
+
+      final importResult = await _stickerService.importPackFromPaths(
+        paths: filePaths,
+        packName: 'Imported Pack',
+      );
+      if (importResult.importedCount == 0) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No valid stickers found in selected files.'),
+            ),
+          );
+        }
+        return;
+      }
+
+      await _loadAll();
+      if (!mounted) return;
+      _showSuccessOverlay(
+        title: 'Sticker Pack Installed',
+        message:
+            '${importResult.importedCount} stickers installed to your library.',
+        variant: SuccessOverlayVariant.stickerImport,
+        badgeLabel: importResult.skippedCount > 0
+            ? '${importResult.skippedCount} skipped'
+            : null,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to import sticker pack. Please try again.'),
+        ),
+      );
+    }
+  }
+
+  void _showSuccessOverlay({
+    required String title,
+    required String message,
+    required SuccessOverlayVariant variant,
+    String? badgeLabel,
+  }) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => SuccessOverlay(
+        title: title,
+        message: message,
+        badgeLabel: badgeLabel,
+        variant: variant,
+        onDismiss: () => Navigator.pop(context),
+      ),
     );
   }
 
@@ -104,9 +191,9 @@ class _StickerPickerState extends State<StickerPicker>
     await _loadAll();
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Sticker deleted')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Sticker deleted')));
   }
 
   Future<void> _togglePack(StickerPack pack) async {
@@ -118,18 +205,18 @@ class _StickerPickerState extends State<StickerPicker>
       if (_installedPacks.contains(pack.id)) {
         await _stickerService.uninstallPack(pack.id);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('${pack.name} removed')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('${pack.name} removed')));
         }
       } else {
         final installedCount = await _stickerService.installPack(pack);
         if (mounted) {
           if (installedCount > 0) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('${pack.name} installed ($installedCount)'),
-              ),
+            _showSuccessOverlay(
+              title: '${pack.name} Installed',
+              message: '$installedCount stickers are now available.',
+              variant: SuccessOverlayVariant.stickerImport,
             );
           } else {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -166,7 +253,7 @@ class _StickerPickerState extends State<StickerPicker>
 
     if (_isLoading) {
       return Container(
-        height: 420,
+        height: 500,
         color: surfaceColor,
         child: const Center(child: CircularProgressIndicator()),
       );
@@ -174,7 +261,7 @@ class _StickerPickerState extends State<StickerPicker>
 
     if (_errorMessage != null) {
       return Container(
-        height: 420,
+        height: 500,
         color: surfaceColor,
         child: Center(
           child: Column(
@@ -184,10 +271,7 @@ class _StickerPickerState extends State<StickerPicker>
               const SizedBox(height: 10),
               Text(_errorMessage!, style: TextStyle(color: textColor)),
               const SizedBox(height: 10),
-              ElevatedButton(
-                onPressed: _loadAll,
-                child: const Text('Retry'),
-              ),
+              ElevatedButton(onPressed: _loadAll, child: const Text('Retry')),
             ],
           ),
         ),
@@ -195,30 +279,49 @@ class _StickerPickerState extends State<StickerPicker>
     }
 
     return Container(
-      height: 420,
+      height: 500,
       color: surfaceColor,
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 8, 10, 0),
-            child: Row(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Stickers',
-                  style: GoogleFonts.inter(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 16,
-                    color: textColor,
-                  ),
+                Row(
+                  children: [
+                    Text(
+                      'Stickers',
+                      style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 18,
+                        color: textColor,
+                      ),
+                    ),
+                    const Spacer(),
+                    OutlinedButton.icon(
+                      onPressed: _createFromGallery,
+                      icon: const Icon(
+                        Icons.add_photo_alternate_outlined,
+                        size: 16,
+                      ),
+                      label: const Text('Single'),
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      onPressed: _importPackFromFiles,
+                      icon: const Icon(Icons.folder_zip_rounded, size: 16),
+                      label: const Text('Import Pack'),
+                    ),
+                  ],
                 ),
-                const Spacer(),
-                TextButton.icon(
-                  onPressed: _createFromGallery,
-                  icon: const Icon(
-                    Icons.add_photo_alternate_outlined,
-                    size: 18,
+                const SizedBox(height: 6),
+                Text(
+                  'Import from gallery or install packs. Long press any sticker to delete.',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: textColor.withValues(alpha: 0.65),
                   ),
-                  label: const Text('From Gallery'),
                 ),
               ],
             ),
@@ -254,10 +357,7 @@ class _StickerPickerState extends State<StickerPicker>
           Expanded(
             child: TabBarView(
               controller: _tabController,
-              children: [
-                _buildStickersGrid(),
-                _buildPackList(isDark),
-              ],
+              children: [_buildStickersGrid(isDark), _buildPackList(isDark)],
             ),
           ),
         ],
@@ -265,79 +365,153 @@ class _StickerPickerState extends State<StickerPicker>
     );
   }
 
-  Widget _buildStickersGrid() {
-    if (_stickers.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.sticky_note_2_outlined,
-              size: 44,
-              color: AppTheme.getTextColor(context).withValues(alpha: 0.5),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'No stickers yet',
-              style: GoogleFonts.inter(
-                color: AppTheme.getTextColor(context).withValues(alpha: 0.75),
+  Widget _buildStickersGrid(bool isDark) {
+    final stickers = _filteredStickers;
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+          child: TextField(
+            onChanged: (value) {
+              setState(() => _stickerQuery = value);
+            },
+            decoration: InputDecoration(
+              hintText: 'Search sticker by name',
+              isDense: true,
+              prefixIcon: const Icon(Icons.search_rounded, size: 18),
+              filled: true,
+              fillColor: isDark ? AppTheme.darkCard : const Color(0xFFF8FAFC),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(
+                  color: isDark ? AppTheme.darkBorder : const Color(0xFFE2E8F0),
+                ),
               ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Use gallery import or install a pack',
-              style: GoogleFonts.inter(
-                fontSize: 12,
-                color: AppTheme.getTextColor(context).withValues(alpha: 0.55),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-      itemCount: _stickers.length,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 4,
-        mainAxisSpacing: 8,
-        crossAxisSpacing: 8,
-        childAspectRatio: 1,
-      ),
-      itemBuilder: (context, index) {
-        final sticker = _stickers[index];
-        return GestureDetector(
-          onTap: () => widget.onStickerSelected(sticker),
-          onLongPress: () => _deleteSticker(sticker),
-          child: Semantics(
-            label: 'Sticker ${index + 1}. Long press to delete.',
-            button: true,
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppTheme.getBorderColor(context)),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: Image.file(
-                sticker,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(
+                  color: isDark ? AppTheme.darkBorder : const Color(0xFFE2E8F0),
+                ),
               ),
             ),
           ),
-        );
-      },
+        ),
+        Expanded(
+          child: stickers.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.sticky_note_2_outlined,
+                        size: 44,
+                        color: AppTheme.getTextColor(
+                          context,
+                        ).withValues(alpha: 0.5),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _stickerQuery.trim().isEmpty
+                            ? 'No stickers yet'
+                            : 'No matching sticker found',
+                        style: GoogleFonts.inter(
+                          color: AppTheme.getTextColor(
+                            context,
+                          ).withValues(alpha: 0.75),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Try importing from gallery or pack files.',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: AppTheme.getTextColor(
+                            context,
+                          ).withValues(alpha: 0.55),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              : GridView.builder(
+                  padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+                  itemCount: stickers.length,
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 4,
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                    childAspectRatio: 1,
+                  ),
+                  itemBuilder: (context, index) {
+                    final sticker = stickers[index];
+                    return GestureDetector(
+                      onTap: () => widget.onStickerSelected(sticker),
+                      onLongPress: () => _deleteSticker(sticker),
+                      child: Semantics(
+                        label: 'Sticker ${index + 1}. Long press to delete.',
+                        button: true,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: AppTheme.getBorderColor(context),
+                            ),
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: Image.file(
+                            sticker,
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, __, ___) =>
+                                const Icon(Icons.broken_image),
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
     );
   }
 
   Widget _buildPackList(bool isDark) {
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(12, 2, 12, 12),
-      itemCount: StickerService.availablePacks.length,
+      itemCount: StickerService.availablePacks.length + 1,
       separatorBuilder: (_, __) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
-        final pack = StickerService.availablePacks[index];
+        if (index == 0) {
+          return Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isDark ? AppTheme.darkCard : const Color(0xFFEFF6FF),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isDark ? AppTheme.darkBorder : const Color(0xFFBFDBFE),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.info_outline_rounded,
+                  color: isDark ? Colors.white70 : const Color(0xFF1D4ED8),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'For WhatsApp/Telegram sticker exports, share files to this app or use Import Pack.',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: isDark ? Colors.white70 : const Color(0xFF1E3A8A),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        final pack = StickerService.availablePacks[index - 1];
         final installed = _installedPacks.contains(pack.id);
         final busy = _packActionInProgress == pack.id;
         final previewUrl = pack.previewUrl;

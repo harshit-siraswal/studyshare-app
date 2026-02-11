@@ -18,7 +18,8 @@ class DepartmentAccountScreen extends StatefulWidget {
   });
 
   @override
-  State<DepartmentAccountScreen> createState() => _DepartmentAccountScreenState();
+  State<DepartmentAccountScreen> createState() =>
+      _DepartmentAccountScreenState();
 }
 
 class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
@@ -36,20 +37,21 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
     _loadDepartmentNotices();
     _loadFollowData();
   }
-  
+
   Future<void> _loadFollowData() async {
     final email = _authService.userEmail;
     if (email == null) return;
     try {
       final isFollowing = await _supabaseService.isFollowingDepartment(
-        widget.account.id, 
-        email
+        widget.account.id,
+        email,
+        collegeId: widget.collegeId,
       );
       final count = await _supabaseService.getDepartmentFollowerCount(
         widget.account.id,
-        widget.collegeId
+        widget.collegeId,
       );
-      
+
       if (mounted) {
         setState(() {
           _isFollowing = isFollowing;
@@ -61,31 +63,39 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
       print('Error loading follow data: $e');
     }
   }
-  
+
   Future<void> _toggleFollow() async {
     final email = _authService.userEmail;
     if (email == null) return;
-    
+
     setState(() => _isFollowLoading = true);
-    
+
     try {
       if (_isFollowing) {
-        await _supabaseService.unfollowDepartment(widget.account.id, email);
+        await _supabaseService.unfollowDepartment(
+          widget.account.id,
+          email,
+          collegeId: widget.collegeId,
+        );
         setState(() {
           _isFollowing = false;
           _followerCount--;
         });
       } else {
-        await _supabaseService.followDepartment(widget.account.id, widget.collegeId, email);
+        await _supabaseService.followDepartment(
+          widget.account.id,
+          widget.collegeId,
+          email,
+        );
         setState(() {
           _isFollowing = true;
           _followerCount++;
         });
       }
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
     } finally {
       if (mounted) setState(() => _isFollowLoading = false);
     }
@@ -96,13 +106,14 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
       final allNotices = await _supabaseService.getNotices(
         collegeId: widget.collegeId,
       );
-      
+
       // Filter by department
       final deptNotices = allNotices.where((n) {
-          final dept = n['department']?.toString() ?? n['department_id']?.toString() ?? '';
-          return dept.toLowerCase() == widget.account.id.toLowerCase();
+        final dept =
+            n['department']?.toString() ?? n['department_id']?.toString() ?? '';
+        return dept.toLowerCase() == widget.account.id.toLowerCase();
       }).toList();
-      
+
       setState(() {
         _notices = deptNotices;
         _isLoading = false;
@@ -115,10 +126,14 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final textColor = isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
-    final secondaryColor = isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary;
+    final textColor = isDark
+        ? AppTheme.darkTextPrimary
+        : AppTheme.lightTextPrimary;
+    final secondaryColor = isDark
+        ? AppTheme.darkTextSecondary
+        : AppTheme.lightTextSecondary;
     final bgColor = isDark ? AppTheme.darkBackground : AppTheme.lightBackground;
-    
+
     return Scaffold(
       backgroundColor: bgColor,
       appBar: AppBar(
@@ -138,7 +153,7 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                   Row(
+                  Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       // Avatar
@@ -153,9 +168,9 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
                           child: Text(
                             widget.account.avatarLetter,
                             style: GoogleFonts.inter(
-                              fontSize: 32, 
-                              fontWeight: FontWeight.bold, 
-                              color: Colors.white
+                              fontSize: 32,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
                             ),
                           ),
                         ),
@@ -169,28 +184,51 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
                           child: ElevatedButton(
                             onPressed: _isFollowLoading ? null : _toggleFollow,
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: _isFollowing ? Colors.transparent : (isDark ? Colors.white : Colors.black),
-                              foregroundColor: _isFollowing ? (isDark ? Colors.white : Colors.black) : Colors.white,
+                              backgroundColor: _isFollowing
+                                  ? Colors.transparent
+                                  : (isDark ? Colors.white : Colors.black),
+                              foregroundColor: _isFollowing
+                                  ? (isDark ? Colors.white : Colors.black)
+                                  : Colors.white,
                               elevation: 0,
-                              side: _isFollowing ? BorderSide(color: isDark ? Colors.white30 : Colors.black26) : null,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                              padding: const EdgeInsets.symmetric(horizontal: 20),
+                              side: _isFollowing
+                                  ? BorderSide(
+                                      color: isDark
+                                          ? Colors.white30
+                                          : Colors.black26,
+                                    )
+                                  : null,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 20,
+                              ),
                             ),
-                            child: _isFollowLoading 
-                              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                              : Text(
-                                  _isFollowing ? 'Following' : 'Follow',
-                                  style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 14),
-                                ),
+                            child: _isFollowLoading
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : Text(
+                                    _isFollowing ? 'Following' : 'Follow',
+                                    style: GoogleFonts.inter(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                  ),
                           ),
                         ),
                       ),
                     ],
-                   ),
-                   const SizedBox(height: 16),
-                   
-                   // Name & Handle
-                   Row(
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Name & Handle
+                  Row(
                     children: [
                       Text(
                         widget.account.name,
@@ -201,74 +239,90 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
                         ),
                       ),
                       const SizedBox(width: 4),
-                       if (_isFollowing)
-                         Icon(Icons.verified, size: 20, color: AppTheme.primary),
+                      if (_isFollowing)
+                        Icon(Icons.verified, size: 20, color: AppTheme.primary),
                     ],
-                   ),
-                   Text(
+                  ),
+                  Text(
                     widget.account.handle,
                     style: GoogleFonts.inter(
                       fontSize: 15,
                       color: secondaryColor,
                     ),
-                   ),
-                   const SizedBox(height: 16),
-                   
-                   // Stats
-                   Row(
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Stats
+                  Row(
                     children: [
-                      _buildXStat(_followerCount.toString(), 'Followers', textColor, secondaryColor),
+                      _buildXStat(
+                        _followerCount.toString(),
+                        'Followers',
+                        textColor,
+                        secondaryColor,
+                      ),
                       const SizedBox(width: 16),
-                      _buildXStat('${_notices.length}', 'Notices', textColor, secondaryColor),
+                      _buildXStat(
+                        '${_notices.length}',
+                        'Notices',
+                        textColor,
+                        secondaryColor,
+                      ),
                     ],
-                   ),
-                   const SizedBox(height: 16),
-                   const Divider(height: 1),
+                  ),
+                  const SizedBox(height: 16),
+                  const Divider(height: 1),
                 ],
               ),
             ),
           ),
-            
-            // Notices List
-            if (_isLoading)
-               SliverToBoxAdapter(child: _buildLoadingSkeleton(isDark))
-            else if (_notices.isEmpty)
-               SliverToBoxAdapter(child: _buildEmptyState(isDark, textColor, secondaryColor))
-            else 
-               SliverList(
-                 delegate: SliverChildBuilderDelegate(
-                   (context, index) => NoticeCard(
-                     notice: _notices[index],
-                     account: widget.account,
-                     isDark: isDark,
-                   ),
-                   childCount: _notices.length,
-                 ),
-               ),
-            
-            const SliverToBoxAdapter(child: SizedBox(height: 40)),
+
+          // Notices List
+          if (_isLoading)
+            SliverToBoxAdapter(child: _buildLoadingSkeleton(isDark))
+          else if (_notices.isEmpty)
+            SliverToBoxAdapter(
+              child: _buildEmptyState(isDark, textColor, secondaryColor),
+            )
+          else
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (context, index) => NoticeCard(
+                  notice: _notices[index],
+                  account: widget.account,
+                  collegeId: widget.collegeId,
+                  isDark: isDark,
+                ),
+                childCount: _notices.length,
+              ),
+            ),
+
+          const SliverToBoxAdapter(child: SizedBox(height: 40)),
         ],
       ),
     );
   }
 
-  Widget _buildXStat(String value, String label, Color textColor, Color secondaryColor) {
+  Widget _buildXStat(
+    String value,
+    String label,
+    Color textColor,
+    Color secondaryColor,
+  ) {
     return Row(
       children: [
         Text(
           value,
-          style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: textColor),
+          style: GoogleFonts.inter(
+            fontWeight: FontWeight.bold,
+            color: textColor,
+          ),
         ),
         const SizedBox(width: 4),
-        Text(
-          label,
-          style: GoogleFonts.inter(color: secondaryColor),
-        ),
+        Text(label, style: GoogleFonts.inter(color: secondaryColor)),
       ],
     );
   }
-
-
 
   Widget _buildEmptyState(bool isDark, Color textColor, Color secondaryColor) {
     return Center(
@@ -293,10 +347,7 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
             const SizedBox(height: 4),
             Text(
               'This department hasn\'t posted any notices',
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                color: secondaryColor,
-              ),
+              style: GoogleFonts.inter(fontSize: 13, color: secondaryColor),
             ),
           ],
         ),
@@ -308,20 +359,25 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
-        children: List.generate(3, (index) => Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: Shimmer.fromColors(
-            baseColor: isDark ? AppTheme.darkCard : Colors.grey.shade200,
-            highlightColor: isDark ? AppTheme.darkBorder : Colors.grey.shade100,
-            child: Container(
-              height: 120,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
+        children: List.generate(
+          3,
+          (index) => Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Shimmer.fromColors(
+              baseColor: isDark ? AppTheme.darkCard : Colors.grey.shade200,
+              highlightColor: isDark
+                  ? AppTheme.darkBorder
+                  : Colors.grey.shade100,
+              child: Container(
+                height: 120,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
           ),
-        )),
+        ),
       ),
     );
   }

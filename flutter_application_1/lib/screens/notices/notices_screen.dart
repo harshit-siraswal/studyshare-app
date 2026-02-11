@@ -17,33 +17,77 @@ class NoticesScreen extends StatefulWidget {
   State<NoticesScreen> createState() => _NoticesScreenState();
 }
 
-class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProviderStateMixin {
+class _NoticesScreenState extends State<NoticesScreen>
+    with SingleTickerProviderStateMixin {
   final SupabaseService _supabaseService = SupabaseService();
   final TextEditingController _searchController = TextEditingController();
-  
+
   List<Map<String, dynamic>> _notices = [];
   List<Map<String, dynamic>> _filteredNotices = [];
   bool _isLoading = true;
   String? _selectedDepartment;
-  
+
   // Track if search field is focused
   final FocusNode _searchFocusNode = FocusNode();
-  
+
   late TabController _tabController;
-  
+
   // Department accounts (Twitter-style)
   final List<DepartmentAccount> _departmentAccounts = [
-    DepartmentAccount(id: 'general', name: 'General Notices', handle: '@general', avatarLetter: 'G', color: const Color(0xFF3B82F6)),
-    DepartmentAccount(id: 'cse', name: 'Computer Science', handle: '@cse_dept', avatarLetter: 'CS', color: const Color(0xFF8B5CF6)),
-    DepartmentAccount(id: 'ece', name: 'Electronics & Comm', handle: '@ece_dept', avatarLetter: 'EC', color: const Color(0xFF10B981)),
-    DepartmentAccount(id: 'eee', name: 'Electrical Engg', handle: '@eee_dept', avatarLetter: 'EE', color: const Color(0xFFF59E0B)),
-    DepartmentAccount(id: 'me', name: 'Mechanical Engg', handle: '@mech_dept', avatarLetter: 'ME', color: const Color(0xFFEF4444)),
-    DepartmentAccount(id: 'ce', name: 'Civil Engineering', handle: '@civil_dept', avatarLetter: 'CE', color: const Color(0xFF6366F1)),
-    DepartmentAccount(id: 'it', name: 'Information Tech', handle: '@it_dept', avatarLetter: 'IT', color: const Color(0xFF14B8A6)),
+    DepartmentAccount(
+      id: 'general',
+      name: 'General Notices',
+      handle: '@general',
+      avatarLetter: 'G',
+      color: const Color(0xFF3B82F6),
+    ),
+    DepartmentAccount(
+      id: 'cse',
+      name: 'Computer Science',
+      handle: '@cse_dept',
+      avatarLetter: 'CS',
+      color: const Color(0xFF8B5CF6),
+    ),
+    DepartmentAccount(
+      id: 'ece',
+      name: 'Electronics & Comm',
+      handle: '@ece_dept',
+      avatarLetter: 'EC',
+      color: const Color(0xFF10B981),
+    ),
+    DepartmentAccount(
+      id: 'eee',
+      name: 'Electrical Engg',
+      handle: '@eee_dept',
+      avatarLetter: 'EE',
+      color: const Color(0xFFF59E0B),
+    ),
+    DepartmentAccount(
+      id: 'me',
+      name: 'Mechanical Engg',
+      handle: '@mech_dept',
+      avatarLetter: 'ME',
+      color: const Color(0xFFEF4444),
+    ),
+    DepartmentAccount(
+      id: 'ce',
+      name: 'Civil Engineering',
+      handle: '@civil_dept',
+      avatarLetter: 'CE',
+      color: const Color(0xFF6366F1),
+    ),
+    DepartmentAccount(
+      id: 'it',
+      name: 'Information Tech',
+      handle: '@it_dept',
+      avatarLetter: 'IT',
+      color: const Color(0xFF14B8A6),
+    ),
   ];
 
   DateTime? _startDate;
   DateTime? _endDate;
+  final Map<String, int> _departmentFollowerCounts = {};
 
   Future<void> _showDateFilter() async {
     final picked = await showDateRangePicker(
@@ -81,7 +125,7 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
   void _showNoticeSearch(bool isDark) {
     final searchController = TextEditingController();
     List<Map<String, dynamic>> searchResults = [];
-    
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -100,14 +144,18 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
             setModalState(() {
               searchResults = _filteredNotices.where((notice) {
                 final title = (notice['title'] as String? ?? '').toLowerCase();
-                final content = (notice['content'] as String? ?? '').toLowerCase();
-                return title.contains(lowercaseQuery) || content.contains(lowercaseQuery);
+                final content = (notice['content'] as String? ?? '')
+                    .toLowerCase();
+                return title.contains(lowercaseQuery) ||
+                    content.contains(lowercaseQuery);
               }).toList();
             });
           }
 
           return Padding(
-            padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+            padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom,
+            ),
             child: Container(
               height: MediaQuery.of(context).size.height * 0.75,
               padding: const EdgeInsets.all(20),
@@ -130,16 +178,26 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
                     decoration: InputDecoration(
                       hintText: 'Search notices...',
                       hintStyle: GoogleFonts.inter(color: Colors.grey),
-                      prefixIcon: Icon(Icons.search, color: isDark ? Colors.white54 : Colors.grey),
+                      prefixIcon: Icon(
+                        Icons.search,
+                        color: isDark ? Colors.white54 : Colors.grey,
+                      ),
                       filled: true,
-                      fillColor: isDark ? const Color(0xFF2C2C2E) : Colors.grey.shade100,
+                      fillColor: isDark
+                          ? const Color(0xFF2C2C2E)
+                          : Colors.grey.shade100,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: BorderSide.none,
                       ),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
                     ),
-                    style: GoogleFonts.inter(color: isDark ? Colors.white : Colors.black),
+                    style: GoogleFonts.inter(
+                      color: isDark ? Colors.white : Colors.black,
+                    ),
                     onChanged: performSearch,
                   ),
                   const SizedBox(height: 16),
@@ -158,7 +216,8 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
                             itemCount: searchResults.length,
                             itemBuilder: (context, index) {
                               final notice = searchResults[index];
-                              final deptId = notice['department'] as String? ?? 'general';
+                              final deptId =
+                                  notice['department'] as String? ?? 'general';
                               final account = _departmentAccounts.firstWhere(
                                 (a) => a.id == deptId,
                                 orElse: () => _departmentAccounts.first,
@@ -168,6 +227,7 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
                                 child: NoticeCard(
                                   notice: notice,
                                   account: account,
+                                  collegeId: widget.collegeId,
                                   isDark: isDark,
                                 ),
                               );
@@ -191,14 +251,41 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
     _tabController = TabController(length: 2, vsync: this);
     _loadNotices();
     _loadFollowedDepartments();
+    _loadDepartmentFollowerCounts();
   }
-  
+
+  Future<void> _loadDepartmentFollowerCounts() async {
+    try {
+      final entries = await Future.wait(
+        _departmentAccounts.map((account) async {
+          final count = await _supabaseService.getDepartmentFollowerCount(
+            account.id,
+            widget.collegeId,
+          );
+          return MapEntry(account.id, count);
+        }),
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _departmentFollowerCounts
+          ..clear()
+          ..addEntries(entries);
+      });
+    } catch (e) {
+      debugPrint('Error loading department follower counts: $e');
+    }
+  }
+
   Future<void> _loadFollowedDepartments() async {
     final email = _supabaseService.currentUserEmail;
     if (email == null) return;
-    
+
     try {
-      final followedIds = await _supabaseService.getFollowedDepartmentIds(widget.collegeId, email);
+      final followedIds = await _supabaseService.getFollowedDepartmentIds(
+        widget.collegeId,
+        email,
+      );
       if (mounted) {
         setState(() {
           _followedDepartments = followedIds.toSet();
@@ -212,26 +299,42 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
   Future<void> _toggleDepartmentFollow(String deptId) async {
     final email = _supabaseService.currentUserEmail;
     if (email == null) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please log in to follow')));
-        return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please log in to follow')));
+      return;
     }
 
     final isFollowing = _followedDepartments.contains(deptId);
-    
+
     // Optimistic update
     setState(() {
       if (isFollowing) {
         _followedDepartments.remove(deptId);
+        _departmentFollowerCounts[deptId] =
+            ((_departmentFollowerCounts[deptId] ?? 1) - 1)
+                .clamp(0, 1 << 20)
+                .toInt();
       } else {
         _followedDepartments.add(deptId);
+        _departmentFollowerCounts[deptId] =
+            (_departmentFollowerCounts[deptId] ?? 0) + 1;
       }
     });
 
     try {
       if (isFollowing) {
-        await _supabaseService.unfollowDepartment(deptId, email);
+        await _supabaseService.unfollowDepartment(
+          deptId,
+          email,
+          collegeId: widget.collegeId,
+        );
       } else {
-        await _supabaseService.followDepartment(deptId, widget.collegeId, email);
+        await _supabaseService.followDepartment(
+          deptId,
+          widget.collegeId,
+          email,
+        );
       }
     } catch (e) {
       // Revert on error
@@ -239,23 +342,32 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
         setState(() {
           if (isFollowing) {
             _followedDepartments.add(deptId);
+            _departmentFollowerCounts[deptId] =
+                (_departmentFollowerCounts[deptId] ?? 0) + 1;
           } else {
             _followedDepartments.remove(deptId);
+            _departmentFollowerCounts[deptId] =
+                ((_departmentFollowerCounts[deptId] ?? 1) - 1)
+                    .clamp(0, 1 << 20)
+                    .toInt();
           }
         });
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to update follow status')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to update follow status')),
+        );
       }
     }
   }
-
 
   Future<void> _loadNotices() async {
     if (!mounted) return;
     setState(() => _isLoading = true);
 
     try {
-      final notices = await _supabaseService.getNotices(collegeId: widget.collegeId);
-      
+      final notices = await _supabaseService.getNotices(
+        collegeId: widget.collegeId,
+      );
+
       // Filter by date range if set
       List<Map<String, dynamic>> filtered = notices;
       if (_startDate != null && _endDate != null) {
@@ -265,10 +377,10 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
           final date = DateTime.tryParse(createdAt.toString());
           if (date == null) return true;
           return date.isAfter(_startDate!.subtract(const Duration(days: 1))) &&
-                 date.isBefore(_endDate!.add(const Duration(days: 1)));
+              date.isBefore(_endDate!.add(const Duration(days: 1)));
         }).toList();
       }
-      
+
       if (mounted) {
         setState(() {
           _notices = notices;
@@ -324,15 +436,27 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
                               'Latest updates from your departments',
                               style: GoogleFonts.inter(
                                 fontSize: 12,
-                                color: isDark ? AppTheme.darkTextMuted : AppTheme.lightTextMuted,
+                                color: isDark
+                                    ? AppTheme.darkTextMuted
+                                    : AppTheme.lightTextMuted,
                               ),
                             ),
                           ],
                         ),
                       ),
                       IconButton(
-                        icon: Icon(Icons.calendar_today_rounded, color: isDark ? Colors.white : Colors.black),
+                        icon: Icon(
+                          Icons.calendar_today_rounded,
+                          color: isDark ? Colors.white : Colors.black,
+                        ),
                         onPressed: _showDateFilter,
+                      ),
+                      IconButton(
+                        icon: Icon(
+                          Icons.search_rounded,
+                          color: isDark ? Colors.white : Colors.black,
+                        ),
+                        onPressed: () => _showNoticeSearch(isDark),
                       ),
                     ],
                   ),
@@ -341,9 +465,14 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
                     onTap: () => _showNoticeSearch(isDark),
                     borderRadius: BorderRadius.circular(16),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
                       decoration: BoxDecoration(
-                        color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+                        color: isDark
+                            ? Colors.white10
+                            : Colors.black.withValues(alpha: 0.05),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
                           color: isDark ? Colors.white12 : Colors.black12,
@@ -351,7 +480,11 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.search_rounded, size: 18, color: isDark ? Colors.white70 : Colors.black54),
+                          Icon(
+                            Icons.search_rounded,
+                            size: 18,
+                            color: isDark ? Colors.white70 : Colors.black54,
+                          ),
                           const SizedBox(width: 8),
                           Text(
                             'Search notices...',
@@ -367,7 +500,7 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
                 ],
               ),
             ),
-            
+
             // Tabs
             TabBar(
               controller: _tabController,
@@ -380,7 +513,7 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
               ],
             ),
             _buildDateFilterHeader(isDark),
-            
+
             // Content
             Expanded(
               child: TabBarView(
@@ -389,44 +522,48 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
                   // Tab 1: Notices List
                   RefreshIndicator(
                     onRefresh: _loadNotices,
-                    child: _isLoading 
-                      ? _buildLoadingSkeleton(isDark)
-                      : _filteredNotices.isEmpty 
-                          ? _buildEmptyState(isDark)
-                          : ListView.builder(
-                              padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
-                              itemCount: _filteredNotices.length,
-                              itemBuilder: (context, index) {
-                                final notice = _filteredNotices[index];
-                                // Attempt to map to department, fallback to General
-                                // Depending on notice schema, it might have 'department' key
-                                final deptId = notice['department'] as String? ?? 'general';
-                                final account = _departmentAccounts.firstWhere(
-                                  (a) => a.id == deptId,
-                                  orElse: () => _departmentAccounts.first, 
-                                );
+                    child: _isLoading
+                        ? _buildLoadingSkeleton(isDark)
+                        : _filteredNotices.isEmpty
+                        ? _buildEmptyState(isDark)
+                        : ListView.builder(
+                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+                            itemCount: _filteredNotices.length,
+                            itemBuilder: (context, index) {
+                              final notice = _filteredNotices[index];
+                              // Attempt to map to department, fallback to General
+                              // Depending on notice schema, it might have 'department' key
+                              final deptId =
+                                  notice['department'] as String? ?? 'general';
+                              final account = _departmentAccounts.firstWhere(
+                                (a) => a.id == deptId,
+                                orElse: () => _departmentAccounts.first,
+                              );
 
-                                return Padding(
-                                  padding: const EdgeInsets.only(bottom: 16),
-                                  child: NoticeCard(
-                                    notice: notice,
-                                    account: account,
-                                    isDark: isDark,
-                                  ),
-                                );
-                              },
-                            ),
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 16),
+                                child: NoticeCard(
+                                  notice: notice,
+                                  account: account,
+                                  collegeId: widget.collegeId,
+                                  isDark: isDark,
+                                ),
+                              );
+                            },
+                          ),
                   ),
-                  
+
                   // Tab 2: Departments List
                   ListView.builder(
                     padding: const EdgeInsets.only(top: 12, bottom: 120),
                     itemCount: _departmentAccounts.length,
                     itemBuilder: (context, index) {
                       final account = _departmentAccounts[index];
-                      // We need notice count - mocked or fetched?
-                      // For now mock or 0
-                      return _buildDepartmentAccountTile(account, 0, isDark, index);
+                      return _buildDepartmentAccountTile(
+                        account,
+                        isDark,
+                        index,
+                      );
                     },
                   ),
                 ],
@@ -438,9 +575,13 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
     );
   }
 
-
-  Widget _buildDepartmentAccountTile(DepartmentAccount account, int noticeCount, bool isDark, int index) {
+  Widget _buildDepartmentAccountTile(
+    DepartmentAccount account,
+    bool isDark,
+    int index,
+  ) {
     final isFollowing = _followedDepartments.contains(account.id);
+    final followerCount = _departmentFollowerCounts[account.id] ?? 0;
 
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
@@ -461,7 +602,7 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
           await Navigator.push(
             context,
             MaterialPageRoute(
-               builder: (context) => dept_screen.DepartmentAccountScreen(
+              builder: (context) => dept_screen.DepartmentAccountScreen(
                 account: DepartmentAccount(
                   id: account.id,
                   name: account.name,
@@ -499,7 +640,7 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
                 ),
               ),
               const SizedBox(width: 12),
-              
+
               // Info
               Expanded(
                 child: Column(
@@ -513,7 +654,9 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
                             style: GoogleFonts.inter(
                               fontWeight: FontWeight.w600,
                               fontSize: 15,
-                              color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                              color: isDark
+                                  ? AppTheme.darkTextPrimary
+                                  : AppTheme.lightTextPrimary,
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -533,17 +676,27 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
                           account.handle,
                           style: GoogleFonts.inter(
                             fontSize: 13,
-                            color: isDark ? AppTheme.darkTextMuted : AppTheme.lightTextMuted,
+                            color: isDark
+                                ? AppTheme.darkTextMuted
+                                : AppTheme.lightTextMuted,
                           ),
                         ),
                         const SizedBox(width: 8),
-                        Icon(Icons.people_outline_rounded, size: 14, color: isDark ? AppTheme.darkTextMuted : AppTheme.lightTextMuted),
+                        Icon(
+                          Icons.people_outline_rounded,
+                          size: 14,
+                          color: isDark
+                              ? AppTheme.darkTextMuted
+                              : AppTheme.lightTextMuted,
+                        ),
                         const SizedBox(width: 2),
                         Text(
-                          '${noticeCount * 12} followers', 
+                          '$followerCount followers',
                           style: GoogleFonts.inter(
                             fontSize: 12,
-                            color: isDark ? AppTheme.darkTextMuted : AppTheme.lightTextMuted,
+                            color: isDark
+                                ? AppTheme.darkTextMuted
+                                : AppTheme.lightTextMuted,
                           ),
                         ),
                       ],
@@ -551,15 +704,20 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
                   ],
                 ),
               ),
-              
+
               // Follow button
               GestureDetector(
                 onTap: () => _toggleDepartmentFollow(account.id),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: isFollowing ? Colors.transparent : account.color,
-                    border: isFollowing ? Border.all(color: account.color, width: 1.5) : null,
+                    border: isFollowing
+                        ? Border.all(color: account.color, width: 1.5)
+                        : null,
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
@@ -597,7 +755,9 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
             padding: const EdgeInsets.only(bottom: 16),
             child: Shimmer.fromColors(
               baseColor: isDark ? const Color(0xFF2C2C2C) : Colors.grey[300]!,
-              highlightColor: isDark ? const Color(0xFF3D3D3D) : Colors.grey[100]!,
+              highlightColor: isDark
+                  ? const Color(0xFF3D3D3D)
+                  : Colors.grey[100]!,
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -614,11 +774,7 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Container(
-                          width: 120,
-                          height: 12,
-                          color: Colors.white,
-                        ),
+                        Container(width: 120, height: 12, color: Colors.white),
                         const SizedBox(height: 8),
                         Container(
                           width: double.infinity,
@@ -640,8 +796,6 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
     );
   }
 
-
-
   void _clearDateFilter() {
     setState(() {
       _startDate = null;
@@ -653,7 +807,8 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
   Widget _buildDateFilterHeader(bool isDark) {
     if (_startDate == null || _endDate == null) return const SizedBox.shrink();
 
-    final startStr = "${_startDate!.day}/${_startDate!.month}/${_startDate!.year}";
+    final startStr =
+        "${_startDate!.day}/${_startDate!.month}/${_startDate!.year}";
     final endStr = "${_endDate!.day}/${_endDate!.month}/${_endDate!.year}";
 
     return Container(
@@ -679,21 +834,22 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
               style: GoogleFonts.inter(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
-                color: Colors.redAccent
+                color: Colors.redAccent,
               ),
             ),
-          )
+          ),
         ],
       ),
     );
   }
+
   Widget _buildEmptyState(bool isDark) {
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 64),
       children: [
-         Center(
-         child: Column(
+        Center(
+          child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Image.asset(
@@ -704,18 +860,20 @@ class _NoticesScreenState extends State<NoticesScreen> with SingleTickerProvider
               ),
               const SizedBox(height: 16),
               Text(
-                'No notices found', 
+                'No notices found',
                 style: GoogleFonts.inter(
                   fontSize: 18,
                   fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white : Colors.black
-                )
+                  color: isDark ? Colors.white : Colors.black,
+                ),
               ),
               const SizedBox(height: 8),
               if (_startDate != null)
                 Text(
                   'Try clearing the date filter',
-                  style: GoogleFonts.inter(color: isDark ? Colors.white54 : Colors.grey),
+                  style: GoogleFonts.inter(
+                    color: isDark ? Colors.white54 : Colors.grey,
+                  ),
                 ),
             ],
           ),

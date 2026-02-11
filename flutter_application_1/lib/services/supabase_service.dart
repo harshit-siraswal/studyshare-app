@@ -32,6 +32,59 @@ class SupabaseService {
 
   String? get currentUserEmail => _client.auth.currentUser?.email;
 
+  String _normalizeEmail(String? email) => email?.trim().toLowerCase() ?? '';
+
+  bool _isDuplicateKeyError(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('duplicate key') || message.contains('23505');
+  }
+
+  bool _isMissingColumnError(Object error, String column) {
+    final message = error.toString().toLowerCase();
+    return message.contains('column') &&
+        message.contains(column.toLowerCase()) &&
+        message.contains('does not exist');
+  }
+
+  Map<String, dynamic> _normalizeSocialUser(Map<String, dynamic> raw) {
+    final email = (raw['email'] ?? raw['user_email'] ?? '').toString();
+    final displayName =
+        (raw['display_name'] ??
+                raw['name'] ??
+                raw['user_name'] ??
+                (email.isNotEmpty ? email.split('@').first : 'User'))
+            .toString();
+    final username =
+        (raw['username'] ?? (email.isNotEmpty ? email.split('@').first : null))
+            ?.toString();
+    final photoUrl =
+        (raw['profile_photo_url'] ?? raw['photo_url'] ?? raw['avatar_url'])
+            ?.toString();
+
+    return {
+      'email': email,
+      'display_name': displayName,
+      'profile_photo_url': photoUrl,
+      'photo_url': photoUrl,
+      'username': username,
+    };
+  }
+
+  List<Map<String, dynamic>> _normalizeSocialUsers(dynamic rows) {
+    if (rows is! List) return [];
+    final normalized = rows
+        .whereType<Map>()
+        .map((entry) => _normalizeSocialUser(Map<String, dynamic>.from(entry)))
+        .where((entry) => (entry['email'] ?? '').toString().isNotEmpty)
+        .toList();
+
+    final deduped = <String, Map<String, dynamic>>{};
+    for (final user in normalized) {
+      deduped[_normalizeEmail(user['email']?.toString())] = user;
+    }
+    return deduped.values.toList();
+  }
+
   Future<List<String>> _resolveUserIdentifiers(String email) async {
     try {
       final user = await _client
@@ -394,6 +447,30 @@ class SupabaseService {
     // Delegate to leaveRoom; RLS enforces admin-only removal of other users
     await leaveRoom(roomId, userEmail);
   }
+
+  /// Update a room member role (admin/member).
+  Future<void> updateRoomMemberRole({
+    required String roomId,
+    required String userEmail,
+    required String role,
+  }) async {
+    final normalizedRole = role.trim().toLowerCase();
+    if (normalizedRole != 'admin' && normalizedRole != 'member') {
+      throw Exception('Invalid role: $role');
+    }
+
+    try {
+      await _client
+          .from('room_members')
+          .update({'role': normalizedRole})
+          .eq('room_id', roomId)
+          .eq('user_email', userEmail);
+    } catch (e) {
+      debugPrint('Error updating room member role: $e');
+      rethrow;
+    }
+  }
+
   // Join a room (Via RPC to enforce limits)
   Future<void> joinRoom(String roomId) async {
     try {
@@ -635,13 +712,17 @@ class SupabaseService {
   // ============ SOCIAL LISTS ============
 
   Future<List<Map<String, dynamic>>> getFollowers(String userEmail) async {
+    final normalizedTarget = _normalizeEmail(userEmail);
+    final normalizedCurrent = _normalizeEmail(currentUserEmail);
+
     try {
-      if (userEmail == currentUserEmail) {
+      if (normalizedTarget.isNotEmpty &&
+          normalizedTarget == normalizedCurrent) {
         final res = await _api.getFollowers();
-        return List<Map<String, dynamic>>.from(res['followers'] ?? []);
+        return _normalizeSocialUsers(res['followers']);
       }
 
-      final identifiers = await _resolveUserIdentifiers(userEmail);
+      final identifiers = await _resolveUserIdentifiers(normalizedTarget);
       if (identifiers.isEmpty) return [];
 
       List<String> followerIds = [];
@@ -666,17 +747,7 @@ class SupabaseService {
       if (followerIds.isEmpty) return [];
 
       final usersResponse = await _fetchUsersByIds(followerIds);
-
-      return usersResponse.map((u) {
-        final photoUrl = u['profile_photo_url'] ?? u['photo_url'];
-        return {
-          'email': u['email'],
-          'display_name': u['display_name'],
-          'profile_photo_url': photoUrl,
-          'photo_url': photoUrl,
-          'username': u['username'],
-        };
-      }).toList();
+      return _normalizeSocialUsers(usersResponse);
     } catch (e) {
       debugPrint('Error getting followers: $e');
     }
@@ -689,7 +760,7 @@ class SupabaseService {
         final response = await _client
             .from('follows')
             .select('follower_email')
-            .eq('following_email', userEmail)
+            .eq('following_email', normalizedTarget)
             .eq('status', 'accepted');
 
         followerEmails = (response as List)
@@ -700,7 +771,7 @@ class SupabaseService {
         final response = await _client
             .from('follows')
             .select('follower_email')
-            .eq('following_email', userEmail);
+            .eq('following_email', normalizedTarget);
 
         followerEmails = (response as List)
             .map((r) => r['follower_email'] as String?)
@@ -715,16 +786,7 @@ class SupabaseService {
           .select('email, display_name, profile_photo_url, username, photo_url')
           .inFilter('email', followerEmails);
 
-      return (usersResponse as List).map((u) {
-        final photoUrl = u['profile_photo_url'] ?? u['photo_url'];
-        return {
-          'email': u['email'],
-          'display_name': u['display_name'],
-          'profile_photo_url': photoUrl,
-          'photo_url': photoUrl,
-          'username': u['username'],
-        };
-      }).toList();
+      return _normalizeSocialUsers(usersResponse);
     } catch (e) {
       debugPrint('Error getting followers (email fallback): $e');
       return [];
@@ -732,13 +794,17 @@ class SupabaseService {
   }
 
   Future<List<Map<String, dynamic>>> getFollowing(String userEmail) async {
+    final normalizedTarget = _normalizeEmail(userEmail);
+    final normalizedCurrent = _normalizeEmail(currentUserEmail);
+
     try {
-      if (userEmail == currentUserEmail) {
+      if (normalizedTarget.isNotEmpty &&
+          normalizedTarget == normalizedCurrent) {
         final res = await _api.getFollowing();
-        return List<Map<String, dynamic>>.from(res['following'] ?? []);
+        return _normalizeSocialUsers(res['following']);
       }
 
-      final identifiers = await _resolveUserIdentifiers(userEmail);
+      final identifiers = await _resolveUserIdentifiers(normalizedTarget);
       if (identifiers.isEmpty) return [];
 
       List<String> followingIds = [];
@@ -763,17 +829,7 @@ class SupabaseService {
       if (followingIds.isEmpty) return [];
 
       final usersResponse = await _fetchUsersByIds(followingIds);
-
-      return usersResponse.map((u) {
-        final photoUrl = u['profile_photo_url'] ?? u['photo_url'];
-        return {
-          'email': u['email'],
-          'display_name': u['display_name'],
-          'profile_photo_url': photoUrl,
-          'photo_url': photoUrl,
-          'username': u['username'],
-        };
-      }).toList();
+      return _normalizeSocialUsers(usersResponse);
     } catch (e) {
       debugPrint('Error getting following: $e');
     }
@@ -786,7 +842,7 @@ class SupabaseService {
         final response = await _client
             .from('follows')
             .select('following_email')
-            .eq('follower_email', userEmail)
+            .eq('follower_email', normalizedTarget)
             .eq('status', 'accepted');
 
         followingEmails = (response as List)
@@ -797,7 +853,7 @@ class SupabaseService {
         final response = await _client
             .from('follows')
             .select('following_email')
-            .eq('follower_email', userEmail);
+            .eq('follower_email', normalizedTarget);
 
         followingEmails = (response as List)
             .map((r) => r['following_email'] as String?)
@@ -812,16 +868,7 @@ class SupabaseService {
           .select('email, display_name, profile_photo_url, username, photo_url')
           .inFilter('email', followingEmails);
 
-      return (usersResponse as List).map((u) {
-        final photoUrl = u['profile_photo_url'] ?? u['photo_url'];
-        return {
-          'email': u['email'],
-          'display_name': u['display_name'],
-          'profile_photo_url': photoUrl,
-          'photo_url': photoUrl,
-          'username': u['username'],
-        };
-      }).toList();
+      return _normalizeSocialUsers(usersResponse);
     } catch (e) {
       debugPrint('Error getting following (email fallback): $e');
       return [];
@@ -1453,6 +1500,7 @@ class SupabaseService {
       rethrow;
     }
   }
+
   /// Vote on a post
   Future<void> votePost(String postId, String userEmail, int direction) async {
     try {
@@ -1510,11 +1558,8 @@ class SupabaseService {
       final response = await _client
           .from('saved_posts')
           .select('id')
-          .eq(
-            'post_id',
-            postId,
-          ) // Assuming 'post_id' is the column name for message ID in saved_posts
-          .eq('user_email', userEmail)
+          .eq('message_id', postId)
+          .eq('user_email', _normalizeEmail(userEmail))
           .maybeSingle();
       return response != null;
     } catch (e) {
@@ -1523,8 +1568,8 @@ class SupabaseService {
         final response = await _client
             .from('saved_posts')
             .select('id')
-            .eq('message_id', postId)
-            .eq('user_email', userEmail)
+            .eq('post_id', postId)
+            .eq('user_email', _normalizeEmail(userEmail))
             .maybeSingle();
         return response != null;
       } catch (e2) {
@@ -1562,44 +1607,125 @@ class SupabaseService {
   /// Get all saved post IDs for a user (Batch Optimization)
   Future<Set<String>> getSavedPostIds(String userEmail) async {
     try {
+      final normalizedEmail = _normalizeEmail(userEmail);
       final response = await _client
           .from('saved_posts')
-          .select('post_id')
-          .eq('user_email', userEmail);
+          .select('message_id')
+          .eq('user_email', normalizedEmail);
 
       return (response as List)
-          .where((e) => e['post_id'] != null)
-          .map((e) => e['post_id'].toString())
+          .where((e) => e['message_id'] != null)
+          .map((e) => e['message_id'].toString())
           .toSet();
     } catch (e) {
-      debugPrint('Error fetching saved post IDs: $e');
-      return {};
+      try {
+        final normalizedEmail = _normalizeEmail(userEmail);
+        final fallback = await _client
+            .from('saved_posts')
+            .select('post_id')
+            .eq('user_email', normalizedEmail);
+        return (fallback as List)
+            .where((e) => e['post_id'] != null)
+            .map((e) => e['post_id'].toString())
+            .toSet();
+      } catch (fallbackError) {
+        debugPrint('Error fetching saved post IDs: $e | $fallbackError');
+        return {};
+      }
     }
   }
 
   /// Get all saved posts for a user
   Future<List<Map<String, dynamic>>> getSavedPosts(String userEmail) async {
     try {
-      final response = await _client
+      final normalizedEmail = _normalizeEmail(userEmail);
+      final savedRows = await _client
           .from('saved_posts')
-          .select(
-            'message_id, room_messages(*, comment_count:room_post_comments(count))',
-          )
-          .eq('user_email', userEmail)
+          .select('message_id, room_id, created_at')
+          .eq('user_email', normalizedEmail)
           .order('created_at', ascending: false);
 
-      return (response as List)
-          .where((row) => row['room_messages'] != null)
-          .map((row) {
-            final data = Map<String, dynamic>.from(row['room_messages']);
-            // Fix count format
-            data['comment_count'] = _normalizeCount(data['comment_count']);
-            return data;
-          })
+      final rows = List<Map<String, dynamic>>.from(savedRows);
+      final messageIds = rows
+          .map((row) => row['message_id']?.toString())
+          .where((id) => id != null && id.isNotEmpty)
+          .cast<String>()
           .toList();
+      if (messageIds.isEmpty) return [];
+
+      final messageResponse = await _client
+          .from('room_messages')
+          .select('*, comment_count:room_post_comments(count)')
+          .inFilter('id', messageIds);
+
+      final messagesById = <String, Map<String, dynamic>>{};
+      for (final row in List<Map<String, dynamic>>.from(messageResponse)) {
+        final id = row['id']?.toString();
+        if (id == null || id.isEmpty) continue;
+        row['comment_count'] = _normalizeCount(row['comment_count']);
+        messagesById[id] = row;
+      }
+
+      final ordered = <Map<String, dynamic>>[];
+      for (final saved in rows) {
+        final id = saved['message_id']?.toString();
+        if (id == null || id.isEmpty) continue;
+        final msg = messagesById[id];
+        if (msg == null) continue;
+        ordered.add({
+          ...msg,
+          '_saved_at': saved['created_at'],
+          '_saved_room_id': saved['room_id'],
+        });
+      }
+
+      return ordered;
     } catch (e) {
-      debugPrint('Error fetching saved posts: $e');
-      return [];
+      try {
+        final normalizedEmail = _normalizeEmail(userEmail);
+        final legacyRows = await _client
+            .from('saved_posts')
+            .select('post_id, room_id, created_at')
+            .eq('user_email', normalizedEmail)
+            .order('created_at', ascending: false);
+
+        final rows = List<Map<String, dynamic>>.from(legacyRows);
+        final postIds = rows
+            .map((row) => row['post_id']?.toString())
+            .where((id) => id != null && id.isNotEmpty)
+            .cast<String>()
+            .toList();
+        if (postIds.isEmpty) return [];
+
+        final messageResponse = await _client
+            .from('room_messages')
+            .select('*, comment_count:room_post_comments(count)')
+            .inFilter('id', postIds);
+        final messagesById = <String, Map<String, dynamic>>{};
+        for (final row in List<Map<String, dynamic>>.from(messageResponse)) {
+          final id = row['id']?.toString();
+          if (id == null || id.isEmpty) continue;
+          row['comment_count'] = _normalizeCount(row['comment_count']);
+          messagesById[id] = row;
+        }
+
+        final ordered = <Map<String, dynamic>>[];
+        for (final saved in rows) {
+          final id = saved['post_id']?.toString();
+          if (id == null || id.isEmpty) continue;
+          final msg = messagesById[id];
+          if (msg == null) continue;
+          ordered.add({
+            ...msg,
+            '_saved_at': saved['created_at'],
+            '_saved_room_id': saved['room_id'],
+          });
+        }
+        return ordered;
+      } catch (fallbackError) {
+        debugPrint('Error fetching saved posts: $e | $fallbackError');
+        return [];
+      }
     }
   }
 
@@ -1644,49 +1770,136 @@ class SupabaseService {
     String collegeId,
     String userEmail,
   ) async {
-    try {
-      await _client.from('department_followers').insert({
+    final normalizedEmail = _normalizeEmail(userEmail);
+    final payloads = <Map<String, dynamic>>[
+      {
         'department_id': departmentId,
         'college_id': collegeId,
-        'user_email': userEmail,
-        'followed_at': DateTime.now().toIso8601String(),
-      });
-    } catch (e) {
-      debugPrint('Error following department: $e');
-      rethrow;
+        'follower_email': normalizedEmail,
+      },
+      {'department_id': departmentId, 'follower_email': normalizedEmail},
+      {
+        'department_id': departmentId,
+        'college_id': collegeId,
+        'user_email': normalizedEmail,
+      },
+      {'department_id': departmentId, 'user_email': normalizedEmail},
+    ];
+
+    Object? lastError;
+    for (final payload in payloads) {
+      try {
+        await _client.from('department_followers').insert(payload);
+        return;
+      } catch (e) {
+        if (_isDuplicateKeyError(e)) return;
+        lastError = e;
+        final schemaMismatch =
+            _isMissingColumnError(e, 'follower_email') ||
+            _isMissingColumnError(e, 'user_email') ||
+            _isMissingColumnError(e, 'college_id');
+        if (!schemaMismatch) {
+          debugPrint('Error following department: $e');
+          rethrow;
+        }
+      }
     }
+
+    debugPrint('Error following department: $lastError');
+    if (lastError != null) throw lastError;
   }
 
   /// Unfollow a department
-  Future<void> unfollowDepartment(String departmentId, String userEmail) async {
-    try {
-      await _client
-          .from('department_followers')
-          .delete()
-          .eq('department_id', departmentId)
-          .eq('user_email', userEmail);
-    } catch (e) {
-      debugPrint('Error unfollowing department: $e');
-      rethrow;
+  Future<void> unfollowDepartment(
+    String departmentId,
+    String userEmail, {
+    String? collegeId,
+  }) async {
+    final normalizedEmail = _normalizeEmail(userEmail);
+    final attempts = <Map<String, dynamic>>[
+      {'emailColumn': 'follower_email', 'useCollegeFilter': true},
+      {'emailColumn': 'follower_email', 'useCollegeFilter': false},
+      {'emailColumn': 'user_email', 'useCollegeFilter': true},
+      {'emailColumn': 'user_email', 'useCollegeFilter': false},
+    ];
+
+    Object? lastError;
+    for (final attempt in attempts) {
+      final emailColumn = attempt['emailColumn'] as String;
+      final useCollegeFilter = attempt['useCollegeFilter'] == true;
+      try {
+        var query = _client
+            .from('department_followers')
+            .delete()
+            .eq('department_id', departmentId)
+            .eq(emailColumn, normalizedEmail);
+        if (useCollegeFilter &&
+            collegeId != null &&
+            collegeId.trim().isNotEmpty) {
+          query = query.eq('college_id', collegeId);
+        }
+        await query;
+        return;
+      } catch (e) {
+        lastError = e;
+        final schemaMismatch =
+            _isMissingColumnError(e, emailColumn) ||
+            (useCollegeFilter && _isMissingColumnError(e, 'college_id'));
+        if (!schemaMismatch) {
+          debugPrint('Error unfollowing department: $e');
+          rethrow;
+        }
+      }
+    }
+
+    debugPrint('Error unfollowing department: $lastError');
+    if (lastError != null) {
+      throw lastError;
     }
   }
 
   /// Check if following department
   Future<bool> isFollowingDepartment(
     String departmentId,
-    String userEmail,
-  ) async {
-    try {
-      final response = await _client
-          .from('department_followers')
-          .select('id')
-          .eq('department_id', departmentId)
-          .eq('user_email', userEmail)
-          .maybeSingle();
-      return response != null;
-    } catch (e) {
-      return false;
+    String userEmail, {
+    String? collegeId,
+  }) async {
+    final normalizedEmail = _normalizeEmail(userEmail);
+    final attempts = <Map<String, dynamic>>[
+      {'emailColumn': 'follower_email', 'useCollegeFilter': true},
+      {'emailColumn': 'follower_email', 'useCollegeFilter': false},
+      {'emailColumn': 'user_email', 'useCollegeFilter': true},
+      {'emailColumn': 'user_email', 'useCollegeFilter': false},
+    ];
+
+    for (final attempt in attempts) {
+      final emailColumn = attempt['emailColumn'] as String;
+      final useCollegeFilter = attempt['useCollegeFilter'] == true;
+      try {
+        var query = _client
+            .from('department_followers')
+            .select('id')
+            .eq('department_id', departmentId)
+            .eq(emailColumn, normalizedEmail);
+        if (useCollegeFilter &&
+            collegeId != null &&
+            collegeId.trim().isNotEmpty) {
+          query = query.eq('college_id', collegeId);
+        }
+        final response = await query.maybeSingle();
+        return response != null;
+      } catch (e) {
+        final schemaMismatch =
+            _isMissingColumnError(e, emailColumn) ||
+            (useCollegeFilter && _isMissingColumnError(e, 'college_id'));
+        if (!schemaMismatch) {
+          debugPrint('Error checking department follow: $e');
+          return false;
+        }
+      }
     }
+
+    return false;
   }
 
   /// Get department follower count
@@ -1695,13 +1908,30 @@ class SupabaseService {
     String collegeId,
   ) async {
     try {
-      final response = await _client
+      var query = _client
           .from('department_followers')
           .count(CountOption.exact)
-          .eq('department_id', departmentId)
-          .eq('college_id', collegeId);
+          .eq('department_id', departmentId);
+      if (collegeId.trim().isNotEmpty) {
+        query = query.eq('college_id', collegeId);
+      }
+      final response = await query;
       return response;
     } catch (e) {
+      if (_isMissingColumnError(e, 'college_id')) {
+        try {
+          final response = await _client
+              .from('department_followers')
+              .count(CountOption.exact)
+              .eq('department_id', departmentId);
+          return response;
+        } catch (fallbackError) {
+          debugPrint(
+            'Error getting department follower count: $e | $fallbackError',
+          );
+          return 0;
+        }
+      }
       debugPrint('Error getting department follower count: $e');
       return 0;
     }
@@ -1712,21 +1942,43 @@ class SupabaseService {
     String collegeId,
     String userEmail,
   ) async {
-    try {
-      final response = await _client
-          .from('department_followers')
-          .select('department_id')
-          .eq('college_id', collegeId)
-          .eq('user_email', userEmail);
-      return (response as List)
-          .map((e) => e['department_id']?.toString())
-          .where((id) => id != null && id.isNotEmpty)
-          .cast<String>()
-          .toList();
-    } catch (e) {
-      debugPrint('Error getting followed departments: $e');
-      return [];
+    final normalizedEmail = _normalizeEmail(userEmail);
+    final attempts = <Map<String, dynamic>>[
+      {'emailColumn': 'follower_email', 'useCollegeFilter': true},
+      {'emailColumn': 'follower_email', 'useCollegeFilter': false},
+      {'emailColumn': 'user_email', 'useCollegeFilter': true},
+      {'emailColumn': 'user_email', 'useCollegeFilter': false},
+    ];
+
+    for (final attempt in attempts) {
+      final emailColumn = attempt['emailColumn'] as String;
+      final useCollegeFilter = attempt['useCollegeFilter'] == true;
+      try {
+        var query = _client
+            .from('department_followers')
+            .select('department_id')
+            .eq(emailColumn, normalizedEmail);
+        if (useCollegeFilter && collegeId.trim().isNotEmpty) {
+          query = query.eq('college_id', collegeId);
+        }
+        final response = await query;
+        return (response as List)
+            .map((e) => e['department_id']?.toString())
+            .where((id) => id != null && id.isNotEmpty)
+            .cast<String>()
+            .toList();
+      } catch (e) {
+        final schemaMismatch =
+            _isMissingColumnError(e, emailColumn) ||
+            (useCollegeFilter && _isMissingColumnError(e, 'college_id'));
+        if (!schemaMismatch) {
+          debugPrint('Error getting followed departments: $e');
+          return [];
+        }
+      }
     }
+
+    return [];
   }
 
   // ============ NOTICE COMMENTS ============
