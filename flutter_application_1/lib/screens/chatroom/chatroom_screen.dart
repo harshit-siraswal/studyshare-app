@@ -833,21 +833,22 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                           color: secondaryTextColor,
                         ),
                       ),
-            GestureDetector(
-              onTap: () {
-                final authorEmail = post['author_email']?.toString() ?? '';
-                if (authorEmail.isEmpty) return;
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => UserProfileScreen(
-                      userEmail: authorEmail,
-                      userName: authorName,
-                      userPhotoUrl: post['author_photo_url'],
-                    ),
-                  ),
-                );
-              },                            ScaffoldMessenger.of(context).showSnackBar(
+                      PopupMenuButton<String>(
+                        padding: EdgeInsets.zero,
+                        tooltip: 'More',
+                        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                        icon: Icon(
+                          Icons.more_horiz_rounded,
+                          color: secondaryTextColor,
+                          size: 18,
+                        ),
+                        onSelected: (value) async {
+                          if (value == 'copy') {
+                            await Clipboard.setData(
+                              ClipboardData(text: displayContent),
+                            );
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
                                 content: Text('Copied to clipboard'),
                               ),
@@ -861,7 +862,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                           }
                         },
                         itemBuilder: (context) => [
-                          PopupMenuItem(
+                          PopupMenuItem<String>(
                             value: 'copy',
                             child: Row(
                               children: [
@@ -878,7 +879,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                               ],
                             ),
                           ),
-                          PopupMenuItem(
+                          PopupMenuItem<String>(
                             value: 'report',
                             child: Row(
                               children: [
