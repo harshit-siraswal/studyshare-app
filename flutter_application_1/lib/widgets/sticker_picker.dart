@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../config/theme.dart';
 import '../services/sticker_service.dart';
+import '../screens/stickers/sticker_editor_screen.dart';
 import 'success_overlay.dart';
 
 class StickerPicker extends StatefulWidget {
@@ -22,6 +23,7 @@ class _StickerPickerState extends State<StickerPicker>
     with SingleTickerProviderStateMixin {
   final StickerService _stickerService = StickerService();
   late TabController _tabController;
+  final TextEditingController _searchController = TextEditingController();
 
   List<File> _stickers = [];
   Set<String> _installedPacks = {};
@@ -40,6 +42,7 @@ class _StickerPickerState extends State<StickerPicker>
   @override
   void dispose() {
     _tabController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -63,6 +66,7 @@ class _StickerPickerState extends State<StickerPicker>
     });
 
     try {
+      await _stickerService.purgeLegacyPacks();
       final stickers = await _stickerService.getLocalStickers();
       final installedPacks = await _stickerService.getInstalledPackIds();
       if (!mounted) return;
@@ -81,14 +85,26 @@ class _StickerPickerState extends State<StickerPicker>
   }
 
   Future<void> _createFromGallery() async {
-    final file = await _stickerService.importSticker(enableEditing: true);
-    if (file == null) return;
+    final result = await FilePicker.platform.pickFiles(type: FileType.image);
+    if (result == null || result.files.single.path == null) return;
+
+    final sourceFile = File(result.files.single.path!);
+    if (!mounted) return;
+
+    final savedFile = await Navigator.push<File>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => StickerEditorScreen(sourceFile: sourceFile),
+      ),
+    );
+
+    if (savedFile == null) return;
 
     await _loadAll();
     if (!mounted) return;
     _showSuccessOverlay(
-      title: 'Sticker Added',
-      message: 'Your sticker has been added to My Stickers.',
+      title: 'Sticker Created',
+      message: 'Your sticker is ready to use.',
       variant: SuccessOverlayVariant.stickerImport,
     );
   }
@@ -250,10 +266,12 @@ class _StickerPickerState extends State<StickerPicker>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final surfaceColor = AppTheme.getSurfaceColor(context);
     final textColor = AppTheme.getTextColor(context);
+    final mutedColor = textColor.withValues(alpha: 0.65);
+    final sheetHeight = MediaQuery.of(context).size.height * 0.72;
 
     if (_isLoading) {
       return Container(
-        height: 500,
+        height: sheetHeight,
         color: surfaceColor,
         child: const Center(child: CircularProgressIndicator()),
       );
@@ -261,7 +279,7 @@ class _StickerPickerState extends State<StickerPicker>
 
     if (_errorMessage != null) {
       return Container(
-        height: 500,
+        height: sheetHeight,
         color: surfaceColor,
         child: Center(
           child: Column(
@@ -279,65 +297,97 @@ class _StickerPickerState extends State<StickerPicker>
     }
 
     return Container(
-      height: 500,
-      color: surfaceColor,
+      height: sheetHeight,
+      decoration: BoxDecoration(
+        color: surfaceColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.15),
+            blurRadius: 22,
+            offset: const Offset(0, -8),
+          ),
+        ],
+      ),
       child: Column(
         children: [
+          const SizedBox(height: 8),
+          Container(
+            width: 44,
+            height: 5,
+            decoration: BoxDecoration(
+              color: isDark ? Colors.white24 : Colors.black12,
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            padding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
+            child: Row(
               children: [
-                Row(
-                  children: [
-                    Text(
-                      'Stickers',
-                      style: GoogleFonts.inter(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 18,
-                        color: textColor,
-                      ),
+                const SizedBox(width: 36),
+                Expanded(
+                  child: Text(
+                    'Stickers',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 18,
+                      color: textColor,
                     ),
-                    const Spacer(),
-                    OutlinedButton.icon(
-                      onPressed: _createFromGallery,
-                      icon: const Icon(
-                        Icons.add_photo_alternate_outlined,
-                        size: 16,
-                      ),
-                      label: const Text('Single'),
-                    ),
-                    const SizedBox(width: 8),
-                    ElevatedButton.icon(
-                      onPressed: _importPackFromFiles,
-                      icon: const Icon(Icons.folder_zip_rounded, size: 16),
-                      label: const Text('Import Pack'),
-                    ),
-                  ],
+                  ),
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  'Import from gallery or install packs. Long press any sticker to delete.',
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    color: textColor.withValues(alpha: 0.65),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: Icon(
+                    Icons.close_rounded,
+                    color: isDark ? Colors.white70 : Colors.black54,
                   ),
                 ),
               ],
             ),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
+            padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+            child: Text(
+              'Create stickers with text or remove background for a clean look.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(fontSize: 12, color: mutedColor),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Row(
+              children: [
+                _buildActionButton(
+                  icon: Icons.add_photo_alternate_rounded,
+                  onTap: _createFromGallery,
+                  tooltip: 'Create from gallery',
+                  isDark: isDark,
+                ),
+                const SizedBox(width: 8),
+                _buildActionButton(
+                  icon: Icons.folder_zip_rounded,
+                  onTap: _importPackFromFiles,
+                  tooltip: 'Import sticker pack',
+                  isDark: isDark,
+                ),
+                const SizedBox(width: 12),
+                Expanded(child: _buildSearchField(isDark)),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Container(
               decoration: BoxDecoration(
                 color: isDark ? AppTheme.darkCard : const Color(0xFFF1F5F9),
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(16),
               ),
               child: TabBar(
                 controller: _tabController,
                 indicator: BoxDecoration(
-                  color: AppTheme.primary.withValues(alpha: 0.16),
-                  borderRadius: BorderRadius.circular(10),
+                  color: AppTheme.primary.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 labelColor: AppTheme.primary,
                 unselectedLabelColor: isDark ? Colors.white70 : Colors.black54,
@@ -353,7 +403,7 @@ class _StickerPickerState extends State<StickerPicker>
               ),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           Expanded(
             child: TabBarView(
               controller: _tabController,
@@ -365,112 +415,175 @@ class _StickerPickerState extends State<StickerPicker>
     );
   }
 
+  Widget _buildActionButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    required String tooltip,
+    required bool isDark,
+  }) {
+    final iconColor = isDark ? Colors.white70 : Colors.black87;
+    final bgColor = isDark
+        ? Colors.white10
+        : Colors.black.withValues(alpha: 0.06);
+    final borderColor = isDark ? Colors.white12 : Colors.black12;
+
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: borderColor),
+          ),
+          child: Icon(icon, size: 20, color: iconColor),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSearchField(bool isDark) {
+    return TextField(
+      controller: _searchController,
+      onChanged: (value) => setState(() => _stickerQuery = value),
+      decoration: InputDecoration(
+        hintText: 'Search stickers...',
+        isDense: true,
+        prefixIcon: Icon(
+          Icons.search_rounded,
+          size: 18,
+          color: isDark ? Colors.white54 : Colors.black54,
+        ),
+        suffixIcon: _stickerQuery.isEmpty
+            ? null
+            : IconButton(
+                icon: Icon(
+                  Icons.close_rounded,
+                  size: 16,
+                  color: isDark ? Colors.white54 : Colors.black54,
+                ),
+                onPressed: () {
+                  _searchController.clear();
+                  setState(() => _stickerQuery = '');
+                },
+              ),
+        filled: true,
+        fillColor: isDark ? Colors.white10 : const Color(0xFFF4F6FB),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(18),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding: const EdgeInsets.symmetric(vertical: 12),
+      ),
+    );
+  }
+
   Widget _buildStickersGrid(bool isDark) {
     final stickers = _filteredStickers;
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-          child: TextField(
-            onChanged: (value) {
-              setState(() => _stickerQuery = value);
-            },
-            decoration: InputDecoration(
-              hintText: 'Search sticker by name',
-              isDense: true,
-              prefixIcon: const Icon(Icons.search_rounded, size: 18),
-              filled: true,
-              fillColor: isDark ? AppTheme.darkCard : const Color(0xFFF8FAFC),
-              border: OutlineInputBorder(
+    if (stickers.isEmpty) {
+      return _buildStickerEmptyState();
+    }
+
+    final items = <File?>[null, ...stickers];
+
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(14, 4, 14, 14),
+      itemCount: items.length,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 4,
+        mainAxisSpacing: 10,
+        crossAxisSpacing: 10,
+        childAspectRatio: 1,
+      ),
+      itemBuilder: (context, index) {
+        if (index == 0) {
+          return _buildCreateTile(isDark);
+        }
+        final sticker = items[index]!;
+        return GestureDetector(
+          onTap: () => widget.onStickerSelected(sticker),
+          onLongPress: () => _deleteSticker(sticker),
+          child: Semantics(
+            label: 'Sticker ${index + 1}. Long press to delete.',
+            button: true,
+            child: Container(
+              decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(
-                  color: isDark ? AppTheme.darkBorder : const Color(0xFFE2E8F0),
-                ),
+                border: Border.all(color: AppTheme.getBorderColor(context)),
+                color: isDark ? Colors.white10 : Colors.white,
               ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(
-                  color: isDark ? AppTheme.darkBorder : const Color(0xFFE2E8F0),
-                ),
+              clipBehavior: Clip.antiAlias,
+              child: Image.file(
+                sticker,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
               ),
             ),
           ),
+        );
+      },
+    );
+  }
+
+  Widget _buildStickerEmptyState() {
+    final message = _stickerQuery.trim().isEmpty
+        ? 'No stickers yet'
+        : 'No matching sticker found';
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.sticky_note_2_outlined,
+            size: 44,
+            color: AppTheme.getTextColor(context).withValues(alpha: 0.5),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            message,
+            style: GoogleFonts.inter(
+              color: AppTheme.getTextColor(context).withValues(alpha: 0.8),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Create stickers from photos or import packs.',
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              color: AppTheme.getTextColor(context).withValues(alpha: 0.55),
+            ),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: _createFromGallery,
+            icon: const Icon(Icons.add_photo_alternate_rounded, size: 18),
+            label: const Text('Create Sticker'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCreateTile(bool isDark) {
+    final borderColor = isDark ? Colors.white24 : Colors.black12;
+    final iconColor = isDark ? Colors.white70 : Colors.black54;
+    return InkWell(
+      onTap: _createFromGallery,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: borderColor),
+          color: isDark ? Colors.white10 : Colors.white,
         ),
-        Expanded(
-          child: stickers.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.sticky_note_2_outlined,
-                        size: 44,
-                        color: AppTheme.getTextColor(
-                          context,
-                        ).withValues(alpha: 0.5),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _stickerQuery.trim().isEmpty
-                            ? 'No stickers yet'
-                            : 'No matching sticker found',
-                        style: GoogleFonts.inter(
-                          color: AppTheme.getTextColor(
-                            context,
-                          ).withValues(alpha: 0.75),
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Try importing from gallery or pack files.',
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: AppTheme.getTextColor(
-                            context,
-                          ).withValues(alpha: 0.55),
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              : GridView.builder(
-                  padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-                  itemCount: stickers.length,
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 4,
-                    mainAxisSpacing: 8,
-                    crossAxisSpacing: 8,
-                    childAspectRatio: 1,
-                  ),
-                  itemBuilder: (context, index) {
-                    final sticker = stickers[index];
-                    return GestureDetector(
-                      onTap: () => widget.onStickerSelected(sticker),
-                      onLongPress: () => _deleteSticker(sticker),
-                      child: Semantics(
-                        label: 'Sticker ${index + 1}. Long press to delete.',
-                        button: true,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(
-                              color: AppTheme.getBorderColor(context),
-                            ),
-                          ),
-                          clipBehavior: Clip.antiAlias,
-                          child: Image.file(
-                            sticker,
-                            fit: BoxFit.cover,
-                            errorBuilder: (_, __, ___) =>
-                                const Icon(Icons.broken_image),
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
+        child: Center(
+          child: Icon(Icons.add_rounded, size: 28, color: iconColor),
         ),
-      ],
+      ),
     );
   }
 

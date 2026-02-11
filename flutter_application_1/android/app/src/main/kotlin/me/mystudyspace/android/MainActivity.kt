@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
+import android.webkit.MimeTypeMap
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -152,7 +153,8 @@ class MainActivity : FlutterActivity() {
             fileJson.put("mimeType", mimeType ?: "")
             fileJson.put("sizeBytes", targetFile.length())
             fileJson
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            android.util.Log.w("MainActivity", "Failed to copy shared file: ${uri}", e)
             null
         }
     }
@@ -171,24 +173,16 @@ class MainActivity : FlutterActivity() {
             null
         }
     }
-
     private fun extensionFrom(displayName: String, mimeType: String?): String {
         val dotIndex = displayName.lastIndexOf('.')
         if (dotIndex > 0 && dotIndex < displayName.length - 1) {
             return displayName.substring(dotIndex).lowercase(Locale.US)
         }
 
-        return when (mimeType?.lowercase(Locale.US)) {
-            "application/pdf" -> ".pdf"
-            "application/msword" -> ".doc"
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" -> ".docx"
-            "application/vnd.ms-powerpoint" -> ".ppt"
-            "application/vnd.openxmlformats-officedocument.presentationml.presentation" -> ".pptx"
-            "image/png" -> ".png"
-            "image/jpeg" -> ".jpg"
-            "image/webp" -> ".webp"
-            "image/gif" -> ".gif"
-            else -> ".bin"
+        if (mimeType != null) {
+            val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)
+            if (ext != null) return ".$ext"
         }
+        return ".bin"
     }
 }

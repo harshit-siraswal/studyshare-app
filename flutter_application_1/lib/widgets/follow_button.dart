@@ -49,10 +49,12 @@ class _FollowButtonState extends State<FollowButton> {
     
     final currentUserEmail = _supabase.currentUserEmail;
     if (currentUserEmail == widget.targetEmail) {
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _status = FollowStatus.self;
         _isLoading = false;
       });
+      }
       return;
     }
     try {
@@ -171,10 +173,10 @@ class _FollowButtonState extends State<FollowButton> {
             : Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (icon != null) ...[
-                    Icon(icon, size: 14, color: textColor),
-                    const SizedBox(width: 4),
-                  ],
+                  ...[
+                  Icon(icon, size: 14, color: textColor),
+                  const SizedBox(width: 4),
+                ],
                   Text(
                     text,
                     style: TextStyle(

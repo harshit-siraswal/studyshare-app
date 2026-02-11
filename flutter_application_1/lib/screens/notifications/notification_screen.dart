@@ -511,10 +511,11 @@ class _NotificationScreenState extends State<NotificationScreen>
             targetId.toString(),
           );
           if (noticeMap == null) {
-            if (mounted)
+            if (mounted) {
               ScaffoldMessenger.of(
                 context,
               ).showSnackBar(const SnackBar(content: Text('Notice not found')));
+            }
             return;
           }
 
@@ -552,10 +553,11 @@ class _NotificationScreenState extends State<NotificationScreen>
         }
       } catch (e) {
         debugPrint('Error navigating to notice: $e');
-        if (mounted)
+        if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Could not open notice')),
           );
+        }
       }
       return;
     }
@@ -763,16 +765,18 @@ class _NotificationScreenState extends State<NotificationScreen>
 
       if (accept) {
         await _api.acceptFollowRequest(requestId);
-        if (mounted)
+        if (mounted) {
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(const SnackBar(content: Text('Request accepted')));
+        }
       } else {
         await _api.rejectFollowRequest(requestId);
-        if (mounted)
+        if (mounted) {
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(const SnackBar(content: Text('Request declined')));
+        }
       }
     } catch (e) {
       if (mounted) {

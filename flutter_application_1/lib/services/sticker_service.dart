@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
@@ -7,6 +8,8 @@ import 'package:image_cropper/image_cropper.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import '../config/app_config.dart';
 
 class StickerPack {
   final String id;
@@ -50,41 +53,64 @@ class StickerService {
     '.webp',
     '.gif',
   };
+  static const List<Map<String, String>> _removeBgQualityProfiles = [
+    {'size': '4k', 'format': 'png'},
+    {'size': 'auto', 'format': 'png'},
+  ];
 
   static const List<StickerPack> availablePacks = [
     StickerPack(
-      id: 'study_pack',
-      name: 'Study Pack',
-      author: 'Twemoji (Free)',
-      source: 'github.com/twitter/twemoji',
+      id: 'study_essentials',
+      name: 'Study Essentials',
+      author: 'Noto Emoji',
+      source: 'github.com/googlefonts/noto-emoji',
       stickerUrls: [
-        'https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f4da.png',
-        'https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f4d6.png',
-        'https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f4dd.png',
-        'https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f4d5.png',
-        'https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f4d7.png',
-        'https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f4a1.png',
-        'https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/2705.png',
-        'https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f9e0.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f4da.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f4d6.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f4dd.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u270f.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f4a1.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f3af.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f4c5.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f393.png',
       ],
     ),
     StickerPack(
-      id: 'express_pack',
-      name: 'Express Pack',
-      author: 'Twemoji (Free)',
-      source: 'github.com/twitter/twemoji',
+      id: 'reaction_burst',
+      name: 'Reaction Burst',
+      author: 'Noto Emoji',
+      source: 'github.com/googlefonts/noto-emoji',
       stickerUrls: [
-        'https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f44d.png',
-        'https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f44f.png',
-        'https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f389.png',
-        'https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f525.png',
-        'https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f60e.png',
-        'https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f92f.png',
-        'https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f64c.png',
-        'https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f680.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f44d.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f44f.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f525.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f389.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f60e.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f92f.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f4af.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f64c.png',
+      ],
+    ),
+    StickerPack(
+      id: 'cute_vibes',
+      name: 'Cute Vibes',
+      author: 'Noto Emoji',
+      source: 'github.com/googlefonts/noto-emoji',
+      stickerUrls: [
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f970.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f60d.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f63b.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f917.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f496.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f308.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f31f.png',
+        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f31a.png',
       ],
     ),
   ];
+
+  /// Returns true when background removal is available.
+  bool get canRemoveBackground => AppConfig.removeBgApiKey.isNotEmpty;
 
   Future<Directory> getStickerDirectory() async {
     final appDocDir = await getApplicationDocumentsDirectory();
@@ -93,6 +119,28 @@ class StickerService {
       await stickerDir.create(recursive: true);
     }
     return stickerDir;
+  }
+
+  /// Deletes legacy sticker packs from disk and preferences.
+  Future<void> purgeLegacyPacks() async {
+    const legacyIds = {'study_pack', 'express_pack'};
+    try {
+      final dir = await getStickerDirectory();
+      for (final legacyId in legacyIds) {
+        final packDir = Directory(path.join(dir.path, 'pack_$legacyId'));
+        if (await packDir.exists()) {
+          await packDir.delete(recursive: true);
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to purge legacy packs: $e');
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final current =
+        prefs.getStringList(_installedPacksKey)?.toSet() ?? <String>{};
+    current.removeAll(legacyIds);
+    await prefs.setStringList(_installedPacksKey, current.toList());
   }
 
   Future<List<File>> getLocalStickers() async {
@@ -184,6 +232,101 @@ class StickerService {
       debugPrint('Error importing sticker: $e');
       return null;
     }
+  }
+
+  /// Removes the background from an image using remove.bg.
+  Future<File?> removeBackground(File sourceFile) async {
+    final apiKey = AppConfig.removeBgApiKey;
+    if (apiKey.isEmpty) {
+      throw Exception('REMOVE_BG_API_KEY not set');
+    }
+
+    Object? lastError;
+
+    try {
+      final dio = Dio(
+        BaseOptions(
+          connectTimeout: const Duration(seconds: 40),
+          receiveTimeout: const Duration(seconds: 60),
+        ),
+      );
+
+      for (final profile in _removeBgQualityProfiles) {
+        try {
+          final formData = FormData.fromMap({
+            'image_file': await MultipartFile.fromFile(sourceFile.path),
+            ...profile,
+          });
+
+          final response = await dio.post<List<int>>(
+            'https://api.remove.bg/v1.0/removebg',
+            data: formData,
+            options: Options(
+              responseType: ResponseType.bytes,
+              headers: {'X-Api-Key': apiKey},
+            ),
+          );
+
+          final bytes = response.data;
+          if (bytes == null || bytes.isEmpty) {
+            continue;
+          }
+
+          final tempDir = await getTemporaryDirectory();
+          final outputPath = path.join(
+            tempDir.path,
+            'mss_removebg_${DateTime.now().millisecondsSinceEpoch}.png',
+          );
+          final outputFile = File(outputPath);
+          await outputFile.writeAsBytes(bytes, flush: true);
+          return outputFile;
+        } catch (e) {
+          lastError = e;
+          if (!_shouldRetryRemoveBg(e)) {
+            rethrow;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Background removal failed: $e');
+      rethrow;
+    }
+
+    if (lastError != null) {
+      throw Exception(_readableRemoveBgError(lastError));
+    }
+    return null;
+  }
+
+  bool _shouldRetryRemoveBg(Object error) {
+    if (error is! DioException) return false;
+    final statusCode = error.response?.statusCode ?? 0;
+    if (statusCode == 401 || statusCode == 403) {
+      return false;
+    }
+    return statusCode >= 400 && statusCode < 500;
+  }
+
+  String _readableRemoveBgError(Object error) {
+    if (error is DioException) {
+      final statusCode = error.response?.statusCode;
+      final responseData = error.response?.data;
+      if (responseData is List<int>) {
+        try {
+          final decoded = utf8.decode(responseData);
+          if (decoded.trim().isNotEmpty) {
+            return 'remove.bg request failed (${statusCode ?? 'n/a'}): $decoded';
+          }
+        } catch (_) {
+          // Keep generic error text if decoding fails.
+        }
+      }
+      if (responseData is String && responseData.trim().isNotEmpty) {
+        return 'remove.bg request failed (${statusCode ?? 'n/a'}): $responseData';
+      }
+      return 'remove.bg request failed (${statusCode ?? 'n/a'})';
+    }
+    return error.toString();
   }
 
   Future<Set<String>> getInstalledPackIds() async {

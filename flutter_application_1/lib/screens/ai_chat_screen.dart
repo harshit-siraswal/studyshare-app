@@ -862,7 +862,7 @@ class _AIChatScreenState extends State<AIChatScreen> {
                       child: _buildMessageBubble(m, isDark),
                     ),
                   );
-                }).toList(),
+                }),
                 if (_isLoading)
                   Align(
                     alignment: Alignment.centerLeft,

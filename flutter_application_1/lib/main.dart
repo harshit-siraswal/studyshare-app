@@ -124,7 +124,13 @@ void main() async {
   runApp(const AppRoot());
 }
 
-enum AppState { loading, noConnection, permissionError, initializationError, ready }
+enum AppState {
+  loading,
+  noConnection,
+  permissionError,
+  initializationError,
+  ready,
+}
 
 class AppRoot extends StatefulWidget {
   // Expose key if needed via static accessor, but top-level is fine too
@@ -378,7 +384,6 @@ class _AppRootState extends State<AppRoot> {
     if (_appState == AppState.loading ||
         _prefs == null ||
         _themeProvider == null) {
-      // Return a temporary splash or loading indicator while initializing
       return const MaterialApp(
         debugShowCheckedModeBanner: false,
         home: Scaffold(
@@ -528,7 +533,8 @@ class _AppRouterState extends State<AppRouter> {
       }
       if (legacyDomain != null) {
         await widget.prefs.setString('selectedCollegeDomain', legacyDomain);
-      }    }
+      }
+    }
     setState(() {});
   }
 

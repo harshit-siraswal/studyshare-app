@@ -316,6 +316,7 @@ class AppSplashAnimation extends StatefulWidget {
 class _AppSplashAnimationState extends State<AppSplashAnimation>
     with TickerProviderStateMixin {
   late final AnimationController _spinController;
+  late final AnimationController _pulseController;
   late final AnimationController _entryController;
   late final Animation<double> _fadeAnimation;
   late final Animation<double> _scaleAnimation;
@@ -325,11 +326,15 @@ class _AppSplashAnimationState extends State<AppSplashAnimation>
     super.initState();
     _spinController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 2600),
+      duration: const Duration(milliseconds: 3600),
     )..repeat();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1700),
+    )..repeat(reverse: true);
     _entryController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 650),
+      duration: const Duration(milliseconds: 850),
     )..forward();
     _fadeAnimation = CurvedAnimation(
       parent: _entryController,
@@ -344,51 +349,261 @@ class _AppSplashAnimationState extends State<AppSplashAnimation>
   @override
   void dispose() {
     _spinController.dispose();
+    _pulseController.dispose();
     _entryController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final topColor = isDark ? const Color(0xFF06120D) : const Color(0xFFEAF7EF);
+    final bottomColor = isDark
+        ? const Color(0xFF020805)
+        : const Color(0xFFD8EEDD);
+    final titleColor = isDark ? Colors.white : const Color(0xFF1A5B3B);
+    final subtitleColor = isDark
+        ? Colors.white70
+        : const Color(0xFF2A6F4D).withValues(alpha: 0.9);
+
     return Container(
       width: double.infinity,
       height: double.infinity,
-      color: const Color(0xFF0F5FE8),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [topColor, bottomColor],
+        ),
+      ),
       child: Center(
         child: FadeTransition(
           opacity: _fadeAnimation,
-          child: ScaleTransition(
-            scale: Tween<double>(begin: 0.86, end: 1).animate(_scaleAnimation),
-            child: _buildRotatingLogo(),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ScaleTransition(
+                scale: Tween<double>(
+                  begin: 0.86,
+                  end: 1,
+                ).animate(_scaleAnimation),
+                child: _buildLogoOrb(isDark),
+              ),
+              const SizedBox(height: 28),
+              Text(
+                widget.title,
+                style: GoogleFonts.manrope(
+                  fontSize: 38,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -0.7,
+                  color: titleColor,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                widget.subtitle,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                  color: subtitleColor,
+                  letterSpacing: 0.1,
+                ),
+              ),
+              const SizedBox(height: 24),
+              _buildLoadingLabel(isDark),
+            ],
           ),
         ),
       ),
     );
   }
 
-  Widget _buildRotatingLogo() {
-    const logoSize = 128.0;
+  Widget _buildLogoOrb(bool isDark) {
+    const orbSize = 212.0;
+    const brandGreen = Color(0xFF2EA867);
+    const brandGreenLight = Color(0xFF57C884);
+    final glowColor = isDark ? brandGreenLight : brandGreen;
+
+    return AnimatedBuilder(
+      animation: Listenable.merge([_spinController, _pulseController]),
+      builder: (context, child) {
+        final pulse =
+            0.97 + 0.03 * math.sin(_pulseController.value * 2 * math.pi);
+        final shimmer =
+            (0.5 + 0.5 * math.sin(_pulseController.value * 2 * math.pi))
+                .clamp(0.0, 1.0)
+                .toDouble();
+
+        return Transform.scale(
+          scale: pulse,
+          child: SizedBox(
+            width: orbSize,
+            height: orbSize,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Container(
+                  width: orbSize,
+                  height: orbSize,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: const LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [brandGreenLight, brandGreen],
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: glowColor.withValues(
+                          alpha: isDark ? 0.28 : 0.22,
+                        ),
+                        blurRadius: 32,
+                        spreadRadius: 4,
+                      ),
+                    ],
+                  ),
+                ),
+                CustomPaint(
+                  size: const Size.square(orbSize * 0.68),
+                  painter: _LogoGlyphPainter(
+                    progress: _spinController.value,
+                    color: Colors.white,
+                    shimmer: shimmer,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildLoadingLabel(bool isDark) {
+    final panelColor = isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : Colors.white.withValues(alpha: 0.7);
+
     return Container(
-      width: logoSize,
-      height: logoSize,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.2),
-            blurRadius: 28,
-            spreadRadius: 3,
-            offset: const Offset(0, 10),
+        color: panelColor,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.12)
+              : const Color(0xFF53B97D).withValues(alpha: 0.24),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: isDark ? Colors.white : const Color(0xFF2EA867),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            widget.loadingLabel,
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white70 : const Color(0xFF235A3D),
+            ),
           ),
         ],
       ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(28),
-        child: RotationTransition(
-          turns: _spinController,
-          child: Image.asset('assets/icon/app_icon.png', fit: BoxFit.cover),
-        ),
-      ),
     );
+  }
+}
+
+class _LogoGlyphPainter extends CustomPainter {
+  final double progress;
+  final Color color;
+  final double shimmer;
+
+  const _LogoGlyphPainter({
+    required this.progress,
+    required this.color,
+    required this.shimmer,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const segmentCount = 12;
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width * 0.31;
+    final pillWidth = size.width * 0.062;
+    final pillHeight = size.width * 0.175;
+    final arcSize = size.width * 0.155;
+
+    for (int i = 0; i < segmentCount; i++) {
+      final angle = (2 * math.pi / segmentCount) * i;
+      final wave = (math.sin((progress * 2 * math.pi) - (i * 0.55)) + 1) / 2;
+      final alpha = (0.38 + (0.62 * wave * (0.55 + 0.45 * shimmer)))
+          .clamp(0.0, 1.0)
+          .toDouble();
+
+      final fillPaint = Paint()
+        ..style = PaintingStyle.fill
+        ..color = color.withValues(alpha: alpha);
+
+      final strokePaint = Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = size.width * 0.02
+        ..strokeCap = StrokeCap.round
+        ..color = color.withValues(
+          alpha: (alpha * 0.95).clamp(0.0, 1.0).toDouble(),
+        );
+
+      canvas.save();
+      canvas.translate(center.dx, center.dy);
+      canvas.rotate(angle);
+
+      final pillRect = Rect.fromCenter(
+        center: Offset(0, -radius),
+        width: pillWidth,
+        height: pillHeight,
+      );
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(pillRect, Radius.circular(pillWidth / 2)),
+        fillPaint,
+      );
+
+      final arcRect = Rect.fromCenter(
+        center: Offset(0, -radius - (size.width * 0.1)),
+        width: arcSize,
+        height: arcSize,
+      );
+      canvas.drawArc(
+        arcRect,
+        math.pi * 0.8,
+        math.pi * 1.55,
+        false,
+        strokePaint,
+      );
+      canvas.restore();
+    }
+
+    final ringPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = size.width * 0.016
+      ..color = color.withValues(
+        alpha: (0.12 + shimmer * 0.12).clamp(0.0, 1.0).toDouble(),
+      );
+
+    canvas.drawCircle(center, size.width * 0.2, ringPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _LogoGlyphPainter oldDelegate) {
+    return oldDelegate.progress != progress ||
+        oldDelegate.color != color ||
+        oldDelegate.shimmer != shimmer;
   }
 }

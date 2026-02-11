@@ -9,11 +9,13 @@ import '../config/app_config.dart';
 /// Use this for ALL privileged writes (create room, post, comment, upload, profile update).
 /// This avoids client-side Supabase inserts that fail under RLS with anon key.
 class BackendApiService {
-  BackendApiService({FirebaseAuth? firebaseAuth}) : _auth = firebaseAuth ?? FirebaseAuth.instance;
+  BackendApiService({FirebaseAuth? firebaseAuth})
+    : _auth = firebaseAuth ?? FirebaseAuth.instance;
 
   final FirebaseAuth _auth;
 
-  String get _baseUrl => AppConfig.apiUrl; // e.g. https://studyspace-backend.onrender.com
+  String get _baseUrl =>
+      AppConfig.apiUrl; // e.g. https://studyspace-backend.onrender.com
 
   Future<String?> _getIdToken() async {
     final user = _auth.currentUser;
@@ -44,7 +46,9 @@ class BackendApiService {
     // Attach reCAPTCHA token for privileged writes (POST/PUT/DELETE) if context provided.
     // TEMPORARILY DISABLED: reCAPTCHA requires Android package registration in Google Cloud Console.
     // To re-enable: uncomment the block below after registering package name.
-    Map<String, dynamic>? effectiveBody = body == null ? null : Map<String, dynamic>.from(body);
+    Map<String, dynamic>? effectiveBody = body == null
+        ? null
+        : Map<String, dynamic>.from(body);
     // final m = method.toUpperCase();
     // final needsBody = m == 'POST' || m == 'PUT' || m == 'DELETE';
     // if (needsBody && contextForRecaptcha != null) {
@@ -64,13 +68,25 @@ class BackendApiService {
     late http.Response res;
     switch (method.toUpperCase()) {
       case 'POST':
-        res = await http.post(uri, headers: headers, body: jsonEncode(effectiveBody ?? {}));
+        res = await http.post(
+          uri,
+          headers: headers,
+          body: jsonEncode(effectiveBody ?? {}),
+        );
         break;
       case 'PUT':
-        res = await http.put(uri, headers: headers, body: jsonEncode(effectiveBody ?? {}));
+        res = await http.put(
+          uri,
+          headers: headers,
+          body: jsonEncode(effectiveBody ?? {}),
+        );
         break;
       case 'DELETE':
-        res = await http.delete(uri, headers: headers, body: jsonEncode(effectiveBody ?? {}));
+        res = await http.delete(
+          uri,
+          headers: headers,
+          body: jsonEncode(effectiveBody ?? {}),
+        );
         break;
       default:
         res = await http.get(uri, headers: headers);
@@ -85,7 +101,10 @@ class BackendApiService {
     }
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      final msg = data['message']?.toString() ?? data['error']?.toString() ?? 'API request failed';
+      final msg =
+          data['message']?.toString() ??
+          data['error']?.toString() ??
+          'API request failed';
       throw Exception(msg);
     }
     return data;
@@ -113,8 +132,8 @@ class BackendApiService {
         'isPrivate': isPrivate,
         'collegeId': collegeId,
 
-        if (durationInDays != null) 'durationInDays': durationInDays,
-        if (tags != null) 'tags': tags,
+        'durationInDays': ?durationInDays,
+        'tags': ?tags,
       },
       contextForRecaptcha: context,
       recaptchaAction: 'create_chat_room',
@@ -147,14 +166,19 @@ class BackendApiService {
       body: {
         'roomId': roomId,
         'content': content,
-        if (imageUrl != null) 'imageUrl': imageUrl,
-        if (authorName != null) 'authorName': authorName,      },
+        'imageUrl': ?imageUrl,
+        'authorName': ?authorName,
+      },
       contextForRecaptcha: context,
       recaptchaAction: 'post_chat_message',
-    );  }
+    );
+  }
 
   Future<List<Map<String, dynamic>>> getChatComments(String messageId) async {
-    final data = await _requestJson('/api/chat/comments/${Uri.encodeComponent(messageId)}', method: 'GET');
+    final data = await _requestJson(
+      '/api/chat/comments/${Uri.encodeComponent(messageId)}',
+      method: 'GET',
+    );
     final list = (data['comments'] as List?) ?? const [];
     return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
@@ -181,10 +205,7 @@ class BackendApiService {
     return _requestJson(
       '/api/chat/saved',
       method: 'POST',
-      body: {
-        'messageId': messageId,
-        'roomId': roomId,
-      },
+      body: {'messageId': messageId, 'roomId': roomId},
       contextForRecaptcha: context,
       recaptchaAction: 'save_chat_message',
     );
@@ -215,8 +236,8 @@ class BackendApiService {
       body: {
         'messageId': messageId,
         'content': content,
-        if (authorName != null) 'authorName': authorName,
-        if (parentId != null) 'parentId': parentId,
+        'authorName': ?authorName,
+        'parentId': ?parentId,
       },
       contextForRecaptcha: context,
       recaptchaAction: 'post_chat_message',
@@ -258,10 +279,7 @@ class BackendApiService {
     return _requestJson(
       '/api/votes',
       method: 'POST',
-      body: {
-        'resourceId': resourceId,
-        'voteType': voteType,
-      },
+      body: {'resourceId': resourceId, 'voteType': voteType},
       contextForRecaptcha: context,
       recaptchaAction: 'cast_vote',
     );
@@ -283,10 +301,7 @@ class BackendApiService {
     return _requestJson(
       '/api/bookmarks',
       method: 'POST',
-      body: {
-        'itemId': itemId,
-        'type': type,
-      },
+      body: {'itemId': itemId, 'type': type},
       contextForRecaptcha: context,
       recaptchaAction: 'add_bookmark',
     );
@@ -329,7 +344,10 @@ class BackendApiService {
   }
 
   Future<List<Map<String, dynamic>>> getNotices(String collegeId) async {
-    final data = await _requestJson('/api/notices?college_id=${Uri.encodeQueryComponent(collegeId)}', method: 'GET');
+    final data = await _requestJson(
+      '/api/notices?college_id=${Uri.encodeQueryComponent(collegeId)}',
+      method: 'GET',
+    );
     final list = (data['notices'] as List?) ?? const [];
     return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
@@ -338,7 +356,10 @@ class BackendApiService {
   // ----------------------------
 
   Future<List<Map<String, dynamic>>> getNoticeComments(String noticeId) async {
-    final data = await _requestJson('${_noticePath(noticeId)}/comments', method: 'GET');
+    final data = await _requestJson(
+      '${_noticePath(noticeId)}/comments',
+      method: 'GET',
+    );
     final list = (data['comments'] as List?) ?? const [];
     return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
@@ -352,10 +373,7 @@ class BackendApiService {
     return _requestJson(
       '${_noticePath(noticeId)}/comments',
       method: 'POST',
-      body: {
-        'content': content,
-        if (parentId != null) 'parentId': parentId,
-      },
+      body: {'content': content, 'parentId': ?parentId},
       contextForRecaptcha: context,
       recaptchaAction: 'post_notice_comment',
     );
@@ -425,13 +443,13 @@ class BackendApiService {
       '/api/users/profile',
       method: 'PUT',
       body: {
-        if (displayName != null) 'display_name': displayName,
-        if (username != null) 'username': username,
-        if (bio != null) 'bio': bio,
-        if (profilePhotoUrl != null) 'profile_photo_url': profilePhotoUrl,
-        if (college != null) 'college': college,
-        if (branch != null) 'branch': branch,
-        if (semester != null) 'semester': semester,
+        'display_name': ?displayName,
+        'username': ?username,
+        'bio': ?bio,
+        'profile_photo_url': ?profilePhotoUrl,
+        'college': ?college,
+        'branch': ?branch,
+        'semester': ?semester,
       },
       contextForRecaptcha: context,
       recaptchaAction: 'update_profile',
@@ -448,12 +466,9 @@ class BackendApiService {
     BuildContext? context,
   }) async {
     return _requestJson(
-      '/api/payments/order', 
+      '/api/payments/order',
       method: 'POST',
-      body: {
-        'amount': amount,
-        'planId': planId,
-      },
+      body: {'amount': amount, 'planId': planId},
       contextForRecaptcha: context,
       recaptchaAction: 'create_payment_order',
     );
@@ -465,7 +480,7 @@ class BackendApiService {
     required String signature,
   }) async {
     return _requestJson(
-      '/api/payments/verify', 
+      '/api/payments/verify',
       method: 'POST',
       body: {
         'razorpay_order_id': orderId,
@@ -478,23 +493,32 @@ class BackendApiService {
   // Chat
   // ----------------------------
 
-  Future<Map<String, dynamic>> joinChatRoom(String code, String? userEmail, String collegeId) async {
+  Future<Map<String, dynamic>> joinChatRoom(
+    String code,
+    String? userEmail,
+    String collegeId,
+  ) async {
     return _requestJson(
       '/api/chat/join',
       method: 'POST',
-      body: {
-        'code': code,
-        'collegeId': collegeId,
-      },
+      body: {'code': code, 'collegeId': collegeId},
     );
   }
 
   Future<Map<String, dynamic>> getUserVotes(String roomId) async {
-    return _requestJson('/api/chat/rooms/${Uri.encodeComponent(roomId)}/votes', method: 'GET');
+    return _requestJson(
+      '/api/chat/rooms/${Uri.encodeComponent(roomId)}/votes',
+      method: 'GET',
+    );
   }
 
   // Reporting
-  Future<void> reportPost(String postId, String reason, String reporterId, {String type = 'post'}) async {
+  Future<void> reportPost(
+    String postId,
+    String reason,
+    String reporterId, {
+    String type = 'post',
+  }) async {
     await _requestJson(
       '/api/reports',
       method: 'POST',
@@ -510,22 +534,33 @@ class BackendApiService {
   // Notifications & Follows
   // ----------------------------
 
-  Future<List<Map<String, dynamic>>> getNotifications({int limit = 20, int offset = 0}) async {
-    final data = await _requestJson('/api/notifications?limit=$limit&offset=$offset', method: 'GET');
+  Future<List<Map<String, dynamic>>> getNotifications({
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    final data = await _requestJson(
+      '/api/notifications?limit=$limit&offset=$offset',
+      method: 'GET',
+    );
     final list = (data['notifications'] as List?) ?? const [];
     return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
-  Future<void> markNotificationRead(int id, {BuildContext? contextForRecaptcha}) async {
+  Future<void> markNotificationRead(
+    Object id, {
+    BuildContext? contextForRecaptcha,
+  }) async {
     await _requestJson(
-      '/api/notifications/$id/read',
+      '/api/notifications/${Uri.encodeComponent(id.toString())}/read',
       method: 'POST',
       contextForRecaptcha: contextForRecaptcha,
       recaptchaAction: 'mark_notification_read',
     );
   }
 
-  Future<void> markAllNotificationsRead({BuildContext? contextForRecaptcha}) async {
+  Future<void> markAllNotificationsRead({
+    BuildContext? contextForRecaptcha,
+  }) async {
     await _requestJson(
       '/api/notifications/read-all',
       method: 'POST',
@@ -534,7 +569,10 @@ class BackendApiService {
     );
   }
 
-  Future<void> deleteNotification(int id, {BuildContext? contextForRecaptcha}) async {
+  Future<void> deleteNotification(
+    int id, {
+    BuildContext? contextForRecaptcha,
+  }) async {
     await _requestJson(
       '/api/notifications/$id',
       method: 'DELETE',
@@ -543,18 +581,61 @@ class BackendApiService {
     );
   }
 
+  // ----------------------------
+  // Comment Reactions (Emoji)
+  // ----------------------------
+
+  Future<Map<String, dynamic>> getCommentReactions({
+    required String commentId,
+    required String commentType,
+  }) async {
+    final query = Uri(
+      queryParameters: {'commentId': commentId, 'commentType': commentType},
+    ).query;
+    return _requestJson('/api/reactions/comments?$query', method: 'GET');
+  }
+
+  Future<bool> toggleCommentReaction({
+    required String commentId,
+    required String commentType,
+    required String emoji,
+    required BuildContext context,
+  }) async {
+    final data = await _requestJson(
+      '/api/reactions/comments/toggle',
+      method: 'POST',
+      body: {
+        'commentId': commentId,
+        'commentType': commentType,
+        'emoji': emoji,
+      },
+      contextForRecaptcha: context,
+      recaptchaAction: 'toggle_reaction',
+    );
+
+    return data['added'] == true;
+  }
+
   // Follows
-  Future<void> sendFollowRequest(String targetEmail, BuildContext context) async {
+  Future<void> sendFollowRequest(
+    String targetEmail,
+    BuildContext context,
+  ) async {
     await _requestJson(
-        '/api/follow/request', // Corrected from /api/follows/requests
-        method: 'POST', 
-        body: {'targetEmail': targetEmail}, // Changed targetId to targetEmail per API
-        contextForRecaptcha: context,
-        recaptchaAction: 'follow_user'
+      '/api/follow/request', // Corrected from /api/follows/requests
+      method: 'POST',
+      body: {
+        'targetEmail': targetEmail,
+      }, // Changed targetId to targetEmail per API
+      contextForRecaptcha: context,
+      recaptchaAction: 'follow_user',
     );
   }
 
-  Future<void> acceptFollowRequest(int requestId, {BuildContext? context}) async {
+  Future<void> acceptFollowRequest(
+    int requestId, {
+    BuildContext? context,
+  }) async {
     await _requestJson(
       '/api/follow/approve/${requestId.toString()}', // Corrected endpoint
       method: 'POST',
@@ -562,8 +643,11 @@ class BackendApiService {
       recaptchaAction: 'accept_follow_request',
     );
   }
-  
-  Future<void> rejectFollowRequest(int requestId, {BuildContext? context}) async {
+
+  Future<void> rejectFollowRequest(
+    int requestId, {
+    BuildContext? context,
+  }) async {
     await _requestJson(
       '/api/follow/reject/${requestId.toString()}', // Corrected endpoint
       method: 'POST',
@@ -597,13 +681,13 @@ class BackendApiService {
       method: 'POST',
       body: {
         'file_id': fileId,
-        if (collegeId != null) 'college_id': collegeId,
-        if (useOcr != null) 'use_ocr': useOcr,
-        if (forceOcr != null) 'force_ocr': forceOcr,
-        if (ocrProvider != null) 'ocr_provider': ocrProvider,
-        if (force != null) 'force': force,
-        if (includeSource != null) 'include_source': includeSource,
-        if (videoUrl != null) 'video_url': videoUrl,
+        'college_id': ?collegeId,
+        'use_ocr': ?useOcr,
+        'force_ocr': ?forceOcr,
+        'ocr_provider': ?ocrProvider,
+        'force': ?force,
+        'include_source': ?includeSource,
+        'video_url': ?videoUrl,
       },
     );
   }
@@ -623,13 +707,13 @@ class BackendApiService {
       method: 'POST',
       body: {
         'file_id': fileId,
-        if (collegeId != null) 'college_id': collegeId,
-        if (useOcr != null) 'use_ocr': useOcr,
-        if (forceOcr != null) 'force_ocr': forceOcr,
-        if (ocrProvider != null) 'ocr_provider': ocrProvider,
-        if (force != null) 'force': force,
-        if (includeSource != null) 'include_source': includeSource,
-        if (videoUrl != null) 'video_url': videoUrl,
+        'college_id': ?collegeId,
+        'use_ocr': ?useOcr,
+        'force_ocr': ?forceOcr,
+        'ocr_provider': ?ocrProvider,
+        'force': ?force,
+        'include_source': ?includeSource,
+        'video_url': ?videoUrl,
       },
     );
   }
@@ -649,13 +733,13 @@ class BackendApiService {
       method: 'POST',
       body: {
         'file_id': fileId,
-        if (collegeId != null) 'college_id': collegeId,
-        if (useOcr != null) 'use_ocr': useOcr,
-        if (forceOcr != null) 'force_ocr': forceOcr,
-        if (ocrProvider != null) 'ocr_provider': ocrProvider,
-        if (force != null) 'force': force,
-        if (includeSource != null) 'include_source': includeSource,
-        if (videoUrl != null) 'video_url': videoUrl,
+        'college_id': ?collegeId,
+        'use_ocr': ?useOcr,
+        'force_ocr': ?forceOcr,
+        'ocr_provider': ?ocrProvider,
+        'force': ?force,
+        'include_source': ?includeSource,
+        'video_url': ?videoUrl,
       },
     );
   }
@@ -674,10 +758,10 @@ class BackendApiService {
       body: {
         'file_id': fileId,
         'query': query,
-        if (collegeId != null) 'college_id': collegeId,
-        if (useOcr != null) 'use_ocr': useOcr,
-        if (forceOcr != null) 'force_ocr': forceOcr,
-        if (ocrProvider != null) 'ocr_provider': ocrProvider,
+        'college_id': ?collegeId,
+        'use_ocr': ?useOcr,
+        'force_ocr': ?forceOcr,
+        'ocr_provider': ?ocrProvider,
       },
     );
   }
@@ -694,10 +778,10 @@ class BackendApiService {
       method: 'POST',
       body: {
         'question': question,
-        if (collegeId != null) 'college_id': collegeId,
-        if (topK != null) 'top_k': topK,
-        if (minScore != null) 'min_score': minScore,
-        if (allowWeb != null) 'allow_web': allowWeb,
+        'college_id': ?collegeId,
+        'top_k': ?topK,
+        'min_score': ?minScore,
+        'allow_web': ?allowWeb,
       },
     );
   }
@@ -713,10 +797,7 @@ class BackendApiService {
     await _requestJson(
       '/api/notifications/fcm-token',
       method: 'POST',
-      body: {
-        'token': token,
-        'platform': platform,
-      },
+      body: {'token': token, 'platform': platform},
       // Recaptcha context removed as it cannot be a string
     );
   }
@@ -726,12 +807,11 @@ class BackendApiService {
     await _requestJson(
       '/api/notifications/fcm-token',
       method: 'DELETE',
-      body: {
-        'token': token,
-      },
+      body: {'token': token},
       // Recaptcha context removed
     );
   }
+
   Future<Map<String, dynamic>> joinChatRoomById(String roomId) async {
     return _requestJson(
       '/api/chat/join-room',
@@ -746,8 +826,12 @@ class BackendApiService {
 
   Future<Map<String, dynamic>> checkFollowStatus(String email) async {
     // Corrected endpoint
-    return _requestJson('/api/follow/status/${Uri.encodeComponent(email)}', method: 'GET');
+    return _requestJson(
+      '/api/follow/status/${Uri.encodeComponent(email)}',
+      method: 'GET',
+    );
   }
+
   Future<Map<String, dynamic>> getFollowers() async {
     return _requestJson('/api/follow/followers', method: 'GET');
   }
@@ -772,6 +856,9 @@ class BackendApiService {
   }
 
   Future<void> cancelFollowRequest(String requestId) async {
-    await _requestJson('/api/follow/request/${Uri.encodeComponent(requestId)}', method: 'DELETE');
+    await _requestJson(
+      '/api/follow/request/${Uri.encodeComponent(requestId)}',
+      method: 'DELETE',
+    );
   }
 }

@@ -352,9 +352,9 @@ class _NoticesScreenState extends State<NoticesScreen>
                     .toInt();
           }
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to update follow status')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_followErrorMessage(e))));
       }
     }
   }
@@ -413,12 +413,7 @@ class _NoticesScreenState extends State<NoticesScreen>
                 children: [
                   Row(
                     children: [
-                      Image.asset(
-                        'assets/icon/app_icon.png',
-                        width: 28,
-                        height: 28,
-                        fit: BoxFit.contain,
-                      ),
+                      _buildNoticesHeaderIcon(isDark),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Column(
@@ -880,5 +875,83 @@ class _NoticesScreenState extends State<NoticesScreen>
         ),
       ],
     );
+  }
+
+  String _followErrorMessage(Object error) {
+    final message = error.toString().toLowerCase();
+    if (message.contains('row-level security') ||
+        message.contains('unauthorized')) {
+      return 'Follow is not available right now. Please sign in again.';
+    }
+    return 'Failed to update follow status.';
+  }
+
+  Widget _buildNoticesHeaderIcon(bool isDark) {
+    return Container(
+      width: 32,
+      height: 32,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            AppTheme.primary,
+            AppTheme.primaryDark.withValues(alpha: 0.9),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: isDark ? Colors.white12 : Colors.black12),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primary.withValues(alpha: 0.22),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: const Center(child: _NoticeLogoMark()),
+    );
+  }
+}
+
+class _NoticeLogoMark extends StatelessWidget {
+  const _NoticeLogoMark();
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      size: const Size(18, 14),
+      painter: const _NoticeLogoMarkPainter(color: Colors.white),
+    );
+  }
+}
+
+class _NoticeLogoMarkPainter extends CustomPainter {
+  final Color color;
+
+  const _NoticeLogoMarkPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = size.width * 0.14
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    final path = Path()
+      ..moveTo(0, size.height)
+      ..lineTo(0, 0)
+      ..lineTo(size.width * 0.5, size.height * 0.7)
+      ..lineTo(size.width, 0)
+      ..lineTo(size.width, size.height);
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant _NoticeLogoMarkPainter oldDelegate) {
+    return oldDelegate.color != color;
   }
 }

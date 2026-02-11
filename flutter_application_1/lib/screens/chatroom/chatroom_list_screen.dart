@@ -512,7 +512,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                  title: Text('Private', style: TextStyle(color: isDark ? Colors.white : Colors.black)),
                  value: isPrivate,
                  onChanged: (v) => setDialogState(() => isPrivate = v),
-                 activeColor: isDark ? Colors.white : Colors.black,
+                 activeThumbColor: isDark ? Colors.white : Colors.black,
                ),
                SwitchListTile(
                  title: Row(
@@ -536,7 +536,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                  onChanged: isPremium 
                     ? (v) => setDialogState(() => isPermanent = v)
                     : null, // Disabled for free users
-                 activeColor: isDark ? Colors.white : Colors.black,
+                 activeThumbColor: isDark ? Colors.white : Colors.black,
                ),
              ],
            ),

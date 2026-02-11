@@ -833,21 +833,19 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                           color: secondaryTextColor,
                         ),
                       ),
+                      const SizedBox(width: 4),
                       PopupMenuButton<String>(
-                        padding: EdgeInsets.zero,
-                        tooltip: 'More',
-                        color: isDark ? const Color(0xFF1E293B) : Colors.white,
                         icon: Icon(
                           Icons.more_horiz_rounded,
                           color: secondaryTextColor,
-                          size: 18,
+                          size: 20,
                         ),
-                        onSelected: (value) async {
+                        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                        onSelected: (value) {
                           if (value == 'copy') {
-                            await Clipboard.setData(
+                            Clipboard.setData(
                               ClipboardData(text: displayContent),
                             );
-                            if (!mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
                                 content: Text('Copied to clipboard'),
@@ -862,7 +860,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                           }
                         },
                         itemBuilder: (context) => [
-                          PopupMenuItem<String>(
+                          PopupMenuItem(
                             value: 'copy',
                             child: Row(
                               children: [
@@ -879,7 +877,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                               ],
                             ),
                           ),
-                          PopupMenuItem<String>(
+                          PopupMenuItem(
                             value: 'report',
                             child: Row(
                               children: [

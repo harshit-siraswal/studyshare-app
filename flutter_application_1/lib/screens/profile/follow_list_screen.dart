@@ -4,7 +4,6 @@ import '../../services/backend_api_service.dart';
 import '../../services/supabase_service.dart';
 import '../../widgets/user_avatar.dart';
 import '../../widgets/follow_button.dart';
-import '../../widgets/follow_button.dart';
 import '../../config/theme.dart';
 import 'user_profile_screen.dart';
 

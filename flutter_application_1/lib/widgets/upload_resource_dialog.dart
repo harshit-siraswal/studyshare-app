@@ -211,15 +211,19 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     final lower = filename.toLowerCase();
     if (lower.endsWith('.pdf')) return 'application/pdf';
     if (lower.endsWith('.doc')) return 'application/msword';
-    if (lower.endsWith('.docx'))
+    if (lower.endsWith('.docx')) {
       return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    }
     if (lower.endsWith('.ppt')) return 'application/vnd.ms-powerpoint';
-    if (lower.endsWith('.pptx'))
+    if (lower.endsWith('.pptx')) {
       return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
-    if (lower.endsWith('.odt'))
+    }
+    if (lower.endsWith('.odt')) {
       return 'application/vnd.oasis.opendocument.text';
-    if (lower.endsWith('.odp'))
+    }
+    if (lower.endsWith('.odp')) {
       return 'application/vnd.oasis.opendocument.presentation';
+    }
     if (lower.endsWith('.txt')) return 'text/plain';
     return 'application/octet-stream';
   }
@@ -229,10 +233,12 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     if (_semester.isEmpty) return _showError('Select semester');
     if (_branch.isEmpty) return _showError('Select branch');
     if (_subject.isEmpty) return _showError('Select subject');
-    if (_typeIndex == 0 && _selectedFile == null)
+    if (_typeIndex == 0 && _selectedFile == null) {
       return _showError('Attach a file to contribute');
-    if (_typeIndex == 1 && _videoUrl.isEmpty)
+    }
+    if (_typeIndex == 1 && _videoUrl.isEmpty) {
       return _showError('Enter video URL');
+    }
     if (_typeIndex == 0 &&
         _selectedFile != null &&
         _selectedFile!.size > 10 * 1024 * 1024) {
@@ -388,11 +394,12 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     } catch (e) {
       if (mounted) _showError('Submission failed: ${e.toString()}');
     } finally {
-      if (mounted)
+      if (mounted) {
         setState(() {
           _isUploading = false;
           _uploadProgress = 0;
         });
+      }
     }
   }
 

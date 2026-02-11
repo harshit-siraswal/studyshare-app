@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/college.dart';
 import '../models/resource.dart';
@@ -31,6 +32,16 @@ class SupabaseService {
   }
 
   String? get currentUserEmail => _client.auth.currentUser?.email;
+  String? get currentUserId => _client.auth.currentUser?.id;
+
+  String _currentSessionEmail() {
+    final supabaseEmail = _normalizeEmail(currentUserEmail);
+    if (supabaseEmail.isNotEmpty) return supabaseEmail;
+    final firebaseEmail = _normalizeEmail(
+      firebase_auth.FirebaseAuth.instance.currentUser?.email,
+    );
+    return firebaseEmail;
+  }
 
   String _normalizeEmail(String? email) => email?.trim().toLowerCase() ?? '';
 
@@ -44,6 +55,58 @@ class SupabaseService {
     return message.contains('column') &&
         message.contains(column.toLowerCase()) &&
         message.contains('does not exist');
+  }
+
+  bool _isStatusColumnMissingError(Object error) {
+    return _isMissingColumnError(error, 'status');
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchAcceptedOrApprovedFollows({
+    required String selectColumns,
+    required String filterColumn,
+    required dynamic filterValue,
+  }) async {
+    try {
+      final withStatuses = await _client
+          .from('follows')
+          .select(selectColumns)
+          .eq(filterColumn, filterValue)
+          .inFilter('status', ['accepted', 'approved']);
+      return List<Map<String, dynamic>>.from(withStatuses);
+    } catch (e) {
+      if (!_isStatusColumnMissingError(e)) rethrow;
+      final withoutStatus = await _client
+          .from('follows')
+          .select(selectColumns)
+          .eq(filterColumn, filterValue);
+      return List<Map<String, dynamic>>.from(withoutStatus);
+    }
+  }
+
+  Future<int> _countAcceptedOrApprovedFollows({
+    required String filterColumn,
+    required dynamic filterValue,
+  }) async {
+    try {
+      return await _client
+          .from('follows')
+          .count(CountOption.exact)
+          .eq(filterColumn, filterValue)
+          .inFilter('status', ['accepted', 'approved']);
+    } catch (e) {
+      if (!_isStatusColumnMissingError(e)) rethrow;
+      return await _client
+          .from('follows')
+          .count(CountOption.exact)
+          .eq(filterColumn, filterValue);
+    }
+  }
+
+  bool _isRowLevelSecurityError(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('row-level security') ||
+        message.contains('violates row-level security policy') ||
+        message.contains('42501');
   }
 
   Map<String, dynamic> _normalizeSocialUser(Map<String, dynamic> raw) {
@@ -138,12 +201,10 @@ class SupabaseService {
       // Merge results and deduplicate by user id
       final Map<String, Map<String, dynamic>> deduped = {};
       for (final result in results) {
-        if (result is List) {
-          for (final user in result) {
-            final userId = user['id'];
-            if (userId != null) {
-              deduped[userId] = user;
-            }
+        for (final user in result) {
+          final userId = user['id'];
+          if (userId != null) {
+            deduped[userId] = user;
           }
         }
       }
@@ -267,13 +328,13 @@ class SupabaseService {
       List<String> followingIds = [];
 
       for (final id in identifiers) {
-        final followsResponse = await _client
-            .from('follows')
-            .select('following_id')
-            .eq('follower_id', id)
-            .eq('status', 'accepted');
+        final followsResponse = await _fetchAcceptedOrApprovedFollows(
+          selectColumns: 'following_id',
+          filterColumn: 'follower_id',
+          filterValue: id,
+        );
 
-        final ids = (followsResponse as List)
+        final ids = followsResponse
             .map((r) => r['following_id'] as String?)
             .whereType<String>()
             .toList();
@@ -312,12 +373,13 @@ class SupabaseService {
 
     // Fallback: email-based follows
     try {
-      final followsResponse = await _client
-          .from('follows')
-          .select('following_email')
-          .eq('follower_email', userEmail);
+      final followsResponse = await _fetchAcceptedOrApprovedFollows(
+        selectColumns: 'following_email',
+        filterColumn: 'follower_email',
+        filterValue: userEmail.toLowerCase(),
+      );
 
-      final followingEmails = (followsResponse as List)
+      final followingEmails = followsResponse
           .map((r) => r['following_email'] as String?)
           .whereType<String>()
           .toList();
@@ -598,9 +660,6 @@ class SupabaseService {
     required String type,
     required String title,
     required String message,
-    String? actorId,
-    int? followRequestId,
-    bool isActionable = false,
   }) async {
     // Backend handles this
   }
@@ -610,12 +669,7 @@ class SupabaseService {
   /// Get recent notifications
   Future<List<Map<String, dynamic>>> getNotifications({int limit = 50}) async {
     try {
-      final response = await _client
-          .from('notifications')
-          .select()
-          .order('created_at', ascending: false)
-          .limit(limit);
-      return List<Map<String, dynamic>>.from(response);
+      return await _api.getNotifications(limit: limit);
     } catch (e) {
       debugPrint('Error fetching notifications: $e');
       return [];
@@ -625,10 +679,8 @@ class SupabaseService {
   /// Mark notification as read
   Future<void> markNotificationRead(String notificationId) async {
     try {
-      await _client
-          .from('notifications')
-          .update({'is_read': true})
-          .eq('id', notificationId);
+      final ctx = _ctx;
+      await _api.markNotificationRead(notificationId, contextForRecaptcha: ctx);
     } catch (e) {
       debugPrint('Error marking notification read: $e');
     }
@@ -713,7 +765,7 @@ class SupabaseService {
 
   Future<List<Map<String, dynamic>>> getFollowers(String userEmail) async {
     final normalizedTarget = _normalizeEmail(userEmail);
-    final normalizedCurrent = _normalizeEmail(currentUserEmail);
+    final normalizedCurrent = _currentSessionEmail();
 
     try {
       if (normalizedTarget.isNotEmpty &&
@@ -723,61 +775,48 @@ class SupabaseService {
       }
 
       final identifiers = await _resolveUserIdentifiers(normalizedTarget);
-      if (identifiers.isEmpty) return [];
+      if (identifiers.isNotEmpty) {
+        List<String> followerIds = [];
+        for (final id in identifiers) {
+          final response = await _fetchAcceptedOrApprovedFollows(
+            selectColumns: 'follower_id',
+            filterColumn: 'following_id',
+            filterValue: id,
+          );
 
-      List<String> followerIds = [];
-      for (final id in identifiers) {
-        final response = await _client
-            .from('follows')
-            .select('follower_id')
-            .eq('following_id', id)
-            .eq('status', 'accepted');
+          final ids = response
+              .map((r) => r['follower_id'] as String?)
+              .whereType<String>()
+              .toList();
 
-        final ids = (response as List)
-            .map((r) => r['follower_id'] as String?)
-            .whereType<String>()
-            .toList();
+          if (ids.isNotEmpty) {
+            followerIds = ids;
+            break;
+          }
+        }
 
-        if (ids.isNotEmpty) {
-          followerIds = ids;
-          break;
+        if (followerIds.isNotEmpty) {
+          final usersResponse = await _fetchUsersByIds(followerIds);
+          final normalized = _normalizeSocialUsers(usersResponse);
+          if (normalized.isNotEmpty) return normalized;
         }
       }
-
-      if (followerIds.isEmpty) return [];
-
-      final usersResponse = await _fetchUsersByIds(followerIds);
-      return _normalizeSocialUsers(usersResponse);
     } catch (e) {
       debugPrint('Error getting followers: $e');
     }
 
     // Fallback: email-based follows (older schema)
     try {
-      List<String> followerEmails = [];
+      final response = await _fetchAcceptedOrApprovedFollows(
+        selectColumns: 'follower_email',
+        filterColumn: 'following_email',
+        filterValue: normalizedTarget,
+      );
 
-      try {
-        final response = await _client
-            .from('follows')
-            .select('follower_email')
-            .eq('following_email', normalizedTarget)
-            .eq('status', 'accepted');
-
-        followerEmails = (response as List)
-            .map((r) => r['follower_email'] as String?)
-            .whereType<String>()
-            .toList();
-      } catch (e) {
-        final response = await _client
-            .from('follows')
-            .select('follower_email')
-            .eq('following_email', normalizedTarget);
-
-        followerEmails = (response as List)
-            .map((r) => r['follower_email'] as String?)
-            .whereType<String>()
-            .toList();
-      }
+      final followerEmails = response
+          .map((r) => r['follower_email'] as String?)
+          .whereType<String>()
+          .toList();
 
       if (followerEmails.isEmpty) return [];
 
@@ -795,7 +834,7 @@ class SupabaseService {
 
   Future<List<Map<String, dynamic>>> getFollowing(String userEmail) async {
     final normalizedTarget = _normalizeEmail(userEmail);
-    final normalizedCurrent = _normalizeEmail(currentUserEmail);
+    final normalizedCurrent = _currentSessionEmail();
 
     try {
       if (normalizedTarget.isNotEmpty &&
@@ -805,61 +844,48 @@ class SupabaseService {
       }
 
       final identifiers = await _resolveUserIdentifiers(normalizedTarget);
-      if (identifiers.isEmpty) return [];
+      if (identifiers.isNotEmpty) {
+        List<String> followingIds = [];
+        for (final id in identifiers) {
+          final response = await _fetchAcceptedOrApprovedFollows(
+            selectColumns: 'following_id',
+            filterColumn: 'follower_id',
+            filterValue: id,
+          );
 
-      List<String> followingIds = [];
-      for (final id in identifiers) {
-        final response = await _client
-            .from('follows')
-            .select('following_id')
-            .eq('follower_id', id)
-            .eq('status', 'accepted');
+          final ids = response
+              .map((r) => r['following_id'] as String?)
+              .whereType<String>()
+              .toList();
 
-        final ids = (response as List)
-            .map((r) => r['following_id'] as String?)
-            .whereType<String>()
-            .toList();
+          if (ids.isNotEmpty) {
+            followingIds = ids;
+            break;
+          }
+        }
 
-        if (ids.isNotEmpty) {
-          followingIds = ids;
-          break;
+        if (followingIds.isNotEmpty) {
+          final usersResponse = await _fetchUsersByIds(followingIds);
+          final normalized = _normalizeSocialUsers(usersResponse);
+          if (normalized.isNotEmpty) return normalized;
         }
       }
-
-      if (followingIds.isEmpty) return [];
-
-      final usersResponse = await _fetchUsersByIds(followingIds);
-      return _normalizeSocialUsers(usersResponse);
     } catch (e) {
       debugPrint('Error getting following: $e');
     }
 
     // Fallback: email-based follows (older schema)
     try {
-      List<String> followingEmails = [];
+      final response = await _fetchAcceptedOrApprovedFollows(
+        selectColumns: 'following_email',
+        filterColumn: 'follower_email',
+        filterValue: normalizedTarget,
+      );
 
-      try {
-        final response = await _client
-            .from('follows')
-            .select('following_email')
-            .eq('follower_email', normalizedTarget)
-            .eq('status', 'accepted');
-
-        followingEmails = (response as List)
-            .map((r) => r['following_email'] as String?)
-            .whereType<String>()
-            .toList();
-      } catch (e) {
-        final response = await _client
-            .from('follows')
-            .select('following_email')
-            .eq('follower_email', normalizedTarget);
-
-        followingEmails = (response as List)
-            .map((r) => r['following_email'] as String?)
-            .whereType<String>()
-            .toList();
-      }
+      final followingEmails = response
+          .map((r) => r['following_email'] as String?)
+          .whereType<String>()
+          .toList();
 
       if (followingEmails.isEmpty) return [];
 
@@ -882,7 +908,16 @@ class SupabaseService {
   Future<List<Map<String, dynamic>>> getBookmarks() async {
     try {
       final res = await _api.getBookmarks();
-      return List<Map<String, dynamic>>.from(res['bookmarks'] ?? []);
+      final raw = List<Map<String, dynamic>>.from(res['bookmarks'] ?? []);
+      return raw.map((item) {
+        final normalized = Map<String, dynamic>.from(item);
+        normalized['resource_id'] ??= normalized['resourceId'];
+        normalized['notice_id'] ??= normalized['noticeId'];
+        normalized['created_at'] ??= normalized['createdAt'];
+        normalized['resource'] ??= normalized['content'];
+        normalized['notice'] ??= normalized['content'];
+        return normalized;
+      }).toList();
     } catch (e) {
       debugPrint('Error getting bookmarks: $e');
       return [];
@@ -941,7 +976,7 @@ class SupabaseService {
   /// Get followers count
   Future<int> getFollowersCount(String userEmail) async {
     try {
-      if (userEmail == currentUserEmail) {
+      if (_normalizeEmail(userEmail) == _currentSessionEmail()) {
         final res = await _api.getFollowers();
         final list = List<Map<String, dynamic>>.from(res['followers'] ?? []);
         return list.length;
@@ -953,11 +988,10 @@ class SupabaseService {
       if (identifiers.isNotEmpty) {
         for (final id in identifiers) {
           try {
-            final withStatus = await _client
-                .from('follows')
-                .count(CountOption.exact)
-                .eq('following_id', id)
-                .eq('status', 'accepted');
+            final withStatus = await _countAcceptedOrApprovedFollows(
+              filterColumn: 'following_id',
+              filterValue: id,
+            );
             if (withStatus > maxCount) maxCount = withStatus;
             continue;
           } catch (_) {}
@@ -973,10 +1007,10 @@ class SupabaseService {
       }
 
       try {
-        final emailCount = await _client
-            .from('follows')
-            .count(CountOption.exact)
-            .eq('following_email', userEmail.toLowerCase());
+        final emailCount = await _countAcceptedOrApprovedFollows(
+          filterColumn: 'following_email',
+          filterValue: userEmail.toLowerCase(),
+        );
         if (emailCount > maxCount) maxCount = emailCount;
       } catch (_) {}
 
@@ -989,7 +1023,7 @@ class SupabaseService {
   /// Get following count
   Future<int> getFollowingCount(String userEmail) async {
     try {
-      if (userEmail == currentUserEmail) {
+      if (_normalizeEmail(userEmail) == _currentSessionEmail()) {
         final res = await _api.getFollowing();
         final list = List<Map<String, dynamic>>.from(res['following'] ?? []);
         return list.length;
@@ -1001,11 +1035,10 @@ class SupabaseService {
       if (identifiers.isNotEmpty) {
         for (final id in identifiers) {
           try {
-            final withStatus = await _client
-                .from('follows')
-                .count(CountOption.exact)
-                .eq('follower_id', id)
-                .eq('status', 'accepted');
+            final withStatus = await _countAcceptedOrApprovedFollows(
+              filterColumn: 'follower_id',
+              filterValue: id,
+            );
             if (withStatus > maxCount) maxCount = withStatus;
             continue;
           } catch (_) {}
@@ -1021,10 +1054,10 @@ class SupabaseService {
       }
 
       try {
-        final emailCount = await _client
-            .from('follows')
-            .count(CountOption.exact)
-            .eq('follower_email', userEmail.toLowerCase());
+        final emailCount = await _countAcceptedOrApprovedFollows(
+          filterColumn: 'follower_email',
+          filterValue: userEmail.toLowerCase(),
+        );
         if (emailCount > maxCount) maxCount = emailCount;
       } catch (_) {}
 
@@ -1771,7 +1804,36 @@ class SupabaseService {
     String userEmail,
   ) async {
     final normalizedEmail = _normalizeEmail(userEmail);
+    final userId = currentUserId;
     final payloads = <Map<String, dynamic>>[
+      if (userId != null && userId.isNotEmpty)
+        {
+          'department_id': departmentId,
+          'college_id': collegeId,
+          'user_id': userId,
+          'follower_email': normalizedEmail,
+        },
+      if (userId != null && userId.isNotEmpty)
+        {
+          'department_id': departmentId,
+          'college_id': collegeId,
+          'follower_id': userId,
+          'follower_email': normalizedEmail,
+        },
+      if (userId != null && userId.isNotEmpty)
+        {
+          'department_id': departmentId,
+          'college_id': collegeId,
+          'user_id': userId,
+          'user_email': normalizedEmail,
+        },
+      if (userId != null && userId.isNotEmpty)
+        {
+          'department_id': departmentId,
+          'college_id': collegeId,
+          'follower_id': userId,
+          'user_email': normalizedEmail,
+        },
       {
         'department_id': departmentId,
         'college_id': collegeId,
@@ -1784,6 +1846,10 @@ class SupabaseService {
         'user_email': normalizedEmail,
       },
       {'department_id': departmentId, 'user_email': normalizedEmail},
+      if (userId != null && userId.isNotEmpty)
+        {'department_id': departmentId, 'user_id': userId},
+      if (userId != null && userId.isNotEmpty)
+        {'department_id': departmentId, 'follower_id': userId},
     ];
 
     Object? lastError;
@@ -1794,19 +1860,26 @@ class SupabaseService {
       } catch (e) {
         if (_isDuplicateKeyError(e)) return;
         lastError = e;
-        final schemaMismatch =
-            _isMissingColumnError(e, 'follower_email') ||
-            _isMissingColumnError(e, 'user_email') ||
-            _isMissingColumnError(e, 'college_id');
-        if (!schemaMismatch) {
-          debugPrint('Error following department: $e');
-          rethrow;
+
+        final hasSchemaMismatch = payload.keys.any(
+          (key) => key != 'department_id' && _isMissingColumnError(e, key),
+        );
+        if (hasSchemaMismatch) {
+          continue;
         }
+
+        if (_isRowLevelSecurityError(e)) {
+          continue;
+        }
+
+        debugPrint('Error following department: $e');
+        rethrow;
       }
     }
 
     debugPrint('Error following department: $lastError');
-    if (lastError != null) throw lastError;
+    if (lastError != null) throw Exception(lastError.toString());
+    throw Exception('Could not follow department.');
   }
 
   /// Unfollow a department
@@ -1816,23 +1889,45 @@ class SupabaseService {
     String? collegeId,
   }) async {
     final normalizedEmail = _normalizeEmail(userEmail);
-    final attempts = <Map<String, dynamic>>[
-      {'emailColumn': 'follower_email', 'useCollegeFilter': true},
-      {'emailColumn': 'follower_email', 'useCollegeFilter': false},
-      {'emailColumn': 'user_email', 'useCollegeFilter': true},
-      {'emailColumn': 'user_email', 'useCollegeFilter': false},
+    final userId = currentUserId;
+    final filters = <Map<String, String>>[
+      if (userId != null && userId.isNotEmpty)
+        {'column': 'user_id', 'value': userId},
+      if (userId != null && userId.isNotEmpty)
+        {'column': 'follower_id', 'value': userId},
+      if (normalizedEmail.isNotEmpty)
+        {'column': 'follower_email', 'value': normalizedEmail},
+      if (normalizedEmail.isNotEmpty)
+        {'column': 'user_email', 'value': normalizedEmail},
     ];
+    final attempts = <Map<String, dynamic>>[
+      for (final filter in filters)
+        {
+          'column': filter['column']!,
+          'value': filter['value']!,
+          'useCollegeFilter': true,
+        },
+      for (final filter in filters)
+        {
+          'column': filter['column']!,
+          'value': filter['value']!,
+          'useCollegeFilter': false,
+        },
+    ];
+
+    if (attempts.isEmpty) return;
 
     Object? lastError;
     for (final attempt in attempts) {
-      final emailColumn = attempt['emailColumn'] as String;
+      final column = attempt['column'] as String;
+      final value = attempt['value'] as String;
       final useCollegeFilter = attempt['useCollegeFilter'] == true;
       try {
         var query = _client
             .from('department_followers')
             .delete()
             .eq('department_id', departmentId)
-            .eq(emailColumn, normalizedEmail);
+            .eq(column, value);
         if (useCollegeFilter &&
             collegeId != null &&
             collegeId.trim().isNotEmpty) {
@@ -1843,18 +1938,20 @@ class SupabaseService {
       } catch (e) {
         lastError = e;
         final schemaMismatch =
-            _isMissingColumnError(e, emailColumn) ||
+            _isMissingColumnError(e, column) ||
             (useCollegeFilter && _isMissingColumnError(e, 'college_id'));
-        if (!schemaMismatch) {
-          debugPrint('Error unfollowing department: $e');
-          rethrow;
+        if (schemaMismatch || _isRowLevelSecurityError(e)) {
+          continue;
         }
+
+        debugPrint('Error unfollowing department: $e');
+        rethrow;
       }
     }
 
     debugPrint('Error unfollowing department: $lastError');
     if (lastError != null) {
-      throw lastError;
+      throw Exception(lastError.toString());
     }
   }
 
@@ -1865,22 +1962,44 @@ class SupabaseService {
     String? collegeId,
   }) async {
     final normalizedEmail = _normalizeEmail(userEmail);
+    final userId = currentUserId;
+    final filters = <Map<String, String>>[
+      if (userId != null && userId.isNotEmpty)
+        {'column': 'user_id', 'value': userId},
+      if (userId != null && userId.isNotEmpty)
+        {'column': 'follower_id', 'value': userId},
+      if (normalizedEmail.isNotEmpty)
+        {'column': 'follower_email', 'value': normalizedEmail},
+      if (normalizedEmail.isNotEmpty)
+        {'column': 'user_email', 'value': normalizedEmail},
+    ];
     final attempts = <Map<String, dynamic>>[
-      {'emailColumn': 'follower_email', 'useCollegeFilter': true},
-      {'emailColumn': 'follower_email', 'useCollegeFilter': false},
-      {'emailColumn': 'user_email', 'useCollegeFilter': true},
-      {'emailColumn': 'user_email', 'useCollegeFilter': false},
+      for (final filter in filters)
+        {
+          'column': filter['column']!,
+          'value': filter['value']!,
+          'useCollegeFilter': true,
+        },
+      for (final filter in filters)
+        {
+          'column': filter['column']!,
+          'value': filter['value']!,
+          'useCollegeFilter': false,
+        },
     ];
 
+    if (attempts.isEmpty) return false;
+
     for (final attempt in attempts) {
-      final emailColumn = attempt['emailColumn'] as String;
+      final column = attempt['column'] as String;
+      final value = attempt['value'] as String;
       final useCollegeFilter = attempt['useCollegeFilter'] == true;
       try {
         var query = _client
             .from('department_followers')
             .select('id')
             .eq('department_id', departmentId)
-            .eq(emailColumn, normalizedEmail);
+            .eq(column, value);
         if (useCollegeFilter &&
             collegeId != null &&
             collegeId.trim().isNotEmpty) {
@@ -1890,9 +2009,9 @@ class SupabaseService {
         return response != null;
       } catch (e) {
         final schemaMismatch =
-            _isMissingColumnError(e, emailColumn) ||
+            _isMissingColumnError(e, column) ||
             (useCollegeFilter && _isMissingColumnError(e, 'college_id'));
-        if (!schemaMismatch) {
+        if (!schemaMismatch && !_isRowLevelSecurityError(e)) {
           debugPrint('Error checking department follow: $e');
           return false;
         }
@@ -1943,21 +2062,43 @@ class SupabaseService {
     String userEmail,
   ) async {
     final normalizedEmail = _normalizeEmail(userEmail);
+    final userId = currentUserId;
+    final filters = <Map<String, String>>[
+      if (userId != null && userId.isNotEmpty)
+        {'column': 'user_id', 'value': userId},
+      if (userId != null && userId.isNotEmpty)
+        {'column': 'follower_id', 'value': userId},
+      if (normalizedEmail.isNotEmpty)
+        {'column': 'follower_email', 'value': normalizedEmail},
+      if (normalizedEmail.isNotEmpty)
+        {'column': 'user_email', 'value': normalizedEmail},
+    ];
     final attempts = <Map<String, dynamic>>[
-      {'emailColumn': 'follower_email', 'useCollegeFilter': true},
-      {'emailColumn': 'follower_email', 'useCollegeFilter': false},
-      {'emailColumn': 'user_email', 'useCollegeFilter': true},
-      {'emailColumn': 'user_email', 'useCollegeFilter': false},
+      for (final filter in filters)
+        {
+          'column': filter['column']!,
+          'value': filter['value']!,
+          'useCollegeFilter': true,
+        },
+      for (final filter in filters)
+        {
+          'column': filter['column']!,
+          'value': filter['value']!,
+          'useCollegeFilter': false,
+        },
     ];
 
+    if (attempts.isEmpty) return [];
+
     for (final attempt in attempts) {
-      final emailColumn = attempt['emailColumn'] as String;
+      final column = attempt['column'] as String;
+      final value = attempt['value'] as String;
       final useCollegeFilter = attempt['useCollegeFilter'] == true;
       try {
         var query = _client
             .from('department_followers')
             .select('department_id')
-            .eq(emailColumn, normalizedEmail);
+            .eq(column, value);
         if (useCollegeFilter && collegeId.trim().isNotEmpty) {
           query = query.eq('college_id', collegeId);
         }
@@ -1969,9 +2110,9 @@ class SupabaseService {
             .toList();
       } catch (e) {
         final schemaMismatch =
-            _isMissingColumnError(e, emailColumn) ||
+            _isMissingColumnError(e, column) ||
             (useCollegeFilter && _isMissingColumnError(e, 'college_id'));
-        if (!schemaMismatch) {
+        if (!schemaMismatch && !_isRowLevelSecurityError(e)) {
           debugPrint('Error getting followed departments: $e');
           return [];
         }
@@ -2096,21 +2237,31 @@ class SupabaseService {
     required String commentType, // 'notice' or 'post'
   }) async {
     try {
-      final response = await _client
-          .from('comment_reactions')
-          .select()
-          .eq('comment_id', commentId)
-          .eq('comment_type', commentType);
+      final data = await _api.getCommentReactions(
+        commentId: commentId,
+        commentType: commentType,
+      );
 
-      // Group by emoji
+      final raw = data['reactions'];
       final Map<String, List<String>> grouped = {};
-      for (var r in response) {
-        final emoji = r['emoji'] as String;
-        final userEmail = r['user_email'] as String;
-        grouped.putIfAbsent(emoji, () => []).add(userEmail);
+      if (raw is Map) {
+        raw.forEach((key, value) {
+          final emoji = key.toString();
+          if (value is List) {
+            grouped[emoji] = value.map((e) => e.toString()).toList();
+          } else {
+            grouped[emoji] = [];
+          }
+        });
       }
 
-      return {'reactions': grouped, 'total': response.length};
+      final total = data['total'];
+      return {
+        'reactions': grouped,
+        'total': total is int
+            ? total
+            : grouped.values.fold<int>(0, (sum, list) => sum + list.length),
+      };
     } catch (e) {
       debugPrint('Error fetching comment reactions: $e');
       return {'reactions': {}, 'total': 0};
@@ -2125,74 +2276,18 @@ class SupabaseService {
     required String emoji,
   }) async {
     try {
-      // Atomic-like toggle: Try to remove first.
-      // If removed (returned true), we are done (unliked).
-      // If not removed (returned false), it didn't exist, so we add it (liked).
-      final removed = await removeReaction(
+      final ctx = _ctx;
+      if (ctx == null) throw Exception('Security context not initialized');
+      final added = await _api.toggleCommentReaction(
         commentId: commentId,
         commentType: commentType,
-        userEmail: userEmail,
         emoji: emoji,
+        context: ctx,
       );
-
-      if (removed) {
-        return false;
-      } else {
-        await addReaction(
-          commentId: commentId,
-          commentType: commentType,
-          userEmail: userEmail,
-          emoji: emoji,
-        );
-        return true;
-      }
+      return added;
     } catch (e) {
       debugPrint('Error toggling reaction: $e');
       rethrow;
-    }
-  }
-
-  /// Add a reaction to a comment
-  Future<void> addReaction({
-    required String commentId,
-    required String commentType,
-    required String userEmail,
-    required String emoji,
-  }) async {
-    try {
-      await _client.from('comment_reactions').upsert({
-        'comment_id': commentId,
-        'comment_type': commentType,
-        'user_email': userEmail,
-        'emoji': emoji,
-      });
-    } catch (e) {
-      debugPrint('Error adding reaction: $e');
-      rethrow;
-    }
-  }
-
-  /// Remove a reaction
-  Future<bool> removeReaction({
-    required String commentId,
-    required String commentType,
-    required String userEmail,
-    required String emoji,
-  }) async {
-    try {
-      final response = await _client
-          .from('comment_reactions')
-          .delete()
-          .eq('comment_id', commentId)
-          .eq('comment_type', commentType)
-          .eq('user_email', userEmail)
-          .eq('emoji', emoji)
-          .select();
-
-      return response.isNotEmpty;
-    } catch (e) {
-      debugPrint('Error removing reaction: $e');
-      return false;
     }
   }
 

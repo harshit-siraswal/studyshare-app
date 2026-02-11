@@ -502,23 +502,6 @@ class _ResourceCardState extends State<ResourceCard> {
 
     if (name == null) return const SizedBox.shrink();
 
-    if (email == null) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-        child: Semantics(
-          label: 'by $name',
-          button: false,
-          child: Text(
-            'by $name',
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              color: AppTheme.textMuted,
-            ),
-          ),
-        ),
-      );
-    }
-
     return Material(
       color: Colors.transparent,
       child: Tooltip(
@@ -529,7 +512,7 @@ class _ResourceCardState extends State<ResourceCard> {
             Navigator.of(context).push(
               MaterialPageRoute(
                 builder: (_) => UserProfileScreen(
-                  userEmail: email!,
+                  userEmail: email,
                   userName: name,
                 ),
               ),

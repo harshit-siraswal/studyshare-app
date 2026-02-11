@@ -47,8 +47,8 @@ class _StudyScreenState extends State<StudyScreen>
   List<Resource> _resources = [];
   bool _isLoading = true;
   bool _isLoadingMore = false;
-  int _page = 0;
-  bool _hasMore = true;
+  final int _page = 0;
+  final bool _hasMore = true;
   final AudioPlayer _audioPlayer = AudioPlayer();
   late Future<List<DepartmentData>> _departmentsFuture;
 
@@ -70,7 +70,7 @@ class _StudyScreenState extends State<StudyScreen>
   List<String> _semesters = [];
   List<String> _branches = [];
   List<String> _subjects = [];
-  final List<String> _types = ['All', 'Notes', 'PYQ', 'Downloads'];
+  final List<String> _types = ['All', 'Notes', 'PYQ', 'Videos', 'Downloads'];
   final List<String> _sortOptions = ['Recent', 'Most upvotes', 'Teacher'];
 
   @override
@@ -167,7 +167,7 @@ class _StudyScreenState extends State<StudyScreen>
         semester: _selectedSemester != 'All' ? _selectedSemester : null,
         branch: _selectedBranch != 'All' ? _selectedBranch : null,
         subject: _selectedSubject != 'All' ? _selectedSubject : null,
-        type: _selectedType != 'All' ? _selectedType?.toLowerCase() : null,
+        type: _mapResourceType(_selectedType),
         searchQuery: _searchController.text.isNotEmpty
             ? _searchController.text
             : null,
@@ -208,7 +208,7 @@ class _StudyScreenState extends State<StudyScreen>
         semester: _selectedSemester != 'All' ? _selectedSemester : null,
         branch: _selectedBranch != 'All' ? _selectedBranch : null,
         subject: _selectedSubject != 'All' ? _selectedSubject : null,
-        type: _selectedType != 'All' ? _selectedType?.toLowerCase() : null,
+        type: _mapResourceType(_selectedType),
         searchQuery: _searchController.text.isNotEmpty
             ? _searchController.text
             : null,
@@ -256,7 +256,6 @@ class _StudyScreenState extends State<StudyScreen>
                     Column(
                       children: [
                         _buildSearchBar(),
-                        _buildQuickFilters(),
                         Expanded(
                           child: RefreshIndicator(
                             onRefresh: () => _loadResources(refresh: true),
@@ -694,6 +693,18 @@ class _StudyScreenState extends State<StudyScreen>
       _selectedSort != 'Recent',
     ].where((v) => v).length;
 
+    final searchBarColor = isDark ? Colors.black : const Color(0xFFF4F6FB);
+    final borderColor = hasActiveFilters
+        ? AppTheme.primary.withValues(alpha: 0.55)
+        : (isDark ? Colors.white24 : const Color(0xFFE1E7F0));
+    final dividerColor = isDark ? Colors.white10 : Colors.black12;
+    final filterBackground = hasActiveFilters
+        ? AppTheme.primary.withValues(alpha: isDark ? 0.22 : 0.12)
+        : (isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.06));
+    final filterTextColor = hasActiveFilters
+        ? AppTheme.primary
+        : (isDark ? Colors.white70 : const Color(0xFF111827));
+
     return GestureDetector(
       onTap: () {
         Navigator.of(context).push(
@@ -727,23 +738,20 @@ class _StudyScreenState extends State<StudyScreen>
       child: Container(
         height: 58,
         margin: const EdgeInsets.symmetric(horizontal: 20),
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFF),
-          borderRadius: BorderRadius.circular(28),
+          color: searchBarColor,
+          borderRadius: BorderRadius.circular(18),
           border: Border.all(
-            color: hasActiveFilters
-                ? AppTheme.primary.withValues(alpha: 0.45)
-                : (isDark ? Colors.white24 : const Color(0xFFD7E3FF)),
-            width: hasActiveFilters ? 1.1 : 0.7,
+            color: borderColor,
+            width: hasActiveFilters ? 1.2 : 0.9,
           ),
           boxShadow: [
-            if (!isDark)
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              ),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.08),
+              blurRadius: 12,
+              offset: const Offset(0, 6),
+            ),
           ],
         ),
         child: Row(
@@ -753,69 +761,55 @@ class _StudyScreenState extends State<StudyScreen>
               height: 36,
               decoration: BoxDecoration(
                 color: isDark
-                    ? Colors.white.withValues(alpha: 0.08)
-                    : const Color(0xFFE8F0FF),
-                borderRadius: BorderRadius.circular(12),
+                    ? Colors.white.withValues(alpha: 0.1)
+                    : const Color(0xFFDCE3EE),
+                borderRadius: BorderRadius.circular(11),
               ),
               child: Icon(
                 Icons.search_rounded,
-                color: isDark ? Colors.white70 : AppTheme.primary,
+                color: isDark ? Colors.white70 : const Color(0xFF19212E),
                 size: 18,
               ),
             ),
             const SizedBox(width: 12),
-            Text(
-              "Search resources...",
-              style: GoogleFonts.inter(
-                color: isDark ? Colors.grey[400] : Colors.grey[600],
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
+            Expanded(
+              child: Text(
+                'Search resources...',
+                style: GoogleFonts.inter(
+                  color: isDark ? Colors.grey[400] : const Color(0xFF4B5563),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w500,
+                ),
+                overflow: TextOverflow.ellipsis,
               ),
             ),
-            const Spacer(),
-            // Filter Icon Button
+            Container(width: 1, height: 30, color: dividerColor),
+            const SizedBox(width: 8),
             Material(
               color: Colors.transparent,
               child: InkWell(
                 onTap: _showFilterOptionsSheet,
-                borderRadius: BorderRadius.circular(999),
+                borderRadius: BorderRadius.circular(12),
                 child: Stack(
                   clipBehavior: Clip.none,
                   children: [
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 9,
-                      ),
+                      width: 36,
+                      height: 36,
+                      alignment: Alignment.center,
                       decoration: BoxDecoration(
-                        color: hasActiveFilters
-                            ? AppTheme.primary
-                            : (isDark
-                                  ? const Color(0xFF1F2937)
-                                  : const Color(0xFFF1F5F9)),
-                        borderRadius: BorderRadius.circular(999),
+                        color: filterBackground,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: hasActiveFilters
+                              ? AppTheme.primary.withValues(alpha: 0.4)
+                              : dividerColor,
+                        ),
                       ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.tune_rounded,
-                            color: hasActiveFilters
-                                ? Colors.white
-                                : (isDark ? Colors.white70 : Colors.black54),
-                            size: 16,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            'Filter',
-                            style: GoogleFonts.inter(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: hasActiveFilters
-                                  ? Colors.white
-                                  : (isDark ? Colors.white70 : Colors.black54),
-                            ),
-                          ),
-                        ],
+                      child: Icon(
+                        Icons.tune_rounded,
+                        color: filterTextColor,
+                        size: 18,
                       ),
                     ),
                     if (activeFilterCount > 0)
@@ -861,59 +855,17 @@ class _StudyScreenState extends State<StudyScreen>
     }
   }
 
-  // Horizontal list of resource type filters
-  Widget _buildQuickFilters() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return Container(
-      height: 44,
-      margin: const EdgeInsets.only(top: 12, bottom: 8),
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        itemCount: _types.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
-        itemBuilder: (context, index) {
-          final type = _types[index];
-          final isSelected =
-              (_selectedType == null && type == 'All') || _selectedType == type;
-          return GestureDetector(
-            onTap: () {
-              setState(() {
-                _selectedType = type == 'All' ? null : type;
-              });
-              _loadResources(refresh: true);
-            },
-            child: Container(
-              constraints: const BoxConstraints(minWidth: 74),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? AppTheme.primary
-                    : (isDark ? const Color(0xFF2C2C2E) : Colors.grey.shade100),
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(
-                  color: isSelected
-                      ? AppTheme.primary
-                      : (isDark ? Colors.white24 : Colors.grey.shade300),
-                  width: 0.5,
-                ),
-              ),
-              child: Text(
-                type,
-                textAlign: TextAlign.center,
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-                  color: isSelected
-                      ? Colors.white
-                      : (isDark ? Colors.white70 : Colors.black87),
-                ),
-              ),
-            ),
-          );
-        },
-      ),
-    );
+  String? _mapResourceType(String? typeLabel) {
+    if (typeLabel == null || typeLabel == 'All') {
+      return null;
+    }
+    if (typeLabel == 'Videos') {
+      return 'video';
+    }
+    if (typeLabel == 'Downloads') {
+      return 'notes';
+    }
+    return typeLabel.toLowerCase();
   }
 
   void _showFilterOptionsSheet() {
@@ -922,363 +874,294 @@ class _StudyScreenState extends State<StudyScreen>
       backgroundColor:
           Colors.transparent, // Use transparent to handle rounded corners
       isScrollControlled: true,
-      builder: (context) => _buildFilterSheetContent(),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) =>
+            _buildFilterSheetContent(setModalState),
+      ),
     );
   }
 
-  Widget _buildFilterSheetContent() {
+  Widget _buildFilterSheetContent(StateSetter setModalState) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgColor = isDark ? const Color(0xFF111827) : Colors.white;
-    final titleColor = isDark ? Colors.white : const Color(0xFF0F172A);
+    final bgColor = isDark ? const Color(0xFF0F1116) : Colors.white;
+    void syncSheet() => setModalState(() {});
 
-    return DefaultTabController(
-      length: 2,
-      child: Container(
-        height: MediaQuery.of(context).size.height * 0.78,
-        decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: Column(
-          children: [
-            const SizedBox(height: 10),
-            Container(
-              width: 42,
-              height: 4,
-              decoration: BoxDecoration(
-                color: isDark ? Colors.white24 : Colors.grey.shade300,
-                borderRadius: BorderRadius.circular(2),
-              ),
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.74,
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
+      ),
+      child: Column(
+        children: [
+          const SizedBox(height: 10),
+          Container(
+            width: 44,
+            height: 5,
+            decoration: BoxDecoration(
+              color: isDark ? Colors.white24 : Colors.black12,
+              borderRadius: BorderRadius.circular(999),
             ),
-            const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Row(
-                children: [
-                  Text(
-                    'Search Controls',
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 16, 8),
+            child: Row(
+              children: [
+                const SizedBox(width: 56),
+                Expanded(
+                  child: Text(
+                    'Sort & filter',
+                    textAlign: TextAlign.center,
                     style: GoogleFonts.inter(
-                      fontSize: 19,
+                      fontSize: 24,
                       fontWeight: FontWeight.w700,
-                      color: titleColor,
+                      color: isDark ? Colors.white : const Color(0xFF111827),
                     ),
                   ),
-                  const Spacer(),
-                  TextButton(
-                    onPressed: () {
-                      setState(() {
-                        _selectedSemester = null;
-                        _selectedBranch = null;
-                        _selectedSubject = null;
-                        _selectedType = null;
-                        _selectedSort = 'Recent';
-                      });
-                      _loadResources(refresh: true);
-                    },
-                    child: Text(
-                      'Reset',
-                      style: GoogleFonts.inter(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.error,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
-              child: Container(
-                height: 42,
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? const Color(0xFF1F2937)
-                      : const Color(0xFFF1F5F9),
-                  borderRadius: BorderRadius.circular(999),
                 ),
-                child: TabBar(
-                  indicator: BoxDecoration(
-                    color: AppTheme.primary,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  dividerColor: Colors.transparent,
-                  labelColor: Colors.white,
-                  unselectedLabelColor: isDark
-                      ? Colors.white70
-                      : Colors.black54,
-                  labelStyle: GoogleFonts.inter(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                  ),
-                  unselectedLabelStyle: GoogleFonts.inter(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  tabs: const [
-                    Tab(text: 'Filter'),
-                    Tab(text: 'Sort'),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: TabBarView(
-                children: [
-                  _buildFilterOptionsTab(isDark),
-                  _buildSortOptionsTab(isDark),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-              child: ElevatedButton(
-                onPressed: () => Navigator.pop(context),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size(double.infinity, 52),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  elevation: 0,
-                ),
-                child: Text(
-                  'Show Results',
-                  style: GoogleFonts.inter(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFilterOptionsTab(bool isDark) {
-    final subTitleColor = isDark ? Colors.white70 : Colors.black54;
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Semester',
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: subTitleColor,
-            ),
-          ),
-          const SizedBox(height: 10),
-          _buildFilterDropdown(
-            value: _selectedSemester ?? 'All',
-            items: _semesters.isEmpty ? ['All'] : _semesters,
-            onChanged: (value) {
-              setState(() {
-                _selectedSemester = value == 'All' ? null : value;
-              });
-              _loadResources(refresh: true);
-            },
-            isDark: isDark,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Branch',
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: subTitleColor,
-            ),
-          ),
-          const SizedBox(height: 10),
-          _buildFilterDropdown(
-            value: _selectedBranch ?? 'All',
-            items: _branches.isEmpty ? ['All'] : _branches,
-            onChanged: (value) {
-              setState(() {
-                _selectedBranch = value == 'All' ? null : value;
-                _selectedSubject = null;
-              });
-              _loadSubjects();
-              _loadResources(refresh: true);
-            },
-            isDark: isDark,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Subject',
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: subTitleColor,
-            ),
-          ),
-          const SizedBox(height: 10),
-          _buildFilterDropdown(
-            value: _selectedSubject ?? 'All',
-            items: _subjects.isEmpty ? ['All'] : _subjects,
-            onChanged: (_selectedBranch != null && _selectedBranch != 'All')
-                ? (value) {
+                TextButton(
+                  onPressed: () {
                     setState(() {
-                      _selectedSubject = value == 'All' ? null : value;
+                      _selectedSemester = null;
+                      _selectedBranch = null;
+                      _selectedSubject = null;
+                      _selectedType = null;
+                      _selectedSort = 'Recent';
+                      _subjects = [];
                     });
+                    syncSheet();
                     _loadResources(refresh: true);
-                  }
-                : null,
-            isDark: isDark,
-            enabled: _selectedBranch != null && _selectedBranch != 'All',
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Type',
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: subTitleColor,
+                  },
+                  child: Text(
+                    'Clear',
+                    style: GoogleFonts.inter(
+                      color: isDark ? Colors.white70 : Colors.black54,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 10),
-          _buildFilterDropdown(
-            value: _selectedType ?? 'All',
-            items: _types,
-            onChanged: (value) {
-              setState(() {
-                _selectedType = value == 'All' ? null : value;
-              });
-              _loadResources(refresh: true);
-            },
-            isDark: isDark,
+          Divider(
+            height: 1,
+            color: isDark ? Colors.white10 : const Color(0xFFE5E7EB),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSortOptionsTab(bool isDark) {
-    final subTitleColor = isDark ? Colors.white70 : Colors.black54;
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Sort resources by',
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: subTitleColor,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: _sortOptions
-                .map(
-                  (option) => _buildCompactFilterChip(
-                    option,
-                    _selectedSort == option,
-                    (selected) {
-                      if (!selected) return;
-                      setState(() => _selectedSort = option);
-                      _loadResources(refresh: true);
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+              child: Column(
+                children: [
+                  _buildSheetSelectionRow(
+                    label: 'Sort by',
+                    value: _selectedSort,
+                    isDark: isDark,
+                    onTap: () {
+                      _showPickerSheet(
+                        title: 'Sort by',
+                        items: _sortOptions,
+                        selectedValue: _selectedSort,
+                        isDark: isDark,
+                        onSelected: (value) {
+                          setState(() => _selectedSort = value);
+                          syncSheet();
+                          _loadResources(refresh: true);
+                        },
+                      );
                     },
                   ),
-                )
-                .toList(),
+                  Divider(
+                    height: 1,
+                    color: isDark ? Colors.white10 : const Color(0xFFE5E7EB),
+                  ),
+                  _buildSheetSelectionRow(
+                    label: 'Type',
+                    value: _selectedType ?? 'All',
+                    isDark: isDark,
+                    onTap: () {
+                      _showPickerSheet(
+                        title: 'Type',
+                        items: _types,
+                        selectedValue: _selectedType ?? 'All',
+                        isDark: isDark,
+                        onSelected: (value) {
+                          setState(() {
+                            _selectedType = value == 'All' ? null : value;
+                          });
+                          syncSheet();
+                          _loadResources(refresh: true);
+                        },
+                      );
+                    },
+                  ),
+                  Divider(
+                    height: 1,
+                    color: isDark ? Colors.white10 : const Color(0xFFE5E7EB),
+                  ),
+                  _buildSheetSelectionRow(
+                    label: 'Semester',
+                    value: _selectedSemester ?? 'All',
+                    isDark: isDark,
+                    onTap: () {
+                      _showPickerSheet(
+                        title: 'Semester',
+                        items: _semesters.isEmpty ? ['All'] : _semesters,
+                        selectedValue: _selectedSemester ?? 'All',
+                        isDark: isDark,
+                        onSelected: (value) {
+                          setState(() {
+                            _selectedSemester = value == 'All' ? null : value;
+                          });
+                          syncSheet();
+                          _loadResources(refresh: true);
+                        },
+                      );
+                    },
+                  ),
+                  Divider(
+                    height: 1,
+                    color: isDark ? Colors.white10 : const Color(0xFFE5E7EB),
+                  ),
+                  _buildSheetSelectionRow(
+                    label: 'Branch',
+                    value: _selectedBranch ?? 'All',
+                    isDark: isDark,
+                    onTap: () {
+                      _showPickerSheet(
+                        title: 'Branch',
+                        items: _branches.isEmpty ? ['All'] : _branches,
+                        selectedValue: _selectedBranch ?? 'All',
+                        isDark: isDark,
+                        onSelected: (value) {
+                          setState(() {
+                            _selectedBranch = value == 'All' ? null : value;
+                            _selectedSubject = null;
+                          });
+                          syncSheet();
+                          _loadSubjects();
+                          _loadResources(refresh: true);
+                        },
+                      );
+                    },
+                  ),
+                  Divider(
+                    height: 1,
+                    color: isDark ? Colors.white10 : const Color(0xFFE5E7EB),
+                  ),
+                  _buildSheetSelectionRow(
+                    label: 'Subject',
+                    value:
+                        _selectedSubject ??
+                        (_selectedBranch == null
+                            ? 'Select branch first'
+                            : 'All'),
+                    isDark: isDark,
+                    enabled:
+                        _selectedBranch != null && _selectedBranch != 'All',
+                    onTap: (_selectedBranch == null || _selectedBranch == 'All')
+                        ? null
+                        : () {
+                            _showPickerSheet(
+                              title: 'Subject',
+                              items: _subjects.isEmpty
+                                  ? ['All']
+                                  : ['All', ..._subjects],
+                              selectedValue: _selectedSubject ?? 'All',
+                              isDark: isDark,
+                              onSelected: (value) {
+                                setState(() {
+                                  _selectedSubject = value == 'All'
+                                      ? null
+                                      : value;
+                                });
+                                syncSheet();
+                                _loadResources(refresh: true);
+                              },
+                            );
+                          },
+                  ),
+                  Divider(
+                    height: 1,
+                    color: isDark ? Colors.white10 : const Color(0xFFE5E7EB),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+            child: ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primary,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(double.infinity, 52),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                elevation: 0,
+              ),
+              child: Text(
+                'Show results',
+                style: GoogleFonts.inter(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildCompactFilterChip(
-    String label,
-    bool isSelected,
-    Function(bool) onSelected,
-  ) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return ChoiceChip(
-      label: Text(label),
-      selected: isSelected,
-      onSelected: onSelected,
-      selectedColor: AppTheme.primary.withValues(alpha: 0.2),
-      backgroundColor: isDark ? const Color(0xFF2C2C2E) : Colors.white,
-      labelStyle: GoogleFonts.inter(
-        fontSize: 12,
-        color: isSelected
-            ? AppTheme.primary
-            : (isDark ? Colors.white : Colors.black87),
-        fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
-      ),
-      side: BorderSide(
-        color: isSelected
-            ? AppTheme.primary
-            : (isDark ? Colors.white24 : Colors.grey.shade300),
-        width: 0.5,
-      ),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
-      visualDensity: VisualDensity.compact,
-    );
-  }
-
-  Widget _buildFilterDropdown({
+  Widget _buildSheetSelectionRow({
+    required String label,
     required String value,
-    required List<String> items,
-    required Function(String)? onChanged,
     required bool isDark,
+    required VoidCallback? onTap,
     bool enabled = true,
   }) {
-    return GestureDetector(
-      onTap: enabled && onChanged != null
-          ? () {
-              _showPickerSheet(
-                title: 'Select',
-                items: items,
-                selectedValue: value,
-                onSelected: onChanged,
-                isDark: isDark,
-              );
-            }
-          : null,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF2C2C2E) : Colors.grey.shade100,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: isDark ? Colors.white24 : Colors.grey.shade300,
-            width: 0.5,
-          ),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              value,
-              style: GoogleFonts.inter(
-                fontSize: 15,
-                color: enabled
-                    ? (isDark ? Colors.white : Colors.black87)
-                    : (isDark ? Colors.grey : Colors.grey.shade500),
-                fontWeight: FontWeight.w500,
+    final textColor = isDark ? Colors.white : const Color(0xFF111827);
+    final mutedColor = isDark ? Colors.white70 : const Color(0xFF6B7280);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 14),
+          child: Row(
+            children: [
+              Text(
+                label,
+                style: GoogleFonts.inter(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: enabled ? textColor : mutedColor,
+                ),
               ),
-            ),
-            Icon(
-              Icons.keyboard_arrow_down_rounded,
-              color: enabled
-                  ? (isDark ? Colors.white70 : Colors.black54)
-                  : (isDark ? Colors.grey.shade700 : Colors.grey.shade400),
-              size: 22,
-            ),
-          ],
+              const Spacer(),
+              Flexible(
+                child: Text(
+                  value,
+                  textAlign: TextAlign.right,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    fontSize: 15,
+                    color: enabled ? AppTheme.primary : mutedColor,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: enabled ? mutedColor : mutedColor.withValues(alpha: 0.6),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -1352,88 +1235,6 @@ class _StudyScreenState extends State<StudyScreen>
               ),
             ),
             SizedBox(height: MediaQuery.of(context).padding.bottom + 8),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showSubjectPicker() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => Container(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: isDark ? AppTheme.darkBorder : Colors.grey.shade300,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Select Subject',
-              style: GoogleFonts.inter(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : AppTheme.textLight,
-              ),
-            ),
-            const SizedBox(height: 16),
-            ListTile(
-              title: Text(
-                'All Subjects',
-                style: GoogleFonts.inter(
-                  color: isDark ? Colors.white : AppTheme.textLight,
-                ),
-              ),
-              trailing: _selectedSubject == null
-                  ? const Icon(Icons.check_circle, color: AppTheme.primary)
-                  : null,
-              onTap: () {
-                setState(() => _selectedSubject = null);
-                _loadResources(refresh: true);
-                Navigator.pop(context);
-              },
-            ),
-            Flexible(
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: _subjects.length,
-                itemBuilder: (context, index) {
-                  final subject = _subjects[index];
-                  return ListTile(
-                    title: Text(
-                      subject,
-                      style: GoogleFonts.inter(
-                        color: isDark ? Colors.white : AppTheme.textLight,
-                      ),
-                    ),
-                    trailing: _selectedSubject == subject
-                        ? const Icon(
-                            Icons.check_circle,
-                            color: AppTheme.primary,
-                          )
-                        : null,
-                    onTap: () {
-                      setState(() => _selectedSubject = subject);
-                      _loadResources(refresh: true);
-                      Navigator.pop(context);
-                    },
-                  );
-                },
-              ),
-            ),
           ],
         ),
       ),

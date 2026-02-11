@@ -3,7 +3,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import 'package:flutter_application_1/config/theme.dart';
 import 'package:flutter_application_1/services/supabase_service.dart';
-import 'package:flutter_application_1/services/supabase_service.dart';
 import 'package:flutter_application_1/widgets/user_avatar.dart';
 import 'profile/user_profile_screen.dart';
 

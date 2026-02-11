@@ -40,7 +40,12 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
 
   Future<void> _loadFollowData() async {
     final email = _authService.userEmail;
-    if (email == null) return;
+    if (email == null) {
+      if (mounted) {
+        setState(() => _isFollowLoading = false);
+      }
+      return;
+    }
     try {
       final isFollowing = await _supabaseService.isFollowingDepartment(
         widget.account.id,
@@ -60,7 +65,7 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
         });
       }
     } catch (e) {
-      print('Error loading follow data: $e');
+      debugPrint('Error loading follow data: $e');
     }
   }
 
@@ -93,9 +98,10 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
         });
       }
     } catch (e) {
+      debugPrint('Department follow update failed: $e');
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      ).showSnackBar(SnackBar(content: Text(_followErrorMessage(e))));
     } finally {
       if (mounted) setState(() => _isFollowLoading = false);
     }
@@ -133,6 +139,12 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
         ? AppTheme.darkTextSecondary
         : AppTheme.lightTextSecondary;
     final bgColor = isDark ? AppTheme.darkBackground : AppTheme.lightBackground;
+    final followBgColor = _isFollowing
+        ? Colors.transparent
+        : (isDark ? Colors.white : Colors.black);
+    final followTextColor = _isFollowing
+        ? (isDark ? Colors.white : Colors.black)
+        : (isDark ? Colors.black : Colors.white);
 
     return Scaffold(
       backgroundColor: bgColor,
@@ -184,12 +196,8 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
                           child: ElevatedButton(
                             onPressed: _isFollowLoading ? null : _toggleFollow,
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: _isFollowing
-                                  ? Colors.transparent
-                                  : (isDark ? Colors.white : Colors.black),
-                              foregroundColor: _isFollowing
-                                  ? (isDark ? Colors.white : Colors.black)
-                                  : Colors.white,
+                              backgroundColor: followBgColor,
+                              foregroundColor: followTextColor,
                               elevation: 0,
                               side: _isFollowing
                                   ? BorderSide(
@@ -206,11 +214,14 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
                               ),
                             ),
                             child: _isFollowLoading
-                                ? const SizedBox(
+                                ? SizedBox(
                                     width: 16,
                                     height: 16,
                                     child: CircularProgressIndicator(
                                       strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                        followTextColor,
+                                      ),
                                     ),
                                   )
                                 : Text(
@@ -218,6 +229,7 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
                                     style: GoogleFonts.inter(
                                       fontWeight: FontWeight.bold,
                                       fontSize: 14,
+                                      color: followTextColor,
                                     ),
                                   ),
                           ),
@@ -380,5 +392,14 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
         ),
       ),
     );
+  }
+
+  String _followErrorMessage(Object error) {
+    final message = error.toString().toLowerCase();
+    if (message.contains('row-level security') ||
+        message.contains('unauthorized')) {
+      return 'Follow is not available right now. Please sign in again.';
+    }
+    return 'Could not update follow status right now.';
   }
 }
