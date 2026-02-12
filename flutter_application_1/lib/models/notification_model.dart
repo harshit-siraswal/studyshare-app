@@ -63,7 +63,7 @@ class NotificationModel {
       actorName: json['actor_name'],
       actorAvatar: json['actor_avatar'],
       followRequestId: json['follow_request_id']?.toString(),
-      actionTaken: json['action_taken'] ?? false,
+      actionTaken: (json['action_taken'] ?? false) == true,
     );
   }
 

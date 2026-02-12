@@ -100,6 +100,7 @@ class _StickerPickerState extends State<StickerPicker>
 
     if (savedFile == null) return;
 
+    if (!mounted) return;
     await _loadAll();
     if (!mounted) return;
     _showSuccessOverlay(
@@ -483,49 +484,59 @@ class _StickerPickerState extends State<StickerPicker>
   }
 
   Widget _buildStickersGrid(bool isDark) {
-    final stickers = _filteredStickers;
-    if (stickers.isEmpty) {
-      return _buildStickerEmptyState();
-    }
+    final filtered = _filteredStickers;
+    final items = <File?>[null, ...filtered];
 
-    final items = <File?>[null, ...stickers];
-
-    return GridView.builder(
-      padding: const EdgeInsets.fromLTRB(14, 4, 14, 14),
-      itemCount: items.length,
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 4,
-        mainAxisSpacing: 10,
-        crossAxisSpacing: 10,
-        childAspectRatio: 1,
-      ),
-      itemBuilder: (context, index) {
-        if (index == 0) {
-          return _buildCreateTile(isDark);
-        }
-        final sticker = items[index]!;
-        return GestureDetector(
-          onTap: () => widget.onStickerSelected(sticker),
-          onLongPress: () => _deleteSticker(sticker),
-          child: Semantics(
-            label: 'Sticker ${index + 1}. Long press to delete.',
-            button: true,
-            child: Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppTheme.getBorderColor(context)),
-                color: isDark ? Colors.white10 : Colors.white,
+    return Stack(
+      children: [
+        GridView.builder(
+          padding: const EdgeInsets.fromLTRB(14, 4, 14, 14),
+          itemCount: items.length,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 4,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: 1,
+          ),
+          itemBuilder: (context, index) {
+            if (index == 0) {
+              return _buildCreateTile(isDark);
+            }
+            final sticker = items[index]!;
+            return GestureDetector(
+              onTap: () => widget.onStickerSelected(sticker),
+              child: Semantics(
+                label: 'Sticker $index',
+                button: true,
+                child: Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: AppTheme.getBorderColor(context)),
+                    color: isDark ? Colors.white10 : Colors.white,
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Image.file(
+                    sticker,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) =>
+                        const Icon(Icons.broken_image),
+                  ),
+                ),
               ),
-              clipBehavior: Clip.antiAlias,
-              child: Image.file(
-                sticker,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
+            );
+          },
+        ),
+        if (filtered.isEmpty)
+          Positioned.fill(
+            child: IgnorePointer(
+              ignoring: true,
+              child: Container(
+                color: Colors.transparent,
+                child: _buildStickerEmptyState(),
               ),
             ),
           ),
-        );
-      },
+      ],
     );
   }
 
@@ -558,11 +569,20 @@ class _StickerPickerState extends State<StickerPicker>
             ),
           ),
           const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: _createFromGallery,
-            icon: const Icon(Icons.add_photo_alternate_rounded, size: 18),
-            label: const Text('Create Sticker'),
-          ),
+          if (_stickerQuery.trim().isEmpty)
+            ElevatedButton.icon(
+              onPressed: _createFromGallery,
+              icon: const Icon(Icons.add_photo_alternate_rounded, size: 18),
+              label: const Text('Create Sticker'),
+            )
+          else
+            TextButton(
+              onPressed: () {
+                _searchController.clear();
+                setState(() => _stickerQuery = '');
+              },
+              child: const Text('Clear search'),
+            ),
         ],
       ),
     );

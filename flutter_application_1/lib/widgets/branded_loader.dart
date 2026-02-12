@@ -320,6 +320,7 @@ class _AppSplashAnimationState extends State<AppSplashAnimation>
   late final AnimationController _entryController;
   late final Animation<double> _fadeAnimation;
   late final Animation<double> _scaleAnimation;
+  late final Listenable _orbAnimations;
 
   @override
   void initState() {
@@ -332,6 +333,7 @@ class _AppSplashAnimationState extends State<AppSplashAnimation>
       vsync: this,
       duration: const Duration(milliseconds: 1700),
     )..repeat(reverse: true);
+    _orbAnimations = Listenable.merge([_spinController, _pulseController]);
     _entryController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 850),
@@ -357,10 +359,9 @@ class _AppSplashAnimationState extends State<AppSplashAnimation>
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final topColor = isDark ? const Color(0xFF06120D) : const Color(0xFFEAF7EF);
-    final bottomColor = isDark
-        ? const Color(0xFF020805)
-        : const Color(0xFFD8EEDD);
+    final backgroundColor = isDark
+        ? const Color(0xFF06120D)
+        : const Color(0xFFEAF7EF);
     final titleColor = isDark ? Colors.white : const Color(0xFF1A5B3B);
     final subtitleColor = isDark
         ? Colors.white70
@@ -369,13 +370,7 @@ class _AppSplashAnimationState extends State<AppSplashAnimation>
     return Container(
       width: double.infinity,
       height: double.infinity,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [topColor, bottomColor],
-        ),
-      ),
+      color: backgroundColor,
       child: Center(
         child: FadeTransition(
           opacity: _fadeAnimation,
@@ -426,15 +421,13 @@ class _AppSplashAnimationState extends State<AppSplashAnimation>
     final glowColor = isDark ? brandGreenLight : brandGreen;
 
     return AnimatedBuilder(
-      animation: Listenable.merge([_spinController, _pulseController]),
+      animation: _orbAnimations,
       builder: (context, child) {
         final pulse =
             0.97 + 0.03 * math.sin(_pulseController.value * 2 * math.pi);
         final shimmer =
             (0.5 + 0.5 * math.sin(_pulseController.value * 2 * math.pi))
-                .clamp(0.0, 1.0)
-                .toDouble();
-
+                .clamp(0.0, 1.0);
         return Transform.scale(
           scale: pulse,
           child: SizedBox(

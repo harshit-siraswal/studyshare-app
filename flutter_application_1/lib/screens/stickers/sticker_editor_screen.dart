@@ -85,10 +85,15 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
         throw Exception('Preview not ready');
       }
       final image = await boundary.toImage(pixelRatio: 3);
-      final data = await image.toByteData(format: ui.ImageByteFormat.png);
-      final bytes = data?.buffer.asUint8List();
-      if (bytes == null || bytes.isEmpty) {
-        throw Exception('Failed to render sticker');
+      Uint8List? bytes;
+      try {
+        final data = await image.toByteData(format: ui.ImageByteFormat.png);
+        bytes = data?.buffer.asUint8List();
+        if (bytes == null || bytes.isEmpty) {
+          throw Exception('Failed to render sticker');
+        }
+      } finally {
+        image.dispose();
       }
 
       final savedFile = await _writeSticker(bytes);
@@ -179,7 +184,11 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    Image.file(_workingFile, fit: BoxFit.contain),
+                    Image(
+                      image: FileImage(_workingFile),
+                      fit: BoxFit.contain,
+                      key: ValueKey(_workingFile.path + _workingFile.lastModifiedSync().toString()),
+                    ),
                     if (overlayText.isNotEmpty)
                       Align(
                         alignment: _textAlignment,

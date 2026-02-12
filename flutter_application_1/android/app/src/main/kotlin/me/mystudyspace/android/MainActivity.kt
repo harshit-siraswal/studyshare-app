@@ -154,7 +154,7 @@ class MainActivity : FlutterActivity() {
             fileJson.put("sizeBytes", targetFile.length())
             fileJson
         } catch (e: Exception) {
-            android.util.Log.w("MainActivity", "Failed to copy shared file: ${uri}", e)
+            android.util.Log.w("MainActivity", "Failed to copy shared file from ${uri.scheme}://${uri.authority}", e)
             null
         }
     }

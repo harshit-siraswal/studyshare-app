@@ -244,6 +244,8 @@ class StickerService {
     Object? lastError;
 
     try {
+      final sourceBytes = await sourceFile.readAsBytes();
+      final fileName = path.basename(sourceFile.path);
       final dio = Dio(
         BaseOptions(
           connectTimeout: const Duration(seconds: 40),
@@ -254,7 +256,10 @@ class StickerService {
       for (final profile in _removeBgQualityProfiles) {
         try {
           final formData = FormData.fromMap({
-            'image_file': await MultipartFile.fromFile(sourceFile.path),
+            'image_file': MultipartFile.fromBytes(
+              sourceBytes,
+              filename: fileName,
+            ),
             ...profile,
           });
 
@@ -301,10 +306,13 @@ class StickerService {
   bool _shouldRetryRemoveBg(Object error) {
     if (error is! DioException) return false;
     final statusCode = error.response?.statusCode ?? 0;
-    if (statusCode == 401 || statusCode == 403) {
+    // Don't retry on auth errors or rate limits
+    if (statusCode == 401 || statusCode == 403 || statusCode == 429) {
       return false;
     }
-    return statusCode >= 400 && statusCode < 500;
+    // Retry with lower quality profile on client errors (e.g., plan limitations)
+    // or transient server errors
+    return (statusCode >= 400 && statusCode < 500) || statusCode >= 500;
   }
 
   String _readableRemoveBgError(Object error) {

@@ -66,8 +66,10 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
       }
     } catch (e) {
       debugPrint('Error loading follow data: $e');
-    }
-  }
+      if (mounted) {
+        setState(() => _isFollowLoading = false);
+      }
+    }  }
 
   Future<void> _toggleFollow() async {
     final email = _authService.userEmail;

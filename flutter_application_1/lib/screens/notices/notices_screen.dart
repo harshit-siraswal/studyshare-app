@@ -914,6 +914,13 @@ class _NoticesScreenState extends State<NoticesScreen>
   }
 }
 
+/// `_NoticeLogoMark`
+///
+/// A small, stylized 'M' brand mark used in the Notices header. The shape
+/// is drawn as a four-point path and rendered by the
+/// `_NoticeLogoMarkPainter` as a stroked path with rounded caps and joins.
+/// The painter's `shouldRepaint` only compares the `color`, so repainting
+/// happens when the color changes.
 class _NoticeLogoMark extends StatelessWidget {
   const _NoticeLogoMark();
 
@@ -926,6 +933,11 @@ class _NoticeLogoMark extends StatelessWidget {
   }
 }
 
+/// Painter for `_NoticeLogoMark`.
+///
+/// Draws a stroked path that forms the mark; uses rounded stroke caps and
+/// joins for a friendly, hand-drawn feel. `shouldRepaint` compares the
+/// incoming `color` to determine if a repaint is necessary.
 class _NoticeLogoMarkPainter extends CustomPainter {
   final Color color;
 
