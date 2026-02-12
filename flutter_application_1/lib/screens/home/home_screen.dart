@@ -113,7 +113,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Future<void> _showUpload({PlatformFile? prefilledFile}) async {
     await showUploadDialog(
       context,
-      widget.collegeDomain,
+      widget.collegeId,
       _authService.userEmail ?? '',
       prefilledFile: prefilledFile,
     );
@@ -233,19 +233,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     switch (index) {
       case 0:
         return StudyScreen(
-          collegeId: widget.collegeDomain,
+          collegeId: widget.collegeId,
+          collegeDomain: widget.collegeDomain,
           collegeName: widget.collegeName,
           userEmail: _authService.userEmail ?? '',
           onChangeCollege: widget.onChangeCollege,
         );
       case 1:
         return ChatroomListScreen(
-          collegeId: widget.collegeDomain,
+          collegeId: widget.collegeId,
           collegeDomain: widget.collegeDomain,
           userEmail: _authService.userEmail ?? '',
         );
       case 2:
-        return NoticesScreen(collegeId: widget.collegeDomain);
+        return NoticesScreen(collegeId: widget.collegeId);
       case 3:
         return ProfileScreen(
           collegeName: widget.collegeName,
@@ -256,7 +257,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         );
       default:
         return StudyScreen(
-          collegeId: widget.collegeDomain,
+          collegeId: widget.collegeId,
+          collegeDomain: widget.collegeDomain,
           collegeName: widget.collegeName,
           userEmail: _authService.userEmail ?? '',
           onChangeCollege: widget.onChangeCollege,
@@ -515,7 +517,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 context,
                 MaterialPageRoute(
                   builder: (_) => DiscoverRoomsScreen(
-                    collegeId: widget.collegeDomain,
+                    collegeId: widget.collegeId,
                     collegeDomain: widget.collegeDomain,
                     userEmail: _authService.userEmail ?? '',
                   ),

@@ -11,7 +11,7 @@ class AuthService {
   // Only create GoogleSignIn for mobile platforms
   GoogleSignIn? _googleSignIn;
   SupabaseClient get _supabase => Supabase.instance.client;
-  
+
   AuthService() {
     // Only initialize GoogleSignIn on mobile (not web)
     if (!kIsWeb) {
@@ -22,25 +22,25 @@ class AuthService {
       );
     }
   }
-  
+
   // Current user stream
   Stream<firebase_auth.User?> get authStateChanges => _auth.authStateChanges();
-  
+
   // Current user
   firebase_auth.User? get currentUser => _auth.currentUser;
-  
+
   // Check if user is signed in
   bool get isSignedIn => currentUser != null;
-  
+
   // Check if email is verified
   bool get isEmailVerified => currentUser?.emailVerified ?? false;
-  
+
   // Get user email
   String? get userEmail => currentUser?.email;
-  
+
   // Get display name
   String? get displayName => currentUser?.displayName;
-  
+
   // Get photo URL
   String? get photoUrl => currentUser?.photoURL;
 
@@ -51,40 +51,42 @@ class AuthService {
         final provider = firebase_auth.GoogleAuthProvider();
         provider.addScope('email');
         provider.addScope('profile');
-        
+
         final userCredential = await _auth.signInWithPopup(provider);
-        
+
         if (userCredential.user != null) {
-          await _saveUserToDatabase(userCredential.user!);
+          _saveUserToDatabase(userCredential.user!).catchError((e) {
+            debugPrint('Background save error: $e');
+          });
         }
-        
-        return userCredential;
-      }
-      
+
+        return userCredential;      }
+
       if (_googleSignIn == null) {
         debugPrint('GoogleSignIn not initialized (web platform?)');
         throw Exception('Google Sign-In is not available on this platform');
       }
-      
+
       final GoogleSignInAccount? googleUser = await _googleSignIn!.signIn();
       if (googleUser == null) return null;
-      
-      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
-      
+
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
+
       final credential = firebase_auth.GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
-      
+
       final userCredential = await _auth.signInWithCredential(credential);
-      
+
       if (userCredential.user != null) {
         // Save to database without blocking navigation
         _saveUserToDatabase(userCredential.user!).catchError((e) {
           debugPrint('Background save error: $e');
         });
       }
-      
+
       return userCredential;
     } catch (e) {
       debugPrint('Error signing in with Google: $e');
@@ -93,20 +95,23 @@ class AuthService {
   }
 
   /// Sign in with email and password
-  Future<firebase_auth.UserCredential> signInWithEmail(String email, String password) async {
+  Future<firebase_auth.UserCredential> signInWithEmail(
+    String email,
+    String password,
+  ) async {
     try {
       final userCredential = await _auth.signInWithEmailAndPassword(
         email: email,
         password: password,
       );
-      
+
       // Save/update user in database (non-blocking)
       if (userCredential.user != null) {
         _saveUserToDatabase(userCredential.user!).catchError((e) {
           debugPrint('Background save error: $e');
         });
       }
-      
+
       return userCredential;
     } catch (e) {
       debugPrint('Error signing in with email: $e');
@@ -125,17 +130,17 @@ class AuthService {
         email: email,
         password: password,
       );
-      
+
       await userCredential.user?.updateDisplayName(displayName);
       await userCredential.user?.sendEmailVerification();
-      
+      await userCredential.user?.reload();
+
       if (userCredential.user != null) {
         // Save to database (non-blocking)
         _saveUserToDatabase(userCredential.user!).catchError((e) {
           debugPrint('Background save error: $e');
         });
       }
-      
       return userCredential;
     } catch (e) {
       debugPrint('Error creating account: $e');
@@ -196,15 +201,39 @@ class AuthService {
   }
 
   /// Check if user is banned
-  Future<Map<String, dynamic>?> checkBanStatus(String email, String? collegeId) async {
-    try {
-      final globalBan = await _supabase
+  Future<Map<String, dynamic>?> checkBanStatus(
+    String email,
+    String? collegeId,
+  ) async {
+    /// Find ban record by column; throws on database errors (fail-closed).
+    /// Returns null if no ban is found (legitimate no-result).
+    /// Exceptions indicate query failures and should be treated as such.
+    Future<Map<String, dynamic>?> findBan({
+      required String column,
+      required String normalizedEmail,
+      String? scopedCollegeId,
+    }) async {
+      var query = _supabase
           .from('banned_users')
           .select()
-          .eq('user_email', email)
-          .isFilter('college_id', null)
-          .maybeSingle();
-      
+          .eq(column, normalizedEmail);
+
+      if (scopedCollegeId == null) {
+        query = query.isFilter('college_id', null);
+      } else {
+        query = query.eq('college_id', scopedCollegeId);
+      }
+
+      return await query.maybeSingle();
+    }
+
+    try {
+      final normalizedEmail = email.trim().toLowerCase();
+
+      final globalBan =
+          await findBan(column: 'email', normalizedEmail: normalizedEmail) ??
+          await findBan(column: 'user_email', normalizedEmail: normalizedEmail);
+
       if (globalBan != null) {
         return {
           'isBanned': true,
@@ -212,35 +241,42 @@ class AuthService {
           'isGlobal': true,
         };
       }
-      
+
       if (collegeId != null) {
-        final collegeBan = await _supabase
-            .from('banned_users')
-            .select()
-            .eq('user_email', email)
-            .eq('college_id', collegeId)
-            .maybeSingle();
-        
+        final collegeBan =
+            await findBan(
+              column: 'email',
+              normalizedEmail: normalizedEmail,
+              scopedCollegeId: collegeId,
+            ) ??
+            await findBan(
+              column: 'user_email',
+              normalizedEmail: normalizedEmail,
+              scopedCollegeId: collegeId,
+            );
+
         if (collegeBan != null) {
           return {
             'isBanned': true,
-            'reason': collegeBan['reason'] ?? 'You have been banned from this college.',
+            'reason':
+                collegeBan['reason'] ??
+                'You have been banned from this college.',
             'isGlobal': false,
           };
         }
       }
-      
+
       return {'isBanned': false};
     } catch (e) {
       debugPrint('Error checking ban status: $e');
-      return {'isBanned': false};
+      rethrow; // Fail-closed: propagate DB errors so caller can handle them
     }
   }
 
   /// Determine user role based on email domain
   String getUserRole(String email, String? collegeDomain) {
     if (collegeDomain == null) return 'READ_ONLY';
-    
+
     final emailDomain = email.split('@').last.toLowerCase();
     if (emailDomain == collegeDomain.toLowerCase()) {
       return 'COLLEGE_USER';
@@ -268,13 +304,16 @@ class AuthService {
       if (existingUser == null) {
         // Create new user record
         final now = DateTime.now().toIso8601String();
-        await _supabase.from('users').insert({
-          'email': email,
-          'display_name': user.displayName ?? email.split('@')[0],
-          'profile_photo_url': user.photoURL,
-          'created_at': now,
-          'updated_at': now,
-        }).timeout(const Duration(seconds: 5));
+        await _supabase
+            .from('users')
+            .insert({
+              'email': email,
+              'display_name': user.displayName ?? email.split('@')[0],
+              'profile_photo_url': user.photoURL,
+              'created_at': now,
+              'updated_at': now,
+            })
+            .timeout(const Duration(seconds: 5));
         debugPrint('User saved to database: $email');
       } else {
         // Update existing user
@@ -295,7 +334,8 @@ class AuthService {
     } on PostgrestException catch (e) {
       debugPrint('Supabase database error: ${e.message}');
       // Check if it's a constraint violation (user might already exist)
-      if (e.code == '23505') { // Unique violation
+      if (e.code == '23505') {
+        // Unique violation
         debugPrint('User already exists in database');
       } else {
         debugPrint('Database error code: ${e.code}');

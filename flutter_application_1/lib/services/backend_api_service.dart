@@ -128,12 +128,11 @@ class BackendApiService {
       method: 'POST',
       body: {
         'name': name,
-        'description': description,
+        if (description != null) 'description': description,
         'isPrivate': isPrivate,
         'collegeId': collegeId,
-
-        'durationInDays': ?durationInDays,
-        'tags': ?tags,
+        if (durationInDays != null) 'durationInDays': durationInDays,
+        if (tags != null) 'tags': tags,
       },
       contextForRecaptcha: context,
       recaptchaAction: 'create_chat_room',
@@ -166,8 +165,8 @@ class BackendApiService {
       body: {
         'roomId': roomId,
         'content': content,
-        'imageUrl': ?imageUrl,
-        'authorName': ?authorName,
+        if (imageUrl != null) 'imageUrl': imageUrl,
+        if (authorName != null) 'authorName': authorName,
       },
       contextForRecaptcha: context,
       recaptchaAction: 'post_chat_message',
@@ -236,8 +235,8 @@ class BackendApiService {
       body: {
         'messageId': messageId,
         'content': content,
-        'authorName': ?authorName,
-        'parentId': ?parentId,
+        if (authorName != null) 'authorName': authorName,
+        if (parentId != null) 'parentId': parentId,
       },
       contextForRecaptcha: context,
       recaptchaAction: 'post_chat_message',
@@ -373,7 +372,7 @@ class BackendApiService {
     return _requestJson(
       '${_noticePath(noticeId)}/comments',
       method: 'POST',
-      body: {'content': content, 'parentId': ?parentId},
+      body: {'content': content, if (parentId != null) 'parentId': parentId},
       contextForRecaptcha: context,
       recaptchaAction: 'post_notice_comment',
     );
@@ -443,13 +442,13 @@ class BackendApiService {
       '/api/users/profile',
       method: 'PUT',
       body: {
-        'display_name': ?displayName,
-        'username': ?username,
-        'bio': ?bio,
-        'profile_photo_url': ?profilePhotoUrl,
-        'college': ?college,
-        'branch': ?branch,
-        'semester': ?semester,
+        if (displayName != null) 'display_name': displayName,
+        if (username != null) 'username': username,
+        if (bio != null) 'bio': bio,
+        if (profilePhotoUrl != null) 'profile_photo_url': profilePhotoUrl,
+        if (college != null) 'college': college,
+        if (branch != null) 'branch': branch,
+        if (semester != null) 'semester': semester,
       },
       contextForRecaptcha: context,
       recaptchaAction: 'update_profile',
@@ -489,19 +488,16 @@ class BackendApiService {
       },
     );
   }
-  // ----------------------------
-  // Chat
-  // ----------------------------
 
   Future<Map<String, dynamic>> joinChatRoom(
     String code,
-    String? userEmail,
+    String userEmail,
     String collegeId,
   ) async {
     return _requestJson(
       '/api/chat/join',
       method: 'POST',
-      body: {'code': code, 'collegeId': collegeId},
+      body: {'code': code, 'userEmail': userEmail, 'collegeId': collegeId},
     );
   }
 
@@ -519,16 +515,22 @@ class BackendApiService {
     String reporterId, {
     String type = 'post',
   }) async {
-    await _requestJson(
-      '/api/reports',
-      method: 'POST',
-      body: {
-        'postId': postId,
-        'reason': reason,
-        'reporterId': reporterId,
-        'reportType': type,
-      },
-    );
+    final payload = <String, dynamic>{
+      'postId': postId,
+      'reason': reason,
+      'reporterId': reporterId,
+      'reportType': type,
+    };
+
+    try {
+      await _requestJson('/api/reports', method: 'POST', body: payload);
+    } catch (primaryError) {
+      debugPrint(
+        '[BackendApi] /api/reports failed, retrying /api/chat/reports: '
+        '$primaryError',
+      );
+      await _requestJson('/api/chat/reports', method: 'POST', body: payload);
+    }
   }
   // ----------------------------
   // Notifications & Follows
@@ -681,13 +683,13 @@ class BackendApiService {
       method: 'POST',
       body: {
         'file_id': fileId,
-        'college_id': ?collegeId,
-        'use_ocr': ?useOcr,
-        'force_ocr': ?forceOcr,
-        'ocr_provider': ?ocrProvider,
-        'force': ?force,
-        'include_source': ?includeSource,
-        'video_url': ?videoUrl,
+        if (collegeId != null) 'college_id': collegeId,
+        if (useOcr != null) 'use_ocr': useOcr,
+        if (forceOcr != null) 'force_ocr': forceOcr,
+        if (ocrProvider != null) 'ocr_provider': ocrProvider,
+        if (force != null) 'force': force,
+        if (includeSource != null) 'include_source': includeSource,
+        if (videoUrl != null) 'video_url': videoUrl,
       },
     );
   }
@@ -707,13 +709,13 @@ class BackendApiService {
       method: 'POST',
       body: {
         'file_id': fileId,
-        'college_id': ?collegeId,
-        'use_ocr': ?useOcr,
-        'force_ocr': ?forceOcr,
-        'ocr_provider': ?ocrProvider,
-        'force': ?force,
-        'include_source': ?includeSource,
-        'video_url': ?videoUrl,
+        if (collegeId != null) 'college_id': collegeId,
+        if (useOcr != null) 'use_ocr': useOcr,
+        if (forceOcr != null) 'force_ocr': forceOcr,
+        if (ocrProvider != null) 'ocr_provider': ocrProvider,
+        if (force != null) 'force': force,
+        if (includeSource != null) 'include_source': includeSource,
+        if (videoUrl != null) 'video_url': videoUrl,
       },
     );
   }
@@ -733,13 +735,13 @@ class BackendApiService {
       method: 'POST',
       body: {
         'file_id': fileId,
-        'college_id': ?collegeId,
-        'use_ocr': ?useOcr,
-        'force_ocr': ?forceOcr,
-        'ocr_provider': ?ocrProvider,
-        'force': ?force,
-        'include_source': ?includeSource,
-        'video_url': ?videoUrl,
+        if (collegeId != null) 'college_id': collegeId,
+        if (useOcr != null) 'use_ocr': useOcr,
+        if (forceOcr != null) 'force_ocr': forceOcr,
+        if (ocrProvider != null) 'ocr_provider': ocrProvider,
+        if (force != null) 'force': force,
+        if (includeSource != null) 'include_source': includeSource,
+        if (videoUrl != null) 'video_url': videoUrl,
       },
     );
   }
@@ -758,10 +760,10 @@ class BackendApiService {
       body: {
         'file_id': fileId,
         'query': query,
-        'college_id': ?collegeId,
-        'use_ocr': ?useOcr,
-        'force_ocr': ?forceOcr,
-        'ocr_provider': ?ocrProvider,
+        if (collegeId != null) 'college_id': collegeId,
+        if (useOcr != null) 'use_ocr': useOcr,
+        if (forceOcr != null) 'force_ocr': forceOcr,
+        if (ocrProvider != null) 'ocr_provider': ocrProvider,
       },
     );
   }
@@ -778,10 +780,10 @@ class BackendApiService {
       method: 'POST',
       body: {
         'question': question,
-        'college_id': ?collegeId,
-        'top_k': ?topK,
-        'min_score': ?minScore,
-        'allow_web': ?allowWeb,
+        if (collegeId != null) 'college_id': collegeId,
+        if (topK != null) 'top_k': topK,
+        if (minScore != null) 'min_score': minScore,
+        if (allowWeb != null) 'allow_web': allowWeb,
       },
     );
   }

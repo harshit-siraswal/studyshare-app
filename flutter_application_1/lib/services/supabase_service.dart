@@ -914,8 +914,16 @@ class SupabaseService {
         normalized['resource_id'] ??= normalized['resourceId'];
         normalized['notice_id'] ??= normalized['noticeId'];
         normalized['created_at'] ??= normalized['createdAt'];
-        normalized['resource'] ??= normalized['content'];
-        normalized['notice'] ??= normalized['content'];
+        final type =
+            normalized['type'] ??
+            (normalized['resource_id'] != null ? 'resource' : 'notice');
+        normalized['type'] = type;
+        if (type == 'resource') {
+          normalized['resource'] ??= normalized['content'];
+        } else if (type == 'notice') {
+          normalized['notice'] ??= normalized['content'];
+        }
+        // Unknown types: content not mapped to avoid incorrect field assignment
         return normalized;
       }).toList();
     } catch (e) {
@@ -1771,12 +1779,14 @@ class SupabaseService {
     String? semester,
     String? subject,
   }) async {
-    try {
+    Future<List<Map<String, dynamic>>> queryByDepartmentColumn(
+      String departmentColumn,
+    ) async {
       var query = _client
           .from('syllabus')
           .select()
           .eq('college_id', collegeId)
-          .eq('department', department); // This is effectively the 'branch'
+          .eq(departmentColumn, department);
 
       if (semester != null && semester.isNotEmpty && semester != 'All') {
         query = query.eq('semester', semester);
@@ -1787,10 +1797,40 @@ class SupabaseService {
       }
 
       final response = await query.order('semester');
-
       return List<Map<String, dynamic>>.from(response);
-    } catch (e) {
-      debugPrint('Error fetching syllabus: $e');
+    }
+    try {
+      final branchRows = await queryByDepartmentColumn('branch');
+      if (branchRows.isNotEmpty) {
+        return branchRows;
+      }
+    } catch (branchError) {
+      if (_isMissingColumnError(branchError, 'college_id')) {
+        debugPrint(
+          'Syllabus table missing `college_id`; '
+          'refusing unscoped syllabus query for security.',
+        );
+        return [];
+      }
+      debugPrint(
+        'Syllabus query with `branch` failed, trying `department`: '
+        '$branchError',
+      );
+    }
+
+    // Legacy fallback for older schemas still using `department`.
+    try {
+      final departmentRows = await queryByDepartmentColumn('department');
+      return departmentRows;
+    } catch (departmentError) {
+      if (_isMissingColumnError(departmentError, 'college_id')) {
+        debugPrint(
+          'Syllabus table missing `college_id`; '
+          'refusing unscoped syllabus query for security.',
+        );
+        return [];
+      }
+      debugPrint('Error fetching syllabus with `department`: $departmentError');
       return [];
     }
   }

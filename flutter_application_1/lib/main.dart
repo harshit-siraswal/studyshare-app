@@ -147,16 +147,40 @@ class _AppRootState extends State<AppRoot> {
   SharedPreferences? _prefs;
   ThemeProvider? _themeProvider;
 
+  ThemeMode get _bootThemeMode {
+    final savedTheme = _prefs?.getString('theme_mode');
+    if (savedTheme == 'light') return ThemeMode.light;
+    return ThemeMode.dark;
+  }
+
   @override
   void initState() {
     super.initState();
     initApp();
   }
 
+  Future<bool> _bootstrapTheme() async {
+    try {
+      _prefs ??= await SharedPreferences.getInstance();
+      _themeProvider ??= ThemeProvider(_prefs);
+      return true;
+    } catch (e) {
+      debugPrint('SharedPreferences bootstrap error: $e');
+      return false;
+    }
+  }
+
   Future<void> initApp() async {
     if (!mounted) return;
     setState(() => _appState = AppState.loading);
 
+    final bootstrapped = await _bootstrapTheme();
+    if (!bootstrapped) {
+      if (mounted) setState(() => _appState = AppState.initializationError);
+      return;
+    }
+    // Trigger rebuild to apply theme from preferences to loading screen
+    if (mounted) setState(() {});
     // Check internet connectivity
     try {
       final connectivityResult = await Connectivity().checkConnectivity();
@@ -216,17 +240,6 @@ class _AppRootState extends State<AppRoot> {
       return;
     }
     // Get shared preferences
-    try {
-      _prefs = await SharedPreferences.getInstance();
-    } catch (e) {
-      debugPrint('SharedPreferences error: $e');
-      if (mounted) {
-        setState(() {
-          _appState = AppState.initializationError;
-        });
-      }
-      return;
-    }
 
     // Initialize Push Notifications (after Firebase is ready)
     if (!kIsWeb) {
@@ -293,8 +306,10 @@ class _AppRootState extends State<AppRoot> {
     }
 
     if (mounted) {
-      // Only initialize ThemeProvider after _prefs is successfully loaded
-      _themeProvider = ThemeProvider(_prefs);
+      assert(
+        _themeProvider != null,
+        'ThemeProvider should be set by _bootstrapTheme',
+      );
       setState(() => _appState = AppState.ready);
     }
   }
@@ -384,9 +399,12 @@ class _AppRootState extends State<AppRoot> {
     if (_appState == AppState.loading ||
         _prefs == null ||
         _themeProvider == null) {
-      return const MaterialApp(
+      return MaterialApp(
         debugShowCheckedModeBanner: false,
-        home: Scaffold(
+        theme: AppTheme.lightTheme(null),
+        darkTheme: AppTheme.darkTheme(null),
+        themeMode: _bootThemeMode,
+        home: const Scaffold(
           body: AppSplashAnimation(
             title: 'MyStudySpace',
             subtitle: 'Connect. Learn. Share.',
@@ -461,7 +479,6 @@ class AppRouter extends StatefulWidget {
 
 class _AppRouterState extends State<AppRouter> {
   final AuthService _authService = AuthService();
-  bool _isLoading = true;
 
   bool get _hasSeenOnboarding =>
       widget.prefs.getBool('hasSeenOnboarding') ?? false;
@@ -488,18 +505,6 @@ class _AppRouterState extends State<AppRouter> {
   String? get _selectedCollegeDomain =>
       _selectedCollegeData?['domain'] ??
       widget.prefs.getString('selectedCollegeDomain');
-
-  @override
-  void initState() {
-    super.initState();
-    _showSplash();
-  }
-
-  Future<void> _showSplash() async {
-    // Small delay for splash effect
-    await Future.delayed(const Duration(milliseconds: 500));
-    if (mounted) setState(() => _isLoading = false);
-  }
 
   void _onOnboardingComplete() async {
     await widget.prefs.setBool('hasSeenOnboarding', true);
@@ -557,10 +562,6 @@ class _AppRouterState extends State<AppRouter> {
   @override
   Widget build(BuildContext context) {
     SupabaseService().attachContext(context);
-    if (_isLoading) {
-      return const SplashScreen();
-    }
-
     // First time: Show onboarding
     if (!_hasSeenOnboarding) {
       return OnboardingScreen(onComplete: _onOnboardingComplete);

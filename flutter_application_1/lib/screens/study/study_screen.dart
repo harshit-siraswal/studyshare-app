@@ -18,6 +18,7 @@ import '../../data/departments_data.dart'; // Added for DepartmentData and Depar
 
 class StudyScreen extends StatefulWidget {
   final String collegeId;
+  final String collegeDomain;
   final String collegeName;
   final String userEmail;
   final VoidCallback? onChangeCollege;
@@ -25,6 +26,7 @@ class StudyScreen extends StatefulWidget {
   const StudyScreen({
     super.key,
     required this.collegeId,
+    required this.collegeDomain,
     required this.collegeName,
     required this.userEmail,
     this.onChangeCollege,
@@ -47,8 +49,6 @@ class _StudyScreenState extends State<StudyScreen>
   List<Resource> _resources = [];
   bool _isLoading = true;
   bool _isLoadingMore = false;
-  final int _page = 0;
-  final bool _hasMore = true;
   final AudioPlayer _audioPlayer = AudioPlayer();
   late Future<List<DepartmentData>> _departmentsFuture;
 
@@ -335,7 +335,7 @@ class _StudyScreenState extends State<StudyScreen>
       context,
       MaterialPageRoute(
         builder: (_) => ExploreStudentsScreen(
-          collegeDomain: widget.collegeId,
+          collegeDomain: widget.collegeDomain,
           userEmail: widget.userEmail,
         ),
       ),
@@ -736,12 +736,12 @@ class _StudyScreenState extends State<StudyScreen>
         );
       },
       child: Container(
-        height: 58,
+        height: 60,
         margin: const EdgeInsets.symmetric(horizontal: 20),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color: searchBarColor,
-          borderRadius: BorderRadius.circular(18),
+          borderRadius: BorderRadius.circular(30),
           border: Border.all(
             color: borderColor,
             width: hasActiveFilters ? 1.2 : 0.9,
@@ -763,7 +763,7 @@ class _StudyScreenState extends State<StudyScreen>
                 color: isDark
                     ? Colors.white.withValues(alpha: 0.1)
                     : const Color(0xFFDCE3EE),
-                borderRadius: BorderRadius.circular(11),
+                borderRadius: BorderRadius.circular(18),
               ),
               child: Icon(
                 Icons.search_rounded,
@@ -789,7 +789,7 @@ class _StudyScreenState extends State<StudyScreen>
               color: Colors.transparent,
               child: InkWell(
                 onTap: _showFilterOptionsSheet,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(18),
                 child: Stack(
                   clipBehavior: Clip.none,
                   children: [
@@ -799,7 +799,7 @@ class _StudyScreenState extends State<StudyScreen>
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
                         color: filterBackground,
-                        borderRadius: BorderRadius.circular(12),
+                        borderRadius: BorderRadius.circular(18),
                         border: Border.all(
                           color: hasActiveFilters
                               ? AppTheme.primary.withValues(alpha: 0.4)
@@ -861,9 +861,6 @@ class _StudyScreenState extends State<StudyScreen>
     }
     if (typeLabel == 'Videos') {
       return 'video';
-    }
-    if (typeLabel == 'Downloads') {
-      return 'notes';
     }
     return typeLabel.toLowerCase();
   }
@@ -1063,9 +1060,7 @@ class _StudyScreenState extends State<StudyScreen>
                         : () {
                             _showPickerSheet(
                               title: 'Subject',
-                              items: _subjects.isEmpty
-                                  ? ['All']
-                                  : ['All', ..._subjects],
+                              items: _subjects.isEmpty ? ['All'] : _subjects,
                               selectedValue: _selectedSubject ?? 'All',
                               isDark: isDark,
                               onSelected: (value) {

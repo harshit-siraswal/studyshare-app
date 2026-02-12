@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../config/theme.dart';
 import '../../models/resource.dart';
 import '../../services/supabase_service.dart';
+import '../../services/download_service.dart';
 import '../../widgets/resource_card.dart';
 
 class ResourceSearchScreen extends StatefulWidget {
@@ -127,6 +128,31 @@ class _ResourceSearchScreenState extends State<ResourceSearchScreen> {
     });
 
     try {
+      // Handle Downloads separately: fetch from local storage, not API
+      if (_selectedType == 'Downloads') {
+        final downloadService = DownloadService();
+        var localResults = downloadService.getAllDownloadedResources();
+        
+        // Apply local filtering if search query is provided
+        if (_searchController.text.isNotEmpty) {
+          final query = _searchController.text.toLowerCase();
+          localResults = localResults
+              .where((resource) =>
+                  resource.title.toLowerCase().contains(query) ||
+                  (resource.description?.toLowerCase().contains(query) ?? false))
+              .toList();
+          _addRecentSearch(_searchController.text);
+        }
+        
+        if (!mounted) return;
+        setState(() {
+          _searchResults = localResults;
+          _isLoading = false;
+        });
+        return;
+      }
+
+      // For all other types, query the API
       final results = await _supabaseService.getResources(
         collegeId: widget.collegeId,
         searchQuery: _searchController.text.isEmpty
@@ -885,7 +911,7 @@ class _ResourceSearchScreenState extends State<ResourceSearchScreen> {
   String? _mapResourceType(String uiType) {
     if (uiType == 'All') return null;
     if (uiType == 'Videos') return 'video';
-    if (uiType == 'Downloads') return 'notes';
+    if (uiType == 'Downloads') return null; // Downloads are local-only; no API type exists
     return uiType.toLowerCase();
   }
 
