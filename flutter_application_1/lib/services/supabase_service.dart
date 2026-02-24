@@ -1160,7 +1160,6 @@ class SupabaseService {
         'semester': semester,
         'branch': branch,
         'subject': subject,
-        'status': 'approved',
         'source': 'student',
         'filePath': filePath, // Corrected from fileUrl
         'url': videoUrl, // Corrected from videoUrl
@@ -1799,6 +1798,7 @@ class SupabaseService {
       final response = await query.order('semester');
       return List<Map<String, dynamic>>.from(response);
     }
+
     try {
       final branchRows = await queryByDepartmentColumn('branch');
       if (branchRows.isNotEmpty) {

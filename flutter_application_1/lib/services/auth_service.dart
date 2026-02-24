@@ -205,68 +205,92 @@ class AuthService {
     String email,
     String? collegeId,
   ) async {
-    /// Find ban record by column; throws on database errors (fail-closed).
-    /// Returns null if no ban is found (legitimate no-result).
-    /// Exceptions indicate query failures and should be treated as such.
-    Future<Map<String, dynamic>?> findBan({
-      required String column,
-      required String normalizedEmail,
-      String? scopedCollegeId,
-    }) async {
-      var query = _supabase
-          .from('banned_users')
-          .select()
-          .eq(column, normalizedEmail);
-
-      if (scopedCollegeId == null) {
-        query = query.isFilter('college_id', null);
-      } else {
-        query = query.eq('college_id', scopedCollegeId);
-      }
-
-      return await query.maybeSingle();
-    }
-
     try {
       final normalizedEmail = email.trim().toLowerCase();
+      final normalizedCollegeId =
+          collegeId != null && collegeId.trim().isNotEmpty
+          ? collegeId.trim()
+          : null;
 
-      final globalBan =
-          await findBan(column: 'email', normalizedEmail: normalizedEmail) ??
-          await findBan(column: 'user_email', normalizedEmail: normalizedEmail);
+      bool schemaQueryable = false;
 
-      if (globalBan != null) {
-        return {
-          'isBanned': true,
-          'reason': globalBan['reason'] ?? 'You have been banned.',
-          'isGlobal': true,
-        };
+      Future<Map<String, dynamic>?> findBan({
+        required String column,
+        required String normalizedEmail,
+        String? scopedCollegeId,
+      }) async {
+        try {
+          var query = _supabase
+              .from('banned_users')
+              .select()
+              .eq(column, normalizedEmail);
+
+          if (scopedCollegeId == null) {
+            query = query.isFilter('college_id', null);
+          } else {
+            query = query.eq('college_id', scopedCollegeId);
+          }
+
+          final row = await query.maybeSingle();
+          schemaQueryable = true;
+          return row;
+        } on PostgrestException catch (e) {
+          final message = '${e.message} ${e.details ?? ''} ${e.hint ?? ''}'
+              .toLowerCase();
+          final missingColumn = e.code == '42703' ||
+              e.code == 'PGRST204' ||
+              (message.contains('column') &&
+                  message.contains(column.toLowerCase()) &&
+                  message.contains('does not exist'));
+          if (missingColumn) {
+            return null;
+          }
+          rethrow;
+        }
       }
 
-      if (collegeId != null) {
-        final collegeBan =
-            await findBan(
-              column: 'email',
-              normalizedEmail: normalizedEmail,
-              scopedCollegeId: collegeId,
-            ) ??
-            await findBan(
-              column: 'user_email',
-              normalizedEmail: normalizedEmail,
-              scopedCollegeId: collegeId,
-            );
+      final banColumns = ['email', 'user_email'];
 
-        if (collegeBan != null) {
+      for (final column in banColumns) {
+        final globalBan = await findBan(
+          column: column,
+          normalizedEmail: normalizedEmail,
+        );
+        if (globalBan != null) {
           return {
             'isBanned': true,
-            'reason':
-                collegeBan['reason'] ??
-                'You have been banned from this college.',
-            'isGlobal': false,
+            'reason': globalBan['reason'] ?? 'You have been banned.',
+            'isGlobal': true,
           };
         }
       }
 
-      return {'isBanned': false};
+      if (normalizedCollegeId != null) {
+        for (final column in banColumns) {
+          final collegeBan = await findBan(
+            column: column,
+            normalizedEmail: normalizedEmail,
+            scopedCollegeId: normalizedCollegeId,
+          );
+          if (collegeBan != null) {
+            return {
+              'isBanned': true,
+              'reason':
+                  collegeBan['reason'] ??
+                  'You have been banned from this college.',
+              'isGlobal': false,
+            };
+          }
+        }
+      }
+
+      if (!schemaQueryable) {
+        throw Exception(
+          'banned_users schema is missing expected email columns',
+        );
+      }
+
+      return {'isBanned': false, 'reason': null};
     } catch (e) {
       debugPrint('Error checking ban status: $e');
       rethrow; // Fail-closed: propagate DB errors so caller can handle them

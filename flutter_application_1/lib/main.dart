@@ -15,6 +15,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'dart:async';
 
 import 'l10n/app_localizations.dart';
 import 'config/app_config.dart';
@@ -59,14 +60,10 @@ Future<bool> _requestPermissions() async {
 
     // Check results
     bool allGranted = true;
-    bool permanentlyDenied = false;
 
     statuses.forEach((permission, status) {
       if (!status.isGranted) {
         allGranted = false;
-      }
-      if (status.isPermanentlyDenied) {
-        permanentlyDenied = true;
       }
     });
 
@@ -146,6 +143,11 @@ class _AppRootState extends State<AppRoot> {
   AppState _appState = AppState.loading;
   SharedPreferences? _prefs;
   ThemeProvider? _themeProvider;
+  final PushNotificationService _pushService = PushNotificationService();
+  final BackendApiService _backendApi = BackendApiService();
+  final AuthService _authService = AuthService();
+  StreamSubscription? _authStateSubscription;
+  String? _lastRegisteredFcmToken;
 
   ThemeMode get _bootThemeMode {
     final savedTheme = _prefs?.getString('theme_mode');
@@ -157,6 +159,48 @@ class _AppRootState extends State<AppRoot> {
   void initState() {
     super.initState();
     initApp();
+  }
+
+  @override
+  void dispose() {
+    _authStateSubscription?.cancel();
+    super.dispose();
+  }
+
+  void _bindAuthAwareFcmSync() {
+    _authStateSubscription?.cancel();
+    _authStateSubscription = _authService.authStateChanges.listen((user) async {
+      if (user == null) {
+        _lastRegisteredFcmToken = null;
+        return;
+      }
+      await _syncStoredFcmToken();
+    });
+  }
+
+  Future<void> _syncStoredFcmToken() async {
+    final token = _pushService.fcmToken ?? await _pushService.getSavedToken();
+    if (token == null || token.isEmpty) return;
+    await _registerFcmTokenIfAuthenticated(token);
+  }
+
+  Future<void> _registerFcmTokenIfAuthenticated(String token) async {
+    if (kIsWeb || token.isEmpty) return;
+    if (_lastRegisteredFcmToken == token) return;
+
+    if (_authService.currentUser == null) {
+      debugPrint('Skipping FCM token registration: no authenticated user yet.');
+      return;
+    }
+
+    try {
+      final platform = Platform.isIOS ? 'ios' : 'android';
+      await _backendApi.registerFcmToken(token: token, platform: platform);
+      _lastRegisteredFcmToken = token;
+      debugPrint('FCM token registered with backend');
+    } catch (e) {
+      debugPrint('Failed to register FCM token: $e');
+    }
   }
 
   Future<bool> _bootstrapTheme() async {
@@ -219,6 +263,7 @@ class _AppRootState extends State<AppRoot> {
         await Firebase.initializeApp();
       }
       debugPrint('Firebase initialized successfully');
+      _bindAuthAwareFcmSync();
     } catch (e) {
       debugPrint('Firebase initialization error: $e');
     }
@@ -249,22 +294,9 @@ class _AppRootState extends State<AppRoot> {
           firebaseMessagingBackgroundHandler,
         );
 
-        final pushService = PushNotificationService();
-        final backendApi = BackendApiService();
-
-        await pushService.initialize(
+        await _pushService.initialize(
           onTokenRefresh: (token) async {
-            // Register token with backend
-            try {
-              final platform = Platform.isIOS ? 'ios' : 'android';
-              await backendApi.registerFcmToken(
-                token: token,
-                platform: platform,
-              );
-              debugPrint('FCM token registered with backend');
-            } catch (e) {
-              debugPrint('Failed to register FCM token: $e');
-            }
+            await _registerFcmTokenIfAuthenticated(token);
           },
           onMessageReceived: (message) {
             debugPrint('Foreground message: ${message.notification?.title}');
@@ -298,6 +330,7 @@ class _AppRootState extends State<AppRoot> {
             }
           },
         );
+        await _syncStoredFcmToken();
         debugPrint('Push notifications initialized');
       } catch (e) {
         debugPrint('Push notification initialization error: $e');
@@ -479,6 +512,10 @@ class AppRouter extends StatefulWidget {
 
 class _AppRouterState extends State<AppRouter> {
   final AuthService _authService = AuthService();
+  Future<_AuthGateResult>? _authGateFuture;
+  String? _authGateCacheKey;
+  bool _forcedSignOutInFlight = false;
+  String? _pendingLoginErrorMessage;
 
   bool get _hasSeenOnboarding =>
       widget.prefs.getBool('hasSeenOnboarding') ?? false;
@@ -559,6 +596,65 @@ class _AppRouterState extends State<AppRouter> {
     setState(() {});
   }
 
+  void _resetAuthGateCache() {
+    _authGateFuture = null;
+    _authGateCacheKey = null;
+    _forcedSignOutInFlight = false;
+  }
+
+  Future<_AuthGateResult> _checkCurrentSessionAccess(String collegeId) async {
+    final email = _authService.userEmail?.trim();
+    if (email == null || email.isEmpty) {
+      return const _AuthGateResult.denied(
+        'Unable to verify account access. Please sign in again.',
+      );
+    }
+
+    try {
+      final banResult = await _authService.checkBanStatus(email, collegeId);
+      if (banResult?['isBanned'] == true) {
+        final reason =
+            (banResult?['reason'] ??
+                    'Your account has been restricted by an administrator.')
+                .toString();
+        return _AuthGateResult.denied(reason);
+      }
+      return const _AuthGateResult.allowed();
+    } catch (e) {
+      debugPrint('Auth gate ban check failed: $e');
+      return const _AuthGateResult.denied(
+        'Unable to verify account access. Please try again later.',
+      );
+    }
+  }
+
+  Future<_AuthGateResult> _getAuthGateFuture(String collegeId) {
+    final sessionKey =
+        '${_authService.currentUser?.uid ?? 'unknown'}|$collegeId';
+    if (_authGateFuture != null && _authGateCacheKey == sessionKey) {
+      return _authGateFuture!;
+    }
+
+    _authGateCacheKey = sessionKey;
+    _authGateFuture = _checkCurrentSessionAccess(collegeId);
+    return _authGateFuture!;
+  }
+
+  Future<void> _forceSignOutWithReason(String message) async {
+    if (_forcedSignOutInFlight) return;
+    _forcedSignOutInFlight = true;
+    _pendingLoginErrorMessage = message;
+
+    try {
+      await _authService.signOut();
+    } catch (e) {
+      debugPrint('Forced sign-out failed: $e');
+    }
+
+    if (!mounted) return;
+    setState(() => _resetAuthGateCache());
+  }
+
   @override
   Widget build(BuildContext context) {
     SupabaseService().attachContext(context);
@@ -582,6 +678,8 @@ class _AppRouterState extends State<AppRouter> {
         final user = snapshot.data;
 
         if (user == null) {
+          _resetAuthGateCache();
+
           // Double check college data exists before showing login
           if (_selectedCollegeId == null ||
               _selectedCollegeName == null ||
@@ -591,11 +689,14 @@ class _AppRouterState extends State<AppRouter> {
             );
           }
 
+          final initialErrorMessage = _pendingLoginErrorMessage;
+          _pendingLoginErrorMessage = null;
           return LoginScreen(
             collegeName: _selectedCollegeName!,
             collegeDomain: _selectedCollegeDomain!,
             collegeId: _selectedCollegeId!,
             onChangeCollege: _onChangeCollege,
+            initialErrorMessage: initialErrorMessage,
           );
         }
 
@@ -605,18 +706,52 @@ class _AppRouterState extends State<AppRouter> {
           return CollegeSelectionScreen(onCollegeSelected: _onCollegeSelected);
         }
 
-        // Logged in: Show home
-        return HomeScreen(
-          collegeId: _selectedCollegeId!,
-          collegeName: _selectedCollegeName ?? '',
-          collegeDomain: _selectedCollegeDomain!,
-          onLogout: _onLogout,
-          onChangeCollege: _onChangeCollege,
-          themeProvider: widget.themeProvider,
+        return FutureBuilder<_AuthGateResult>(
+          future: _getAuthGateFuture(_selectedCollegeId!),
+          builder: (context, gateSnapshot) {
+            if (gateSnapshot.connectionState == ConnectionState.waiting ||
+                gateSnapshot.connectionState == ConnectionState.active) {
+              return const SplashScreen();
+            }
+
+            final gateResult = gateSnapshot.data;
+            if (gateSnapshot.hasError ||
+                gateResult == null ||
+                !gateResult.allowed) {
+              final denialReason =
+                  gateResult?.denialMessage ??
+                  'Unable to verify account access. Please try again later.';
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                _forceSignOutWithReason(denialReason);
+              });
+              return const SplashScreen();
+            }
+
+            return HomeScreen(
+              collegeId: _selectedCollegeId!,
+              collegeName: _selectedCollegeName ?? '',
+              collegeDomain: _selectedCollegeDomain!,
+              onLogout: _onLogout,
+              onChangeCollege: _onChangeCollege,
+              themeProvider: widget.themeProvider,
+            );
+          },
         );
       },
     );
   }
+}
+
+class _AuthGateResult {
+  final bool allowed;
+  final String? denialMessage;
+
+  const _AuthGateResult._({required this.allowed, this.denialMessage});
+
+  const _AuthGateResult.allowed() : this._(allowed: true);
+
+  const _AuthGateResult.denied(String message)
+    : this._(allowed: false, denialMessage: message);
 }
 
 class SplashScreen extends StatelessWidget {
