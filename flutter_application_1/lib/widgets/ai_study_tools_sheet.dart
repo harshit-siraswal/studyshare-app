@@ -84,6 +84,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   bool _isLoading = false;
   bool _isSaving = false;
   bool _isDownloadingSummary = false;
+  final GlobalKey _pdfButtonKey = GlobalKey();
   String? _loadingType;
   String? _error;
 
@@ -368,10 +369,10 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         summary: summary,
       );
       if (!mounted) return;
-      final box = context.findRenderObject() as RenderBox?;
-      final sharePositionOrigin = box != null
+      final box = _pdfButtonKey.currentContext?.findRenderObject() as RenderBox?;
+      final sharePositionOrigin = (box != null && box.hasSize)
           ? box.localToGlobal(Offset.zero) & box.size
-          : null;
+          : const Rect.fromLTWH(0, 0, 1, 1);
       await SharePlus.instance.share(
         ShareParams(
           files: [XFile(file.path)],
@@ -1297,6 +1298,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                       if (!isSavedLocally) const SizedBox(width: 6),
                       if (_activeType == 'summary')
                         IconButton(
+                          key: _pdfButtonKey,
                           tooltip: 'Download PDF',
                           onPressed: _isDownloadingSummary
                               ? null

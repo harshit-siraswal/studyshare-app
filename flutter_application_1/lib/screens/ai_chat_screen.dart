@@ -163,6 +163,12 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
 
   @override
   void dispose() {
+    for (final anim in _suggestionAnimations) {
+      anim.dispose();
+    }
+    for (final anim in _suggestionFadeAnimations) {
+      anim.dispose();
+    }
     _splashAnimationController.dispose();
     _suggestionsController.dispose();
     _controller.dispose();

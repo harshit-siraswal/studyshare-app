@@ -305,9 +305,10 @@ class _NoticeCardState extends State<NoticeCard> {
                               }
                             }
                           } catch (e) {
+                            debugPrint('Failed to launch URL: $e');
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Unable to open link: $e')),
+                                const SnackBar(content: Text('Unable to open link')),
                               );
                             }
                           }
@@ -535,7 +536,8 @@ class _NoticeCardState extends State<NoticeCard> {
       );
 
       final tempDir = await getTemporaryDirectory();
-      final file = await File('${tempDir.path}/notice_share.png').create();
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final file = await File('${tempDir.path}/notice_share_$ts.png').create();
       try {
         await file.writeAsBytes(bytes);
 
@@ -543,8 +545,10 @@ class _NoticeCardState extends State<NoticeCard> {
           XFile(file.path),
         ], text: 'Check out this notice on MyStudySpace!');
       } finally {
-        // Clean up temporary file
-        try { await file.delete(); } catch (_) {}
+        // Delay deletion to avoid Android race condition
+        Future.delayed(const Duration(seconds: 2), () {
+          try { file.deleteSync(); } catch (_) {}
+        });
       }
     } catch (e) {
       if (!mounted) return;
