@@ -91,10 +91,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       vsync: this,
       duration: const Duration(milliseconds: 600),
     );
-    // Start animation with a slight delay to mimic "arrival"
-    Future.delayed(const Duration(milliseconds: 300), () {
-      if (mounted) _fabAnimationController.forward();
-    });
 
     _loadRoomData();
     _subscribeToPosts();
@@ -165,6 +161,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       }
 
       if (mounted && requestId == _loadRequestId) {
+        final bool prevFABVisible = !_isMember && !_isLoading && !_isReadOnly;
+        
         setState(() {
           _posts = posts;
           _roomInfo = info;
@@ -172,6 +170,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
           _isMember = memberCheckIds.contains(widget.roomId);
           _isLoading = false;
         });
+        
+        final bool newFABVisible = !_isMember && !_isLoading && !_isReadOnly;
+        if (!prevFABVisible && newFABVisible) {
+          _fabAnimationController.reset();
+          _fabAnimationController.forward();
+        }
       }
     } catch (e) {
       debugPrint('Error loading room data: $e');
@@ -635,39 +639,58 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
             ),
         ],
       ),
-      // Use standard bottom nav for join button only
-      bottomNavigationBar: !_isMember && !_isLoading
-          ? Container(
-              padding: const EdgeInsets.all(16),
-              color: const Color(0xFF151922),
-              child: SafeArea(
-                child: _isReadOnly
-                    ? Text(
-                        'Read-only access. Use your college email to join.',
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.inter(
-                          color: Colors.white70,
-                          fontWeight: FontWeight.w600,
+      // Floating Animated Join Button
+      floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
+      floatingActionButton: (!_isMember && !_isLoading && !_isReadOnly)
+          ? AnimatedBuilder(
+              animation: _fabAnimationController,
+              builder: (context, child) {
+                final value = Curves.elasticOut.transform(_fabAnimationController.value.clamp(0.0, 1.0));
+                return Transform.translate(
+                  offset: Offset(0, 50 * (1 - value)),
+                  child: Opacity(
+                    opacity: value.clamp(0.0, 1.0),
+                    child: Container(
+                      width: MediaQuery.of(context).size.width * 0.9,
+                      height: 56,
+                      margin: const EdgeInsets.only(bottom: 16),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF4A90E2), Color(0xFF357ABD)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
                         ),
-                      )
-                    : ElevatedButton(
-                        onPressed: () => _joinRoom(),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primary,
-                          padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(30),
+                        borderRadius: BorderRadius.circular(28),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF4A90E2).withValues(alpha: 0.3),
+                            blurRadius: 12,
+                            offset: const Offset(0, 6),
                           ),
-                        ),
-                        child: const Text(
-                          'Join Room',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
+                        ],
+                      ),
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(28),
+                          onTap: _joinRoom,
+                          child: Center(
+                            child: Text(
+                              'Join Room',
+                              style: GoogleFonts.inter(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
                           ),
                         ),
                       ),
-              ),
+                    ),
+                  ),
+                );
+              },
             )
           : null,
     );

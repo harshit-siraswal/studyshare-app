@@ -83,12 +83,19 @@ class AIChatScreen extends StatefulWidget {
   State<AIChatScreen> createState() => _AIChatScreenState();
 }
 
-class _AIChatScreenState extends State<AIChatScreen> {
+class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMixin {
   final BackendApiService _api = BackendApiService();
   final AuthService _auth = AuthService();
   final AiChatLocalService _localChat = AiChatLocalService();
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+
+  late final AnimationController _splashAnimationController;
+  late final Animation<double> _iconScaleAnimation;
+  late final Animation<double> _splashTitleAnimation;
+  late final Animation<double> _splashSubtitleAnimation;
+  late final AnimationController _suggestionsController;
+  late final List<Animation<double>> _suggestionAnimations;
 
   bool _isLoading = false;
   final List<AIChatMessage> _messages = [];
@@ -108,11 +115,51 @@ class _AIChatScreenState extends State<AIChatScreen> {
   @override
   void initState() {
     super.initState();
+    _splashAnimationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+    _iconScaleAnimation = CurvedAnimation(
+      parent: _splashAnimationController,
+      curve: Curves.elasticOut,
+    );
+    _splashTitleAnimation = CurvedAnimation(
+      parent: _splashAnimationController,
+      curve: const Interval(0.4, 1.0, curve: Curves.easeIn),
+    );
+    _splashSubtitleAnimation = CurvedAnimation(
+      parent: _splashAnimationController,
+      curve: const Interval(0.6, 1.0, curve: Curves.easeIn),
+    );
+    _suggestionsController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    _suggestionAnimations = List.generate(_suggestions.length, (index) {
+      return CurvedAnimation(
+        parent: _suggestionsController,
+        curve: Interval(
+          (index / _suggestions.length) * 0.5,
+          1.0,
+          curve: Curves.easeOutBack,
+        ),
+      );
+    });
+    
+    // Start animations if there are no messages
+    _splashAnimationController.forward().then((_) {
+      if (_messages.isEmpty && mounted) {
+        _suggestionsController.forward();
+      }
+    });
+    
     _loadStoredSessions();
   }
 
   @override
   void dispose() {
+    _splashAnimationController.dispose();
+    _suggestionsController.dispose();
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -753,7 +800,7 @@ class _AIChatScreenState extends State<AIChatScreen> {
               : Colors.black.withValues(alpha: 0.04),
           onPressed: () {
             _controller.text = s;
-            FocusScope.of(context).requestFocus(FocusNode());
+            FocusManager.instance.primaryFocus?.unfocus();
           },
         );
       }).toList(),
@@ -821,34 +868,73 @@ class _AIChatScreenState extends State<AIChatScreen> {
                       Center(
                         child: Padding(
                           padding: const EdgeInsets.only(bottom: 12),
-                          child: Image.asset(
-                            'assets/icon/app_icon.png',
-                            width: 56,
-                            height: 56,
-                            fit: BoxFit.contain,
+                          child: ScaleTransition(
+                            scale: _iconScaleAnimation,
+                            child: Hero(
+                              tag: 'ai_chat_icon',
+                              child: Icon(
+                                Icons.auto_awesome_rounded,
+                                size: 56,
+                                color: isDark ? const Color(0xFF57C884) : const Color(0xFF2EA867),
+                              ),
+                            ),
                           ),
                         ),
                       ),
-                      Text(
-                        'Ask AI about your PDFs and images',
-                        style: GoogleFonts.inter(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          color: isDark ? Colors.white : Colors.black,
+                      FadeTransition(
+                        opacity: _splashTitleAnimation,
+                        child: Text(
+                          'Ask AI about your PDFs and images',
+                          style: GoogleFonts.inter(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? Colors.white : Colors.black,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 8),
-                      Text(
-                        'I will search your study materials first. You can also attach images or PDFs with the paperclip button.',
-                        style: GoogleFonts.inter(
-                          fontSize: 13,
-                          color: isDark
-                              ? AppTheme.darkTextSecondary
-                              : AppTheme.lightTextSecondary,
+                      FadeTransition(
+                        opacity: _splashSubtitleAnimation,
+                        child: Text(
+                          'I will search your study materials first. You can also attach images or PDFs with the paperclip button.',
+                          style: GoogleFonts.inter(
+                            fontSize: 13,
+                            color: isDark
+                                ? AppTheme.darkTextSecondary
+                                : AppTheme.lightTextSecondary,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 16),
-                      _buildSuggestionChips(isDark),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: List.generate(_suggestions.length, (index) {
+                          final animation = _suggestionAnimations[index];
+                          return ScaleTransition(
+                            scale: animation,
+                            child: FadeTransition(
+                              opacity: animation,
+                              child: ActionChip(
+                                label: Text(
+                                  _suggestions[index],
+                                  style: GoogleFonts.inter(
+                                    fontSize: 12,
+                                    color: isDark ? Colors.white70 : Colors.black87,
+                                  ),
+                                ),
+                                backgroundColor: isDark
+                                    ? Colors.white10
+                                    : Colors.black.withValues(alpha: 0.04),
+                                onPressed: () {
+                                  _controller.text = _suggestions[index];
+                                  FocusManager.instance.primaryFocus?.unfocus();
+                                },
+                              ),
+                            ),
+                          );
+                        }),
+                      ),
                       const SizedBox(height: 24),
                     ],
                   ),

@@ -46,7 +46,7 @@ class Resource {
       id: json['id'] ?? '',
       title: json['title'] ?? '',
       type: json['type'] ?? 'notes',
-      fileUrl: json['file_url'] ?? '',
+      fileUrl: json['file_url'] ?? json['url'] ?? '',
       thumbnailUrl: json['thumbnail_url'],
       semester: json['semester'],
       branch: json['branch'],

@@ -591,79 +591,260 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final progress = ContributionBadgeCatalog.progressToNext(_uploadCount);
     final remaining = next == null ? 0 : (next - _uploadCount).clamp(0, 9999);
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppTheme.getCardColor(context),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppTheme.getBorderColor(context)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: _contributionBadge.color.withValues(alpha: 0.14),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  _contributionBadge.icon,
-                  color: _contributionBadge.color,
-                  size: 18,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  '${_contributionBadge.label} Badge',
-                  style: GoogleFonts.inter(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: textColor,
+    return GestureDetector(
+      onTap: () => _showBadgesBottomSheet(),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: AppTheme.getCardColor(context),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppTheme.getBorderColor(context)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: _contributionBadge.color.withValues(alpha: 0.14),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    _contributionBadge.icon,
+                    color: _contributionBadge.color,
+                    size: 18,
                   ),
                 ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    '${_contributionBadge.label} Badge',
+                    style: GoogleFonts.inter(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                      color: textColor,
+                    ),
+                  ),
+                ),
+                Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  size: 12,
+                  color: AppTheme.getMutedColor(context),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Text(
+              _contributionBadge.description,
+              style: GoogleFonts.inter(fontSize: 13, color: subTextColor),
+            ),
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: LinearProgressIndicator(
+                value: progress,
+                minHeight: 7,
+                backgroundColor: _contributionBadge.color.withValues(alpha: 0.12),
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  _contributionBadge.color,
+                ),
               ),
-              Text(
-                '$_uploadCount posts',
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: _contributionBadge.color,
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  '$_uploadCount contributions',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: _contributionBadge.color,
+                  ),
+                ),
+                Text(
+                  next == null
+                      ? 'Top tier reached!'
+                      : '$remaining more to next',
+                  style: GoogleFonts.inter(fontSize: 12, color: subTextColor),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showBadgesBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (BuildContext sheetCtx) {
+        final isDark = Theme.of(sheetCtx).brightness == Brightness.dark;
+        final textColor = AppTheme.getTextColor(sheetCtx);
+        final subTextColor = AppTheme.getTextColor(sheetCtx, isPrimary: false);
+        return Container(
+          height: MediaQuery.of(sheetCtx).size.height * 0.7,
+          decoration: BoxDecoration(
+            color: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              const SizedBox(height: 10),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white24 : Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Icon(Icons.workspace_premium_rounded, color: AppTheme.primary, size: 24),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Your Badges',
+                      style: GoogleFonts.inter(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        color: textColor,
+                      ),
+                    ),
+                    const Spacer(),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        '$_uploadCount uploads',
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.primary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: ContributionBadgeCatalog.tiers.length,
+                  itemBuilder: (context, index) {
+                    final badge = ContributionBadgeCatalog.tiers[index];
+                    final isUnlocked = _uploadCount >= badge.minContributions;
+                    
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: isUnlocked 
+                            ? badge.color.withValues(alpha: 0.1) 
+                            : (isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade50),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: isUnlocked 
+                              ? badge.color.withValues(alpha: 0.3) 
+                              : (isDark ? Colors.white12 : Colors.grey.shade200),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: isUnlocked ? badge.color : (isDark ? Colors.white12 : Colors.grey.shade200),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              isUnlocked ? badge.icon : Icons.lock_outline_rounded,
+                              color: isUnlocked ? Colors.white : (isDark ? Colors.white54 : Colors.black45),
+                              size: 24,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Text(
+                                      badge.label,
+                                      style: GoogleFonts.inter(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w700,
+                                        color: isUnlocked ? badge.color : subTextColor,
+                                      ),
+                                    ),
+                                    if (badge.id == 'pro' && !isUnlocked) ...[
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFFFD700).withValues(alpha: 0.15),
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: const Color(0xFFFFD700).withValues(alpha: 0.5)),
+                                        ),
+                                        child: Text(
+                                          'PREMIUM REWARD',
+                                          style: GoogleFonts.inter(
+                                            fontSize: 8,
+                                            fontWeight: FontWeight.w800,
+                                            color: const Color(0xFFD4AF37),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  badge.description,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 13,
+                                    color: subTextColor,
+                                  ),
+                                ),
+                                if (!isUnlocked) ...[
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Requires ${badge.minContributions} uploads',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: subTextColor.withValues(alpha: 0.6),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          Text(
-            _contributionBadge.description,
-            style: GoogleFonts.inter(fontSize: 13, color: subTextColor),
-          ),
-          const SizedBox(height: 12),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: LinearProgressIndicator(
-              value: progress,
-              minHeight: 7,
-              backgroundColor: _contributionBadge.color.withValues(alpha: 0.12),
-              valueColor: AlwaysStoppedAnimation<Color>(
-                _contributionBadge.color,
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            next == null
-                ? 'Top badge unlocked. Keep inspiring your peers.'
-                : '$remaining more contribution${remaining == 1 ? '' : 's'} to unlock the next badge.',
-            style: GoogleFonts.inter(fontSize: 12, color: subTextColor),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 

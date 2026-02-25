@@ -362,12 +362,16 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
       await Future.delayed(const Duration(milliseconds: 200));
 
       if (mounted) {
+        // Capture overlay state and callback before popping context
+        final overlayState = Overlay.of(context);
+        final onComplete = widget.onUploadComplete;
         Navigator.pop(context); // Close upload dialog
 
-        // Show success animation
-        showDialog(
-          context: context,
-          barrierDismissible: false,
+        // Show non-blocking success overlay
+        late OverlayEntry overlayEntry;
+        bool isRemoved = false;
+        
+        overlayEntry = OverlayEntry(
           builder: (context) => SuccessOverlay(
             variant: badgeUnlocked
                 ? SuccessOverlayVariant.badgeUnlocked
@@ -382,14 +386,19 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                 ? null
                 : '${contributionBadge.label} Badge',
             autoDismissDelay: badgeUnlocked
-                ? const Duration(milliseconds: 3200)
-                : const Duration(milliseconds: 2400),
+                ? const Duration(milliseconds: 4000)
+                : const Duration(milliseconds: 3000),
             onDismiss: () {
-              Navigator.pop(context); // Close success overlay
-              widget.onUploadComplete?.call();
+              if (!isRemoved) {
+                 isRemoved = true;
+                 overlayEntry.remove();
+                 onComplete?.call();
+              }
             },
           ),
         );
+        
+        overlayState.insert(overlayEntry);
       }
     } catch (e) {
       if (mounted) _showError('Submission failed: ${e.toString()}');

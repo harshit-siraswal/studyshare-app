@@ -50,6 +50,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   final TextEditingController _searchController = TextEditingController();
   Timer? _searchDebounce;
   int _searchSequence = 0;
+  VoidCallback? _pdfSearchListener;
 
   bool _isOcrSearching = false;
   List<Map<String, dynamic>> _ocrMatches = [];
@@ -83,6 +84,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   void dispose() {
     _searchDebounce?.cancel();
     _searchController.dispose();
+    if (_pdfSearchListener != null) {
+      _searchResult.removeListener(_pdfSearchListener!);
+    }
+    _pdfViewerController.dispose();
     super.dispose();
   }
 
@@ -128,6 +133,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
 
   void _clearSearchState() {
     if (_isPdf) {
+      if (_pdfSearchListener != null) {
+        _searchResult.removeListener(_pdfSearchListener!);
+        _pdfSearchListener = null;
+      }
       _pdfViewerController.clearSelection();
       _searchResult.clear();
     }
@@ -156,23 +165,29 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     }
 
     if (_isPdf) {
+      if (_pdfSearchListener != null) {
+        _searchResult.removeListener(_pdfSearchListener!);
+      }
+      
       final result = _pdfViewerController.searchText(trimmed);
-      result.addListener(() {
-        if (mounted) setState(() {});
-      });
+      
+      _pdfSearchListener = () {
+        if (mounted) {
+          setState(() {});
+          if (!kIsWeb && result.isSearchCompleted && result.totalInstanceCount == 0 && requestId == _searchSequence) {
+            _runOcrFallbackSearch(trimmed, requestId);
+          }
+        }
+      };
+      
+      result.addListener(_pdfSearchListener!);
+      
       setState(() {
         _searchResult = result;
         _ocrMatches = [];
         _ocrSearchError = null;
         _isOcrSearching = false;
       });
-
-      await Future.delayed(const Duration(milliseconds: 420));
-      if (!mounted || requestId != _searchSequence) return;
-
-      if (_searchResult.totalInstanceCount == 0) {
-        await _runOcrFallbackSearch(trimmed, requestId);
-      }
     }
   }
 
@@ -246,6 +261,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                       IconButton(
                         onPressed: () => Navigator.pop(context),
                         icon: const Icon(Icons.close_rounded),
+                        tooltip: 'Close OCR matches',
                       ),
                     ],
                   ),
@@ -291,6 +307,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+      ),
       builder: (context) => AiStudyToolsSheet(
         resourceId: resourceId,
         resourceTitle: widget.title,
@@ -299,25 +318,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     );
   }
 
-  Future<void> _handleDownload() async {
-    final isPremium = await _subscriptionService.isPremium();
-    if (!mounted) return;
-
-    if (!isPremium) {
-      final messenger = ScaffoldMessenger.of(context);
-      showDialog(
-        context: context,
-        builder: (context) => PaywallDialog(
-          onSuccess: () {
-            if (!mounted) return;
-            messenger.showSnackBar(const SnackBar(content: Text('Premium unlocked! Downloading...')));
-            _handleDownload();
-          },
-        ),
-      );
-      return;
-    }
-
+  Future<void> _performDownloadOrLaunch() async {
     try {
       final uri = Uri.parse(widget.pdfUrl);
       if (await canLaunchUrl(uri)) {
@@ -335,6 +336,28 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         );
       }
     }
+  }
+
+  Future<void> _handleDownload() async {
+    final isPremium = await _subscriptionService.isPremium();
+    if (!mounted) return;
+
+    if (!isPremium) {
+      final messenger = ScaffoldMessenger.of(context);
+      showDialog(
+        context: context,
+        builder: (context) => PaywallDialog(
+          onSuccess: () {
+            if (!mounted) return;
+            messenger.showSnackBar(const SnackBar(content: Text('Premium unlocked! Downloading...')));
+            _performDownloadOrLaunch();
+          },
+        ),
+      );
+      return;
+    }
+
+    await _performDownloadOrLaunch();
   }
 
   @override
@@ -415,7 +438,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               onPressed: _toggleSearch,
               tooltip: 'Find in PDF',
             ),
-          if (_showSearch && _isPdf)
+          if (_showSearch && _isPdf) ...[
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: Center(
@@ -429,13 +452,14 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                 ),
               ),
             ),
-          if (_showSearch && _isPdf) ...[
             IconButton(
               icon: const Icon(Icons.keyboard_arrow_up_rounded),
+              tooltip: 'Previous match',
               onPressed: _searchResult.hasResult ? () => _searchResult.previousInstance() : null,
             ),
             IconButton(
               icon: const Icon(Icons.keyboard_arrow_down_rounded),
+              tooltip: 'Next match',
               onPressed: _searchResult.hasResult ? () => _searchResult.nextInstance() : null,
             ),
           ],
@@ -466,6 +490,27 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
             _buildPdfContent()
           else if (_isOfficeDoc && _webViewController != null && !kIsWeb)
             WebViewWidget(controller: _webViewController!)
+          else if (_isOfficeDoc && kIsWeb)
+            Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.browser_not_supported_rounded, size: 64, color: Colors.grey),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Office document viewing is not fully supported on Web natively.',
+                    style: GoogleFonts.inter(color: Colors.grey, fontSize: 16),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton.icon(
+                    onPressed: _handleDownload,
+                    icon: const Icon(Icons.download_rounded),
+                    label: const Text('Download to View'),
+                  )
+                ],
+              ),
+            )
           else
             _buildUnsupportedContent(),
           if (_showSearch && (_isOcrSearching || _ocrMatches.isNotEmpty || _ocrSearchError != null))
@@ -499,11 +544,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               width: 16,
               height: 16,
               child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          else if (_ocrMatches.isNotEmpty)
-            const Icon(Icons.find_in_page_rounded, color: AppTheme.primary, size: 18)
-          else
-            const Icon(Icons.info_outline_rounded, color: AppTheme.error, size: 18),
+            ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -512,7 +553,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                   : _ocrMatches.isNotEmpty
                       ? 'Found ${_ocrMatches.length} OCR matches for this PDF.'
                       : (_ocrSearchError ?? 'No OCR match found'),
-              style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600),
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: _isNightMode ? Colors.white70 : const Color(0xFF334155),
+              ),
             ),
           ),
           if (_ocrMatches.isNotEmpty)

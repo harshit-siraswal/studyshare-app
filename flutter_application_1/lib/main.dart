@@ -471,6 +471,9 @@ class StudySpaceApp extends StatelessWidget {
       builder: (context, _) {
         return DynamicColorBuilder(
           builder: (lightDynamic, darkDynamic) {
+            final lightTheme = AppTheme.lightTheme(lightDynamic);
+            final darkTheme = AppTheme.darkTheme(darkDynamic);
+
             return MaterialApp(
               title: AppConfig.appName,
               debugShowCheckedModeBanner: false,
@@ -482,9 +485,11 @@ class StudySpaceApp extends StatelessWidget {
               ],
               supportedLocales: const [Locale('en')],
               navigatorKey: appNavigatorKey,
-              theme: AppTheme.lightTheme(lightDynamic),
-              darkTheme: AppTheme.darkTheme(darkDynamic),
+              theme: lightTheme,
+              darkTheme: darkTheme,
               themeMode: themeProvider.themeMode,
+              themeAnimationDuration: const Duration(milliseconds: 400),
+              themeAnimationCurve: Curves.easeInOut,
               home: AppRouter(prefs: prefs, themeProvider: themeProvider),
               builder: (context, child) =>
                   GlobalTimerOverlay(child: child ?? const SizedBox.shrink()),

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_linkify/flutter_linkify.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:screenshot/screenshot.dart';
@@ -286,11 +288,23 @@ class _NoticeCardState extends State<NoticeCard> {
                     ),
                     if (content.isNotEmpty) ...[
                       const SizedBox(height: 8),
-                      Text(
-                        content,
+                      Linkify(
+                        onOpen: (link) async {
+                          final uri = Uri.tryParse(link.url);
+                          if (uri != null && await canLaunchUrl(uri)) {
+                            await launchUrl(uri, mode: LaunchMode.externalApplication);
+                          }
+                        },
+                        text: content,
                         style: GoogleFonts.inter(
                           fontSize: 14,
                           color: secondaryColor,
+                          height: 1.4,
+                        ),
+                        linkStyle: GoogleFonts.inter(
+                          fontSize: 14,
+                          color: AppTheme.primary,
+                          decoration: TextDecoration.underline,
                           height: 1.4,
                         ),
                         maxLines: 4,

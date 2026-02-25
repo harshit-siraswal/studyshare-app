@@ -28,16 +28,17 @@ class SummaryPdfService {
 
   Future<Directory> _resolveDirectory() async {
     try {
-      final downloads = await getDownloadsDirectory();
-      if (downloads != null) {
-        if (!await downloads.exists()) {
-          await downloads.create(recursive: true);
+      if (!Platform.isIOS && !Platform.isAndroid) {
+        final downloads = await getDownloadsDirectory();
+        if (downloads != null) {
+          if (!await downloads.exists()) {
+            await downloads.create(recursive: true);
+          }
+          return downloads;
         }
-        return downloads;
       }
     } catch (e) {
-      // Downloads directory unavailable on this platform, falling back to app documents
-      // Consider logging: debugPrint('Downloads directory unavailable: $e');
+      // Fallback to app documents directory
     }
 
     final appDocs = await getApplicationDocumentsDirectory();

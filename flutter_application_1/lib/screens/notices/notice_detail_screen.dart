@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_linkify/flutter_linkify.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:screenshot/screenshot.dart';
@@ -484,13 +486,25 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                 const SizedBox(height: 12),
 
                 // Content Body
-                Text(
-                  content,
+                SelectableLinkify(
+                  onOpen: (link) async {
+                    final uri = Uri.tryParse(link.url);
+                    if (uri != null && await canLaunchUrl(uri)) {
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    }
+                  },
+                  text: content,
                   style: GoogleFonts.inter(
                     fontSize: 16,
                     color: isDark
                         ? const Color(0xFFE2E8F0)
                         : const Color(0xFF334155),
+                    height: 1.6,
+                  ),
+                  linkStyle: GoogleFonts.inter(
+                    fontSize: 16,
+                    color: AppTheme.primary,
+                    decoration: TextDecoration.underline,
                     height: 1.6,
                   ),
                 ),

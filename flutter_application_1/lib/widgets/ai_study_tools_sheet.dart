@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../config/theme.dart';
 import '../services/ai_output_local_service.dart';
@@ -99,12 +100,28 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
   final Map<String, bool> _cachedMap = {};
   final Map<String, bool> _savedLocallyMap = {};
+  
+  bool _isFullscreen = false;
 
   bool get _supportsOcr => widget.resourceType != 'video';
+
+  final TextEditingController _ocrProviderController = TextEditingController();
+
+  String _ocrProviderLabelFor(String provider) {
+    switch (provider) {
+      case 'google':
+        return 'Google';
+      case 'sarvam':
+        return 'Sarvam';
+      default:
+        return 'Google';
+    }
+  }
 
   @override
   void initState() {
     super.initState();
+    _ocrProviderController.text = _ocrProviderLabelFor(_ocrProvider);
     _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) return;
@@ -115,6 +132,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
   @override
   void dispose() {
+    _ocrProviderController.dispose();
     _tabController.dispose();
     super.dispose();
   }
@@ -350,8 +368,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         summary: summary,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Summary PDF saved: ${file.path}')),
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        text: 'Generative AI Summary for ${widget.resourceTitle}',
       );
     } catch (e) {
       if (!mounted) return;
@@ -427,9 +446,8 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
             ),
           ),
           const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               _buildOptionChip(
                 label: 'Use OCR',
@@ -442,24 +460,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                 },
                 isDark: isDark,
               ),
-              _buildOptionChip(
-                label: 'Force OCR',
-                selected: _forceOcr,
-                onSelected: (val) {
-                  setState(() {
-                    _forceOcr = val;
-                    if (val) _useOcr = true;
-                  });
-                },
-                isDark: isDark,
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
+              const Spacer(),
               Text(
-                'OCR Provider:',
+                'Provider:',
                 style: GoogleFonts.inter(
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
@@ -467,22 +470,47 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                 ),
               ),
               const SizedBox(width: 8),
-              DropdownButton<String>(
-                value: _ocrProvider,
-                underline: const SizedBox.shrink(),
-                dropdownColor: isDark ? AppTheme.darkSurface : Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                items: const [
-                  DropdownMenuItem(
-                    value: 'google',
-                    child: Text('Google Vision'),
+              SizedBox(
+                height: 32,
+                child: DropdownMenu<String>(
+                  controller: _ocrProviderController,
+                  width: 100,
+                  initialSelection: _ocrProvider,
+                  enabled: _useOcr,
+                  enableSearch: false,
+                  requestFocusOnTap: false,
+                  textStyle: GoogleFonts.inter(
+                    fontSize: 11,
+                    color: isDark ? Colors.white : Colors.black87,
                   ),
-                  DropdownMenuItem(value: 'sarvam', child: Text('Sarvam OCR')),
-                ],
-                onChanged: (val) {
-                  if (val == null) return;
-                  setState(() => _ocrProvider = val);
-                },
+                  inputDecorationTheme: InputDecorationTheme(
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                    filled: true,
+                    fillColor: isDark ? AppTheme.darkSurface : Colors.white,
+                  ),
+                  menuStyle: MenuStyle(
+                    backgroundColor: WidgetStatePropertyAll<Color>(
+                      isDark ? AppTheme.darkSurface : Colors.white,
+                    ),
+                  ),
+                  dropdownMenuEntries: const [
+                    DropdownMenuEntry(value: 'google', label: 'Google'),
+                    DropdownMenuEntry(value: 'sarvam', label: 'Sarvam'),
+                  ],
+                  onSelected: (String? val) {
+                    if (val != null) {
+                      setState(() {
+                        _ocrProvider = val;
+                        _ocrProviderController.text = _ocrProviderLabelFor(val);
+                      });
+                    }
+                  },
+                ),
               ),
             ],
           ),
@@ -1000,11 +1028,13 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     final hasOutput = _hasOutput(_activeType);
     final isSavedLocally = _savedLocallyMap[_activeType] == true;
 
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.88,
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.fastOutSlowIn,
+      height: _isFullscreen ? MediaQuery.of(context).size.height : MediaQuery.of(context).size.height * 0.88,
       decoration: BoxDecoration(
         color: isDark ? AppTheme.darkSurface : Colors.white,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
+        borderRadius: _isFullscreen ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(26)),
       ),
       child: Column(
         children: [
@@ -1058,6 +1088,17 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                         ),
                       ),
                     ],
+                  ),
+                ),
+                IconButton(
+                  onPressed: () {
+                    setState(() {
+                      _isFullscreen = !_isFullscreen;
+                    });
+                  },
+                  icon: Icon(
+                    _isFullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
+                    color: isDark ? Colors.white70 : const Color(0xFF334155),
                   ),
                 ),
                 IconButton(
@@ -1165,123 +1206,126 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
             top: false,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-              child: Row(
-                children: [
-                  if (_cachedMap[_activeType] == true)
-                    Container(
-                      margin: const EdgeInsets.only(right: 8),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppTheme.success.withValues(alpha: 0.16),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        'Server cache',
-                        style: GoogleFonts.inter(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.success,
-                        ),
-                      ),
-                    ),
-                  if (isSavedLocally)
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primary.withValues(alpha: 0.16),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        'Saved on device',
-                        style: GoogleFonts.inter(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.primary,
-                        ),
-                      ),
-                    ),
-                  const Spacer(),
-                  if (!hasOutput)
-                    ElevatedButton.icon(
-                      onPressed: _isLoading
-                          ? null
-                          : () => _generate(_activeType, regenerate: false),
-                      icon: const Icon(Icons.auto_awesome),
-                      label: const Text('Generate'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        foregroundColor: Colors.white,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    if (_cachedMap[_activeType] == true)
+                      Container(
+                        margin: const EdgeInsets.only(right: 8),
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
+                          horizontal: 8,
+                          vertical: 4,
                         ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
+                        decoration: BoxDecoration(
+                          color: AppTheme.success.withValues(alpha: 0.16),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          'Server cache',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.success,
+                          ),
                         ),
                       ),
-                    )
-                  else ...[
-                    OutlinedButton.icon(
-                      onPressed: (_isSaving || isSavedLocally)
-                          ? null
-                          : _saveActiveOutput,
-                      icon: _isSaving
-                          ? const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : Icon(
-                              isSavedLocally
-                                  ? Icons.check_rounded
-                                  : Icons.save_outlined,
-                              size: 16,
-                            ),
-                      label: Text(isSavedLocally ? 'Saved' : 'Save'),
-                    ),
-                    if (_activeType == 'summary')
-                      IconButton(
-                        tooltip: 'Download PDF',
-                        onPressed: _isDownloadingSummary
+                    if (isSavedLocally)
+                      Container(
+                        margin: const EdgeInsets.only(right: 12),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary.withValues(alpha: 0.16),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          'Saved on device',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.primary,
+                          ),
+                        ),
+                      ),
+                    if (!hasOutput)
+                      ElevatedButton.icon(
+                        onPressed: _isLoading
                             ? null
-                            : _downloadSummaryPdf,
-                        icon: _isDownloadingSummary
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
+                            : () => _generate(_activeType, regenerate: false),
+                        icon: const Icon(Icons.auto_awesome),
+                        label: const Text('Generate'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primary,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                      )
+                    else ...[
+                      if (!isSavedLocally)
+                        OutlinedButton.icon(
+                          onPressed: _isSaving
+                              ? null
+                              : _saveActiveOutput,
+                          icon: _isSaving
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(
+                                  Icons.save_outlined,
+                                  size: 16,
                                 ),
-                              )
-                            : const Icon(Icons.picture_as_pdf_outlined),
-                      ),
-                    const SizedBox(width: 6),
-                    ElevatedButton.icon(
-                      onPressed: _isLoading
-                          ? null
-                          : () => _generate(_activeType, regenerate: true),
-                      icon: const Icon(Icons.refresh_rounded),
-                      label: const Text('Regenerate'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 12,
+                          label: const Text('Save'),
                         ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
+                      if (!isSavedLocally) const SizedBox(width: 6),
+                      if (_activeType == 'summary')
+                        IconButton(
+                          tooltip: 'Download PDF',
+                          onPressed: _isDownloadingSummary
+                              ? null
+                              : _downloadSummaryPdf,
+                          icon: _isDownloadingSummary
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.picture_as_pdf_outlined),
+                        ),
+                      if (_activeType == 'summary') const SizedBox(width: 6),
+                      ElevatedButton.icon(
+                        onPressed: _isLoading
+                            ? null
+                            : () => _generate(_activeType, regenerate: true),
+                        icon: const Icon(Icons.refresh_rounded),
+                        label: const Text('Regenerate'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primary,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
                         ),
                       ),
-                    ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ),

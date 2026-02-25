@@ -1,0 +1,148 @@
+﻿Resolving dependencies...
+Downloading packages...
+  _fe_analyzer_shared 91.0.0 (96.0.0 available)
+  analyzer 8.4.1 (10.2.0 available)
+  app_links 6.4.1 (7.0.0 available)
+  archive 4.0.7 (4.0.9 available)
+  characters 1.4.0 (1.4.1 available)
+  dbus 0.7.11 (0.7.12 available)
+  ffi 2.1.5 (2.2.0 available)
+  flutter_local_notifications 18.0.1 (20.1.0 available)
+  flutter_local_notifications_linux 5.0.0 (7.0.0 available)
+  flutter_local_notifications_platform_interface 8.0.0 (10.0.0 available)
+  flutter_riverpod 3.2.0 (3.2.1 available)
+  fluttertoast 8.2.14 (9.0.0 available)
+  go_router 17.0.1 (17.1.0 available)
+  google_fonts 7.1.0 (8.0.2 available)
+  google_sign_in 6.3.0 (7.2.0 available)
+  google_sign_in_android 6.2.1 (7.2.9 available)
+  google_sign_in_ios 5.9.0 (6.3.0 available)
+  google_sign_in_platform_interface 2.5.0 (3.1.0 available)
+  google_sign_in_web 0.12.4+4 (1.1.2 available)
+  hooks 1.0.0 (1.0.1 available)
+  image 4.7.2 (4.8.0 available)
+  json_annotation 4.10.0 (4.11.0 available)
+  matcher 0.12.17 (0.12.18 available)
+  material_color_utilities 0.11.1 (0.13.0 available)
+  meta 1.17.0 (1.18.1 available)
+  objective_c 9.2.5 (9.3.0 available)
+  petitparser 7.0.1 (7.0.2 available)
+  photo_view 0.14.0 (0.15.0 available)
+  posix 6.0.3 (6.5.0 available)
+  razorpay_flutter 1.4.0 (1.4.1 available)
+  riverpod 3.2.0 (3.2.1 available)
+  riverpod_annotation 4.0.1 (4.0.2 available)
+  source_span 1.10.1 (1.10.2 available)
+  syncfusion_flutter_core 32.1.25 (32.2.7 available)
+  syncfusion_flutter_pdf 32.1.25 (32.2.7 available)
+  syncfusion_flutter_pdfviewer 32.1.25 (32.2.7 available)
+  syncfusion_flutter_signaturepad 32.1.25 (32.2.7 available)
+  syncfusion_pdfviewer_linux 32.1.25 (32.2.7 available)
+  syncfusion_pdfviewer_macos 32.1.25 (32.2.7 available)
+  syncfusion_pdfviewer_platform_interface 32.1.25 (32.2.7 available)
+  syncfusion_pdfviewer_web 32.1.25 (32.2.7 available)
+  syncfusion_pdfviewer_windows 32.1.25 (32.2.7 available)
+  test 1.26.3 (1.29.0 available)
+  test_api 0.7.7 (0.7.9 available)
+  test_core 0.6.12 (0.6.15 available)
+  timezone 0.10.1 (0.11.0 available)
+  url_launcher_ios 6.3.6 (6.4.1 available)
+  uuid 4.5.2 (4.5.3 available)
+  vector_graphics_compiler 1.1.20 (1.2.0 available)
+  video_player 2.10.1 (2.11.0 available)
+  video_player_android 2.9.1 (2.9.4 available)
+  video_player_avfoundation 2.9.0 (2.9.3 available)
+  webview_flutter_android 4.10.11 (4.10.13 available)
+  webview_flutter_wkwebview 3.23.5 (3.23.7 available)
+  win32 5.15.0 (6.0.0 available)
+  win32_registry 2.1.0 (3.0.0 available)
+Got dependencies!
+56 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Analyzing flutter_application_1...                              
+
+   info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\data\departments_data.dart:17:24 - deprecated_member_use
+warning - The declaration '_buildSuggestionChips' isn't referenced - lib\screens\ai_chat_screen.dart:785:10 - unused_element
+  error - Undefined name 'index' - lib\screens\ai_chat_screen.dart:802:67 - undefined_identifier
+warning - The declaration '_showCreateOrJoinDialog' isn't referenced - lib\screens\chatroom\chatroom_list_screen.dart:383:8 - unused_element
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_list_screen.dart:456:58 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_list_screen.dart:459:50 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_list_screen.dart:559:56 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_list_screen.dart:561:48 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\screens\chatroom\chatroom_screen.dart:205:30 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:1184:38 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:1191:38 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\screens\chatroom\chatroom_screen.dart:1717:29 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:1722:31 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:1797:43 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:2090:51 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:2107:51 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:2184:51 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:2205:51 - use_build_context_synchronously
+warning - The value of the local variable 'cardColor' isn't used - lib\screens\chatroom\discover_rooms_screen.dart:87:11 - unused_local_variable
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\discover_rooms_screen.dart:216:41 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\discover_rooms_screen.dart:221:48 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\discover_rooms_screen.dart:447:40 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\discover_rooms_screen.dart:451:50 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\discover_rooms_screen.dart:456:47 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\post_detail_screen.dart:573:33 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\screens\chatroom\post_detail_screen.dart:612:33 - use_build_context_synchronously
+warning - The declaration '_showReportDialog' isn't referenced - lib\screens\chatroom\post_detail_screen.dart:1370:8 - unused_element
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\post_detail_screen.dart:1440:40 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\post_detail_screen.dart:1448:40 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\screens\notices\department_account_screen.dart:105:9 - use_build_context_synchronously
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\notices\department_account_screen.dart:350:37 - deprecated_member_use
+   info - 'Share' is deprecated and shouldn't be used. Use SharePlus instead - lib\screens\notices\notice_detail_screen.dart:417:13 - deprecated_member_use
+   info - 'shareXFiles' is deprecated and shouldn't be used. Use SharePlus.instance.share() instead - lib\screens\notices\notice_detail_screen.dart:417:19 - deprecated_member_use
+warning - The value of the field '_searchController' isn't used - lib\screens\notices\notices_screen.dart:23:31 - unused_field
+warning - The value of the field '_notices' isn't used - lib\screens\notices\notices_screen.dart:25:30 - unused_field
+warning - The value of the field '_selectedDepartment' isn't used - lib\screens\notices\notices_screen.dart:28:11 - unused_field
+warning - The value of the field '_searchFocusNode' isn't used - lib\screens\notices\notices_screen.dart:31:19 - unused_field
+  error - Too many positional arguments: 0 expected, but 1 found - lib\screens\profile\profile_screen.dart:595:43 - extra_positional_arguments
+warning - The value of the field '_isSearching' isn't used - lib\screens\study\pdf_viewer_screen.dart:29:8 - unused_field
+warning - The declaration '_loadDownloadedResources' isn't referenced - lib\screens\study\study_screen.dart:1357:8 - unused_element
+warning - The declaration '_buildDownloadsTab' isn't referenced - lib\screens\study\study_screen.dart:1363:10 - unused_element
+   info - The private field _isNightMode could be 'final' - lib\screens\viewer\pdf_viewer_screen.dart:47:8 - prefer_final_fields
+warning - The declaration '_openAiTools' isn't referenced - lib\screens\viewer\pdf_viewer_screen.dart:303:8 - unused_element
+  error - Too many positional arguments: 0 expected, but 2 found - lib\screens\viewer\pdf_viewer_screen.dart:454:13 - extra_positional_arguments_could_be_named
+  error - Expected to find ')' - lib\screens\viewer\pdf_viewer_screen.dart:464:11 - expected_token
+  error - Expected an identifier - lib\screens\viewer\pdf_viewer_screen.dart:465:11 - missing_identifier
+  error - Expected to find ')' - lib\screens\viewer\pdf_viewer_screen.dart:465:11 - expected_token
+warning - The value of the local variable 'isDark' isn't used - lib\screens\viewer\pdf_viewer_screen.dart:530:11 - unused_local_variable
+warning - The value of the field '_isLoading' isn't used - lib\services\recaptcha_service.dart:69:8 - unused_field
+  error - The method 'debugPrint' isn't defined for the type 'SummaryPdfService' - lib\services\summary_pdf_service.dart:39:7 - undefined_method
+warning - Unused import: 'subscription_service.dart' - lib\services\supabase_service.dart:7:8 - unused_import
+warning - The declaration '_createNotification' isn't referenced - lib\services\supabase_service.dart:658:16 - unused_element
+   info - Don't use 'BuildContext's across async gaps - lib\services\supabase_service.dart:1587:9 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\services\supabase_service.dart:1639:9 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\services\supabase_service.dart:2420:61 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\services\supabase_service.dart:2427:9 - use_build_context_synchronously
+   info - 'Share' is deprecated and shouldn't be used. Use SharePlus instead - lib\widgets\ai_study_tools_sheet.dart:371:13 - deprecated_member_use
+   info - 'shareXFiles' is deprecated and shouldn't be used. Use SharePlus.instance.share() instead - lib\widgets\ai_study_tools_sheet.dart:371:19 - deprecated_member_use
+   info - 'Share' is deprecated and shouldn't be used. Use SharePlus instead - lib\widgets\full_screen_image_viewer.dart:49:13 - deprecated_member_use
+   info - 'shareXFiles' is deprecated and shouldn't be used. Use SharePlus.instance.share() instead - lib\widgets\full_screen_image_viewer.dart:49:19 - deprecated_member_use
+   info - Invalid use of a private type in a public API - lib\widgets\global_timer_overlay.dart:12:26 - library_private_types_in_public_api
+   info - Don't use 'BuildContext's across async gaps - lib\widgets\notice_card.dart:71:30 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\widgets\notice_card.dart:77:28 - use_build_context_synchronously
+   info - 'Share' is deprecated and shouldn't be used. Use SharePlus instead - lib\widgets\notice_card.dart:510:13 - deprecated_member_use
+   info - 'shareXFiles' is deprecated and shouldn't be used. Use SharePlus.instance.share() instead - lib\widgets\notice_card.dart:510:19 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps - lib\widgets\resource_card.dart:123:9 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\widgets\resource_card.dart:134:28 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\widgets\resource_card.dart:140:41 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\widgets\resource_card.dart:142:41 - use_build_context_synchronously
+warning - The declaration '_PDFViewerDialog' isn't referenced - lib\widgets\resource_card.dart:549:7 - unused_element
+warning - The declaration '_deleteSticker' isn't referenced - lib\widgets\sticker_picker.dart:184:16 - unused_element
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:22:35 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:53:56 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:53:88 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:58:44 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:77:81 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:135:48 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:143:55 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:184:60 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:184:93 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:190:80 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:228:40 - deprecated_member_use
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:228:72 - deprecated_member_use
+warning - The value of the field '_slideAnimation' isn't used - lib\widgets\success_overlay.dart:41:22 - unused_field
+
