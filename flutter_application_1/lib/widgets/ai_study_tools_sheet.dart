@@ -368,10 +368,15 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         summary: summary,
       );
       if (!mounted) return;
+      final box = context.findRenderObject() as RenderBox?;
+      final sharePositionOrigin = box != null
+          ? box.localToGlobal(Offset.zero) & box.size
+          : null;
       await SharePlus.instance.share(
         ShareParams(
           files: [XFile(file.path)],
           text: 'Generative AI Summary for ${widget.resourceTitle}',
+          sharePositionOrigin: sharePositionOrigin,
         ),
       );
     } catch (e) {

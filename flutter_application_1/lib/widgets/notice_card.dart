@@ -66,9 +66,11 @@ class _NoticeCardState extends State<NoticeCard> {
     try {
       if (_isSaved) {
         await _supabaseService.unsaveNotice(widget.notice['id'], email);
+        if (!mounted) return;
         setState(() => _isSaved = false);
       } else {
         await _supabaseService.saveNotice(widget.notice['id'], email);
+        if (!mounted) return;
         setState(() => _isSaved = true);
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -77,6 +79,7 @@ class _NoticeCardState extends State<NoticeCard> {
       }
     } catch (e, stackTrace) {
       debugPrint('Error toggling saved status: $e\n$stackTrace');
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Something went wrong. Please try again.'),
@@ -294,10 +297,19 @@ class _NoticeCardState extends State<NoticeCard> {
                           try {
                             final uri = Uri.tryParse(link.url);
                             if (uri != null) {
-                              await launchUrl(uri, mode: LaunchMode.externalApplication);
+                              final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+                              if (!launched && mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Could not open: ${link.url}')),
+                                );
+                              }
                             }
                           } catch (e) {
-                            debugPrint('Failed to launch URL: $e');
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Unable to open link: $e')),
+                              );
+                            }
                           }
                         },
                         text: content,
@@ -524,14 +536,16 @@ class _NoticeCardState extends State<NoticeCard> {
 
       final tempDir = await getTemporaryDirectory();
       final file = await File('${tempDir.path}/notice_share.png').create();
-      await file.writeAsBytes(bytes);
+      try {
+        await file.writeAsBytes(bytes);
 
-      await Share.shareXFiles([
-        XFile(file.path),
-      ], text: 'Check out this notice on MyStudySpace!');
-
-      // Clean up temporary file
-      await file.delete();
+        await Share.shareXFiles([
+          XFile(file.path),
+        ], text: 'Check out this notice on MyStudySpace!');
+      } finally {
+        // Clean up temporary file
+        try { await file.delete(); } catch (_) {}
+      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(

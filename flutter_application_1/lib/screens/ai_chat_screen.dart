@@ -96,6 +96,7 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
   late final Animation<double> _splashSubtitleAnimation;
   late final AnimationController _suggestionsController;
   late final List<Animation<double>> _suggestionAnimations;
+  late final List<Animation<double>> _suggestionFadeAnimations;
 
   bool _isLoading = false;
   final List<AIChatMessage> _messages = [];
@@ -142,6 +143,16 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
           (index / _suggestions.length) * 0.5,
           1.0,
           curve: Curves.easeOutBack,
+        ),
+      );
+    });
+    _suggestionFadeAnimations = List.generate(_suggestions.length, (index) {
+      return CurvedAnimation(
+        parent: _suggestionsController,
+        curve: Interval(
+          (index / _suggestions.length) * 0.5,
+          1.0,
+          curve: Curves.easeOut,
         ),
       );
     });
@@ -298,6 +309,15 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
       _messages.clear();
       _attachments.clear();
       _controller.clear();
+    });
+
+    // Reset and replay splash animations for the empty chat
+    _splashAnimationController.reset();
+    _suggestionsController.reset();
+    _splashAnimationController.forward().then((_) {
+      if (_messages.isEmpty && mounted) {
+        _suggestionsController.forward();
+      }
     });
   }
 
@@ -915,7 +935,7 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
                           return ScaleTransition(
                             scale: animation,
                             child: FadeTransition(
-                              opacity: animation.drive(Tween(begin: 0.0, end: 1.0)),
+                              opacity: _suggestionFadeAnimations[index],
                               child: ActionChip(
                                 label: Text(
                                   _suggestions[index],

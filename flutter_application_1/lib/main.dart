@@ -97,14 +97,12 @@ void main() async {
   }
 
   // Initialize Firebase FIRST — must happen before any Firebase service is used
+  bool _firebaseInitialized = false;
   try {
-    if (kIsWeb) {
-      await Firebase.initializeApp(
-        options: DefaultFirebaseOptions.currentPlatform,
-      );
-    } else {
-      await Firebase.initializeApp();
-    }
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
+    _firebaseInitialized = true;
     debugPrint('Firebase initialized successfully');
   } catch (e) {
     debugPrint('Firebase initialization error: $e');
@@ -132,7 +130,7 @@ void main() async {
     ),
   );
 
-  runApp(const AppRoot());
+  runApp(AppRoot(firebaseInitialized: _firebaseInitialized));
 }
 
 enum AppState {
@@ -147,7 +145,9 @@ class AppRoot extends StatefulWidget {
   // Expose key if needed via static accessor, but top-level is fine too
   static GlobalKey<NavigatorState> get navKey => appNavigatorKey;
 
-  const AppRoot({super.key});
+  final bool firebaseInitialized;
+
+  const AppRoot({super.key, this.firebaseInitialized = false});
 
   @override
   State<AppRoot> createState() => _AppRootState();
@@ -267,8 +267,7 @@ class _AppRootState extends State<AppRoot> {
       return;
     }
 
-    // Firebase is already initialized in main()
-    _bindAuthAwareFcmSync();
+    // Firebase FCM binding is deferred until after Supabase init below
 
     // Initialize Supabase (required)
     try {
@@ -288,8 +287,13 @@ class _AppRootState extends State<AppRoot> {
     }
     // Get shared preferences
 
+    // Bind auth-aware FCM sync now that Supabase is ready
+    if (widget.firebaseInitialized) {
+      _bindAuthAwareFcmSync();
+    }
+
     // Initialize Push Notifications (after Firebase is ready)
-    if (!kIsWeb) {
+    if (!kIsWeb && widget.firebaseInitialized) {
       try {
         // Set up background message handler
         FirebaseMessaging.onBackgroundMessage(

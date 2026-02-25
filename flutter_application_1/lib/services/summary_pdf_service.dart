@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:io';
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'dart:math';
@@ -39,7 +40,7 @@ class SummaryPdfService {
         }
       }
     } catch (e, st) {
-      debugPrint('Failed to resolve downloads directory: $e\n$st');
+      developer.log('Failed to resolve downloads directory', error: e, stackTrace: st);
     }
 
     final appDocs = await getApplicationDocumentsDirectory();

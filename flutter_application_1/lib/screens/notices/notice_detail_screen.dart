@@ -491,10 +491,19 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                     try {
                       final uri = Uri.tryParse(link.url);
                       if (uri != null) {
-                        await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+                        if (!launched && mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Could not open: ${link.url}')),
+                          );
+                        }
                       }
                     } catch (e) {
-                      debugPrint('Failed to launch URL: $e');
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Unable to open link: $e')),
+                        );
+                      }
                     }
                   },
                   text: content,
