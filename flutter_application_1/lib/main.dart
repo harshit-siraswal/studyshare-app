@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
+import 'dart:ui' show PlatformDispatcher;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -77,6 +78,16 @@ Future<bool> _requestPermissions() async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Global error handler — works in release mode
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    debugPrint('FlutterError: ${details.exception}');
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('PlatformDispatcher error: $error\n$stack');
+    return true;
+  };
 
   // Validate configuration and log any warnings
   // Validate configuration
@@ -232,25 +243,32 @@ class _AppRootState extends State<AppRoot> {
     if (!mounted) return;
     setState(() => _appState = AppState.loading);
 
-    final bootstrapped = await _bootstrapTheme();
-    if (!bootstrapped) {
-      if (mounted) setState(() => _appState = AppState.initializationError);
-      return;
-    }
-    // Trigger rebuild to apply theme from preferences to loading screen
-    if (mounted) setState(() {});
-    // Check internet connectivity
     try {
-      final connectivityResult = await Connectivity().checkConnectivity();
-      if (connectivityResult.contains(ConnectivityResult.none)) {
-        if (mounted) setState(() => _appState = AppState.noConnection);
+      final bootstrapped = await _bootstrapTheme();
+      if (!bootstrapped) {
+        if (mounted) setState(() => _appState = AppState.initializationError);
         return;
       }
-    } catch (e) {
-      debugPrint('Connectivity check failed: $e');
-    }
+      // Trigger rebuild to apply theme from preferences to loading screen
+      if (mounted) setState(() {});
+      // Check internet connectivity
+      try {
+        final connectivityResult = await Connectivity().checkConnectivity();
+        if (connectivityResult.contains(ConnectivityResult.none)) {
+          if (mounted) setState(() => _appState = AppState.noConnection);
+          return;
+        }
+      } catch (e) {
+        debugPrint('Connectivity check failed: $e');
+      }
 
-    await _continueStartup();
+      await _continueStartup();
+    } catch (e, st) {
+      debugPrint('FATAL initApp error: $e\n$st');
+      if (mounted) {
+        setState(() => _appState = AppState.initializationError);
+      }
+    }
   }
 
   Future<void> _continueStartup() async {
