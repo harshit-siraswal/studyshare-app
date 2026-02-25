@@ -95,8 +95,8 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
   late final Animation<double> _splashTitleAnimation;
   late final Animation<double> _splashSubtitleAnimation;
   late final AnimationController _suggestionsController;
-  late final List<Animation<double>> _suggestionAnimations;
-  late final List<Animation<double>> _suggestionFadeAnimations;
+  late final List<CurvedAnimation> _suggestionAnimations;
+  late final List<CurvedAnimation> _suggestionFadeAnimations;
 
   bool _isLoading = false;
   final List<AIChatMessage> _messages = [];
