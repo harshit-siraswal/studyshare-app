@@ -488,9 +488,13 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                 // Content Body
                 SelectableLinkify(
                   onOpen: (link) async {
-                    final uri = Uri.tryParse(link.url);
-                    if (uri != null && await canLaunchUrl(uri)) {
-                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    try {
+                      final uri = Uri.tryParse(link.url);
+                      if (uri != null) {
+                        await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      }
+                    } catch (e) {
+                      debugPrint('Failed to launch URL: $e');
                     }
                   },
                   text: content,

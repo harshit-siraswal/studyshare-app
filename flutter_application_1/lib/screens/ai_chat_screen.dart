@@ -146,13 +146,7 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
       );
     });
     
-    // Start animations if there are no messages
-    _splashAnimationController.forward().then((_) {
-      if (_messages.isEmpty && mounted) {
-        _suggestionsController.forward();
-      }
-    });
-    
+    // Defer splash animation until after stored sessions load
     _loadStoredSessions();
   }
 
@@ -280,6 +274,16 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
         _activeSessionId = _newSessionId();
       }
     });
+
+    // Start splash animation only if no messages were loaded
+    if (_messages.isEmpty && mounted) {
+      _splashAnimationController.forward().then((_) {
+        if (_messages.isEmpty && mounted) {
+          _suggestionsController.forward();
+        }
+      });
+    }
+
     await _scrollToBottom();
   }
 
@@ -870,14 +874,11 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
                           padding: const EdgeInsets.only(bottom: 12),
                           child: ScaleTransition(
                             scale: _iconScaleAnimation,
-                            child: Hero(
-                              tag: 'ai_chat_icon',
-                              child: Icon(
+                            child: Icon(
                                 Icons.auto_awesome_rounded,
                                 size: 56,
                                 color: isDark ? const Color(0xFF57C884) : const Color(0xFF2EA867),
                               ),
-                            ),
                           ),
                         ),
                       ),
@@ -914,7 +915,7 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
                           return ScaleTransition(
                             scale: animation,
                             child: FadeTransition(
-                              opacity: animation,
+                              opacity: animation.drive(Tween(begin: 0.0, end: 1.0)),
                               child: ActionChip(
                                 label: Text(
                                   _suggestions[index],

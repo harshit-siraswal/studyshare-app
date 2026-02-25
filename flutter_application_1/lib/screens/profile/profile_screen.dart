@@ -792,7 +792,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                         color: isUnlocked ? badge.color : subTextColor,
                                       ),
                                     ),
-                                    if (badge.id == 'pro' && !isUnlocked) ...[
+                                    if (badge.isPremiumReward && !isUnlocked) ...[
                                       const SizedBox(width: 6),
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),

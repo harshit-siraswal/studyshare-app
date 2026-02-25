@@ -170,11 +170,12 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       }
       
       final result = _pdfViewerController.searchText(trimmed);
+      _searchResult = result;
       
       _pdfSearchListener = () {
         if (mounted) {
           setState(() {});
-          if (!kIsWeb && result.isSearchCompleted && result.totalInstanceCount == 0 && requestId == _searchSequence) {
+          if (!kIsWeb && result.isSearchCompleted && result.totalInstanceCount == 0 && requestId == _searchSequence && !_isOcrSearching) {
             _runOcrFallbackSearch(trimmed, requestId);
           }
         }
@@ -183,7 +184,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       result.addListener(_pdfSearchListener!);
       
       setState(() {
-        _searchResult = result;
         _ocrMatches = [];
         _ocrSearchError = null;
         _isOcrSearching = false;
@@ -307,6 +307,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
+      clipBehavior: Clip.antiAlias,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
       ),

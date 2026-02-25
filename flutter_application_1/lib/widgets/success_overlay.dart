@@ -38,7 +38,6 @@ class SuccessOverlay extends StatefulWidget {
 class _SuccessOverlayState extends State<SuccessOverlay>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
-  Animation<double>? _slideAnimation;
   late final Animation<double> _fadeAnimation;
   late final Animation<double> _scaleAnimation;
   Timer? _dismissTimer;

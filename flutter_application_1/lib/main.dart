@@ -96,6 +96,20 @@ void main() async {
     debugPrint('Configuration Warning: $warning');
   }
 
+  // Initialize Firebase FIRST — must happen before any Firebase service is used
+  try {
+    if (kIsWeb) {
+      await Firebase.initializeApp(
+        options: DefaultFirebaseOptions.currentPlatform,
+      );
+    } else {
+      await Firebase.initializeApp();
+    }
+    debugPrint('Firebase initialized successfully');
+  } catch (e) {
+    debugPrint('Firebase initialization error: $e');
+  }
+
   try {
     await Hive.initFlutter();
   } catch (e) {
@@ -253,20 +267,8 @@ class _AppRootState extends State<AppRoot> {
       return;
     }
 
-    // Initialize Firebase
-    try {
-      if (kIsWeb) {
-        await Firebase.initializeApp(
-          options: DefaultFirebaseOptions.currentPlatform,
-        );
-      } else {
-        await Firebase.initializeApp();
-      }
-      debugPrint('Firebase initialized successfully');
-      _bindAuthAwareFcmSync();
-    } catch (e) {
-      debugPrint('Firebase initialization error: $e');
-    }
+    // Firebase is already initialized in main()
+    _bindAuthAwareFcmSync();
 
     // Initialize Supabase (required)
     try {

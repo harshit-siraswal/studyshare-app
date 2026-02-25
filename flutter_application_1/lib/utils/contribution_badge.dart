@@ -10,6 +10,7 @@ class ContributionBadge {
   final int? nextThreshold;
   final Color color;
   final IconData icon;
+  final bool isPremiumReward;
 
   const ContributionBadge({
     required this.id,
@@ -19,6 +20,7 @@ class ContributionBadge {
     required this.nextThreshold,
     required this.color,
     required this.icon,
+    this.isPremiumReward = false,
   });
 }
 
@@ -54,11 +56,12 @@ class ContributionBadgeCatalog {
     ContributionBadge(
       id: 'pro',
       label: 'Pro',
-      description: 'Reached 10 contributions. Premium unlocked!',
+      description: 'Reached 10 contributions. You\'re a Pro!',
       minContributions: 10,
       nextThreshold: 15,
       color: Color(0xFF10B981),
       icon: Icons.verified_rounded,
+      isPremiumReward: true,
     ),
     ContributionBadge(
       id: 'mentor',

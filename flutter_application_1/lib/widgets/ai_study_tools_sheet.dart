@@ -368,9 +368,11 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         summary: summary,
       );
       if (!mounted) return;
-      await Share.shareXFiles(
-        [XFile(file.path)],
-        text: 'Generative AI Summary for ${widget.resourceTitle}',
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path)],
+          text: 'Generative AI Summary for ${widget.resourceTitle}',
+        ),
       );
     } catch (e) {
       if (!mounted) return;
@@ -506,7 +508,6 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                     if (val != null) {
                       setState(() {
                         _ocrProvider = val;
-                        _ocrProviderController.text = _ocrProviderLabelFor(val);
                       });
                     }
                   },
@@ -1038,6 +1039,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
       ),
       child: Column(
         children: [
+          if (_isFullscreen) SizedBox(height: MediaQuery.of(context).padding.top),
           const SizedBox(height: 10),
           Container(
             width: 42,

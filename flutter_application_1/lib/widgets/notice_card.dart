@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_linkify/flutter_linkify.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -290,9 +291,13 @@ class _NoticeCardState extends State<NoticeCard> {
                       const SizedBox(height: 8),
                       Linkify(
                         onOpen: (link) async {
-                          final uri = Uri.tryParse(link.url);
-                          if (uri != null && await canLaunchUrl(uri)) {
-                            await launchUrl(uri, mode: LaunchMode.externalApplication);
+                          try {
+                            final uri = Uri.tryParse(link.url);
+                            if (uri != null) {
+                              await launchUrl(uri, mode: LaunchMode.externalApplication);
+                            }
+                          } catch (e) {
+                            debugPrint('Failed to launch URL: $e');
                           }
                         },
                         text: content,

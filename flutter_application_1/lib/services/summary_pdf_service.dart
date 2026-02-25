@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -28,7 +29,7 @@ class SummaryPdfService {
 
   Future<Directory> _resolveDirectory() async {
     try {
-      if (!Platform.isIOS && !Platform.isAndroid) {
+      if (!kIsWeb && !Platform.isIOS && !Platform.isAndroid) {
         final downloads = await getDownloadsDirectory();
         if (downloads != null) {
           if (!await downloads.exists()) {
@@ -37,8 +38,8 @@ class SummaryPdfService {
           return downloads;
         }
       }
-    } catch (e) {
-      // Fallback to app documents directory
+    } catch (e, st) {
+      debugPrint('Failed to resolve downloads directory: $e\n$st');
     }
 
     final appDocs = await getApplicationDocumentsDirectory();

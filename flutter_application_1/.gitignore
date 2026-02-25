@@ -47,5 +47,10 @@ app.*.map.json
 # Analysis logs
 analysis_log*.txt
 *.log
+analyze_output*.txt
+analyze_results*.txt
+analyze_2.txt
+build_output.txt
+errors.txt
 
 debug_output*.txt
