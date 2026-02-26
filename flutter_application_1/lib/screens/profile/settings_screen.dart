@@ -15,6 +15,7 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import '../../services/subscription_service.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../../widgets/paywall_dialog.dart';
+import '../../utils/theme_animator.dart';
 
 class SettingsScreen extends StatefulWidget {
   final VoidCallback onLogout;
@@ -283,12 +284,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   icon: isDark ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
                   title: 'Appearance',
                   subtitle: isDark ? 'Dark Mode' : 'Light Mode',
-                  trailing: Switch(
-                    value: isDark,
-                    activeTrackColor: AppTheme.primary,
-                    onChanged: (val) {
-                      themeProvider.toggleTheme();
-                    },
+                  trailing: Builder(
+                    builder: (switchContext) {
+                      const double kSwitchFallbackOffsetRight = 40.0;
+                      const double kSwitchFallbackOffsetY = 200.0;
+                      return Switch(
+                        value: isDark,
+                        activeTrackColor: AppTheme.primary,
+                        onChanged: (val) {
+                          final box = switchContext.findRenderObject() as RenderBox?;
+                          final offset = box != null 
+                              ? box.localToGlobal(box.size.center(Offset.zero)) 
+                              : Offset(MediaQuery.of(context).size.width - kSwitchFallbackOffsetRight, kSwitchFallbackOffsetY);
+                          
+                          animateThemeTransition(context, offset, () {
+                            themeProvider.toggleTheme();
+                          });
+                        },
+                      );
+                    }
                   ),
                   isDark: isDark,
                 ),

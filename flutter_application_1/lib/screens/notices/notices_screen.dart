@@ -7,6 +7,8 @@ import 'department_account_screen.dart' as dept_screen;
 import '../../widgets/notice_card.dart';
 import '../../models/department_account.dart';
 import '../../widgets/branded_loader.dart';
+import 'package:intl/intl.dart';
+import 'dart:math' as math;
 
 class NoticesScreen extends StatefulWidget {
   final String collegeId;
@@ -312,9 +314,7 @@ class _NoticesScreenState extends State<NoticesScreen>
       if (isFollowing) {
         _followedDepartments.remove(deptId);
         _departmentFollowerCounts[deptId] =
-            ((_departmentFollowerCounts[deptId] ?? 1) - 1)
-                .clamp(0, 1 << 20)
-                .toInt();
+            math.max(0, (_departmentFollowerCounts[deptId] ?? 1) - 1);
       } else {
         _followedDepartments.add(deptId);
         _departmentFollowerCounts[deptId] =
@@ -347,9 +347,7 @@ class _NoticesScreenState extends State<NoticesScreen>
           } else {
             _followedDepartments.remove(deptId);
             _departmentFollowerCounts[deptId] =
-                ((_departmentFollowerCounts[deptId] ?? 1) - 1)
-                    .clamp(0, 1 << 20)
-                    .toInt();
+                math.max(0, (_departmentFollowerCounts[deptId] ?? 1) - 1);
           }
         });
         ScaffoldMessenger.of(
@@ -373,9 +371,9 @@ class _NoticesScreenState extends State<NoticesScreen>
       if (_startDate != null && _endDate != null) {
         filtered = notices.where((notice) {
           final createdAt = notice['created_at'];
-          if (createdAt == null) return true;
+          if (createdAt == null) return false;
           final date = DateTime.tryParse(createdAt.toString());
-          if (date == null) return true;
+          if (date == null) return false;
           return date.isAfter(_startDate!.subtract(const Duration(days: 1))) &&
               date.isBefore(_endDate!.add(const Duration(days: 1)));
         }).toList();
@@ -413,8 +411,6 @@ class _NoticesScreenState extends State<NoticesScreen>
                 children: [
                   Row(
                     children: [
-                      _buildNoticesHeaderIcon(isDark),
-                      const SizedBox(width: 10),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -802,9 +798,8 @@ class _NoticesScreenState extends State<NoticesScreen>
   Widget _buildDateFilterHeader(bool isDark) {
     if (_startDate == null || _endDate == null) return const SizedBox.shrink();
 
-    final startStr =
-        "${_startDate!.day}/${_startDate!.month}/${_startDate!.year}";
-    final endStr = "${_endDate!.day}/${_endDate!.month}/${_endDate!.year}";
+    final startStr = DateFormat.yMd().format(_startDate!);
+    final endStr = DateFormat.yMd().format(_endDate!);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -886,84 +881,5 @@ class _NoticesScreenState extends State<NoticesScreen>
     return 'Failed to update follow status.';
   }
 
-  Widget _buildNoticesHeaderIcon(bool isDark) {
-    return Container(
-      width: 32,
-      height: 32,
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            AppTheme.primary,
-            AppTheme.primaryDark.withValues(alpha: 0.9),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: isDark ? Colors.white12 : Colors.black12),
-        boxShadow: [
-          BoxShadow(
-            color: AppTheme.primary.withValues(alpha: 0.22),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: const Center(child: _NoticeLogoMark()),
-    );
-  }
-}
 
-/// `_NoticeLogoMark`
-///
-/// A small, stylized 'M' brand mark used in the Notices header. The shape
-/// is drawn as a four-point path and rendered by the
-/// `_NoticeLogoMarkPainter` as a stroked path with rounded caps and joins.
-/// The painter's `shouldRepaint` only compares the `color`, so repainting
-/// happens when the color changes.
-class _NoticeLogoMark extends StatelessWidget {
-  const _NoticeLogoMark();
-
-  @override
-  Widget build(BuildContext context) {
-    return CustomPaint(
-      size: const Size(18, 14),
-      painter: const _NoticeLogoMarkPainter(color: Colors.white),
-    );
-  }
-}
-
-/// Painter for `_NoticeLogoMark`.
-///
-/// Draws a stroked path that forms the mark; uses rounded stroke caps and
-/// joins for a friendly, hand-drawn feel. `shouldRepaint` compares the
-/// incoming `color` to determine if a repaint is necessary.
-class _NoticeLogoMarkPainter extends CustomPainter {
-  final Color color;
-
-  const _NoticeLogoMarkPainter({required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = size.width * 0.14
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    final path = Path()
-      ..moveTo(0, size.height)
-      ..lineTo(0, 0)
-      ..lineTo(size.width * 0.5, size.height * 0.7)
-      ..lineTo(size.width, 0)
-      ..lineTo(size.width, size.height);
-
-    canvas.drawPath(path, paint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _NoticeLogoMarkPainter oldDelegate) {
-    return oldDelegate.color != color;
-  }
 }

@@ -14,6 +14,7 @@ import 'package:flutter_linkify/flutter_linkify.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../widgets/full_screen_image_viewer.dart';
 import '../../utils/sticker_comment_codec.dart';
+import '../../widgets/user_badge.dart';
 
 class PostDetailScreen extends StatefulWidget {
   final Map<String, dynamic> post;
@@ -38,101 +39,17 @@ class PostDetailScreen extends StatefulWidget {
 class _PostDetailScreenState extends State<PostDetailScreen> {
   final SupabaseService _supabaseService = SupabaseService();
   final AuthService _authService = AuthService();
+  final BackendApiService _backendApiService = BackendApiService();
   final TextEditingController _commentController = TextEditingController();
   final FocusNode _commentFocusNode = FocusNode();
+  
+  static const int kMaxStickerSizeBytes = 5 * 1024 * 1024;
 
   // Reply state
   String? _replyToId;
   String? _replyToName;
 
   // ... (rest of vars)
-
-  /*
-  Future<void> _handleGifTap() async {
-     final isPremium = await _subscriptionService.isPremium();
-     if (!mounted) return;
-     
-     if (!isPremium) {
-       showDialog(
-         context: context,
-         builder: (context) => PaywallDialog(
-           onSuccess: () {
-             if (!mounted) return;
-             ScaffoldMessenger.of(context).showSnackBar(
-               const SnackBar(content: Text('Premium unlocked! You can now post GIFs.')),
-             );
-             // Directly show picker for smooth UX
-             _showGifPicker();
-           },
-         ),
-       );
-     } else {
-       _showGifPicker();
-     }
-  }
-
-  void _showGifPicker() {
-    final theme = Theme.of(context);
-    
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        height: 200,
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surface,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            Text('Select GIF (Premium Feature)', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 10),
-            Expanded(
-              child: GridView.count(
-                crossAxisCount: 3,
-                children: [
-                   _buildGifOption('https://media.giphy.com/media/l0HlHJGHe3yAMhdQY/giphy.gif'),
-                   _buildGifOption('https://media.giphy.com/media/3o7TKs6DH0R3X3U6v6/giphy.gif'),
-                   _buildGifOption('https://media.giphy.com/media/d9QiBcfzg64Io/giphy.gif'),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildGifOption(String url) {
-    return GestureDetector(
-      onTap: () {
-        Navigator.pop(context);
-        final text = _commentController.text;
-        final selection = _commentController.selection;
-        final insertPos = selection.isValid ? selection.baseOffset : text.length;
-        final gifMarkdown = ' ![GIF]($url) ';
-        final newText = text.substring(0, insertPos) + gifMarkdown + text.substring(insertPos);
-        _commentController.value = TextEditingValue(
-          text: newText,
-          selection: TextSelection.collapsed(offset: insertPos + gifMarkdown.length),
-        );
-      },
-      child: Image.network(
-        url,
-        fit: BoxFit.cover,
-        loadingBuilder: (context, child, loadingProgress) {
-          if (loadingProgress == null) return child;
-          return const Center(child: CircularProgressIndicator(strokeWidth: 2));
-        },
-        errorBuilder: (context, error, stackTrace) => Container(
-          color: Colors.grey[300],
-          child: const Icon(Icons.broken_image, color: Colors.grey),
-        ),
-      ),
-    );
-  }
-  */
 
   // ... (rest of methods)
   List<Map<String, dynamic>> _comments = [];
@@ -154,7 +71,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     '🔥',
   ];
 
-  Widget _buildCommentContent(String content, bool isDark, Color textColor) {
+  Widget _buildCommentContent(String content, bool isDark, Color textColor, String commentId) {
     final stickerUrl = StickerCommentCodec.extractUrl(content);
     if (stickerUrl != null) {
       return GestureDetector(
@@ -164,13 +81,13 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             MaterialPageRoute(
               builder: (context) => FullScreenImageViewer(
                 imageUrl: stickerUrl,
-                heroTag: 'sticker_${stickerUrl.hashCode}',
+                heroTag: 'sticker_${stickerUrl.hashCode}_$commentId',
               ),
             ),
           );
         },
         child: Hero(
-          tag: 'sticker_${stickerUrl.hashCode}',
+          tag: 'sticker_${stickerUrl.hashCode}_$commentId',
           child: ClipRRect(
             borderRadius: BorderRadius.circular(12),
             child: Image.network(
@@ -209,8 +126,22 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       onOpen: (link) async {
         final uri = Uri.tryParse(link.url);
         if (uri != null) {
-          if (await canLaunchUrl(uri)) {
-            await launchUrl(uri, mode: LaunchMode.externalApplication);
+          try {
+            if (await canLaunchUrl(uri)) {
+              await launchUrl(uri, mode: LaunchMode.externalApplication);
+            } else {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Could not open link: ${link.url}')),
+                );
+              }
+            }
+          } catch (e) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Error opening link: $e')),
+              );
+            }
           }
         }
       },
@@ -265,7 +196,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         });
       }
     } catch (e) {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -313,7 +244,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       await _supabaseService.votePost(
         widget.post['id'].toString(),
         widget.userEmail,
-        direction,
+        newVote ?? 0,
       );
     } catch (e) {
       // Revert on error
@@ -570,7 +501,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   );
                   if (confirm != true) return;
                   if (!mounted) return;
-                  Navigator.pop(sheetCtx);
+                  if (sheetCtx.mounted) {
+                    Navigator.pop(sheetCtx);
+                  }
                   await _deletePostCommentById(commentId);
                 },
               ),
@@ -768,24 +701,31 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     CircleAvatar(
                       radius: 18,
                       backgroundColor: AppTheme.primary.withValues(alpha: 0.2),
-                      child: Text(
+                      backgroundImage: post['author_photo_url'] != null ? NetworkImage(post['author_photo_url']) : null,
+                      child: post['author_photo_url'] == null ? Text(
                         authorName[0].toUpperCase(),
                         style: GoogleFonts.inter(
                           fontWeight: FontWeight.bold,
                           color: AppTheme.primary,
                         ),
-                      ),
+                      ) : null,
                     ),
                     const SizedBox(width: 10),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          authorName,
-                          style: GoogleFonts.inter(
-                            fontWeight: FontWeight.w600,
-                            color: isDark ? Colors.white : Colors.black,
-                          ),
+                        Row(
+                          children: [
+                            Text(
+                              authorName,
+                              style: GoogleFonts.inter(
+                                fontWeight: FontWeight.w600,
+                                color: isDark ? Colors.white : Colors.black,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            UserBadge(email: post['author_email'] ?? '', size: 14),
+                          ],
                         ),
                         Text(
                           _formatTimeAgo(createdAt),
@@ -1022,7 +962,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final hasReplies = replies.isNotEmpty;
     final commentId =
         comment['id']?.toString() ??
-        'comment-${createdAt.toIso8601String()}-$authorName';
+        'comment-${createdAt.toIso8601String()}-$authorName-${content.hashCode}';
     final isExpanded = _expandedCommentIds.contains(commentId);
 
     return Dismissible(
@@ -1113,27 +1053,33 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         // Header: Name + Time
                         Row(
                           children: [
-                            GestureDetector(
-                              onTap: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => UserProfileScreen(
-                                      userEmail: authorEmail,
-                                      userName: authorName,
-                                      userPhotoUrl: comment['author_photo_url'],
+                            Row(
+                              children: [
+                                GestureDetector(
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => UserProfileScreen(
+                                          userEmail: authorEmail,
+                                          userName: authorName,
+                                          userPhotoUrl: comment['author_photo_url'],
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  child: Text(
+                                    authorName,
+                                    style: GoogleFonts.inter(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 14,
+                                      color: isDark ? Colors.white : Colors.black,
                                     ),
                                   ),
-                                );
-                              },
-                              child: Text(
-                                authorName,
-                                style: GoogleFonts.inter(
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 14,
-                                  color: isDark ? Colors.white : Colors.black,
                                 ),
-                              ),
+                                const SizedBox(width: 4),
+                                UserBadge(email: authorEmail, size: 14),
+                              ]
                             ),
                             const SizedBox(width: 8),
                             Text(
@@ -1152,9 +1098,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               ),
                               onSelected: (value) {
                                 if (value == 'report') {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(content: Text('Reported')),
-                                  );
+                                  _showReportDialog(context, commentId, isComment: true);
                                 }
                               },
                               itemBuilder: (context) => [
@@ -1170,7 +1114,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
                         // Comment Body
                         // Comment Body
-                        _buildCommentContent(content, isDark, textColor),
+                        _buildCommentContent(content, isDark, textColor, commentId),
 
                         const SizedBox(height: 8),
 
@@ -1260,11 +1204,17 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
               // Render Recursive Replies
               if (hasReplies && isExpanded)
-                Padding(
-                  padding: const EdgeInsets.only(
-                    left: 44,
-                    top: 12,
-                  ), // Indent replies
+                Container(
+                  margin: const EdgeInsets.only(left: 36, top: 4),
+                  padding: const EdgeInsets.only(left: 12),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      left: BorderSide(
+                        color: isDark ? Colors.white24 : Colors.black12,
+                        width: 1.5,
+                      ),
+                    ),
+                  ),
                   child: depth < 3
                       ? ListView.separated(
                           shrinkWrap: true,
@@ -1306,6 +1256,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     // For now, show a placeholder message
     setState(() => _isSubmitting = true);
     try {
+      final length = await stickerFile.length();
+      if (length > kMaxStickerSizeBytes) {
+         throw Exception('Sticker is too large (max 5MB).');
+      }
       final bytes = await stickerFile.readAsBytes();
       final filename = 'sticker_${DateTime.now().millisecondsSinceEpoch}.png';
 
@@ -1367,14 +1321,17 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     return '${dateTime.day}/${dateTime.month}';
   }
 
-  void _showReportDialog(BuildContext context, String postId, String authorId) {
+  Future<void> _showReportDialog(BuildContext context, String targetId, {bool isComment = false}) async {
     final TextEditingController reasonController = TextEditingController();
-    showDialog(
-      context: context,
+    final itemType = isComment ? 'comment' : 'post';
+    
+    try {
+      await showDialog(
+        context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1E293B),
         title: Text(
-          'Report Post',
+          'Report ${itemType == 'comment' ? 'Comment' : 'Post'}',
           style: GoogleFonts.inter(
             fontWeight: FontWeight.bold,
             color: Colors.white,
@@ -1385,7 +1342,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Why are you reporting this post?',
+              'Why are you reporting this $itemType?',
               style: GoogleFonts.inter(color: Colors.white70),
             ),
             const SizedBox(height: 12),
@@ -1424,14 +1381,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               // Call Backend API
               try {
                 // Determine current user ID if possible, otherwise empty
-                final reporterId = AuthService().currentUser?.uid ?? 'unknown';
+                final reporterId = _authService.currentUser?.uid ?? 'unknown';
 
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text("Submitting report...")),
                 );
 
-                await BackendApiService().reportPost(
-                  postId,
+                await _backendApiService.reportPost(
+                  targetId,
                   reason,
                   reporterId,
                 );
@@ -1467,5 +1424,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         ],
       ),
     );
+    } finally {
+      reasonController.dispose();
+    }
   }
 }

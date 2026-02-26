@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
-import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_linkify/flutter_linkify.dart';
@@ -19,6 +18,7 @@ import '../../services/backend_api_service.dart';
 import '../../services/supabase_service.dart';
 import '../../widgets/full_screen_image_viewer.dart';
 import '../profile/user_profile_screen.dart';
+import '../../widgets/user_badge.dart';
 import 'post_detail_screen.dart';
 import '../../services/cloudinary_service.dart';
 import '../../config/app_config.dart';
@@ -257,7 +257,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
     }
 
     // Exponential backoff: 2^retryCount seconds, capped at 30 seconds
-    final delaySeconds = (2 ^ _presenceRetryCount).clamp(1, 30);
+    final delaySeconds = (pow(2, _presenceRetryCount)).clamp(1, 30).toInt();
     _presenceRetryTimer?.cancel();
     _presenceRetryTimer = Timer(Duration(seconds: delaySeconds), () {
       if (mounted) {
@@ -390,7 +390,18 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   }
 
   Future<void> _handleBookmark(String postId) async {
+    final currentlySaved = _savedPosts[postId] ?? false;
+    final originalState = currentlySaved;
+
     try {
+      if (_authService.currentUser == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Please sign in to save posts')),
+          );
+        }
+        return;
+      }
       if (_isReadOnly) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -401,8 +412,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         );
         return;
       }
-
-      final currentlySaved = _savedPosts[postId] ?? false;
 
       // Optimistic UI update
       setState(() {
@@ -427,9 +436,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       }
     } catch (e) {
       // Revert optimistic update on error
-      final currentState = _savedPosts[postId] ?? false;
       setState(() {
-        _savedPosts[postId] = !currentState;
+        _savedPosts[postId] = originalState;
       });
       if (mounted) {
         ScaffoldMessenger.of(
@@ -567,75 +575,41 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
             ],
           ),
 
-          // Custom FAB Animation (Center -> Bottom Right)
+          // Custom FAB (Bottom Right)
           if (_isMember && !_isReadOnly)
-            AnimatedBuilder(
-              animation: _fabAnimationController,
-              builder: (context, child) {
-                // Animate from Bottom Center to Bottom Right
-                // 0.0 -> Center, 1.0 -> Right
-
-                final double screenWidth = MediaQuery.of(context).size.width;
-                // Center X: screenWidth/2 - fabSize/2
-                // Right X: screenWidth - 16 - fabSize
-
-                final double startX = (screenWidth / 2) - 28; // 56 is fab size
-                final double endX = screenWidth - 16 - 56;
-
-                final double currentX = ui.lerpDouble(
-                  startX,
-                  endX,
-                  Curves.easeInOut.transform(_fabAnimationController.value),
-                )!;
-                final double currentY = ui.lerpDouble(
-                  40,
-                  32,
-                  Curves.bounceOut.transform(_fabAnimationController.value),
-                )!; // slide up slightly
-
-                return Positioned(
-                  left: currentX,
-                  bottom: currentY,
-                  child: Hero(
-                    tag: 'fab_main',
-                    child: Transform.rotate(
-                      angle:
-                          (1.0 - _fabAnimationController.value) *
-                          -0.5, // Keep rotation if desired, or remove
-                      child: Container(
-                        width: 56,
-                        height: 56,
-                        decoration: BoxDecoration(
-                          color: const Color(
-                            0xFF4A90E2,
-                          ), // Specific blue from design
-                          shape: BoxShape.circle,
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.3),
-                              blurRadius: 10,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        child: Material(
-                          // Added Material to enable InkWell splash over Hero
-                          color: Colors.transparent,
-                          child: InkWell(
-                            customBorder: const CircleBorder(),
-                            onTap: _showCreatePostSheet,
-                            child: const Icon(
-                              Icons.add,
-                              color: Colors.white,
-                              size: 28,
-                            ),
-                          ),
-                        ),
+            Positioned(
+              right: 16,
+              bottom: 32,
+              child: Hero(
+                tag: 'fab_main',
+                child: Container(
+                  width: 56,
+                  height: 56,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF4A90E2), // Specific blue from design
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.3),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap: _showCreatePostSheet,
+                      child: const Icon(
+                        Icons.add,
+                        color: Colors.white,
+                        size: 28,
                       ),
                     ),
                   ),
-                );
-              },
+                ),
+              ),
             ),
         ],
       ),
@@ -713,7 +687,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       return Center(
         child: Text(
           'No results found',
-          style: GoogleFonts.inter(color: Colors.white54),
+          style: GoogleFonts.inter(
+            color: isDark ? Colors.white54 : Colors.black54,
+          ),
         ),
       );
     }
@@ -741,11 +717,17 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.chat_bubble_outline, size: 48, color: Colors.white24),
+          Icon(
+            Icons.chat_bubble_outline, 
+            size: 48, 
+            color: isDark ? Colors.white24 : Colors.black26,
+          ),
           const SizedBox(height: 16),
           Text(
             'No discussions yet',
-            style: GoogleFonts.inter(color: Colors.white54),
+            style: GoogleFonts.inter(
+              color: isDark ? Colors.white54 : Colors.black54,
+            ),
           ),
         ],
       ),
@@ -819,14 +801,17 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
               child: CircleAvatar(
                 radius: 18,
                 backgroundColor: const Color(0xFF1D4ED8),
-                child: Text(
+                backgroundImage: post['author_photo_url'] != null && post['author_photo_url'].toString().trim().isNotEmpty 
+                    ? NetworkImage(post['author_photo_url']) 
+                    : null,
+                child: post['author_photo_url'] == null || post['author_photo_url'].toString().trim().isEmpty ? Text(
                   authorInitial,
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
                   ),
-                ),
+                ) : null,
               ),
             ),
             const SizedBox(width: 10),
@@ -836,7 +821,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                 children: [
                   Row(
                     children: [
-                      Expanded(
+                      Flexible(
                         child: Text(
                           authorName,
                           maxLines: 1,
@@ -848,6 +833,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                           ),
                         ),
                       ),
+                      const SizedBox(width: 4),
+                      UserBadge(email: post['author_email'] ?? '', size: 14),
                       const SizedBox(width: 8),
                       Text(
                         _formatTime(createdAt),
@@ -1871,7 +1858,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         builder: (context, setModalState) {
           if (!didStartLoading) {
             didStartLoading = true;
-            Future<void>(() => loadMembers(setModalState));
+            Future.microtask(() => loadMembers(setModalState));
           }
 
           final activeUsers = (_presenceChannel?.presenceState() ?? const [])

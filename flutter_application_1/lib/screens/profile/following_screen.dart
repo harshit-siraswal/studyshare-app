@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../../config/theme.dart';
 import '../../services/supabase_service.dart';
 import 'user_profile_screen.dart';
@@ -526,13 +527,27 @@ class _FollowingScreenState extends State<FollowingScreen>
     }
   }
 
+  Widget _buildInitials(String name) {
+    return Center(
+      child: Text(
+        name.isNotEmpty ? name[0].toUpperCase() : '?',
+        style: GoogleFonts.inter(
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
+        ),
+      ),
+    );
+  }
+
   Widget _buildUserCard(Map<String, dynamic> user, bool isDark) {
     final name = _getUserDisplayName(user);
     final email = user['email'] ?? '';
     final hasNewPost = user['has_new_post'] == true;
+    final photoUrl = user['photo_url'] ?? user['profile_photo_url'];
 
     return GestureDetector(
-      onTap: () => _openUserProfile(email, name),
+      onTap: () => _openUserProfile(email, name, photoUrl),
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(14),
@@ -567,15 +582,16 @@ class _FollowingScreenState extends State<FollowingScreen>
                     ),
                     borderRadius: BorderRadius.circular(14),
                   ),
-                  child: Center(
-                    child: Text(
-                      name.isNotEmpty ? name[0].toUpperCase() : '?',
-                      style: GoogleFonts.inter(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                      ),
-                    ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(14),
+                    child: photoUrl != null
+                        ? CachedNetworkImage(
+                            imageUrl: photoUrl,
+                            fit: BoxFit.cover,
+                            placeholder: (context, url) => _buildInitials(name),
+                            errorWidget: (context, url, error) => _buildInitials(name),
+                          )
+                        : _buildInitials(name),
                   ),
                 ),
                 if (hasNewPost)
@@ -679,13 +695,13 @@ class _FollowingScreenState extends State<FollowingScreen>
     );
   }
 
-  void _openUserProfile(String email, String displayName) {
+  void _openUserProfile(String email, String displayName, String? photoUrl) {
     if (email.isEmpty) return;
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) =>
-            UserProfileScreen(userEmail: email, userName: displayName),
+            UserProfileScreen(userEmail: email, userName: displayName, userPhotoUrl: photoUrl),
       ),
     );
   }

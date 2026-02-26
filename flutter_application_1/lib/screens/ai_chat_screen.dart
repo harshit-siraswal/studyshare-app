@@ -8,6 +8,7 @@ import '../services/backend_api_service.dart';
 import '../services/cloudinary_service.dart';
 import '../services/ai_chat_local_service.dart';
 import '../widgets/branded_loader.dart';
+import 'viewer/pdf_viewer_screen.dart';
 
 class RagSource {
   final String fileId;
@@ -92,8 +93,11 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
 
   late final AnimationController _splashAnimationController;
   late final Animation<double> _iconScaleAnimation;
+  late final Animation<Offset> _iconSlideAnimation;
   late final Animation<double> _splashTitleAnimation;
+  late final Animation<Offset> _titleSlideAnimation;
   late final Animation<double> _splashSubtitleAnimation;
+  late final Animation<Offset> _subtitleSlideAnimation;
   late final AnimationController _suggestionsController;
   late final List<CurvedAnimation> _suggestionAnimations;
   late final List<CurvedAnimation> _suggestionFadeAnimations;
@@ -118,23 +122,41 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
     super.initState();
     _splashAnimationController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1200),
+      duration: const Duration(milliseconds: 1400),
     );
     _iconScaleAnimation = CurvedAnimation(
       parent: _splashAnimationController,
-      curve: Curves.elasticOut,
+      curve: const Interval(0.0, 0.4, curve: Curves.easeOutBack),
     );
+    _iconSlideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.2), // Less slide, just a subtle pop
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _splashAnimationController,
+      curve: const Interval(0.0, 0.4, curve: Curves.easeOutCubic),
+    ));
+    
     _splashTitleAnimation = CurvedAnimation(
       parent: _splashAnimationController,
-      curve: const Interval(0.4, 1.0, curve: Curves.easeIn),
+      curve: const Interval(0.2, 0.6, curve: Curves.easeOutCubic),
     );
+    _titleSlideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.2),
+      end: Offset.zero,
+    ).animate(_splashTitleAnimation);
+
     _splashSubtitleAnimation = CurvedAnimation(
       parent: _splashAnimationController,
-      curve: const Interval(0.6, 1.0, curve: Curves.easeIn),
+      curve: const Interval(0.3, 0.8, curve: Curves.easeOutCubic),
     );
+    _subtitleSlideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.2),
+      end: Offset.zero,
+    ).animate(_splashSubtitleAnimation);
+
     _suggestionsController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 800),
+      duration: const Duration(milliseconds: 1000),
     );
     _suggestionAnimations = List.generate(_suggestions.length, (index) {
       return CurvedAnimation(
@@ -773,11 +795,28 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
                       ? null
                       : () async {
                           final uri = Uri.tryParse(s.fileUrl!);
-                          if (uri != null && await canLaunchUrl(uri)) {
-                            await launchUrl(
-                              uri,
-                              mode: LaunchMode.externalApplication,
-                            );
+                          if (uri != null) {
+                            final isInternal = uri.host.endsWith('.mystudyspace.me');
+                            if (isInternal) {
+                              if (!mounted) return;
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => PdfViewerScreen(
+                                    pdfUrl: s.fileUrl!,
+                                    title: s.title ?? 'Source Document',
+                                    resourceId: s.fileId,
+                                    collegeId: widget.collegeId,
+                                  ),
+                                ),
+                              );
+                            } else if (await canLaunchUrl(uri)) {
+                              if (!mounted) return;
+                              await launchUrl(
+                                uri,
+                                mode: LaunchMode.externalApplication,
+                              );
+                            }
                           }
                         },
                   borderRadius: BorderRadius.circular(12),
@@ -887,119 +926,143 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
       body: Column(
         children: [
           Expanded(
-            child: ListView(
-              controller: _scrollController,
-              padding: const EdgeInsets.all(16),
-              children: [
-                if (_messages.isEmpty)
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Center(
-                        child: Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: ScaleTransition(
-                            scale: _iconScaleAnimation,
-                            child: Icon(
-                                Icons.auto_awesome_rounded,
-                                size: 56,
-                                color: isDark ? const Color(0xFF57C884) : const Color(0xFF2EA867),
-                              ),
-                          ),
-                        ),
-                      ),
-                      FadeTransition(
-                        opacity: _splashTitleAnimation,
-                        child: Text(
-                          'Ask AI about your PDFs and images',
-                          style: GoogleFonts.inter(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                            color: isDark ? Colors.white : Colors.black,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      FadeTransition(
-                        opacity: _splashSubtitleAnimation,
-                        child: Text(
-                          'I will search your study materials first. You can also attach images or PDFs with the paperclip button.',
-                          style: GoogleFonts.inter(
-                            fontSize: 13,
-                            color: isDark
-                                ? AppTheme.darkTextSecondary
-                                : AppTheme.lightTextSecondary,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: List.generate(_suggestions.length, (index) {
-                          final animation = _suggestionAnimations[index];
-                          return ScaleTransition(
-                            scale: animation,
-                            child: FadeTransition(
-                              opacity: _suggestionFadeAnimations[index],
-                              child: ActionChip(
-                                label: Text(
-                                  _suggestions[index],
-                                  style: GoogleFonts.inter(
-                                    fontSize: 12,
-                                    color: isDark ? Colors.white70 : Colors.black87,
-                                  ),
-                                ),
-                                backgroundColor: isDark
-                                    ? Colors.white10
-                                    : Colors.black.withValues(alpha: 0.04),
-                                onPressed: () {
-                                  _controller.text = _suggestions[index];
-                                  FocusManager.instance.primaryFocus?.unfocus();
-                                },
+            child: _messages.isEmpty
+                ? Center(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          SlideTransition(
+                            position: _iconSlideAnimation,
+                            child: ScaleTransition(
+                              scale: _iconScaleAnimation,
+                              child: Image.asset(
+                                'assets/logo_transparent.png',
+                                width: 56,
+                                height: 56,
+                                fit: BoxFit.contain,
                               ),
                             ),
-                          );
-                        }),
+                          ),
+                          const SizedBox(height: 24),
+                          SlideTransition(
+                            position: _titleSlideAnimation,
+                            child: FadeTransition(
+                              opacity: _splashTitleAnimation,
+                              child: Text(
+                                'How can I help you study today?',
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.inter(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w700,
+                                  color: isDark ? Colors.white : Colors.black87,
+                                  height: 1.2,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          SlideTransition(
+                            position: _subtitleSlideAnimation,
+                            child: FadeTransition(
+                              opacity: _splashSubtitleAnimation,
+                              child: Text(
+                                'I can analyze your notes, summarize PDFs, or generate practice questions based on your specific college materials.',
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.inter(
+                                  fontSize: 14,
+                                  color: isDark
+                                      ? AppTheme.darkTextSecondary
+                                      : AppTheme.lightTextSecondary,
+                                  height: 1.4,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 32),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 10,
+                            alignment: WrapAlignment.center,
+                            children: List.generate(_suggestions.length, (index) {
+                              final animation = _suggestionAnimations[index];
+                              return ScaleTransition(
+                                scale: animation,
+                                child: FadeTransition(
+                                  opacity: _suggestionFadeAnimations[index],
+                                  child: ActionChip(
+                                    label: Text(
+                                      _suggestions[index],
+                                      style: GoogleFonts.inter(
+                                        fontSize: 12,
+                                        color: isDark ? Colors.white70 : Colors.black87,
+                                      ),
+                                    ),
+                                    backgroundColor: isDark
+                                        ? Colors.white10
+                                        : Colors.black.withValues(alpha: 0.05),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(16),
+                                      side: BorderSide(
+                                        color: isDark ? Colors.white12 : Colors.black12,
+                                      ),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    onPressed: () {
+                                      _controller.text = _suggestions[index];
+                                      FocusManager.instance.primaryFocus?.unfocus();
+                                    },
+                                  ),
+                                ),
+                              );
+                            }),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 24),
-                    ],
-                  ),
-                ..._messages.map((m) {
-                  return Align(
-                    alignment: m.isUser
-                        ? Alignment.centerRight
-                        : Alignment.centerLeft,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 360),
-                      child: _buildMessageBubble(m, isDark),
                     ),
-                  );
-                }),
-                if (_isLoading)
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Container(
-                      margin: const EdgeInsets.symmetric(vertical: 6),
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: isDark ? AppTheme.darkCard : Colors.white,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: isDark
-                              ? AppTheme.darkBorder
-                              : AppTheme.lightBorder,
+                  )
+                : ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _messages.length + (_isLoading ? 1 : 0),
+                    itemBuilder: (context, index) {
+                      if (index == _messages.length) {
+                        return Align(
+                          alignment: Alignment.centerLeft,
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(vertical: 6),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: isDark ? AppTheme.darkCard : Colors.white,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: isDark
+                                    ? AppTheme.darkBorder
+                                    : AppTheme.lightBorder,
+                              ),
+                            ),
+                            child: const BrandedLoader(
+                              compact: true,
+                              showQuotes: false,
+                              message: 'Thinking...',
+                            ),
+                          ),
+                        );
+                      }
+                      
+                      final m = _messages[index];
+                      return Align(
+                        alignment: m.isUser
+                            ? Alignment.centerRight
+                            : Alignment.centerLeft,
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 360),
+                          child: _buildMessageBubble(m, isDark),
                         ),
-                      ),
-                      child: const BrandedLoader(
-                        compact: true,
-                        showQuotes: false,
-                        message: 'Thinking...',
-                      ),
-                    ),
+                      );
+                    },
                   ),
-              ],
-            ),
           ),
           SafeArea(
             top: false,

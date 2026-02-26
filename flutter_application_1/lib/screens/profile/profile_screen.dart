@@ -222,9 +222,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       future: _subscriptionService.isPremium(),
                       builder: (context, snapshot) {
                         final isPremium = snapshot.data ?? false;
-                        return isPremium
+                        final isVerified = _authService.currentUser?.emailVerified ?? false;
+                        return isPremium && !isVerified
                             ? _buildPremiumBadge()
-                            : _buildUpgradeCard();
+                            : !isPremium 
+                                ? _buildUpgradeCard() 
+                                : const SizedBox.shrink();
                       },
                     ),
                     const SizedBox(height: 24),
@@ -597,9 +600,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
         width: double.infinity,
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: AppTheme.getCardColor(context),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.getBorderColor(context)),
+          borderRadius: BorderRadius.circular(20),
+          gradient: LinearGradient(
+            colors: [
+              _contributionBadge.color.withValues(alpha: Theme.of(context).brightness == Brightness.dark ? 0.15 : 0.08),
+              _contributionBadge.color.withValues(alpha: Theme.of(context).brightness == Brightness.dark ? 0.05 : 0.02),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          border: Border.all(
+            color: _contributionBadge.color.withValues(alpha: 0.3),
+            width: 1.5,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: _contributionBadge.color.withValues(alpha: 0.05),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -690,91 +710,161 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final textColor = AppTheme.getTextColor(sheetCtx);
         final subTextColor = AppTheme.getTextColor(sheetCtx, isPrimary: false);
         return Container(
-          height: MediaQuery.of(sheetCtx).size.height * 0.7,
+          height: MediaQuery.of(sheetCtx).size.height * 0.75,
           decoration: BoxDecoration(
-            color: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+            color: isDark ? const Color(0xFF14171A) : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.2),
+                blurRadius: 20,
+                offset: const Offset(0, -5),
+              ),
+            ],
           ),
           child: Column(
             children: [
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               Container(
-                width: 40,
-                height: 4,
+                width: 48,
+                height: 5,
                 decoration: BoxDecoration(
                   color: isDark ? Colors.white24 : Colors.grey.shade300,
-                  borderRadius: BorderRadius.circular(2),
+                  borderRadius: BorderRadius.circular(4),
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
                 child: Row(
                   children: [
-                    Icon(Icons.workspace_premium_rounded, color: AppTheme.primary, size: 24),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Your Badges',
-                      style: GoogleFonts.inter(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        color: textColor,
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            AppTheme.primary.withValues(alpha: 0.2),
+                            AppTheme.primary.withValues(alpha: 0.05),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: AppTheme.primary.withValues(alpha: 0.3),
+                          width: 1,
+                        ),
+                      ),
+                      child: Icon(Icons.workspace_premium_rounded, color: AppTheme.primary, size: 28),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Your Badges',
+                            style: GoogleFonts.inter(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                              color: textColor,
+                              letterSpacing: -0.5,
+                            ),
+                          ),
+                          Text(
+                            'Earn badges by sharing resources',
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              color: subTextColor,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    const Spacer(),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                       decoration: BoxDecoration(
-                        color: AppTheme.primary.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        '$_uploadCount uploads',
-                        style: GoogleFonts.inter(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: AppTheme.primary,
+                        gradient: LinearGradient(
+                          colors: [AppTheme.primary, AppTheme.primary.withValues(alpha: 0.8)],
                         ),
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppTheme.primary.withValues(alpha: 0.3),
+                            blurRadius: 8,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.upload_rounded, size: 14, color: Colors.white),
+                          const SizedBox(width: 4),
+                          Text(
+                            '$_uploadCount',
+                            style: GoogleFonts.inter(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
                 ),
               ),
-              const Divider(height: 1),
+              Divider(height: 1, color: isDark ? Colors.white10 : Colors.grey.shade200),
               Expanded(
                 child: ListView.builder(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                  physics: const BouncingScrollPhysics(),
                   itemCount: ContributionBadgeCatalog.tiers.length,
                   itemBuilder: (context, index) {
                     final badge = ContributionBadgeCatalog.tiers[index];
                     final isUnlocked = _uploadCount >= badge.minContributions;
                     
                     return Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.all(16),
+                      margin: const EdgeInsets.only(bottom: 16),
+                      padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: isUnlocked 
-                            ? badge.color.withValues(alpha: 0.1) 
-                            : (isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade50),
-                        borderRadius: BorderRadius.circular(16),
+                        gradient: isUnlocked ? LinearGradient(
+                          colors: [
+                            badge.color.withValues(alpha: isDark ? 0.15 : 0.08),
+                            badge.color.withValues(alpha: isDark ? 0.05 : 0.02),
+                          ],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ) : null,
+                        color: !isUnlocked ? (isDark ? Colors.white.withValues(alpha: 0.03) : Colors.grey.shade50) : null,
+                        borderRadius: BorderRadius.circular(24),
                         border: Border.all(
                           color: isUnlocked 
                               ? badge.color.withValues(alpha: 0.3) 
                               : (isDark ? Colors.white12 : Colors.grey.shade200),
+                          width: isUnlocked ? 1.5 : 1,
                         ),
                       ),
                       child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Container(
-                            width: 48,
-                            height: 48,
+                            width: 56,
+                            height: 56,
                             decoration: BoxDecoration(
                               color: isUnlocked ? badge.color : (isDark ? Colors.white12 : Colors.grey.shade200),
                               shape: BoxShape.circle,
+                              boxShadow: isUnlocked ? [
+                                BoxShadow(
+                                  color: badge.color.withValues(alpha: 0.4),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 4),
+                                )
+                              ] : null,
                             ),
                             child: Icon(
                               isUnlocked ? badge.icon : Icons.lock_outline_rounded,
                               color: isUnlocked ? Colors.white : (isDark ? Colors.white54 : Colors.black45),
-                              size: 24,
+                              size: 28,
                             ),
                           ),
                           const SizedBox(width: 16),
@@ -783,52 +873,85 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Row(
+                                  crossAxisAlignment: CrossAxisAlignment.center,
                                   children: [
-                                    Text(
-                                      badge.label,
-                                      style: GoogleFonts.inter(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w700,
-                                        color: isUnlocked ? badge.color : subTextColor,
+                                    Expanded(
+                                      child: Text(
+                                        badge.label,
+                                        style: GoogleFonts.inter(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.w800,
+                                          color: isUnlocked ? badge.color : subTextColor,
+                                          letterSpacing: -0.3,
+                                        ),
                                       ),
                                     ),
-                                    if (badge.isPremiumReward && !isUnlocked) ...[
-                                      const SizedBox(width: 6),
+                                    if (badge.isPremiumReward && !isUnlocked)
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                         decoration: BoxDecoration(
-                                          color: const Color(0xFFFFD700).withValues(alpha: 0.15),
-                                          borderRadius: BorderRadius.circular(8),
-                                          border: Border.all(color: const Color(0xFFFFD700).withValues(alpha: 0.5)),
-                                        ),
-                                        child: Text(
-                                          'PREMIUM REWARD',
-                                          style: GoogleFonts.inter(
-                                            fontSize: 8,
-                                            fontWeight: FontWeight.w800,
-                                            color: const Color(0xFFD4AF37),
+                                          gradient: const LinearGradient(
+                                            colors: [Color(0xFFFFD700), Color(0xFFFFA000)],
                                           ),
+                                          borderRadius: BorderRadius.circular(10),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: const Color(0xFFFFD700).withValues(alpha: 0.3),
+                                              blurRadius: 8,
+                                              offset: const Offset(0, 2),
+                                            )
+                                          ],
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.star_rounded, size: 12, color: Colors.white),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              'PREMIUM REWARD',
+                                              style: GoogleFonts.inter(
+                                                fontSize: 9,
+                                                fontWeight: FontWeight.w900,
+                                                color: Colors.white,
+                                                letterSpacing: 0.5,
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ),
-                                    ],
                                   ],
                                 ),
-                                const SizedBox(height: 4),
+                                const SizedBox(height: 6),
                                 Text(
                                   badge.description,
                                   style: GoogleFonts.inter(
-                                    fontSize: 13,
+                                    fontSize: 14,
                                     color: subTextColor,
+                                    height: 1.4,
                                   ),
                                 ),
                                 if (!isUnlocked) ...[
-                                  const SizedBox(height: 8),
-                                  Text(
-                                    'Requires ${badge.minContributions} uploads',
-                                    style: GoogleFonts.inter(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                      color: subTextColor.withValues(alpha: 0.6),
+                                  const SizedBox(height: 12),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.lock_clock, size: 14, color: subTextColor.withValues(alpha: 0.7)),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          'Requires ${badge.minContributions} uploads',
+                                          style: GoogleFonts.inter(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                            color: subTextColor.withValues(alpha: 0.8),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ],

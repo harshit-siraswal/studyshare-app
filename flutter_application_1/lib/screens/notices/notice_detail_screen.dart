@@ -141,7 +141,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
   Future<void> _toggleSaved() async {
     final email = _authService.userEmail;
     if (email == null) {
-      _showError('You must be signed in to save notices');
+      _showFeedback('You must be signed in to save notices');
       return;
     }
 
@@ -159,13 +159,11 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
         );
         if (mounted) {
           setState(() => _isSaved = true);
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Notice saved to bookmarks')),
-          );
+          _showFeedback('Notice saved to bookmarks');
         }
       }
     } catch (e) {
-      _showError('Error updating bookmark: $e');
+      _showFeedback('Error updating bookmark: $e');
     }
   }
 
@@ -234,11 +232,11 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
 
     final email = _authService.userEmail;
     if (email == null) {
-      _showError('You must be signed in to comment');
+      _showFeedback('You must be signed in to comment');
       return;
     }
     if (_isReadOnly) {
-      _showError(
+      _showFeedback(
         'Read-only users cannot comment. Use your college email to unlock.',
       );
       return;
@@ -269,13 +267,13 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
         );
       }
     } catch (e) {
-      _showError('Failed to post comment: $e');
+      _showFeedback('Failed to post comment: $e');
     } finally {
       if (mounted) setState(() => _isPosting = false);
     }
   }
 
-  void _showError(String message) {
+  void _showFeedback(String message) {
     if (mounted) {
       ScaffoldMessenger.of(
         context,
@@ -420,7 +418,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
         XFile(file.path),
       ], text: 'Check out this notice on MyStudySpace!');
     } catch (e) {
-      _showError('Failed to generate image: $e');
+      _showFeedback('Failed to generate image: $e');
     }
   }
 
@@ -500,16 +498,12 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                       }
                       final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
                       if (!launched && mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Could not open: ${link.url}')),
-                        );
+                        _showFeedback('Could not open: ${link.url}');
                       }
                     } catch (e) {
                       debugPrint('Failed to launch URL: $e');
                       if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Unable to open link')),
-                        );
+                        _showFeedback('Unable to open link');
                       }
                     }
                   },
@@ -743,9 +737,19 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
       children: [
         _buildCommentItem(comment, isDark, textColor, secondaryColor),
         if (replies.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(left: 16, top: 8),
+          Container(
+            margin: const EdgeInsets.only(left: 16, top: 4, bottom: 4),
+            padding: const EdgeInsets.only(left: 12),
+            decoration: BoxDecoration(
+              border: Border(
+                left: BorderSide(
+                  color: isDark ? Colors.white24 : Colors.black12,
+                  width: 1.5,
+                ),
+              ),
+            ),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: replies
                   .map(
                     (r) =>
@@ -1023,7 +1027,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
         );
       }
     } catch (e) {
-      _showError('Failed to post sticker: $e');
+      _showFeedback('Failed to post sticker: $e');
     } finally {
       if (mounted) setState(() => _isPosting = false);
     }

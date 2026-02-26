@@ -24,8 +24,10 @@ import 'config/theme.dart';
 import 'config/firebase_options.dart';
 import 'screens/onboarding/onboarding_screen.dart';
 import 'screens/auth/college_selection_screen.dart';
+import 'screens/auth/banned_user_screen.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/home/home_screen.dart';
+import 'screens/notices/notice_detail_screen.dart';
 import 'services/auth_service.dart';
 import 'services/download_service.dart';
 import 'services/push_notification_service.dart';
@@ -34,7 +36,9 @@ import 'providers/theme_provider.dart';
 import 'widgets/global_timer_overlay.dart';
 import 'widgets/branded_loader.dart';
 import 'utils/app_navigator.dart';
+import 'utils/theme_animator.dart';
 import 'services/supabase_service.dart';
+import 'models/department_account.dart';
 
 /// Request necessary app permissions
 /// Returns true if all critical permissions are granted or not required
@@ -86,7 +90,7 @@ void main() async {
   };
   PlatformDispatcher.instance.onError = (error, stack) {
     debugPrint('PlatformDispatcher error: $error\n$stack');
-    return true;
+    return false; // Let the framework treat this as unhandled/fatal
   };
 
   // Validate configuration and log any warnings
@@ -111,7 +115,7 @@ void main() async {
   bool _firebaseInitialized = false;
   try {
     await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
+      options: kIsWeb ? DefaultFirebaseOptions.currentPlatform : null,
     );
     _firebaseInitialized = true;
     debugPrint('Firebase initialized successfully');
@@ -260,6 +264,10 @@ class _AppRootState extends State<AppRoot> {
         }
       } catch (e) {
         debugPrint('Connectivity check failed: $e');
+        if (mounted) {
+          setState(() => _appState = AppState.initializationError);
+        }
+        return;
       }
 
       await _continueStartup();
@@ -512,11 +520,46 @@ class StudySpaceApp extends StatelessWidget {
               theme: lightTheme,
               darkTheme: darkTheme,
               themeMode: themeProvider.themeMode,
-              themeAnimationDuration: const Duration(milliseconds: 400),
+              themeAnimationDuration: Duration.zero,
+              // curve kept for future non-zero duration changes
               themeAnimationCurve: Curves.easeInOut,
               home: AppRouter(prefs: prefs, themeProvider: themeProvider),
-              builder: (context, child) =>
-                  GlobalTimerOverlay(child: child ?? const SizedBox.shrink()),
+              onGenerateRoute: (settings) {
+                if (settings.name != null && settings.name!.startsWith('/notices')) {
+                  final uri = Uri.parse(settings.name!);
+                  final noticeId = uri.queryParameters['id'];
+                  if (noticeId != null) {
+                    String? collegeId;
+                    try {
+                      final collegeJson = prefs.getString('selectedCollege');
+                      if (collegeJson != null && collegeJson.isNotEmpty) {
+                        final data = jsonDecode(collegeJson) as Map<String, dynamic>;
+                        if (data['id'] is String && (data['id'] as String).isNotEmpty) {
+                          collegeId = data['id'];
+                        }
+                      }
+                    } catch (e) {
+                      debugPrint('Error decoding selectedCollege JSON in deep link: $e');
+                    }
+                    
+                    collegeId ??= prefs.getString('selectedCollegeId');
+
+                    if (collegeId != null && collegeId.isNotEmpty) {
+                      return MaterialPageRoute(
+                        builder: (_) => NoticeDeepLinkLoader(
+                          noticeId: noticeId,
+                          collegeId: collegeId!,
+                        ),
+                      );
+                    }
+                  }
+                }
+                return null;
+              },
+              builder: (context, child) => RepaintBoundary(
+                key: appBoundaryKey,
+                child: GlobalTimerOverlay(child: child ?? const SizedBox.shrink()),
+              ),
             );
           },
         );
@@ -646,7 +689,7 @@ class _AppRouterState extends State<AppRouter> {
             (banResult?['reason'] ??
                     'Your account has been restricted by an administrator.')
                 .toString();
-        return _AuthGateResult.denied(reason);
+        return _AuthGateResult.banned(reason);
       }
       return const _AuthGateResult.allowed();
     } catch (e) {
@@ -746,7 +789,7 @@ class _AppRouterState extends State<AppRouter> {
             final gateResult = gateSnapshot.data;
             if (gateSnapshot.hasError ||
                 gateResult == null ||
-                !gateResult.allowed) {
+                (!gateResult.allowed && !gateResult.isBanned)) {
               final denialReason =
                   gateResult?.denialMessage ??
                   'Unable to verify account access. Please try again later.';
@@ -754,6 +797,15 @@ class _AppRouterState extends State<AppRouter> {
                 _forceSignOutWithReason(denialReason);
               });
               return const SplashScreen();
+            }
+
+            if (gateResult.isBanned) {
+              return BannedUserScreen(
+                reason: gateResult.denialMessage ?? 'Account suspended.',
+                onSignOut: () {
+                  _forceSignOutWithReason('You have signed out.');
+                },
+              );
             }
 
             return HomeScreen(
@@ -773,14 +825,18 @@ class _AppRouterState extends State<AppRouter> {
 
 class _AuthGateResult {
   final bool allowed;
+  final bool isBanned;
   final String? denialMessage;
 
-  const _AuthGateResult._({required this.allowed, this.denialMessage});
+  const _AuthGateResult._({required this.allowed, this.isBanned = false, this.denialMessage});
 
   const _AuthGateResult.allowed() : this._(allowed: true);
 
+  const _AuthGateResult.banned(String message)
+    : this._(allowed: false, isBanned: true, denialMessage: message);
+
   const _AuthGateResult.denied(String message)
-    : this._(allowed: false, denialMessage: message);
+    : this._(allowed: false, isBanned: false, denialMessage: message);
 }
 
 class SplashScreen extends StatelessWidget {
@@ -874,6 +930,121 @@ class _NoConnectionScreenState extends State<NoConnectionScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class NoticeDeepLinkLoader extends StatefulWidget {
+  final String noticeId;
+  final String collegeId;
+
+  const NoticeDeepLinkLoader({
+    super.key,
+    required this.noticeId,
+    required this.collegeId,
+  });
+
+  @override
+  State<NoticeDeepLinkLoader> createState() => _NoticeDeepLinkLoaderState();
+}
+
+class _NoticeDeepLinkLoaderState extends State<NoticeDeepLinkLoader> {
+  @override
+  void initState() {
+    super.initState();
+    _loadNotice();
+  }
+
+  Future<void> _loadNotice() async {
+    try {
+      final response = await Supabase.instance.client
+          .from('notices')
+          .select()
+          .eq('id', widget.noticeId)
+          .maybeSingle()
+          .timeout(const Duration(seconds: 10));
+
+      if (response != null && mounted) {
+        DepartmentAccount account;
+        final deptId = response['department']?.toString();
+        
+        if (deptId != null) {
+          try {
+            final deptResponse = await Supabase.instance.client
+              .from('departments')
+              .select()
+              .eq('id', deptId)
+              .maybeSingle()
+              .timeout(const Duration(seconds: 5));
+
+            if (deptResponse != null) {
+              account = DepartmentAccount.fromJson(deptResponse);
+            } else {
+              account = DepartmentAccount(
+                id: deptId,
+                name: 'Unknown Department',
+                handle: '@unknown',
+                avatarLetter: '?',
+                color: const Color(0xFF64748B),
+              );
+            }
+          } catch (e) {
+            debugPrint('Failed to fetch department for deep link: $e');
+            account = DepartmentAccount(
+              id: deptId,
+              name: 'Unknown Department',
+              handle: '@unknown',
+              avatarLetter: '?',
+              color: const Color(0xFF64748B),
+            );
+          }
+        } else {
+          account = DepartmentAccount(
+            id: 'unknown',
+            name: 'Unknown Department',
+            handle: '@unknown',
+            avatarLetter: '?',
+            color: const Color(0xFF64748B),
+          );
+        }
+        
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => NoticeDetailScreen(
+                notice: response,
+                account: account,
+                collegeId: widget.collegeId,
+              ),
+            ),
+          );
+        }
+      } else if (mounted) {
+        if (Navigator.canPop(context)) {
+          Navigator.pop(context);
+        } else {
+          Navigator.pushReplacementNamed(context, '/');
+        }
+      }
+    } catch (e, stack) {
+      debugPrint('NoticeDeepLinkLoader error: $e\n$stack');
+      if (mounted) {
+        if (Navigator.canPop(context)) {
+          Navigator.pop(context);
+        } else {
+          Navigator.pushReplacementNamed(context, '/');
+        }
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      body: Center(
+        child: CircularProgressIndicator(),
       ),
     );
   }

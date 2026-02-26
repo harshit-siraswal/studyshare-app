@@ -68,6 +68,21 @@ class SubscriptionService {
       final email = _firebaseAuth.currentUser?.email;
       if (email == null) return false;
 
+      // Auto-unlock Premium for active contributors (>= 10 approved uploads)
+      try {
+        final uploadCount = await _supabase
+            .from('resources')
+            .count(CountOption.exact)
+            .eq('uploaded_by_email', email)
+            .eq('status', 'approved');
+        
+        if (uploadCount >= 10) {
+           return true; 
+        }
+      } catch (e) {
+        debugPrint('Failed to check upload count for auto-premium: $e');
+      }
+
       final res = await _supabase
           .from('users')
           .select('subscription_end_date, subscription_tier')

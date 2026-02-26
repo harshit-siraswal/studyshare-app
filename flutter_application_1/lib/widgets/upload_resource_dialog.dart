@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:io';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/theme.dart';
 import '../services/supabase_service.dart';
 import '../services/auth_service.dart';
@@ -9,6 +10,7 @@ import '../services/backend_api_service.dart';
 import 'package:http/http.dart' as http;
 import 'success_overlay.dart';
 import '../utils/contribution_badge.dart';
+import '../models/user.dart';
 
 class UploadResourceDialog extends StatefulWidget {
   final String collegeId;
@@ -322,21 +324,49 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
 
       setState(() => _uploadProgress = 0.7);
 
-      // Create resource in Supabase
-      await supabaseService.createResource(
-        collegeId: widget.collegeId,
-        title: _title.trim(),
-        type: _typeIndex == 1 ? 'video' : _resourceType,
-        semester: _semester,
-        branch: _branch,
-        subject: _subject,
-        uploadedByEmail: widget.userEmail,
-        uploadedByName: authService.displayName ?? 'Anonymous',
-        filePath: filePath,
-        videoUrl: _typeIndex == 1 ? _videoUrl : null,
-        chapter: _chapter.trim().isEmpty ? null : _chapter.trim(),
-        topic: _topic.trim().isEmpty ? null : _topic.trim(),
-        description: _description.trim(),
+      // Get user role dynamically for source tagging
+      String uploaderSource = 'student';
+      try {
+        final userResponse = await Supabase.instance.client
+            .from('users')
+            .select('role')
+            .eq('email', widget.userEmail)
+            .maybeSingle();
+        if (userResponse != null) {
+          final role = (userResponse['role'])?.toString().toUpperCase();
+          final allowedRoles = {
+            AppRoles.admin.toUpperCase(),
+            AppRoles.moderator.toUpperCase(),
+            AppRoles.collegeUser.toUpperCase(),
+            AppRoles.teacher.toUpperCase(),
+          };
+          if (allowedRoles.contains(role)) {
+            uploaderSource = 'teacher';
+          }
+        }
+      } catch (e) {
+        debugPrint('Error fetching user role for upload: $e');
+      }
+
+      // Create resource in Supabase via Backend API
+      await backendApi.createResource(
+        {
+          'college_id': widget.collegeId,
+          'title': _title.trim(),
+          'type': _typeIndex == 1 ? 'video' : _resourceType,
+          'semester': _semester,
+          'branch': _branch,
+          'subject': _subject,
+          'source': uploaderSource,
+          'file_url': filePath ?? _videoUrl,
+          'description': _description.trim(),
+          'chapter': _chapter.trim().isEmpty ? null : _chapter.trim(),
+          'topic': _topic.trim().isEmpty ? null : _topic.trim(),
+          'uploaded_by_name': authService.displayName ?? 'Anonymous',
+          'uploaded_by_email': widget.userEmail,
+          'status': 'pending',
+        },
+        context: context,
       );
 
       int? contributionCount;

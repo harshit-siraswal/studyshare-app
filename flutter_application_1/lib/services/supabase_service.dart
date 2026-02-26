@@ -1134,53 +1134,6 @@ class SupabaseService {
     }
   }
 
-  Future<Map<String, dynamic>> createResource({
-    required String collegeId,
-    required String title,
-    required String type, // notes, pyq, video
-    required String semester,
-    required String branch,
-    required String subject,
-    required String uploadedByEmail,
-    required String uploadedByName,
-    String? filePath,
-    String? videoUrl,
-    String? description,
-    String? chapter,
-    String? topic,
-  }) async {
-    try {
-      final ctx = _ctx;
-      if (ctx == null) throw Exception('Security context not initialized');
-
-      final input = {
-        'collegeId': collegeId,
-        'title': title.trim(),
-        'type': type,
-        'semester': semester,
-        'branch': branch,
-        'subject': subject,
-        'source': 'student',
-        'filePath': filePath, // Corrected from fileUrl
-        'url': videoUrl, // Corrected from videoUrl
-        'description': description?.trim(),
-        'chapter': chapter,
-        'topic': topic,
-        'uploadedByName': uploadedByName,
-        'uploadedByEmail': uploadedByEmail,
-      };
-
-      debugPrint(
-        'Calling _api.createResource for college: $collegeId, type: $type',
-      );
-
-      return await _api.createResource(input, context: ctx);
-    } catch (e) {
-      debugPrint('Error in createResource: $e');
-      throw Exception('Failed to upload resource: $e');
-    }
-  }
-
   /// Create a new chat room
   Future<Map<String, dynamic>> createChatRoom({
     required String name,
@@ -1653,9 +1606,10 @@ class SupabaseService {
           .select('message_id')
           .eq('user_email', normalizedEmail);
 
-      return (response as List)
-          .where((e) => e['message_id'] != null)
-          .map((e) => e['message_id'].toString())
+      return (response as List<dynamic>)
+          .map((e) => e['message_id']?.toString())
+          .where((id) => id != null && id.isNotEmpty)
+          .cast<String>()
           .toSet();
     } catch (e) {
       try {
@@ -1664,9 +1618,10 @@ class SupabaseService {
             .from('saved_posts')
             .select('post_id')
             .eq('user_email', normalizedEmail);
-        return (fallback as List)
-            .where((e) => e['post_id'] != null)
-            .map((e) => e['post_id'].toString())
+        return (fallback as List<dynamic>)
+            .map((e) => e['post_id']?.toString())
+            .where((id) => id != null && id.isNotEmpty)
+            .cast<String>()
             .toSet();
       } catch (fallbackError) {
         debugPrint('Error fetching saved post IDs: $e | $fallbackError');
@@ -1685,7 +1640,9 @@ class SupabaseService {
           .eq('user_email', normalizedEmail)
           .order('created_at', ascending: false);
 
-      final rows = List<Map<String, dynamic>>.from(savedRows);
+      final rows = (savedRows as List<dynamic>)
+          .map((e) => e as Map<String, dynamic>)
+          .toList();
       final messageIds = rows
           .map((row) => row['message_id']?.toString())
           .where((id) => id != null && id.isNotEmpty)
@@ -1729,7 +1686,9 @@ class SupabaseService {
             .eq('user_email', normalizedEmail)
             .order('created_at', ascending: false);
 
-        final rows = List<Map<String, dynamic>>.from(legacyRows);
+        final rows = (legacyRows as List<dynamic>)
+            .map((e) => e as Map<String, dynamic>)
+            .toList();
         final postIds = rows
             .map((row) => row['post_id']?.toString())
             .where((id) => id != null && id.isNotEmpty)
@@ -1844,6 +1803,28 @@ class SupabaseService {
     String userEmail,
   ) async {
     final normalizedEmail = _normalizeEmail(userEmail);
+
+    try {
+      // Sync with users target array
+      final userRes = await _client
+          .from('users')
+          .select('followed_departments')
+          .eq('email', normalizedEmail)
+          .maybeSingle();
+      if (userRes != null) {
+        final currentList = userRes['followed_departments'] as List<dynamic>? ?? [];
+        if (!currentList.contains(departmentId)) {
+          final updatedList = List<dynamic>.from(currentList)..add(departmentId);
+          await _client
+              .from('users')
+              .update({'followed_departments': updatedList})
+              .eq('email', normalizedEmail);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error syncing followed_departments array: $e');
+    }
+
     final userId = currentUserId;
     final payloads = <Map<String, dynamic>>[
       if (userId != null && userId.isNotEmpty)
@@ -1929,6 +1910,28 @@ class SupabaseService {
     String? collegeId,
   }) async {
     final normalizedEmail = _normalizeEmail(userEmail);
+
+    try {
+      // Sync with users target array
+      final userRes = await _client
+          .from('users')
+          .select('followed_departments')
+          .eq('email', normalizedEmail)
+          .maybeSingle();
+      if (userRes != null) {
+        final currentList = userRes['followed_departments'] as List<dynamic>? ?? [];
+        if (currentList.contains(departmentId)) {
+          final updatedList = List<dynamic>.from(currentList)..remove(departmentId);
+          await _client
+              .from('users')
+              .update({'followed_departments': updatedList})
+              .eq('email', normalizedEmail);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error syncing followed_departments array: $e');
+    }
+
     final userId = currentUserId;
     final filters = <Map<String, String>>[
       if (userId != null && userId.isNotEmpty)
@@ -2130,6 +2133,8 @@ class SupabaseService {
 
     if (attempts.isEmpty) return [];
 
+    final finalSet = <String>{};
+
     for (final attempt in attempts) {
       final column = attempt['column'] as String;
       final value = attempt['value'] as String;
@@ -2143,11 +2148,13 @@ class SupabaseService {
           query = query.eq('college_id', collegeId);
         }
         final response = await query;
-        return (response as List)
+        final fetchedIds = (response as List)
             .map((e) => e['department_id']?.toString())
             .where((id) => id != null && id.isNotEmpty)
             .cast<String>()
             .toList();
+        finalSet.addAll(fetchedIds);
+        break; // Stop falling back if query succeeds
       } catch (e) {
         final schemaMismatch =
             _isMissingColumnError(e, column) ||
@@ -2159,7 +2166,24 @@ class SupabaseService {
       }
     }
 
-    return [];
+    // Merge with user profile followed_departments
+    try {
+      final userRes = await _client
+          .from('users')
+          .select('followed_departments')
+          .eq('email', normalizedEmail)
+          .maybeSingle();
+      if (userRes != null) {
+        final profileFollows = userRes['followed_departments'] as List<dynamic>? ?? [];
+        for (final id in profileFollows) {
+          if (id != null) finalSet.add(id.toString());
+        }
+      }
+    } catch (e) {
+      debugPrint('Error getting profile followed_departments: $e');
+    }
+
+    return finalSet.toList();
   }
 
   // ============ NOTICE COMMENTS ============

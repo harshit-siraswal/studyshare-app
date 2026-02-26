@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -470,11 +471,12 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               onPressed: _openAiTools,
               tooltip: 'AI Study Tools',
             ),
-          IconButton(
-            icon: const Icon(Icons.download_rounded),
-            onPressed: _handleDownload,
-            tooltip: 'Download',
-          ),
+          if (_isPdf && widget.pdfUrl.startsWith('http'))
+            IconButton(
+              icon: const Icon(Icons.download_rounded),
+              onPressed: _handleDownload,
+              tooltip: 'Download',
+            ),
           if (_isPdf)
             IconButton(
               icon: Icon(_isNightMode ? Icons.light_mode : Icons.dark_mode_rounded),
@@ -587,29 +589,77 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   }
 
   Widget _buildSfPdfViewer() {
-    return SfPdfViewer.network(
-      widget.pdfUrl,
-      key: _pdfViewerKey,
-      controller: _pdfViewerController,
-      onDocumentLoaded: (_) {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-            _hasError = false;
-          });
+    final bool isNetwork = widget.pdfUrl.startsWith('http');
+    final onLoaded = (PdfDocumentLoadedDetails details) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _hasError = false;
+        });
+      }
+    };
+    final onFailed = (PdfDocumentLoadFailedDetails details) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _hasError = true;
+          _errorMessage = details.description;
+        });
+      }
+    };
+
+    if (isNetwork) {
+      return SfPdfViewer.network(
+        widget.pdfUrl,
+        key: _pdfViewerKey,
+        controller: _pdfViewerController,
+        onDocumentLoaded: onLoaded,
+        onDocumentLoadFailed: onFailed,
+        enableDoubleTapZooming: true,
+      );
+    } else {
+      String filePath = widget.pdfUrl;
+      try {
+        if (!kIsWeb) {
+          final uri = Uri.tryParse(filePath);
+          if (uri != null && uri.scheme == 'file') {
+            filePath = uri.toFilePath();
+          }
+          return SfPdfViewer.file(
+            File(filePath),
+            key: _pdfViewerKey,
+            controller: _pdfViewerController,
+            onDocumentLoaded: onLoaded,
+            onDocumentLoadFailed: onFailed,
+            enableDoubleTapZooming: true,
+          );
+        } else {
+           // web fallback or skip
+           WidgetsBinding.instance.addPostFrameCallback((_) {
+             if (mounted) {
+               setState(() {
+                 _isLoading = false;
+                 _hasError = true;
+                 _errorMessage = 'Local files not supported on web.';
+               });
+             }
+           });
+           return _buildUnsupportedContent();
         }
-      },
-      onDocumentLoadFailed: (details) {
-        if (mounted) {
-          setState(() {
-            _isLoading = false;
-            _hasError = true;
-            _errorMessage = details.description;
-          });
-        }
-      },
-      enableDoubleTapZooming: true,
-    );
+      } catch (e) {
+        debugPrint('Failed to load local PDF file: $e');
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() {
+              _isLoading = false;
+              _hasError = true;
+              _errorMessage = e.toString();
+            });
+          }
+        });
+        return _buildErrorState();
+      }
+    }
   }
 
   Widget _buildUnsupportedContent() {

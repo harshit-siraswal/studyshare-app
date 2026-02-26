@@ -7,6 +7,7 @@ import '../../services/supabase_service.dart';
 import '../../widgets/resource_card.dart';
 import '../../models/resource.dart';
 import 'following_screen.dart';
+import '../../widgets/full_screen_image_viewer.dart';
 
 class UserProfileScreen extends StatefulWidget {
   final String userEmail;
@@ -122,7 +123,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgColor = isDark ? Colors.black : AppTheme.lightBackground;
+    final bgColor = isDark ? AppTheme.darkBackground : AppTheme.lightBackground;
     final cardColor = isDark ? AppTheme.darkCard : Colors.white;
     final textColor = isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
 
@@ -220,33 +221,52 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               // Avatar
-                              Container(
-                                width: 80,
-                                height: 80,
-                                decoration: BoxDecoration(
-                                  color: AppTheme.primary,
-                                  shape: BoxShape.circle,
-                                image: _photoUrl != null 
-                                    ? DecorationImage(
-                                        image: NetworkImage(_photoUrl!),
-                                        fit: BoxFit.cover,
-                                        onError: (exception, stackTrace) {
-                                          debugPrint('Failed to load avatar: $exception');
-                                        },
-                                      )
-                                    : null,                                ),
-                                child: _photoUrl == null
-                                  ? Center(
-                                      child: Text(
-                                        _avatarLetter,
-                                        style: GoogleFonts.inter(
-                                          fontSize: 32, 
-                                          fontWeight: FontWeight.bold, 
-                                          color: Colors.white
+                              GestureDetector(
+                                onTap: () {
+                                  if (_photoUrl != null) {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => FullScreenImageViewer(
+                                          imageUrl: _photoUrl!,
+                                          heroTag: 'avatar-${widget.userEmail}',
                                         ),
                                       ),
-                                    )
-                                  : null,
+                                    );
+                                  }
+                                },
+                                child: Hero(
+                                  tag: 'avatar-${widget.userEmail}',
+                                  child: Container(
+                                    width: 80,
+                                    height: 80,
+                                    decoration: BoxDecoration(
+                                      color: AppTheme.primary,
+                                      shape: BoxShape.circle,
+                                      image: _photoUrl != null 
+                                          ? DecorationImage(
+                                              image: NetworkImage(_photoUrl!),
+                                              fit: BoxFit.cover,
+                                              onError: (exception, stackTrace) {
+                                                debugPrint('Failed to load avatar: $exception\n$stackTrace');
+                                              },
+                                            )
+                                          : null,
+                                    ),
+                                    child: _photoUrl == null
+                                      ? Center(
+                                          child: Text(
+                                            _avatarLetter,
+                                            style: GoogleFonts.inter(
+                                              fontSize: 32, 
+                                              fontWeight: FontWeight.bold, 
+                                              color: Colors.white
+                                            ),
+                                          ),
+                                        )
+                                      : null,
+                                  ),
+                                ),
                               ),
                               const Spacer(),
                               // Follow Button

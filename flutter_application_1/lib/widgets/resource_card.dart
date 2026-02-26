@@ -9,8 +9,8 @@ import '../screens/viewer/pdf_viewer_screen.dart';
 import '../services/download_service.dart';
 import '../services/subscription_service.dart';
 import '../widgets/paywall_dialog.dart';
-import 'package:open_file/open_file.dart';
 import '../screens/profile/user_profile_screen.dart';
+import 'user_badge.dart';
 
 class ResourceCard extends StatefulWidget {
   final Resource resource;
@@ -108,9 +108,20 @@ class _ResourceCardState extends State<ResourceCard> {
     final ds = DownloadService();
     // 1. Check if already downloaded
     if (ds.isDownloaded(widget.resource.id)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Opening offline file...')));
       final path = ds.getLocalPath(widget.resource.id);
-      if (path != null) OpenFile.open(path);
+      if (path != null) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => PdfViewerScreen(
+              pdfUrl: path,
+              title: widget.resource.title,
+              resourceId: widget.resource.id,
+              collegeId: widget.resource.collegeId,
+            ),
+          ),
+        );
+      }
       return;
     }
 
@@ -525,14 +536,21 @@ class _ResourceCardState extends State<ResourceCard> {
               child: Semantics(
                 label: 'Open profile for $name',
                 button: true,
-                child: Text(
-                  'by $name',
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    color: AppTheme.textMuted,
-                    decoration: TextDecoration.underline,
-                    decorationColor: AppTheme.textMuted,
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'by $name',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: AppTheme.textMuted,
+                        decoration: TextDecoration.underline,
+                        decorationColor: AppTheme.textMuted,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    UserBadge(email: email, size: 12),
+                  ],
                 ),
               ),
             ),
