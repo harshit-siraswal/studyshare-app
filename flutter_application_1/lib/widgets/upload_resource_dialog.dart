@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:io';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/theme.dart';
 import '../services/supabase_service.dart';
 import '../services/auth_service.dart';
@@ -238,8 +237,17 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     if (_typeIndex == 0 && _selectedFile == null) {
       return _showError('Attach a file to contribute');
     }
-    if (_typeIndex == 1 && _videoUrl.isEmpty) {
-      return _showError('Enter video URL');
+    if (_typeIndex == 1) {
+      if (_videoUrl.isEmpty) {
+        return _showError('Enter video URL');
+      }
+      final uri = Uri.tryParse(_videoUrl);
+      if (uri == null || 
+          !uri.hasScheme || 
+          !uri.hasAuthority || 
+          (uri.scheme.toLowerCase() != 'http' && uri.scheme.toLowerCase() != 'https')) {
+        return _showError('Enter a valid HTTP/HTTPS video URL');
+      }
     }
     if (_typeIndex == 0 &&
         _selectedFile != null &&
@@ -327,13 +335,9 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
       // Get user role dynamically for source tagging
       String uploaderSource = 'student';
       try {
-        final userResponse = await Supabase.instance.client
-            .from('users')
-            .select('role')
-            .eq('email', widget.userEmail)
-            .maybeSingle();
-        if (userResponse != null) {
-          final role = (userResponse['role'])?.toString().toUpperCase();
+        final userInfo = await supabaseService.getUserInfo(widget.userEmail);
+        if (userInfo != null) {
+          final role = (userInfo['role'])?.toString().toUpperCase();
           final allowedRoles = {
             AppRoles.admin.toUpperCase(),
             AppRoles.moderator.toUpperCase(),

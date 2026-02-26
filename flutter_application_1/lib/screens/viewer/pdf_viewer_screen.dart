@@ -59,6 +59,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
 
   String get _urlPath => Uri.tryParse(widget.pdfUrl)?.path.toLowerCase() ?? '';
 
+  bool get _isNetwork => widget.pdfUrl.startsWith('http');
+
   bool get _isPdf => _urlPath.endsWith('.pdf');
 
   bool get _isOfficeDoc {
@@ -78,6 +80,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
 
     if (_isOfficeDoc && !kIsWeb) {
       _initWebView();
+    } else if (!_isNetwork && kIsWeb) {
+      _isLoading = false;
+      _hasError = true;
+      _errorMessage = 'Local files not supported on web.';
     }
   }
 
@@ -471,7 +477,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               onPressed: _openAiTools,
               tooltip: 'AI Study Tools',
             ),
-          if (_isPdf && widget.pdfUrl.startsWith('http'))
+          if (_isPdf && _isNetwork)
             IconButton(
               icon: const Icon(Icons.download_rounded),
               onPressed: _handleDownload,
@@ -589,7 +595,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   }
 
   Widget _buildSfPdfViewer() {
-    final bool isNetwork = widget.pdfUrl.startsWith('http');
     final onLoaded = (PdfDocumentLoadedDetails details) {
       if (mounted) {
         setState(() {
@@ -608,7 +613,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       }
     };
 
-    if (isNetwork) {
+    if (_isNetwork) {
       return SfPdfViewer.network(
         widget.pdfUrl,
         key: _pdfViewerKey,
@@ -634,29 +639,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
             enableDoubleTapZooming: true,
           );
         } else {
-           // web fallback or skip
-           WidgetsBinding.instance.addPostFrameCallback((_) {
-             if (mounted) {
-               setState(() {
-                 _isLoading = false;
-                 _hasError = true;
-                 _errorMessage = 'Local files not supported on web.';
-               });
-             }
-           });
-           return _buildUnsupportedContent();
+          return _buildUnsupportedContent();
         }
       } catch (e) {
         debugPrint('Failed to load local PDF file: $e');
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            setState(() {
-              _isLoading = false;
-              _hasError = true;
-              _errorMessage = e.toString();
-            });
-          }
-        });
         return _buildErrorState();
       }
     }

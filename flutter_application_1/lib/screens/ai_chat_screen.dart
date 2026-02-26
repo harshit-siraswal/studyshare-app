@@ -804,7 +804,7 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
                                 MaterialPageRoute(
                                   builder: (_) => PdfViewerScreen(
                                     pdfUrl: s.fileUrl!,
-                                    title: s.title ?? 'Source Document',
+                                    title: s.title,
                                     resourceId: s.fileId,
                                     collegeId: widget.collegeId,
                                   ),
@@ -815,6 +815,11 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
                               await launchUrl(
                                 uri,
                                 mode: LaunchMode.externalApplication,
+                              );
+                            } else {
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(content: Text('Could not open ${s.title}')),
                               );
                             }
                           }
@@ -942,6 +947,8 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
                                 width: 56,
                                 height: 56,
                                 fit: BoxFit.contain,
+                                errorBuilder: (context, error, stackTrace) =>
+                                    Icon(Icons.auto_awesome, size: 56, color: isDark ? Colors.white70 : Colors.black87),
                               ),
                             ),
                           ),

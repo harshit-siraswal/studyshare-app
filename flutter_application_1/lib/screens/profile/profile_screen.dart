@@ -215,7 +215,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     const SizedBox(height: 24),
                     _buildStatsRow(textColor, subTextColor),
                     const SizedBox(height: 24),
-                    _buildContributionBadgeCard(textColor, subTextColor),
+                    _buildContributionBadgeCard(textColor, subTextColor, isDark),
                     const SizedBox(height: 24),
                     // Premium Badge / Status
                     FutureBuilder<bool>(
@@ -223,7 +223,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       builder: (context, snapshot) {
                         final isPremium = snapshot.data ?? false;
                         final isVerified = _authService.currentUser?.emailVerified ?? false;
-                        return isPremium && !isVerified
+                        return isPremium && isVerified
                             ? _buildPremiumBadge()
                             : !isPremium 
                                 ? _buildUpgradeCard() 
@@ -589,7 +589,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildContributionBadgeCard(Color textColor, Color subTextColor) {
+  Widget _buildContributionBadgeCard(Color textColor, Color subTextColor, bool isDark) {
     final next = _contributionBadge.nextThreshold;
     final progress = ContributionBadgeCatalog.progressToNext(_uploadCount);
     final remaining = next == null ? 0 : (next - _uploadCount).clamp(0, 9999);
@@ -603,8 +603,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           borderRadius: BorderRadius.circular(20),
           gradient: LinearGradient(
             colors: [
-              _contributionBadge.color.withValues(alpha: Theme.of(context).brightness == Brightness.dark ? 0.15 : 0.08),
-              _contributionBadge.color.withValues(alpha: Theme.of(context).brightness == Brightness.dark ? 0.05 : 0.02),
+              _contributionBadge.color.withValues(alpha: isDark ? 0.15 : 0.08),
+              _contributionBadge.color.withValues(alpha: isDark ? 0.05 : 0.02),
             ],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,

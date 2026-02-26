@@ -3,16 +3,22 @@
 
 class AppConfig {
   // Supabase Configuration
-  static const String supabaseUrl = 'https://iayuwsvguwfqjgjsvjiy.supabase.co';
-  static const String supabaseAnonKey =
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlheXV3c3ZndXdmcWpnanN2aml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYwNTE5MTEsImV4cCI6MjA4MTYyNzkxMX0.EQhiq-yv9QLBNL_kmT5P59AZPykQkEZwbNbilxquYOA';
+  static const String supabaseUrl = String.fromEnvironment(
+    'SUPABASE_URL',
+    defaultValue: 'https://iayuwsvguwfqjgjsvjiy.supabase.co',
+  );
+  static const String supabaseAnonKey = String.fromEnvironment(
+    'SUPABASE_ANON_KEY',
+    defaultValue:
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlheXV3c3ZndXdmcWpnanN2aml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYwNTE5MTEsImV4cCI6MjA4MTYyNzkxMX0.EQhiq-yv9QLBNL_kmT5P59AZPykQkEZwbNbilxquYOA',
+  );
 
   // Cloudinary Configuration
   static const String cloudinaryCloudName = 'dvttcyf7u';
   static const String cloudinaryUploadPreset = 'studyspace_uploads';
 
   // Backend API
-  static const String apiUrl = 'https://studyspace-backend.onrender.com';
+  static const String apiUrl = 'http://13.48.57.16';
 
   // reCAPTCHA (v3 site key from Studyspace/.env)
   static const String recaptchaSiteKey =
@@ -24,17 +30,24 @@ class AppConfig {
   static const String webDomain = 'mystudyspace.me';
 
   // Razorpay Live Key
-  static const String razorpayKeyId = 'rzp_live_S9IWIDxf81JDDM';
+  static const String razorpayKeyId = String.fromEnvironment(
+    'RAZORPAY_KEY_ID',
+    defaultValue: 'rzp_live_S9IWIDxf81JDDM',
+  );
   // Support Email
   static const String supportEmail = 'support@mystudyspace.me';
   // Giphy API Key (Get from Giphy Developers Dashboard: developers.giphy.com)
   static const String giphyApiKey = String.fromEnvironment('GIPHY_API_KEY');
 
   /// remove.bg API key for sticker background removal.
-  static const String removeBgApiKey = String.fromEnvironment(
-    'REMOVE_BG_API_KEY',
-    defaultValue: 'D53uXgDqrEyuxCXHXQWFZ7n4',
-  );
+  static const String removeBgApiKey = String.fromEnvironment('REMOVE_BG_API_KEY');
+
+  static String get removeBgApiKeyOrThrow {
+    if (removeBgApiKey.isEmpty) {
+      throw Exception('REMOVE_BG_API_KEY is not set. It is required for background removal.');
+    }
+    return removeBgApiKey;
+  }
 
   // Google Sign-In Server Client ID (Web Client ID)
   static const String googleServerClientId = String.fromEnvironment(

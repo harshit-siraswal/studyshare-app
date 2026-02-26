@@ -40,6 +40,21 @@ import 'utils/theme_animator.dart';
 import 'services/supabase_service.dart';
 import 'models/department_account.dart';
 
+String? _getCollegeIdFromPrefs(SharedPreferences prefs) {
+  try {
+    final collegeJson = prefs.getString('selectedCollege');
+    if (collegeJson != null && collegeJson.isNotEmpty) {
+      final data = jsonDecode(collegeJson) as Map<String, dynamic>;
+      if (data['id'] is String && (data['id'] as String).isNotEmpty) {
+        return data['id'];
+      }
+    }
+  } catch (e) {
+    debugPrint('Error decoding selectedCollege JSON: $e');
+  }
+  return prefs.getString('selectedCollegeId');
+}
+
 /// Request necessary app permissions
 /// Returns true if all critical permissions are granted or not required
 Future<bool> _requestPermissions() async {
@@ -111,31 +126,7 @@ void main() async {
     debugPrint('Configuration Warning: $warning');
   }
 
-  // Initialize Firebase FIRST — must happen before any Firebase service is used
-  bool _firebaseInitialized = false;
-  try {
-    await Firebase.initializeApp(
-      options: kIsWeb ? DefaultFirebaseOptions.currentPlatform : null,
-    );
-    _firebaseInitialized = true;
-    debugPrint('Firebase initialized successfully');
-  } catch (e) {
-    debugPrint('Firebase initialization error: $e');
-  }
-
-  try {
-    await Hive.initFlutter();
-  } catch (e) {
-    debugPrint('Hive initialization error: $e');
-    rethrow; // Hive is required for app functionality
-  }
-
-  try {
-    await DownloadService().init();
-  } catch (e) {
-    debugPrint('DownloadService initialization error: $e');
-    // Non-critical: log and continue, downloads will fail gracefully
-  }
+  // Initialization is deferred to AppRoot to allow the splash screen to render immediately.
 
   // Set system UI overlay style
   SystemChrome.setSystemUIOverlayStyle(
@@ -145,7 +136,7 @@ void main() async {
     ),
   );
 
-  runApp(AppRoot(firebaseInitialized: _firebaseInitialized));
+  runApp(const AppRoot());
 }
 
 enum AppState {
@@ -157,12 +148,7 @@ enum AppState {
 }
 
 class AppRoot extends StatefulWidget {
-  // Expose key if needed via static accessor, but top-level is fine too
-  static GlobalKey<NavigatorState> get navKey => appNavigatorKey;
-
-  final bool firebaseInitialized;
-
-  const AppRoot({super.key, this.firebaseInitialized = false});
+  const AppRoot({super.key});
 
   @override
   State<AppRoot> createState() => _AppRootState();
@@ -176,6 +162,7 @@ class _AppRootState extends State<AppRoot> {
   final BackendApiService _backendApi = BackendApiService();
   final AuthService _authService = AuthService();
   StreamSubscription? _authStateSubscription;
+  bool _firebaseInitialized = false;
   String? _lastRegisteredFcmToken;
 
   ThemeMode get _bootThemeMode {
@@ -248,27 +235,84 @@ class _AppRootState extends State<AppRoot> {
     setState(() => _appState = AppState.loading);
 
     try {
-      final bootstrapped = await _bootstrapTheme();
+      late bool bootstrapped;
+      late List<ConnectivityResult> connectivityResult;
+
+      try {
+        final results = await Future.wait([
+          _bootstrapTheme(),
+          Connectivity().checkConnectivity(),
+        ]);
+        bootstrapped = results[0] as bool;
+        connectivityResult = results[1] as List<ConnectivityResult>;
+      } catch (e) {
+        debugPrint('Bootstrap/Connectivity parallel check failed: $e');
+        if (mounted) setState(() => _appState = AppState.initializationError);
+        return;
+      }
+
       if (!bootstrapped) {
         if (mounted) setState(() => _appState = AppState.initializationError);
         return;
       }
+
       // Trigger rebuild to apply theme from preferences to loading screen
       if (mounted) setState(() {});
-      // Check internet connectivity
-      try {
-        final connectivityResult = await Connectivity().checkConnectivity();
-        if (connectivityResult.contains(ConnectivityResult.none)) {
-          if (mounted) setState(() => _appState = AppState.noConnection);
-          return;
-        }
-      } catch (e) {
-        debugPrint('Connectivity check failed: $e');
-        if (mounted) {
-          setState(() => _appState = AppState.initializationError);
-        }
+
+      if (connectivityResult.contains(ConnectivityResult.none)) {
+        if (mounted) setState(() => _appState = AppState.noConnection);
         return;
       }
+
+      // Initialize Heavy Services in parallel AFTER the splash screen has rendered
+      await Future.wait([
+        // 1. Supabase (required)
+        // required — app cannot function without this, errors are rethrown
+        () async {
+          try {
+            await Supabase.initialize(
+              url: AppConfig.supabaseUrl,
+              anonKey: AppConfig.supabaseAnonKey,
+            );
+            debugPrint('Supabase initialized successfully');
+          } catch (e) {
+             debugPrint('Supabase initialization error: $e');
+             rethrow;
+          }
+        }(),
+        // 2. Firebase
+        // optional — degrade gracefully, errors logged only
+        () async {
+          try {
+            await Firebase.initializeApp(
+              options: kIsWeb ? DefaultFirebaseOptions.currentPlatform : null,
+            );
+            _firebaseInitialized = true;
+            debugPrint('Firebase initialized successfully');
+          } catch (e) {
+            debugPrint('Firebase initialization error: $e');
+          }
+        }(),
+        // 3. Hive
+        // required — app cannot function without this, errors are rethrown
+        () async {
+          try {
+            await Hive.initFlutter();
+          } catch (e) {
+            debugPrint('Hive initialization error: $e');
+            rethrow; // Hive is required for app functionality
+          }
+        }(),
+        // 4. DownloadService
+        // optional — degrade gracefully, errors logged only
+        () async {
+          try {
+            await DownloadService().init();
+          } catch (e) {
+            debugPrint('DownloadService initialization error: $e');
+          }
+        }(),
+      ]);
 
       await _continueStartup();
     } catch (e, st) {
@@ -280,46 +324,16 @@ class _AppRootState extends State<AppRoot> {
   }
 
   Future<void> _continueStartup() async {
-    // Request permissions (Android only)
-    bool permissionsGranted = true;
-    try {
-      permissionsGranted = await _requestPermissions();
-    } catch (e) {
-      debugPrint('Permission request failed: $e');
-    }
-
-    if (!permissionsGranted && !kIsWeb) {
-      if (mounted) setState(() => _appState = AppState.permissionError);
-      return;
-    }
-
-    // Firebase FCM binding is deferred until after Supabase init below
-
-    // Initialize Supabase (required)
-    try {
-      await Supabase.initialize(
-        url: AppConfig.supabaseUrl,
-        anonKey: AppConfig.supabaseAnonKey,
-      );
-      debugPrint('Supabase initialized successfully');
-    } catch (e) {
-      debugPrint('Supabase initialization error: $e');
-      if (mounted) {
-        setState(() {
-          _appState = AppState.initializationError;
-        });
-      }
-      return;
-    }
-    // Get shared preferences
-
+    // We defer _requestPermissions() so it doesn't block the UI thread during startup.
+    // It will be called lazily later when needed by specific features.
+    
     // Bind auth-aware FCM sync now that Supabase is ready
-    if (widget.firebaseInitialized) {
+    if (_firebaseInitialized) {
       _bindAuthAwareFcmSync();
     }
 
     // Initialize Push Notifications (after Firebase is ready)
-    if (!kIsWeb && widget.firebaseInitialized) {
+    if (!kIsWeb && _firebaseInitialized) {
       try {
         // Set up background message handler
         FirebaseMessaging.onBackgroundMessage(
@@ -529,28 +543,31 @@ class StudySpaceApp extends StatelessWidget {
                   final uri = Uri.parse(settings.name!);
                   final noticeId = uri.queryParameters['id'];
                   if (noticeId != null) {
-                    String? collegeId;
-                    try {
-                      final collegeJson = prefs.getString('selectedCollege');
-                      if (collegeJson != null && collegeJson.isNotEmpty) {
-                        final data = jsonDecode(collegeJson) as Map<String, dynamic>;
-                        if (data['id'] is String && (data['id'] as String).isNotEmpty) {
-                          collegeId = data['id'];
-                        }
-                      }
-                    } catch (e) {
-                      debugPrint('Error decoding selectedCollege JSON in deep link: $e');
-                    }
-                    
-                    collegeId ??= prefs.getString('selectedCollegeId');
+                    final collegeId = _getCollegeIdFromPrefs(prefs);
 
                     if (collegeId != null && collegeId.isNotEmpty) {
                       return MaterialPageRoute(
                         builder: (_) => NoticeDeepLinkLoader(
                           noticeId: noticeId,
-                          collegeId: collegeId!,
+                          collegeId: collegeId,
                         ),
                       );
+                    } else {
+                        // Edge case fallback: 
+                        // Show error and navigate to college selection if no college
+                        debugPrint('Failed to route deep-link: no collegeId found.');
+                        return MaterialPageRoute(
+                          builder: (context) {
+                            WidgetsBinding.instance.addPostFrameCallback((_) {
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Please select a college before opening deep links.')),
+                                );
+                              }
+                            });
+                            return const CollegeSelectionScreen();
+                          },
+                        );
                     }
                   }
                 }
@@ -605,9 +622,7 @@ class _AppRouterState extends State<AppRouter> {
   }
 
   // Support reading from new JSON key with fallback to legacy separate keys
-  String? get _selectedCollegeId =>
-      _selectedCollegeData?['id'] ??
-      widget.prefs.getString('selectedCollegeId');
+  String? get _selectedCollegeId => _getCollegeIdFromPrefs(widget.prefs);
   String? get _selectedCollegeName =>
       _selectedCollegeData?['name'] ??
       widget.prefs.getString('selectedCollegeName');
@@ -981,32 +996,14 @@ class _NoticeDeepLinkLoaderState extends State<NoticeDeepLinkLoader> {
             if (deptResponse != null) {
               account = DepartmentAccount.fromJson(deptResponse);
             } else {
-              account = DepartmentAccount(
-                id: deptId,
-                name: 'Unknown Department',
-                handle: '@unknown',
-                avatarLetter: '?',
-                color: const Color(0xFF64748B),
-              );
+              account = DepartmentAccount.unknown(deptId: deptId);
             }
           } catch (e) {
             debugPrint('Failed to fetch department for deep link: $e');
-            account = DepartmentAccount(
-              id: deptId,
-              name: 'Unknown Department',
-              handle: '@unknown',
-              avatarLetter: '?',
-              color: const Color(0xFF64748B),
-            );
+            account = DepartmentAccount.unknown(deptId: deptId);
           }
         } else {
-          account = DepartmentAccount(
-            id: 'unknown',
-            name: 'Unknown Department',
-            handle: '@unknown',
-            avatarLetter: '?',
-            color: const Color(0xFF64748B),
-          );
+          account = DepartmentAccount.unknown();
         }
         
         if (mounted) {
@@ -1022,10 +1019,16 @@ class _NoticeDeepLinkLoaderState extends State<NoticeDeepLinkLoader> {
           );
         }
       } else if (mounted) {
-        if (Navigator.canPop(context)) {
-          Navigator.pop(context);
-        } else {
-          Navigator.pushReplacementNamed(context, '/');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Notice not found'), duration: Duration(seconds: 2)),
+        );
+        await Future.delayed(const Duration(seconds: 2));
+        if (mounted) {
+          if (Navigator.canPop(context)) {
+            Navigator.pop(context);
+          } else {
+            Navigator.pushReplacementNamed(context, '/');
+          }
         }
       }
     } catch (e, stack) {

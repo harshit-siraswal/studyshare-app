@@ -159,14 +159,18 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
       borderRadius: BorderRadius.circular(16),
       onTap: () {
         final email = student['email'] as String?;
+        final userName = student['display_name'] as String?;
+        final userPhotoUrl = student['profile_photo_url'] as String?;
+
         if (email == null || email.isEmpty) return;
+        
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => UserProfileScreen(
               userEmail: email,
-              userName: student['display_name'],
-              userPhotoUrl: student['profile_photo_url'],
+              userName: userName,
+              userPhotoUrl: userPhotoUrl,
             ),
           ),
         );
@@ -187,7 +191,7 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
         child: Row(
           children: [
             UserAvatar(
-              photoUrl: student['profile_photo_url'],
+              photoUrl: (student['profile_photo_url']?.toString().isNotEmpty == true) ? student['profile_photo_url'] : null,
               radius: 24,
               displayName: student['display_name'] ?? 'User',
             ),

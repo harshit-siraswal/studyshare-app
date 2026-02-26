@@ -542,7 +542,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     ),
                   );
                   if (confirm != true) return;
-                  Navigator.pop(sheetCtx);
+                  if (!mounted) return;
+                  if (sheetCtx.mounted) {
+                    Navigator.pop(sheetCtx);
+                  }
                   await _removeAuthorFromRoom(authorEmail);
                 },
               ),
@@ -1328,8 +1331,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     try {
       await showDialog(
         context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: Theme.of(context).dialogBackgroundColor,
         title: Text(
           'Report ${itemType == 'comment' ? 'Comment' : 'Post'}',
           style: GoogleFonts.inter(
@@ -1376,22 +1379,38 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               final reason = reasonController.text.trim();
               if (reason.isEmpty) return;
 
-              Navigator.pop(context); // Close dialog
+              // Deny unauthenticated reports
+              if (_authService.currentUser == null) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("You must be signed in to report.")),
+                  );
+                }
+                return;
+              }
+              final reporterId = _authService.currentUser!.uid;
 
-              // Call Backend API
-              try {
-                // Determine current user ID if possible, otherwise empty
-                final reporterId = _authService.currentUser?.uid ?? 'unknown';
-
+              if (mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text("Submitting report...")),
                 );
+              }
 
-                await _backendApiService.reportPost(
-                  targetId,
-                  reason,
-                  reporterId,
-                );
+              // Call Backend API
+              try {
+                if (isComment) {
+                  await _backendApiService.reportComment(
+                    targetId,
+                    reason,
+                    reporterId,
+                  );
+                } else {
+                  await _backendApiService.reportPost(
+                    targetId,
+                    reason,
+                    reporterId,
+                  );
+                }
 
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -1404,11 +1423,13 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text(
-                        "Report submitted (backend limitation: $e)",
-                      ),
+                      content: Text("Report failed: $e"),
                     ),
                   );
+                }
+              } finally {
+                if (mounted) {
+                  Navigator.pop(dialogCtx); // Close dialog
                 }
               }
             },

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/theme.dart';
 import '../models/resource.dart';
@@ -82,6 +82,8 @@ class _ResourceCardState extends State<ResourceCard> {
     try {
       final oldVote = _userVote;
       final newVote = _userVote == direction ? null : direction;
+      final oldUpvotes = _upvotes;
+      final oldDownvotes = _downvotes;
       
       setState(() {
         if (oldVote == 1) _upvotes--;
@@ -98,7 +100,16 @@ class _ResourceCardState extends State<ResourceCard> {
       );
       widget.onVoteChanged?.call();
     } catch (e) {
-      // Handle error
+      if (mounted) {
+         setState(() {
+            _upvotes = oldUpvotes;
+            _downvotes = oldDownvotes;
+            _userVote = oldVote;
+         });
+         ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Unable to cast vote. Please try again.'))
+         );
+      }
     } finally {
       if (mounted) setState(() => _isVoting = false);
     }
@@ -133,6 +144,7 @@ class _ResourceCardState extends State<ResourceCard> {
       showDialog(
         context: context,
         builder: (_) => PaywallDialog(onSuccess: () {
+             if (!mounted) return;
              setState(() {}); // refresh state to likely remove lock
              _handleDownload(context); // retry download
         }),
@@ -141,6 +153,10 @@ class _ResourceCardState extends State<ResourceCard> {
     }
 
     // 3. Download
+    if (widget.resource.fileUrl.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No file available to download')));
+      return;
+    }
     try {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Downloading...')));
       await ds.downloadResource(
@@ -226,9 +242,13 @@ class _ResourceCardState extends State<ResourceCard> {
 
     final downloadService = DownloadService();
     final localPath = downloadService.getLocalPath(widget.resource.id);
-    final url = (localPath != null && File(localPath).existsSync()) 
-        ? localPath 
-        : widget.resource.fileUrl;
+    
+    bool hasLocalFile = false;
+    if (!kIsWeb && localPath != null && downloadService.isDownloaded(widget.resource.id)) {
+        hasLocalFile = true;
+    }
+    
+    final url = hasLocalFile ? localPath! : widget.resource.fileUrl;
 
     Navigator.push(
       context,
@@ -256,6 +276,7 @@ class _ResourceCardState extends State<ResourceCard> {
 
   @override
   Widget build(BuildContext context) {
+    final ds = DownloadService();
     // ... no change needed in build if _openResource is handling dispatch ...
     // But we need to update _getTypeIcon and _getTypeColor below
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -421,12 +442,19 @@ class _ResourceCardState extends State<ResourceCard> {
                           
                           // Download Button
                           if (widget.resource.type == 'notes' || widget.resource.type == 'pyq') ...[
-                             GestureDetector(
-                                onTap: () => _handleDownload(context),
-                                child: DownloadService().isDownloaded(widget.resource.id)
-                                    ? Icon(Icons.offline_pin, size: 20, color: AppTheme.success)
-                                    : Icon(Icons.download_rounded, size: 20, color: AppTheme.textMuted),
-                              ),
+                             Material(
+                               color: Colors.transparent,
+                               child: InkWell(
+                                  borderRadius: BorderRadius.circular(20),
+                                  onTap: () => _handleDownload(context),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(8.0),
+                                    child: ds.isDownloaded(widget.resource.id)
+                                        ? Icon(Icons.offline_pin, size: 20, color: AppTheme.success)
+                                        : Icon(Icons.download_rounded, size: 20, color: AppTheme.textMuted),
+                                  ),
+                                ),
+                             ),
                              const SizedBox(width: 12),
                           ],
   
@@ -548,8 +576,10 @@ class _ResourceCardState extends State<ResourceCard> {
                         decorationColor: AppTheme.textMuted,
                       ),
                     ),
-                    const SizedBox(width: 4),
-                    UserBadge(email: email, size: 12),
+                    if (email != null && email.isNotEmpty) ...[
+                      const SizedBox(width: 4),
+                      UserBadge(email: email, size: 12),
+                    ],
                   ],
                 ),
               ),
@@ -562,138 +592,3 @@ class _ResourceCardState extends State<ResourceCard> {
 
   }
 } // End of _ResourceCardState
-
-// Embedded PDF Viewer Dialog
-class _PDFViewerDialog extends StatelessWidget {
-  final String url;
-  final String title;
-
-  const _PDFViewerDialog({
-    required this.url,
-    required this.title,
-  });
-
-  Future<void> _openInBrowser(BuildContext context) async {
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final screenSize = MediaQuery.of(context).size;
-    
-    return Dialog(
-      backgroundColor: Colors.transparent,
-      insetPadding: const EdgeInsets.all(16),
-      child: Container(
-        width: screenSize.width * 0.95,
-        height: screenSize.height * 0.85,
-        decoration: BoxDecoration(
-          color: isDark ? AppTheme.darkSurface : Colors.white,
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          children: [
-            // Header
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: isDark ? AppTheme.darkCard : Colors.grey.shade100,
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      title,
-                      style: GoogleFonts.inter(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white : Colors.black,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => _openInBrowser(context),
-                    icon: Icon(
-                      Icons.open_in_new,
-                      color: isDark ? Colors.white : Colors.black,
-                    ),
-                    tooltip: 'Open in browser',
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.pop(context),
-                    icon: Icon(
-                      Icons.close,
-                      color: isDark ? Colors.white : Colors.black,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            
-            // PDF Preview Content
-            Expanded(
-              child: Container(
-                width: double.infinity,
-                margin: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: isDark ? AppTheme.darkBackground : Colors.grey.shade50,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(24),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primary.withValues(alpha: 0.1),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        Icons.picture_as_pdf,
-                        size: 64,
-                        color: AppTheme.primary,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    Text(
-                      'PDF Document',
-                      style: GoogleFonts.inter(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : Colors.black,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Click below to view',
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        color: AppTheme.textMuted,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    ElevatedButton.icon(
-                      onPressed: () => _openInBrowser(context),
-                      icon: const Icon(Icons.open_in_new),
-                      label: const Text('Open PDF'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}

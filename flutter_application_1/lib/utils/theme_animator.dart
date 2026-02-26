@@ -18,16 +18,7 @@ Future<void> animateThemeTransition(
     return;
   }
 
-  var pixelRatio = 1.0;
-  try {
-    pixelRatio = MediaQuery.of(context).devicePixelRatio;
-  } catch (_) {
-    try {
-      pixelRatio = View.of(context).devicePixelRatio;
-    } catch (_) {
-      pixelRatio = ui.PlatformDispatcher.instance.views.first.devicePixelRatio;
-    }
-  }
+  var pixelRatio = _getDevicePixelRatio(context);
 
   ui.Image? image;
   try {
@@ -38,7 +29,7 @@ Future<void> animateThemeTransition(
     return;
   }
 
-  final overlayState = Overlay.of(context);
+  final overlayState = Overlay.maybeOf(context);
   if (overlayState == null) {
     toggleTheme();
     return;

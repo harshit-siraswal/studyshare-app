@@ -1,9 +1,19 @@
 class AppRoles {
+  AppRoles._(); // Prevent instantiation
+
   static const readOnly = 'READ_ONLY';
   static const admin = 'ADMIN';
   static const moderator = 'MODERATOR';
   static const collegeUser = 'COLLEGE_USER';
   static const teacher = 'TEACHER';
+
+  static const Set<String> validRoles = {
+    readOnly,
+    admin,
+    moderator,
+    collegeUser,
+    teacher,
+  };
 }
 
 class AppUser {
@@ -30,17 +40,35 @@ class AppUser {
   });
 
   factory AppUser.fromJson(Map<String, dynamic> json) {
+    final id = json['id']?.toString() ?? '';
+    if (id.isEmpty) {
+      throw FormatException('AppUser.fromJson: id is null or empty');
+    }
+    
+    final email = json['email']?.toString() ?? '';
+    if (email.isEmpty) {
+      throw FormatException('AppUser.fromJson: email is null or empty for id=$id');
+    }
+
     return AppUser(
-      id: json['id'] ?? '',
-      email: json['email'] ?? '',
+      id: id,
+      email: email,
       displayName: json['display_name'],
       username: json['username'],
       profilePhotoUrl: json['profile_photo_url'],
       college: json['college'],
       bio: json['bio'],
-      role: json['role'] ?? AppRoles.readOnly,
+      role: () {
+        final r = json['role']?.toString();
+        if (r != null && AppRoles.validRoles.contains(r)) {
+          return r;
+        }
+        return AppRoles.readOnly;
+      }(),
       createdAt: () {
-        if (json['created_at'] == null) return DateTime.now();
+        if (json['created_at'] == null) {
+          throw FormatException('AppUser.fromJson: created_at is null for id=${json['id']}');
+        }
         final parsed = DateTime.tryParse(json['created_at'].toString());
         if (parsed == null) {
           throw FormatException('AppUser.fromJson: failed to parse created_at for id=${json['id']}');

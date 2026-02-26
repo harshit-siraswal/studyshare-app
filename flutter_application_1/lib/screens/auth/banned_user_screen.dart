@@ -20,7 +20,7 @@ class BannedUserScreen extends StatelessWidget {
     final Uri emailLaunchUri = Uri(
       scheme: 'mailto',
       path: AppConfig.supportEmail,
-      query: 'subject=Account Suspension Enquiry',
+      queryParameters: {'subject': 'Account Suspension Enquiry'},
     );
     try {
       if (await canLaunchUrl(emailLaunchUri)) {
@@ -58,8 +58,8 @@ class BannedUserScreen extends StatelessWidget {
             children: [
               const Spacer(),
               Semantics(
-                liveRegion: true,
-                label: 'Account banned',
+                header: true,
+                label: title,
                 child: Column(
                   children: [
                     Icon(
@@ -93,10 +93,10 @@ class BannedUserScreen extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: AppTheme.error.withOpacity(0.1),
+                  color: AppTheme.error.withValues(alpha: (0.1 * 255).round()),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: AppTheme.error.withOpacity(0.3),
+                    color: AppTheme.error.withValues(alpha: (0.3 * 255).round()),
                   ),
                 ),
                 child: Column(

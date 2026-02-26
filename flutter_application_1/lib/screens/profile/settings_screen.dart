@@ -40,6 +40,8 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  static const double _kSwitchFallbackOffsetRight = 40.0;
+
   final AuthService _authService = AuthService();
   final SubscriptionService _subscriptionService = SubscriptionService();
   String? _displayName;
@@ -75,9 +77,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _toggleNotifications(bool value) async {
+    final previousValue = _notificationsEnabled;
     setState(() => _notificationsEnabled = value);
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('notifications_enabled', value);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('notifications_enabled', value);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _notificationsEnabled = previousValue);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to update notification settings')),
+        );
+      }
+    }
   }
 
   Future<void> _clearCache() async {
@@ -236,11 +248,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     );
                     
-                    if (updatedFn != null && updatedFn is Map && mounted) {
+                    if (updatedFn != null && updatedFn is Map<String, dynamic> && mounted) {
                        setState(() {
-                         _displayName = updatedFn['display_name'];
-                         _photoUrl = updatedFn['profile_photo_url'];
-                         _bio = updatedFn['bio'];
+                         _displayName = updatedFn['display_name']?.toString();
+                         _photoUrl = updatedFn['profile_photo_url']?.toString();
+                         _bio = updatedFn['bio']?.toString();
                        });
                     }
                   },
@@ -286,8 +298,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   subtitle: isDark ? 'Dark Mode' : 'Light Mode',
                   trailing: Builder(
                     builder: (switchContext) {
-                      const double kSwitchFallbackOffsetRight = 40.0;
-                      const double kSwitchFallbackOffsetY = 200.0;
                       return Switch(
                         value: isDark,
                         activeTrackColor: AppTheme.primary,
@@ -295,7 +305,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           final box = switchContext.findRenderObject() as RenderBox?;
                           final offset = box != null 
                               ? box.localToGlobal(box.size.center(Offset.zero)) 
-                              : Offset(MediaQuery.of(context).size.width - kSwitchFallbackOffsetRight, kSwitchFallbackOffsetY);
+                              : Offset(MediaQuery.of(context).size.width - _kSwitchFallbackOffsetRight, MediaQuery.of(context).size.height / 2);
                           
                           animateThemeTransition(context, offset, () {
                             themeProvider.toggleTheme();

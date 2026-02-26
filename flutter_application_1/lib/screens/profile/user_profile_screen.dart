@@ -56,27 +56,23 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     try {
       final currentUserEmail = _authService.userEmail;
 
-      // 1. Parallelize independent fetches
-      final futures = await Future.wait([
-        _supabaseService.getUserStats(widget.userEmail),
-        _supabaseService.getFollowersCount(widget.userEmail),
-        _supabaseService.getFollowingCount(widget.userEmail),
-        _supabaseService.getUserResources(widget.userEmail),
-        _supabaseService.getUserInfo(widget.userEmail), // Fetch user info including photo
-        // If logged in, fetch follow status in parallel too
-        if (currentUserEmail != null) 
-          _supabaseService.getFollowStatus(currentUserEmail, widget.userEmail)
-        else 
-          Future.value(FollowStatus.notFollowing)
-      ]);
-      
-      // 2. Destructure results
-      final stats = futures[0] as Map<String, dynamic>;
-      final followers = futures[1] as int;
-      final following = futures[2] as int;
-      final resources = futures[3] as List<Resource>;
-      final userInfo = futures[4] as Map<String, dynamic>?;
-      final status = futures[5] as FollowStatus;
+      // 1. Parallelize independent fetches with type-safe variable awaiting
+      final statsFuture = _supabaseService.getUserStats(widget.userEmail);
+      final followersFuture = _supabaseService.getFollowersCount(widget.userEmail);
+      final followingFuture = _supabaseService.getFollowingCount(widget.userEmail);
+      final resourcesFuture = _supabaseService.getUserResources(widget.userEmail);
+      final userInfoFuture = _supabaseService.getUserInfo(widget.userEmail);
+      final statusFuture = currentUserEmail != null 
+          ? _supabaseService.getFollowStatus(currentUserEmail, widget.userEmail)
+          : Future.value(FollowStatus.notFollowing);
+          
+      // 2. Destructure typed results
+      final stats = await statsFuture;
+      final followers = await followersFuture;
+      final following = await followingFuture;
+      final resources = await resourcesFuture;
+      final userInfo = await userInfoFuture;
+      final status = await statusFuture;
       if (mounted) {
         setState(() {
           _uploadCount = stats['uploads'] ?? stats['contributions'] ?? 0;
@@ -221,9 +217,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               // Avatar
-                              GestureDetector(
+                              InkWell(
+                                borderRadius: BorderRadius.circular(40),
                                 onTap: () {
-                                  if (_photoUrl != null) {
+                                  if (_photoUrl != null && _photoUrl!.isNotEmpty) {
                                     Navigator.push(
                                       context,
                                       MaterialPageRoute(
@@ -243,28 +240,46 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                     decoration: BoxDecoration(
                                       color: AppTheme.primary,
                                       shape: BoxShape.circle,
-                                      image: _photoUrl != null 
-                                          ? DecorationImage(
-                                              image: NetworkImage(_photoUrl!),
-                                              fit: BoxFit.cover,
-                                              onError: (exception, stackTrace) {
-                                                debugPrint('Failed to load avatar: $exception\n$stackTrace');
-                                              },
-                                            )
-                                          : null,
                                     ),
-                                    child: _photoUrl == null
-                                      ? Center(
-                                          child: Text(
-                                            _avatarLetter,
-                                            style: GoogleFonts.inter(
-                                              fontSize: 32, 
-                                              fontWeight: FontWeight.bold, 
-                                              color: Colors.white
+                                    clipBehavior: Clip.antiAlias,
+                                    child: _photoUrl != null && _photoUrl!.isNotEmpty
+                                        ? Image.network(
+                                            _photoUrl!,
+                                            fit: BoxFit.cover,
+                                            loadingBuilder: (context, child, loadingProgress) {
+                                              if (loadingProgress == null) return child;
+                                              return Center(
+                                                child: CircularProgressIndicator(
+                                                  value: loadingProgress.expectedTotalBytes != null
+                                                      ? loadingProgress.cumulativeBytesLoaded /
+                                                          loadingProgress.expectedTotalBytes!
+                                                      : null,
+                                                ),
+                                              );
+                                            },
+                                            errorBuilder: (context, error, stackTrace) {
+                                              return Center(
+                                                child: Text(
+                                                  _avatarLetter,
+                                                  style: GoogleFonts.inter(
+                                                    fontSize: 32, 
+                                                    fontWeight: FontWeight.bold, 
+                                                    color: Colors.white
+                                                  ),
+                                                ),
+                                              );
+                                            },
+                                          )
+                                        : Center(
+                                            child: Text(
+                                              _avatarLetter,
+                                              style: GoogleFonts.inter(
+                                                fontSize: 32, 
+                                                fontWeight: FontWeight.bold, 
+                                                color: Colors.white
+                                              ),
                                             ),
                                           ),
-                                        )
-                                      : null,
                                   ),
                                 ),
                               ),
@@ -528,6 +543,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         await _supabaseService.cancelFollowRequest(currentUserEmail, widget.userEmail);
       } else {
         await _supabaseService.sendFollowRequest(currentUserEmail, widget.userEmail);
+        final newStatus = await _supabaseService.getFollowStatus(currentUserEmail, widget.userEmail);
+        if (mounted) {
+           setState(() => _followStatus = newStatus);
+        }
       }
       // Success - just turn off loading
       if(mounted) setState(() => _followLoading = false);

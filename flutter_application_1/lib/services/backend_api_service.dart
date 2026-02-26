@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
@@ -32,8 +32,6 @@ class BackendApiService {
     String path, {
     String method = 'GET',
     Map<String, dynamic>? body,
-    BuildContext? contextForRecaptcha,
-    String recaptchaAction = 'mobile_write',
   }) async {
     final token = await _getIdToken();
     final uri = Uri.parse('$_baseUrl$path');
@@ -43,23 +41,9 @@ class BackendApiService {
       if (token != null) 'Authorization': 'Bearer $token',
     };
 
-    // Attach reCAPTCHA token for privileged writes (POST/PUT/DELETE) if context provided.
-    // TEMPORARILY DISABLED: reCAPTCHA requires Android package registration in Google Cloud Console.
-    // To re-enable: uncomment the block below after registering package name.
     Map<String, dynamic>? effectiveBody = body == null
         ? null
         : Map<String, dynamic>.from(body);
-    final m = method.toUpperCase();
-    final needsBody = m == 'POST' || m == 'PUT' || m == 'DELETE';
-    if (needsBody && contextForRecaptcha != null) {
-      try {
-        // Automatically inject a bypass/dummy token since reCAPTCHA is disabled
-        effectiveBody ??= <String, dynamic>{};
-        effectiveBody['recaptchaToken'] = 'override_mobile_bypassed_token';
-      } catch (e) {
-        throw Exception('Security check failed. Please try again.');
-      }
-    }
 
     late http.Response res;
     switch (method.toUpperCase()) {
@@ -130,8 +114,6 @@ class BackendApiService {
         if (durationInDays != null) 'durationInDays': durationInDays,
         if (tags != null) 'tags': tags,
       },
-      contextForRecaptcha: context,
-      recaptchaAction: 'create_chat_room',
     );
   }
 
@@ -143,8 +125,6 @@ class BackendApiService {
     return _requestJson(
       '/api/chat/rooms/${Uri.encodeComponent(roomId)}/leave',
       method: 'POST',
-      contextForRecaptcha: context,
-      recaptchaAction: 'leave_chat_room',
     );
   }
 
@@ -164,8 +144,6 @@ class BackendApiService {
         if (imageUrl != null) 'imageUrl': imageUrl,
         if (authorName != null) 'authorName': authorName,
       },
-      contextForRecaptcha: context,
-      recaptchaAction: 'post_chat_message',
     );
   }
 
@@ -187,8 +165,6 @@ class BackendApiService {
       '/api/chat/messages/${Uri.encodeComponent(messageId)}/vote',
       method: 'PUT',
       body: {'direction': direction},
-      contextForRecaptcha: context,
-      recaptchaAction: 'vote_chat_message',
     );
   }
 
@@ -201,20 +177,15 @@ class BackendApiService {
       '/api/chat/saved',
       method: 'POST',
       body: {'messageId': messageId, 'roomId': roomId},
-      contextForRecaptcha: context,
-      recaptchaAction: 'save_chat_message',
     );
   }
 
   Future<void> deleteChatComment({
     required String commentId,
-    required BuildContext context,
   }) async {
     await _requestJson(
-      '/api/chat/comments/$commentId',
+      '/api/chat/comments/${Uri.encodeComponent(commentId)}',
       method: 'DELETE',
-      contextForRecaptcha: context,
-      recaptchaAction: 'delete_chat_comment',
     );
   }
 
@@ -234,8 +205,6 @@ class BackendApiService {
         if (authorName != null) 'authorName': authorName,
         if (parentId != null) 'parentId': parentId,
       },
-      contextForRecaptcha: context,
-      recaptchaAction: 'post_chat_message',
     );
   }
 
@@ -261,8 +230,6 @@ class BackendApiService {
       '/api/resources',
       method: 'POST',
       body: input,
-      contextForRecaptcha: context,
-      recaptchaAction: 'create_resource',
     );
   }
 
@@ -275,8 +242,6 @@ class BackendApiService {
       '/api/votes',
       method: 'POST',
       body: {'resourceId': resourceId, 'voteType': voteType},
-      contextForRecaptcha: context,
-      recaptchaAction: 'cast_vote',
     );
   }
 
@@ -297,8 +262,6 @@ class BackendApiService {
       '/api/bookmarks',
       method: 'POST',
       body: {'itemId': itemId, 'type': type},
-      contextForRecaptcha: context,
-      recaptchaAction: 'add_bookmark',
     );
   }
 
@@ -309,8 +272,6 @@ class BackendApiService {
     await _requestJson(
       '/api/bookmarks/item/${Uri.encodeComponent(itemId)}',
       method: 'DELETE',
-      contextForRecaptcha: context,
-      recaptchaAction: 'remove_bookmark',
     );
   }
 
@@ -369,8 +330,6 @@ class BackendApiService {
       '${_noticePath(noticeId)}/comments',
       method: 'POST',
       body: {'content': content, if (parentId != null) 'parentId': parentId},
-      contextForRecaptcha: context,
-      recaptchaAction: 'post_notice_comment',
     );
   }
 
@@ -382,8 +341,6 @@ class BackendApiService {
     await _requestJson(
       _noticePath(noticeId, commentId: commentId),
       method: 'DELETE',
-      contextForRecaptcha: context,
-      recaptchaAction: 'delete_notice_comment',
     );
   }
 
@@ -394,8 +351,6 @@ class BackendApiService {
     return _requestJson(
       '${_noticePath(noticeId)}/like',
       method: 'POST',
-      contextForRecaptcha: context,
-      recaptchaAction: 'like_notice',
     );
   }
 
@@ -411,8 +366,6 @@ class BackendApiService {
     return _requestJson(
       '${_noticePath(noticeId, commentId: commentId)}/like',
       method: 'POST',
-      contextForRecaptcha: context,
-      recaptchaAction: 'like_notice_comment',
     );
   }
 
@@ -446,8 +399,6 @@ class BackendApiService {
         if (branch != null) 'branch': branch,
         if (semester != null) 'semester': semester,
       },
-      contextForRecaptcha: context,
-      recaptchaAction: 'update_profile',
     );
   }
 
@@ -464,8 +415,6 @@ class BackendApiService {
       '/api/payments/order',
       method: 'POST',
       body: {'amount': amount, 'planId': planId},
-      contextForRecaptcha: context,
-      recaptchaAction: 'create_payment_order',
     );
   }
 
@@ -528,6 +477,14 @@ class BackendApiService {
       await _requestJson('/api/chat/reports', method: 'POST', body: payload);
     }
   }
+
+  Future<void> reportComment(
+    String commentId,
+    String reason,
+    String reporterId,
+  ) async {
+    return reportPost(commentId, reason, reporterId, type: 'comment');
+  }
   // ----------------------------
   // Notifications & Follows
   // ----------------------------
@@ -544,43 +501,34 @@ class BackendApiService {
       final list = (data['notifications'] as List?) ?? const [];
       return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     } catch (e) {
-      debugPrint('Backend /api/notifications query failed gracefully: $e');
-      return [];
+      debugPrint('Backend /api/notifications query failed. Bubbling up: $e');
+      rethrow;
     }
   }
 
   Future<void> markNotificationRead(
     Object id, {
-    BuildContext? contextForRecaptcha,
   }) async {
     await _requestJson(
       '/api/notifications/${Uri.encodeComponent(id.toString())}/read',
       method: 'POST',
-      contextForRecaptcha: contextForRecaptcha,
-      recaptchaAction: 'mark_notification_read',
     );
   }
 
   Future<void> markAllNotificationsRead({
-    BuildContext? contextForRecaptcha,
   }) async {
     await _requestJson(
       '/api/notifications/read-all',
       method: 'POST',
-      contextForRecaptcha: contextForRecaptcha,
-      recaptchaAction: 'mark_all_notifications_read',
     );
   }
 
   Future<void> deleteNotification(
-    int id, {
-    BuildContext? contextForRecaptcha,
-  }) async {
+    Object id,
+  ) async {
     await _requestJson(
-      '/api/notifications/$id',
+      '/api/notifications/${Uri.encodeComponent(id.toString())}',
       method: 'DELETE',
-      contextForRecaptcha: contextForRecaptcha,
-      recaptchaAction: 'delete_notification',
     );
   }
 
@@ -612,8 +560,6 @@ class BackendApiService {
         'commentType': commentType,
         'emoji': emoji,
       },
-      contextForRecaptcha: context,
-      recaptchaAction: 'toggle_reaction',
     );
 
     return data['added'] == true;
@@ -630,8 +576,6 @@ class BackendApiService {
       body: {
         'targetEmail': targetEmail,
       }, // Changed targetId to targetEmail per API
-      contextForRecaptcha: context,
-      recaptchaAction: 'follow_user',
     );
   }
 
@@ -642,8 +586,6 @@ class BackendApiService {
     await _requestJson(
       '/api/follow/approve/${requestId.toString()}', // Corrected endpoint
       method: 'POST',
-      contextForRecaptcha: context,
-      recaptchaAction: 'accept_follow_request',
     );
   }
 
@@ -654,8 +596,6 @@ class BackendApiService {
     await _requestJson(
       '/api/follow/reject/${requestId.toString()}', // Corrected endpoint
       method: 'POST',
-      contextForRecaptcha: context,
-      recaptchaAction: 'reject_follow_request',
     );
   }
 
@@ -828,7 +768,6 @@ class BackendApiService {
   // ----------------------------
 
   Future<Map<String, dynamic>> checkFollowStatus(String email) async {
-    // Corrected endpoint
     return _requestJson(
       '/api/follow/status/${Uri.encodeComponent(email)}',
       method: 'GET',
@@ -849,8 +788,8 @@ class BackendApiService {
       final list = (data['requests'] as List?) ?? const [];
       return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     } catch (e) {
-      debugPrint('Backend /api/follow/pending query failed gracefully: $e');
-      return [];
+      debugPrint('Backend /api/follow/pending query failed: $e');
+      rethrow;
     }
   }
 
@@ -858,8 +797,6 @@ class BackendApiService {
     await _requestJson(
       '/api/follow/${Uri.encodeComponent(email)}',
       method: 'DELETE',
-      contextForRecaptcha: context,
-      recaptchaAction: 'unfollow_user',
     );
   }
 
@@ -870,3 +807,4 @@ class BackendApiService {
     );
   }
 }
+

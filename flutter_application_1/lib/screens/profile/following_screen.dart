@@ -131,8 +131,12 @@ class _FollowingScreenState extends State<FollowingScreen>
       _errorMessage = null;
     });
     try {
-      final following = await _supabaseService.getFollowing(widget.userEmail);
-      final followers = await _supabaseService.getFollowers(widget.userEmail);
+      final futureResults = await Future.wait([
+        _supabaseService.getFollowing(widget.userEmail),
+        _supabaseService.getFollowers(widget.userEmail),
+      ]);
+      final following = futureResults[0];
+      final followers = futureResults[1];
 
       if (mounted) {
         setState(() {
@@ -339,19 +343,19 @@ class _FollowingScreenState extends State<FollowingScreen>
                       color: AppTheme.textMuted,
                     ),
                   ),
-                  GestureDetector(
-                    onTap: () => _showSortOptions(context, isDark),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? Colors.white.withValues(alpha: 0.1)
-                            : Colors.grey.shade100,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
+                  Material(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.1)
+                        : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                    child: InkWell(
+                      onTap: () => _showSortOptions(context, isDark),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
                       child: Row(
                         children: [
                           Icon(
@@ -584,7 +588,7 @@ class _FollowingScreenState extends State<FollowingScreen>
                   ),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(14),
-                    child: photoUrl != null
+                    child: (photoUrl != null && photoUrl.toString().isNotEmpty)
                         ? CachedNetworkImage(
                             imageUrl: photoUrl,
                             fit: BoxFit.cover,

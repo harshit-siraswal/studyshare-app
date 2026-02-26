@@ -68,53 +68,64 @@ class SubscriptionService {
       final email = _firebaseAuth.currentUser?.email;
       if (email == null) return false;
 
-      // Auto-unlock Premium for active contributors (>= 10 approved uploads)
-      try {
-        final uploadCount = await _supabase
-            .from('resources')
-            .count(CountOption.exact)
-            .eq('uploaded_by_email', email)
-            .eq('status', 'approved');
-        
-        if (uploadCount >= 10) {
-           return true; 
-        }
-      } catch (e) {
-        debugPrint('Failed to check upload count for auto-premium: $e');
-      }
-
       final res = await _supabase
           .from('users')
           .select('subscription_end_date, subscription_tier')
           .eq('email', email)
           .maybeSingle(); 
       
-      if (res == null) return false;
+      bool isPaidPremium = false;
+      String? paidTier;
+      String? premiumUntilStr;
       
-      final premiumUntilStr = res['subscription_end_date'];
-      if (premiumUntilStr == null) return false;
+      if (res != null) {
+        premiumUntilStr = res['subscription_end_date'];
+        paidTier = res['subscription_tier'] as String?;
+        if (premiumUntilStr != null) {
+          final premiumUntil = DateTime.parse(premiumUntilStr);
+          final now = DateTime.now();
+          final premiumUntilUtc = premiumUntil.isUtc ? premiumUntil : premiumUntil.toUtc();
+          final nowUtc = now.isUtc ? now : now.toUtc();
+          isPaidPremium = premiumUntilUtc.isAfter(nowUtc);
+        }
+      }
+
+      // Auto-unlock Premium for active contributors (>= 10 approved uploads)
+      if (!isPaidPremium) {
+        try {
+          final response = await _supabase
+              .from('resources')
+              .select('id')
+              .eq('uploaded_by_email', email)
+              .eq('status', 'approved')
+              .count(CountOption.exact);
+          
+          final uploadCount = response.count;
+
+          if (uploadCount >= 10) {
+             final prefs = await SharedPreferences.getInstance();
+             await prefs.setString('premium_email', email);
+             await prefs.setString('premium_tier', 'pro');
+             await prefs.setString('premium_until', DateTime.now().add(const Duration(days: 30)).toUtc().toIso8601String());
+             return true; 
+          }
+        } catch (e) {
+          debugPrint('Failed to check upload count for auto-premium: $e');
+        }
+        return false;
+      }
 
       // Sync tier to local cache
-      final tier = res['subscription_tier'] as String?;
       final prefs = await SharedPreferences.getInstance();
-      
-      if (tier != null) {
-        // Map backend tier to local usage if needed, or just store it
-        await prefs.setString('premium_tier', tier);
+      if (paidTier != null) {
+        await prefs.setString('premium_tier', paidTier);
       }
       await prefs.setString('premium_email', email);
       
       // Sync expiry to local cache
-      await prefs.setString('premium_until', premiumUntilStr);
-
-      final premiumUntil = DateTime.parse(premiumUntilStr);
-      final now = DateTime.now();
+      await prefs.setString('premium_until', premiumUntilStr!);
       
-      // Handle timezone explicitly to avoid confusion
-      final premiumUntilUtc = premiumUntil.isUtc ? premiumUntil : premiumUntil.toUtc();
-      final nowUtc = now.isUtc ? now : now.toUtc();
-      
-      return premiumUntilUtc.isAfter(nowUtc);
+      return true;
     } catch (e) {
       debugPrint('Check Premium Critical Error: $e');
       return false;
@@ -235,11 +246,14 @@ class SubscriptionService {
       final prefs = await SharedPreferences.getInstance();
       
       // Set Plan
+      String newTier = 'pro';
       if (_pendingPlanId != null) {
-        await prefs.setString('premium_tier', _pendingPlanId!);
+         newTier = (_pendingPlanId == 'quarterly' || _pendingPlanId == 'max') ? 'max' : 'pro';
       } else if (result.containsKey('plan')) {
-         await prefs.setString('premium_tier', result['plan']);
+         newTier = (result['plan'] == 'quarterly' || result['plan'] == 'max') ? 'max' : 'pro';
       }
+      await prefs.setString('premium_tier', newTier);
+
       final email = _firebaseAuth.currentUser?.email;
       if (email != null) {
         await prefs.setString('premium_email', email);
@@ -247,18 +261,10 @@ class SubscriptionService {
 
       // Calculate new expiry date locally to allow immediate access
       final now = DateTime.now().toUtc();
-      late DateTime newExpiry;
-      
-      // Use pending plan ID for calculation, default to monthly if unknown
-      final plan = _pendingPlanId ?? result['subscription_tier'] ?? 'monthly';
-      
-      if (plan == 'quarterly' || plan == 'max') {
-        newExpiry = now.add(const Duration(days: 90));
-        await prefs.setString('premium_tier', 'max');
-      } else {
-        newExpiry = now.add(const Duration(days: 30));
-        await prefs.setString('premium_tier', 'pro');
-      }
+      final newExpiry = (newTier == 'max') 
+          ? now.add(const Duration(days: 90))
+          : now.add(const Duration(days: 30));
+          
       
       await prefs.setString('premium_until', newExpiry.toIso8601String());
       debugPrint('Success: Subscription activated locally until $newExpiry');

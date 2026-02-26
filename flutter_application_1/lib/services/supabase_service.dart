@@ -1806,21 +1806,10 @@ class SupabaseService {
 
     try {
       // Sync with users target array
-      final userRes = await _client
-          .from('users')
-          .select('followed_departments')
-          .eq('email', normalizedEmail)
-          .maybeSingle();
-      if (userRes != null) {
-        final currentList = userRes['followed_departments'] as List<dynamic>? ?? [];
-        if (!currentList.contains(departmentId)) {
-          final updatedList = List<dynamic>.from(currentList)..add(departmentId);
-          await _client
-              .from('users')
-              .update({'followed_departments': updatedList})
-              .eq('email', normalizedEmail);
-        }
-      }
+      await _client.rpc(
+        'add_followed_department',
+        params: {'user_email': normalizedEmail, 'dept_id': departmentId},
+      );
     } catch (e) {
       debugPrint('Error syncing followed_departments array: $e');
     }
@@ -1913,21 +1902,10 @@ class SupabaseService {
 
     try {
       // Sync with users target array
-      final userRes = await _client
-          .from('users')
-          .select('followed_departments')
-          .eq('email', normalizedEmail)
-          .maybeSingle();
-      if (userRes != null) {
-        final currentList = userRes['followed_departments'] as List<dynamic>? ?? [];
-        if (currentList.contains(departmentId)) {
-          final updatedList = List<dynamic>.from(currentList)..remove(departmentId);
-          await _client
-              .from('users')
-              .update({'followed_departments': updatedList})
-              .eq('email', normalizedEmail);
-        }
-      }
+      await _client.rpc(
+        'remove_followed_department',
+        params: {'user_email': normalizedEmail, 'dept_id': departmentId},
+      );
     } catch (e) {
       debugPrint('Error syncing followed_departments array: $e');
     }

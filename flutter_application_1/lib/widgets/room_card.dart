@@ -3,6 +3,8 @@ import '../config/theme.dart';
 import '../screens/chatroom/chatroom_screen.dart';
 
 class RoomCard extends StatelessWidget {
+  static const String _defaultRoomName = 'Unnamed Room';
+
   final Map<String, dynamic> room;
   final String userEmail;
   final String collegeDomain;
@@ -36,7 +38,7 @@ class RoomCard extends StatelessWidget {
         MaterialPageRoute(
           builder: (context) => ChatRoomScreen(
             roomId: roomId,
-            roomName: room['name'] ?? 'Untitled',
+            roomName: room['name'] ?? _defaultRoomName,
             description: room['description'] ?? '',
             userEmail: userEmail,
             collegeDomain: collegeDomain,
@@ -80,7 +82,7 @@ class RoomCard extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      room['name'] ?? 'Unnamed Room',
+                      room['name'] ?? _defaultRoomName,
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 14,

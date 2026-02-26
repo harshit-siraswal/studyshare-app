@@ -163,7 +163,8 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
         }
       }
     } catch (e) {
-      _showFeedback('Error updating bookmark: $e');
+      debugPrint('Error updating bookmark: $e');
+      _showError('Unable to update bookmark');
     }
   }
 
@@ -267,7 +268,8 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
         );
       }
     } catch (e) {
-      _showFeedback('Failed to post comment: $e');
+      debugPrint('Failed to post comment: $e');
+      _showError('Failed to post comment. Please try again.');
     } finally {
       if (mounted) setState(() => _isPosting = false);
     }
@@ -278,6 +280,17 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
+
+  void _showError(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: AppTheme.error,
+        ),
+      );
     }
   }
 
@@ -418,7 +431,8 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
         XFile(file.path),
       ], text: 'Check out this notice on MyStudySpace!');
     } catch (e) {
-      _showFeedback('Failed to generate image: $e');
+      debugPrint('Failed to generate image: $e');
+      _showError('Failed to generate image');
     }
   }
 
@@ -498,12 +512,12 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                       }
                       final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
                       if (!launched && mounted) {
-                        _showFeedback('Could not open: ${link.url}');
+                        _showError('Could not open link');
                       }
                     } catch (e) {
                       debugPrint('Failed to launch URL: $e');
                       if (mounted) {
-                        _showFeedback('Unable to open link');
+                        _showError('Unable to open link');
                       }
                     }
                   },
