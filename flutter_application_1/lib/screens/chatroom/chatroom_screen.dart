@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -244,8 +247,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
 
   String _getAnonymizedUserId() {
     // Create a deterministic non-PII identifier from email hash
-    final hash = widget.userEmail.hashCode.abs();
-    return 'user_$hash';
+    final bytes = utf8.encode(widget.userEmail + "_room_salt_${widget.roomId}");
+    final digest = sha256.convert(bytes);
+    return 'user_${digest.toString().substring(0, 12)}';
   }
 
   Future<void> _retryPresenceSubscription() async {
@@ -707,7 +711,21 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       itemCount: displayPosts.length,
       itemBuilder: (context, index) {
         final post = displayPosts[index];
-        return _buildPostCard(post, isDark);
+        return TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0.0, end: 1.0),
+          duration: Duration(milliseconds: 400 + (index * 50).clamp(0, 400)),
+          curve: Curves.easeOutCubic,
+          builder: (context, value, child) {
+            return Transform.translate(
+              offset: Offset(0, 30 * (1 - value)),
+              child: Opacity(
+                opacity: value,
+                child: child,
+              ),
+            );
+          },
+          child: _buildPostCard(post, isDark),
+        );
       },
     );
   }
@@ -785,34 +803,43 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            GestureDetector(
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => UserProfileScreen(
-                      userEmail: post['author_email'] ?? '',
-                      userName: authorName,
-                      userPhotoUrl: post['author_photo_url'],
+            Builder(
+              builder: (context) {
+                final String? photoUrl = post['author_photo_url']?.toString();
+                final bool hasPhoto = photoUrl != null && photoUrl.trim().isNotEmpty;
+                return GestureDetector(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => UserProfileScreen(
+                          userEmail: post['author_email'] ?? '',
+                          userName: authorName,
+                          userPhotoUrl: photoUrl,
+                        ),
+                      ),
+                    );
+                  },
+                  child: CircleAvatar(
+                    radius: 18,
+                    backgroundColor: const Color(0xFF1D4ED8),
+                    backgroundImage: hasPhoto
+                        ? NetworkImage(photoUrl)
+                        : null,
+                    onBackgroundImageError: hasPhoto
+                        ? (e, st) => debugPrint('Avatar image load failed for $photoUrl: $e')
+                        : null,
+                    child: hasPhoto ? null : Text(
+                      authorInitial,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                 );
-              },
-              child: CircleAvatar(
-                radius: 18,
-                backgroundColor: const Color(0xFF1D4ED8),
-                backgroundImage: post['author_photo_url'] != null && post['author_photo_url'].toString().trim().isNotEmpty 
-                    ? NetworkImage(post['author_photo_url']) 
-                    : null,
-                child: post['author_photo_url'] == null || post['author_photo_url'].toString().trim().isEmpty ? Text(
-                  authorInitial,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ) : null,
-              ),
+              }
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -1159,7 +1186,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
               Navigator.pop(dialogCtx);
 
               try {
-                final reporterId = AuthService().currentUser?.uid ?? 'unknown';
+                final currentUser = _authService.currentUser;
+                final reporterId = currentUser?.uid;
+                if (reporterId == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please sign in to report posts.')),
+                  );
+                  return;
+                }
 
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Submitting report...')),

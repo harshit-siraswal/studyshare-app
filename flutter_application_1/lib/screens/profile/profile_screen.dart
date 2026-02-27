@@ -16,6 +16,8 @@ import '../../services/subscription_service.dart';
 import 'settings_screen.dart';
 import 'explore_students_screen.dart';
 import 'saved_posts_screen.dart';
+import '../../models/user.dart';
+import '../../widgets/animated_counter.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String collegeName;
@@ -48,6 +50,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _profilePhotoUrl;
   String? _profileDisplayName;
   String? _profileBio;
+  String? _profileSemester;
+  String? _profileBranch;
+  String? _profileAdminKey;
+  String _profileRole = AppRoles.readOnly;
 
   // Real stats
   int _uploadCount = 0;
@@ -80,6 +86,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _profileDisplayName = profile['display_name']?.toString();
         _profilePhotoUrl = profile['profile_photo_url']?.toString();
         _profileBio = profile['bio']?.toString();
+        _profileSemester = profile['semester']?.toString();
+        _profileBranch = profile['branch']?.toString();
+        _profileAdminKey = profile['admin_key']?.toString();
+        final roleStr = profile['role']?.toString() ?? '';
+        _profileRole = AppRoles.validRoles.contains(roleStr) ? roleStr : AppRoles.readOnly;
         _profileLoading = false;
       });
     } catch (_) {
@@ -368,6 +379,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             initialName: _displayName,
                             initialPhotoUrl: _photoUrl,
                             initialBio: _profileBio,
+                            initialSemester: _profileSemester,
+                            initialBranch: _profileBranch,
+                            role: _profileRole,
+                            initialAdminKey: _profileAdminKey,
                           ),
                         ),
                       );
@@ -395,8 +410,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 16),
-            Row(
+          const SizedBox(height: 16),
+          TweenAnimationBuilder<double>(
+            tween: Tween<double>(begin: 0.0, end: 1.0),
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.easeOutCubic,
+            builder: (context, value, child) {
+              return Transform.translate(
+                offset: Offset(-20 * (1 - value), 0),
+                child: Opacity(opacity: value, child: child),
+              );
+            },
+            child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
@@ -454,11 +479,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 4),
-            Text(
-              '@${_profileDisplayName?.replaceAll(" ", "").toLowerCase() ?? "user"}',
-              style: GoogleFonts.inter(fontSize: 14, color: subTextColor),
-            ),
+          ),
+          TweenAnimationBuilder<double>(
+              tween: Tween<double>(begin: 0.0, end: 1.0),
+              duration: const Duration(milliseconds: 600),
+              curve: Curves.easeOutCubic,
+              builder: (context, value, child) {
+                return Transform.translate(
+                  offset: Offset(0, 20 * (1 - value)),
+                  child: Opacity(opacity: value, child: child),
+                );
+              },
+              child: Column(
+                children: [
+                  const SizedBox(height: 4),
+                  Text(
+                    '@${_profileDisplayName?.replaceAll(" ", "").toLowerCase() ?? "user"}',
+                    style: GoogleFonts.inter(fontSize: 14, color: subTextColor),
+                  ),
             const SizedBox(height: 4),
             Text(
               _authService.userEmail ?? '', // Show Email
@@ -470,6 +508,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(fontSize: 14, color: subTextColor),
             ),
+            const SizedBox(height: 8),
+            if ((_profileSemester != null && _profileSemester!.isNotEmpty) ||
+                (_profileBranch != null && _profileBranch!.isNotEmpty))
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.school_outlined, size: 16, color: AppTheme.primary),
+                    const SizedBox(width: 6),
+                    Text(
+                      [
+                        if (_profileBranch != null && _profileBranch!.isNotEmpty) _profileBranch,
+                        if (_profileSemester != null && _profileSemester!.isNotEmpty) 'Sem $_profileSemester',
+                      ].join(' • '),
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             if (_profileBio != null && _profileBio!.isNotEmpty) ...[
               const SizedBox(height: 12),
               Padding(
@@ -481,10 +549,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
             ],
-          ],
-        );
-      },
+            ],
+          ),
+        ),
+      ],
     );
+  },
+);
   }
 
   Widget _buildStatsRow(Color textColor, Color subTextColor) {
@@ -547,8 +618,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
       onTap: onTap,
       child: Column(
         children: [
-          Text(
-            value,
+          AnimatedCounter(
+            count: int.tryParse(value) ?? 0,
             style: GoogleFonts.inter(
               fontSize: 18,
               fontWeight: FontWeight.bold,

@@ -936,8 +936,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       physics: const NeverScrollableScrollPhysics(),
       itemCount: _comments.length,
       separatorBuilder: (_, index) => const SizedBox(height: 12),
-      itemBuilder: (context, index) =>
-          _buildCommentCard(_comments[index], isDark),
+      itemBuilder: (context, index) {
+        return _buildCommentCard(_comments[index], isDark);
+      },
     );
   }
 
@@ -1368,7 +1369,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogCtx),
             child: Text(
               'Cancel',
               style: GoogleFonts.inter(color: Colors.white60),
@@ -1428,7 +1429,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   );
                 }
               } finally {
-                if (mounted) {
+                if (mounted && dialogCtx.mounted) {
                   Navigator.pop(dialogCtx); // Close dialog
                 }
               }

@@ -1,0 +1,30 @@
+﻿              style: GoogleFonts.inter(fontSize: 16, color: AppTheme.textMuted),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Download notes to access them offline',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: AppTheme.textMuted.withValues(alpha: 0.7),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: _downloadedResources.length,
+      itemBuilder: (context, index) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: ResourceCard(
+            resource: _downloadedResources[index],
+            userEmail: widget.userEmail,
+          ),
+        );
+      },
+    );
+  }
+}

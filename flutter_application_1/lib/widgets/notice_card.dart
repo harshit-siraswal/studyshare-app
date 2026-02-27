@@ -114,7 +114,15 @@ class _NoticeCardState extends State<NoticeCard> {
         ? rawCount
         : int.tryParse(rawCount?.toString() ?? '');
 
-    return Container(
+    return Hero(
+      tag: 'notice_card_${widget.notice['id']}',
+      flightShuttleBuilder: (flightContext, animation, flightDirection, fromHeroContext, toHeroContext) {
+        return Material(
+          color: Colors.transparent,
+          child: toHeroContext.widget,
+        );
+      },
+      child: Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
         color: cardColor,
@@ -391,6 +399,7 @@ class _NoticeCardState extends State<NoticeCard> {
           ),
         ),
       ),
+      ),
     );
   }
 
@@ -546,8 +555,9 @@ class _NoticeCardState extends State<NoticeCard> {
         ], text: 'Check out this notice on MyStudySpace!');
       } finally {
         // Delay deletion to avoid Android race condition
-        Future.delayed(const Duration(seconds: 2), () {
-          try { file.deleteSync(); } catch (_) {}
+        const shareCleanupDelay = Duration(seconds: 8);
+        Future.delayed(shareCleanupDelay, () async {
+          try { await file.delete(); } catch (_) {}
         });
       }
     } catch (e) {

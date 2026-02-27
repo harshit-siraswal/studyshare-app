@@ -36,12 +36,16 @@ class BackendApiService {
     String path, {
     String method = 'GET',
     Map<String, dynamic>? body,
+    Map<String, String>? customHeaders,
   }) async {
     final token = await _getIdToken();
     final headers = <String, String>{
       'Content-Type': 'application/json',
       if (token != null) 'Authorization': 'Bearer $token',
     };
+    if (customHeaders != null) {
+      headers.addAll(customHeaders);
+    }
 
     Map<String, dynamic>? effectiveBody = body == null
         ? null
@@ -470,28 +474,59 @@ class BackendApiService {
 
   Future<Map<String, dynamic>> updateProfile({
     String? displayName,
-    String? username,
     String? bio,
     String? profilePhotoUrl,
-    String? college,
-    String? branch,
+    String? collegeId,
     String? semester,
+    String? branch,
+    String? adminKey,
     required BuildContext context,
   }) async {
+    final payload = <String, dynamic>{};
+    if (displayName != null) payload['display_name'] = displayName;
+    if (bio != null) payload['bio'] = bio;
+    if (profilePhotoUrl != null) payload['profile_photo_url'] = profilePhotoUrl;
+    if (collegeId != null) payload['college_id'] = collegeId;
+    if (semester != null) payload['semester'] = semester;
+    if (branch != null) payload['branch'] = branch;
+
+    final customHeaders = <String, String>{};
+    if (adminKey != null && adminKey.isNotEmpty) {
+      customHeaders['X-Admin-Key'] = adminKey;
+    }
+
     return _requestJson(
-      '/api/users/profile',
+      '/api/profile',
       method: 'PUT',
-      body: {
-        if (displayName != null) 'display_name': displayName,
-        if (username != null) 'username': username,
-        if (bio != null) 'bio': bio,
-        if (profilePhotoUrl != null) 'profile_photo_url': profilePhotoUrl,
-        if (college != null) 'college': college,
-        if (branch != null) 'branch': branch,
-        if (semester != null) 'semester': semester,
-      },
+      body: payload,
+      customHeaders: customHeaders.isEmpty ? null : customHeaders,
     );
   }
+
+  Future<Map<String, dynamic>> updateResourceStatus({
+    required String resourceId,
+    required String status,
+    required String adminKey,
+    required BuildContext context,
+  }) async {
+    const allowedStatuses = {'approved', 'rejected', 'pending'};
+    final normalizedStatus = status.toLowerCase();
+    if (!allowedStatuses.contains(normalizedStatus)) {
+      throw ArgumentError('Invalid status: $status. Must be one of $allowedStatuses');
+    }
+
+    return _requestJson(
+      '/api/admin',
+      method: 'POST',
+      body: {
+        'action': 'update_resource_status',
+        'admin_key': adminKey,
+        'resource_id': resourceId,
+        'new_status': normalizedStatus,
+      }
+    );
+  }
+
 
   // ----------------------------
   // Payments

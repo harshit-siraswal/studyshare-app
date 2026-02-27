@@ -7,11 +7,13 @@ import '../../config/theme.dart';
 class PDFViewerScreen extends StatefulWidget {
   final String url;
   final String title;
+  final String? resourceId;
 
   const PDFViewerScreen({
     super.key,
     required this.url,
     required this.title,
+    this.resourceId,
   });
 
   @override
@@ -129,19 +131,40 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
             ),
         ],
       ),
-      body: SfPdfViewer.network(
-        widget.url,
-        key: _pdfViewerKey,
-        controller: _pdfViewerController,
-        onDocumentLoaded: (PdfDocumentLoadedDetails details) {
-          debugPrint('PDF Loaded: ${details.document.pages.count} pages');
-        },
-        onDocumentLoadFailed: (PdfDocumentLoadFailedDetails details) {
-          debugPrint('PDF Load Failed: ${details.error}');
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to load PDF: ${details.description}')),
-          );
-        },
+      body: Stack(
+        children: [
+          Hero(
+            tag: widget.resourceId != null ? 'resource_card_${widget.resourceId}' : 'pdf_viewer_${widget.url}',
+            flightShuttleBuilder: (flightContext, _, __, ___, ____) {
+              return Material(
+                color: Theme.of(flightContext).scaffoldBackgroundColor,
+                borderRadius: BorderRadius.circular(12),
+                child: const Center(
+                  child: SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              );
+            },
+            child: const SizedBox.expand(),
+          ),
+          SfPdfViewer.network(
+            widget.url,
+            key: _pdfViewerKey,
+            controller: _pdfViewerController,
+            onDocumentLoaded: (PdfDocumentLoadedDetails details) {
+              debugPrint('PDF Loaded: ${details.document.pages.count} pages');
+            },
+            onDocumentLoadFailed: (PdfDocumentLoadFailedDetails details) {
+              debugPrint('PDF Load Failed: ${details.error}');
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Failed to load PDF: ${details.description}')),
+              );
+            },
+          ),
+        ],
       ),
     );
   }

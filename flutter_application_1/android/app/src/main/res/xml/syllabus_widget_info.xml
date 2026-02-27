@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="200dp"
+    android:minHeight="100dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/syllabus_widget_layout"
+    android:resizeMode="horizontal|vertical"
+    android:previewImage="@drawable/syllabus_widget_preview"
+    android:description="@string/widget_description_syllabus"
+    android:widgetCategory="home_screen">
+</appwidget-provider>

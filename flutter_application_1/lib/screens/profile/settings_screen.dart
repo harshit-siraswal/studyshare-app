@@ -25,6 +25,10 @@ class SettingsScreen extends StatefulWidget {
   final String? photoUrl;
   final String? bio;
   final ThemeProvider themeProvider;
+  final String userRole;
+  final String? semester;
+  final String? branch;
+  final String? adminKey;
 
   const SettingsScreen({
     super.key,
@@ -34,6 +38,10 @@ class SettingsScreen extends StatefulWidget {
     this.photoUrl,
     this.bio,
     required this.themeProvider,
+    this.userRole = 'READ_ONLY',
+    this.semester,
+    this.branch,
+    this.adminKey,
   });
 
   @override
@@ -63,17 +71,35 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    final isPremium = await _subscriptionService.isPremium();
-    final packageInfo = await PackageInfo.fromPlatform();
-    
-    if (mounted) {
-      setState(() {
-        _notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
-        _isPremium = isPremium;
-        _appVersion = packageInfo.version;
-        _isLoading = false;
-      });
+    try {
+      final (prefs, isPremium, packageInfo) = await (
+        SharedPreferences.getInstance().then<SharedPreferences?>((v) => v).catchError((e, st) {
+          debugPrint('Error loading SharedPreferences: $e\n$st');
+          return null;
+        }),
+        _subscriptionService.isPremium().then<bool?>((v) => v).catchError((e, st) {
+          debugPrint('Error loading premium status: $e\n$st');
+          return null;
+        }),
+        PackageInfo.fromPlatform().then<PackageInfo?>((v) => v).catchError((e, st) {
+          debugPrint('Error loading package info: $e\n$st');
+          return null;
+        }),
+      ).wait;
+
+      if (mounted) {
+        setState(() {
+          if (prefs != null) {
+            _notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
+          }
+          if (isPremium != null) _isPremium = isPremium;
+          if (packageInfo != null) _appVersion = packageInfo.version;
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -107,10 +133,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SnackBar(content: Text('Cache cleared successfully')),
         );
       }
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('Clear cache failed: $e\n$st');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to clear cache: $e')),
+          const SnackBar(content: Text('Failed to clear cache. Please try again.')),
         );
       }
     }
@@ -245,6 +272,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           initialName: _displayName ?? '',
                           initialPhotoUrl: _photoUrl,
                           initialBio: _bio,
+                          role: widget.userRole,
+                          initialSemester: widget.semester,
+                          initialBranch: widget.branch,
+                          initialAdminKey: widget.adminKey,
                         ),
                       ),
                     );
@@ -310,11 +341,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         value: isDark,
                         activeTrackColor: AppTheme.primary,
                         onChanged: (val) {
-                          final box = switchContext.findRenderObject() as RenderBox?;
-                          final offset = box != null 
-                              ? box.localToGlobal(box.size.center(Offset.zero)) 
-                              : Offset(MediaQuery.of(context).size.width - _kSwitchFallbackOffsetRight, MediaQuery.of(context).size.height / 2);
-                          
                           animateThemeTransition(context, () {
                             themeProvider.toggleTheme();
                           });

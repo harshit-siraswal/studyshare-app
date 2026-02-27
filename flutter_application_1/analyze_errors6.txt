@@ -1,0 +1,16 @@
+﻿
+  error - Expected to 
+find ']' - lib\screens\
+profile\profile_screen.
+dart:553:11 - 
+expected_token
+  error - The method 
+'_DepartmentCard3D' 
+isn't defined for the 
+type 
+'_StudyScreenState' - l
+ib\screens\study\study_
+screen.dart:749:12 - 
+undefined_method
+
+

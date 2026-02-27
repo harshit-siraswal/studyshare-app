@@ -1,0 +1,10 @@
+﻿          padding: const EdgeInsets.only(bottom: 10),
+          child: ResourceCard(
+            resource: _downloadedResources[index],
+            userEmail: widget.userEmail,
+          ),
+        );
+      },
+    );
+  }
+}

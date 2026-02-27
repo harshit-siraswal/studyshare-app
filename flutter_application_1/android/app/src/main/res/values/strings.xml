@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_title_recent_notices">Recent Notices</string>
+    <string name="widget_message_loading">Loading...</string>
+    <string name="widget_title_syllabus">Syllabus</string>
+    <string name="widget_description_syllabus">Shows latest syllabus updates</string>
+</resources>

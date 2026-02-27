@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
@@ -7,6 +9,8 @@ import 'department_account_screen.dart' as dept_screen;
 import '../../widgets/notice_card.dart';
 import '../../models/department_account.dart';
 import '../../widgets/branded_loader.dart';
+import '../../services/home_widget_service.dart';
+import '../../models/notice.dart';
 import 'package:intl/intl.dart';
 import 'dart:math' as math;
 
@@ -406,6 +410,25 @@ class _NoticesScreenState extends State<NoticesScreen>
           _isLoading = false;
         });
       }
+      
+      // Sync the latest unfiltered notices to the home screen widget
+      final List<Notice> noticeObjs = [];
+      int failCount = 0;
+      for (final n in notices) {
+        try {
+          noticeObjs.add(Notice.fromJson(n));
+        } catch (e) {
+          failCount++;
+          debugPrint('Notice.fromJson skipped malformed entry: $e');
+        }
+      }
+      if (failCount > 0) {
+        debugPrint('Widget sync: $failCount notice(s) skipped due to parse errors');
+      }
+      unawaited(HomeWidgetService.instance.syncNotices(noticeObjs).catchError((e) {
+        debugPrint('HomeWidget sync failed: $e');
+        return false;
+      }));
     } catch (e) {
       debugPrint('Error loading notices: $e');
       if (mounted) setState(() => _isLoading = false);

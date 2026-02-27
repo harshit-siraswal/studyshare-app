@@ -39,6 +39,7 @@ import 'utils/app_navigator.dart';
 import 'utils/theme_animator.dart';
 import 'services/supabase_service.dart';
 import 'models/department_account.dart';
+import 'services/home_widget_service.dart';
 
 String? _getCollegeIdFromPrefs(SharedPreferences prefs) {
   try {
@@ -310,6 +311,14 @@ class _AppRootState extends State<AppRoot> {
             await DownloadService().init();
           } catch (e) {
             debugPrint('DownloadService initialization error: $e');
+          }
+        }(),
+        // 5. HomeWidgetService
+        () async {
+          try {
+            await HomeWidgetService.instance.initialize();
+          } catch (e) {
+            debugPrint('HomeWidgetService initialization error: $e');
           }
         }(),
       ]);

@@ -24,6 +24,9 @@ class AppUser {
   final String? profilePhotoUrl;
   final String? college;
   final String? bio;
+  final String? semester;
+  final String? branch;
+  final String? adminKey;
   final String role; // READ_ONLY, COLLEGE_USER, MODERATOR, ADMIN, TEACHER
   final DateTime createdAt;
 
@@ -35,6 +38,9 @@ class AppUser {
     this.profilePhotoUrl,
     this.college,
     this.bio,
+    this.semester,
+    this.branch,
+    this.adminKey,
     this.role = AppRoles.readOnly,
     required this.createdAt,
   });
@@ -58,6 +64,9 @@ class AppUser {
       profilePhotoUrl: json['profile_photo_url'],
       college: json['college'],
       bio: json['bio'],
+      semester: json['semester']?.toString(),
+      branch: json['branch']?.toString(),
+      adminKey: json['admin_key']?.toString(),
       role: () {
         final r = json['role']?.toString();
         if (r != null && AppRoles.validRoles.contains(r)) {
@@ -87,6 +96,9 @@ class AppUser {
       'profile_photo_url': profilePhotoUrl,
       'college': college,
       'bio': bio,
+      'semester': semester,
+      'branch': branch,
+      'admin_key': adminKey,
       'role': role,
       'created_at': createdAt.toIso8601String(),
     };

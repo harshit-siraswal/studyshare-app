@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="splash_background">#06120D</color>
+    <color name="widget_background">#1E1E1E</color>
+    <color name="widget_title_text_color">#FFFFFF</color>
+    <color name="widget_message_text_color">#AAAAAA</color>
 </resources>

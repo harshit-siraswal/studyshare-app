@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter/foundation.dart';
+import 'package:shimmer/shimmer.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/theme.dart';
 import '../models/resource.dart';
@@ -16,12 +17,18 @@ class ResourceCard extends StatefulWidget {
   final Resource resource;
   final String userEmail;
   final VoidCallback? onVoteChanged;
+  final bool showModerationControls;
+  final VoidCallback? onApprove;
+  final VoidCallback? onReject;
 
   const ResourceCard({
     super.key,
     required this.resource,
     required this.userEmail,
     this.onVoteChanged,
+    this.showModerationControls = false,
+    this.onApprove,
+    this.onReject,
   });
 
   @override
@@ -35,6 +42,7 @@ class _ResourceCardState extends State<ResourceCard> {
   int? _userVote;
   bool _isBookmarked = false;
   bool _isVoting = false;
+  bool _isPressed = false;
 
   @override
   void initState() {
@@ -313,23 +321,43 @@ class _ResourceCardState extends State<ResourceCard> {
     // But we need to update _getTypeIcon and _getTypeColor below
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Material(
-      color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: _openResource,
+    return AnimatedScale(
+      scale: _isPressed ? 0.97 : 1.0,
+      duration: const Duration(milliseconds: 100),
+      curve: Curves.easeOutCubic,
+      child: Hero(
+        tag: 'resource_card_${widget.resource.id}',
+        flightShuttleBuilder: (context, animation, flightDirection, fromContext, toContext) {
+          return Material(
+            color: Colors.transparent,
+            child: toContext.widget,
+          );
+        },
+        child: Material(
+          color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
         borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          onTap: _openResource,
+          onHighlightChanged: (isHighlighted) {
+            setState(() => _isPressed = isHighlighted);
+          },
+          borderRadius: BorderRadius.circular(12),
         child: Container(
-          padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
             ),
           ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
             children: [
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
               // Type Icon
               Container(
                 width: 48,
@@ -395,22 +423,45 @@ class _ResourceCardState extends State<ResourceCard> {
                               ),
                               borderRadius: BorderRadius.circular(6),
                             ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.school_rounded, size: 10, color: Colors.white),
-                                const SizedBox(width: 3),
-                                Text(
-                                  'TEACHER',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.white,
-                                    letterSpacing: 0.5,
+                            child: MediaQuery.of(context).disableAnimations
+                            ? Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.school_rounded, size: 10, color: Colors.white),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    'TEACHER',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.white,
+                                      letterSpacing: 0.5,
+                                    ),
                                   ),
+                                ],
+                              )
+                            : Shimmer.fromColors(
+                                baseColor: Colors.white,
+                                highlightColor: Colors.white.withOpacity(0.4),
+                                period: const Duration(seconds: 3),
+                                loop: 3,
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.school_rounded, size: 10, color: Colors.white),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      'TEACHER',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w700,
+                                        color: Colors.white,
+                                        letterSpacing: 0.5,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ],
-                            ),
+                              ),
                           ),
                       ],
                     ),
@@ -461,18 +512,33 @@ class _ResourceCardState extends State<ResourceCard> {
                                   padding: const EdgeInsets.symmetric(
                                     horizontal: 6,
                                   ),
-                                  child: Text(
-                                    _netVotes > 0
-                                        ? '+$_netVotes'
-                                        : '$_netVotes',
-                                    style: GoogleFonts.inter(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w600,
-                                      color: _netVotes > 0
-                                          ? AppTheme.success
-                                          : _netVotes < 0
-                                          ? AppTheme.error
-                                          : AppTheme.textMuted,
+                                  child: AnimatedSwitcher(
+                                    duration: const Duration(milliseconds: 300),
+                                    transitionBuilder: (child, animation) {
+                                      return ScaleTransition(
+                                        scale: Tween<double>(begin: 0.8, end: 1.0).animate(
+                                          CurvedAnimation(parent: animation, curve: Curves.elasticOut),
+                                        ),
+                                        child: FadeTransition(
+                                          opacity: animation,
+                                          child: child,
+                                        ),
+                                      );
+                                    },
+                                    child: Text(
+                                      _netVotes > 0
+                                          ? '+$_netVotes'
+                                          : '$_netVotes',
+                                      key: ValueKey<int>(_netVotes),
+                                      style: GoogleFonts.inter(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: _netVotes > 0
+                                            ? AppTheme.success
+                                            : _netVotes < 0
+                                            ? AppTheme.error
+                                            : AppTheme.textMuted,
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -495,14 +561,26 @@ class _ResourceCardState extends State<ResourceCard> {
                               onTap: _toggleBookmark,
                               child: Padding(
                                 padding: const EdgeInsets.all(8.0),
-                                child: Icon(
-                                  _isBookmarked
-                                      ? Icons.bookmark
-                                      : Icons.bookmark_border,
-                                  size: 20,
-                                  color: _isBookmarked
-                                      ? AppTheme.warning
-                                      : AppTheme.textMuted,
+                                child: AnimatedSwitcher(
+                                  duration: const Duration(milliseconds: 400),
+                                  transitionBuilder: (child, animation) {
+                                    return ScaleTransition(
+                                      scale: Tween<double>(begin: 0.3, end: 1.0).animate(
+                                        CurvedAnimation(parent: animation, curve: Curves.elasticOut),
+                                      ),
+                                      child: child,
+                                    );
+                                  },
+                                  child: Icon(
+                                    _isBookmarked
+                                        ? Icons.bookmark
+                                        : Icons.bookmark_border,
+                                    key: ValueKey<bool>(_isBookmarked),
+                                    size: 20,
+                                    color: _isBookmarked
+                                        ? AppTheme.warning
+                                        : AppTheme.textMuted,
+                                  ),
                                 ),
                               ),
                             ),
@@ -554,6 +632,72 @@ class _ResourceCardState extends State<ResourceCard> {
             ],
           ),
         ),
+        if (widget.showModerationControls) _buildModerationFooter(context, isDark),
+              ],
+            ),
+          ),
+        ),
+      ),
+      ),
+    );
+  }
+
+  Widget _buildModerationFooter(BuildContext context, bool isDark) {
+    final rejectColor = widget.onReject == null
+        ? Theme.of(context).disabledColor
+        : AppTheme.error;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(12)),
+        border: Border(
+          top: BorderSide(
+            color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+            width: 1,
+          ),
+        ),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: [
+          TextButton.icon(
+            onPressed: widget.onApprove,
+            icon: const Icon(Icons.check, color: AppTheme.success),
+            label: Text('Approve', style: GoogleFonts.inter(color: AppTheme.success)),
+          ),
+          TextButton.icon(
+            onPressed: widget.onReject == null 
+                ? null 
+                : () {
+                    showDialog(
+                      context: context,
+                      builder: (BuildContext dialogContext) {
+                        return AlertDialog(
+                          title: Text('Reject Resource', style: GoogleFonts.inter()),
+                          content: const Text('Are you sure you want to reject this resource?'),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(dialogContext),
+                              child: const Text('Cancel'),
+                            ),
+                            TextButton(
+                              onPressed: () {
+                                Navigator.pop(dialogContext);
+                                widget.onReject!();
+                              },
+                              child: Text('Reject', style: GoogleFonts.inter(color: AppTheme.error)),
+                            ),
+                          ],
+                        );
+                      },
+                    );
+                  },
+            icon: Icon(Icons.close, color: rejectColor),
+            label: Text('Reject', style: GoogleFonts.inter(color: rejectColor)),
+          ),
+        ],
       ),
     );
   }

@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -687,23 +688,37 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
 
   Widget _buildMessageBubble(AIChatMessage msg, bool isDark) {
     final bgColor = msg.isUser
-        ? AppTheme.primary.withValues(alpha: isDark ? 0.35 : 0.2)
-        : (isDark ? AppTheme.darkCard : Colors.white);
+        ? (isDark ? AppTheme.iosBlueDark : AppTheme.iosBlueLight)
+        : (isDark ? AppTheme.iosBubbleDark : AppTheme.iosBubbleLight);
     final textColor = msg.isUser
-        ? (isDark ? Colors.white : AppTheme.darkTextPrimary)
-        : (isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary);
+        ? Colors.white
+        : (isDark ? Colors.white : Colors.black);
 
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      padding: const EdgeInsets.all(12),
+      margin: EdgeInsets.only(
+        top: 6,
+        bottom: 6,
+        left: msg.isUser ? 48 : 0,
+        right: msg.isUser ? 0 : 48,
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         color: bgColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: msg.isUser
-              ? Colors.transparent
-              : (isDark ? AppTheme.darkBorder : AppTheme.lightBorder),
+        borderRadius: BorderRadius.only(
+          topLeft: const Radius.circular(20),
+          topRight: const Radius.circular(20),
+          bottomLeft: Radius.circular(msg.isUser ? 20 : 4),
+          bottomRight: Radius.circular(msg.isUser ? 4 : 20),
         ),
+        boxShadow: msg.isUser
+            ? null
+            : [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 5,
+                  offset: const Offset(0, 2),
+                )
+              ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -711,7 +726,10 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
           if (!msg.isUser)
             Row(
               children: [
-                Icon(Icons.auto_awesome, size: 14, color: AppTheme.primary),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: Image.asset('assets/icon/app_icon.png', width: 14, height: 14),
+                ),
                 const SizedBox(width: 6),
                 Text(
                   'Studyspace AI',
@@ -887,10 +905,17 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
 
     return Scaffold(
       backgroundColor: isDark
-          ? AppTheme.darkBackground
-          : AppTheme.lightBackground,
+          ? const Color(0xFF000000)
+          : const Color(0xFFF2F2F7),
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
+        backgroundColor: (isDark ? const Color(0xFF000000) : const Color(0xFFF2F2F7)).withValues(alpha: 0.8),
+        flexibleSpace: ClipRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+            child: Container(color: Colors.transparent),
+          ),
+        ),
         elevation: 0,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -942,13 +967,14 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
                             position: _iconSlideAnimation,
                             child: ScaleTransition(
                               scale: _iconScaleAnimation,
-                              child: Image.asset(
-                                'assets/logo_transparent.png',
-                                width: 56,
-                                height: 56,
-                                fit: BoxFit.contain,
-                                errorBuilder: (context, error, stackTrace) =>
-                                    Icon(Icons.auto_awesome, size: 56, color: isDark ? Colors.white70 : Colors.black87),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(16),
+                                child: Image.asset(
+                                  'assets/icon/app_icon.png',
+                                  width: 72,
+                                  height: 72,
+                                  fit: BoxFit.cover,
+                                ),
                               ),
                             ),
                           ),
@@ -1041,13 +1067,20 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
                             margin: const EdgeInsets.symmetric(vertical: 6),
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: isDark ? AppTheme.darkCard : Colors.white,
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: isDark
-                                    ? AppTheme.darkBorder
-                                    : AppTheme.lightBorder,
+                              color: isDark ? const Color(0xFF1C1C1E) : const Color(0xFFE9E9EB),
+                              borderRadius: const BorderRadius.only(
+                                topLeft: Radius.circular(20),
+                                topRight: Radius.circular(20),
+                                bottomLeft: Radius.circular(4),
+                                bottomRight: Radius.circular(20),
                               ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.05),
+                                  blurRadius: 5,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
                             ),
                             child: const BrandedLoader(
                               compact: true,
@@ -1071,18 +1104,22 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
                     },
                   ),
           ),
+          // Input area
           SafeArea(
             top: false,
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-              decoration: BoxDecoration(
-                color: isDark ? AppTheme.darkSurface : Colors.white,
-                border: Border(
-                  top: BorderSide(
-                    color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+            child: ClipRect(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  decoration: BoxDecoration(
+                    color: (isDark ? const Color(0xFF1C1C1E) : const Color(0xFFF2F2F7)).withValues(alpha: 0.85),
+                    border: Border(
+                      top: BorderSide(
+                        color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+                      ),
+                    ),
                   ),
-                ),
-              ),
               child: Column(
                 children: [
                   if (_attachments.isNotEmpty)
@@ -1157,17 +1194,17 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
                       ),
                     ),
                   Container(
-                    constraints: const BoxConstraints(minHeight: 56),
-                    padding: const EdgeInsets.fromLTRB(8, 6, 8, 6),
+                    constraints: const BoxConstraints(minHeight: 40),
+                    padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
                     decoration: BoxDecoration(
                       color: isDark
-                          ? const Color(0xFF111827)
-                          : const Color(0xFFF8FAFC),
-                      borderRadius: BorderRadius.circular(24),
+                          ? const Color(0xFF2C2C2E)
+                          : Colors.white,
+                      borderRadius: BorderRadius.circular(20),
                       border: Border.all(
                         color: isDark
-                            ? Colors.white12
-                            : const Color(0xFFD6DEE8),
+                            ? Colors.transparent
+                            : const Color(0xFFD1D1D6),
                       ),
                     ),
                     child: Row(
@@ -1246,6 +1283,8 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
                   ),
                 ],
               ),
+            ),
+           ),
             ),
           ),
         ],

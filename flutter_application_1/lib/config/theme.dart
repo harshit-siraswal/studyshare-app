@@ -19,6 +19,13 @@ class AppTheme {
   static const Color warning = Color(0xFFD97706); // Amber 600
   static const Color notice = Color(0xFFD946EF); // Fuchsia 500 (PurpleAccent replacement)
   static const Color noticeColor = notice; // Alias for backward compatibility
+  
+  // iOS Chat Colors
+  static const Color iosBlueLight = Color(0xFF007AFF);
+  static const Color iosBlueDark = Color(0xFF0A84FF);
+  static const Color iosBubbleLight = Color(0xFFE9E9EB);
+  static const Color iosBubbleDark = Color(0xFF1C1C1E);
+
   // ============ LIGHT MODE (Notion-inspired) ============
   // Modern Clean: Soft gray background, pure white surfaces
   static const Color lightBackground = Color(0xFFF8FAFC); // Slate 50
@@ -74,6 +81,13 @@ class AppTheme {
     end: Alignment.bottomRight,
     colors: [secondary, primary],
   );
+
+  // iOS Chat helpers – pick color based on Brightness
+  static Color getIosChatBlue(Brightness brightness) =>
+      brightness == Brightness.dark ? iosBlueDark : iosBlueLight;
+
+  static Color getIosChatBubble(Brightness brightness) =>
+      brightness == Brightness.dark ? iosBubbleDark : iosBubbleLight;
   
   // ============ THEME DATA ============
   

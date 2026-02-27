@@ -474,7 +474,17 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
           ),
         ],
       ),
-      body: Column(
+      body: Hero(
+        tag: 'notice_card_${widget.notice['id']}',
+        flightShuttleBuilder: (flightContext, animation, flightDirection, fromHeroContext, toHeroContext) {
+          return Material(
+            color: Colors.transparent,
+            child: toHeroContext.widget,
+          );
+        },
+        child: Material(
+          color: isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
+          child: Column(
         children: [
           Expanded(
             child: ListView(
@@ -606,6 +616,8 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
             child: _buildInputArea(isDark, textColor, secondaryColor),
           ),
         ],
+      ),
+      ),
       ),
     );
   }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:ui';
+import 'package:animations/animations.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -121,6 +122,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   Future<void> _initializeIncomingShareHandling() async {
     await _incomingShareService.start();
+    if (!mounted) return;
 
     _shareSubscription = _incomingShareService.stream.listen(
       _handleIncomingSharePayload,
@@ -311,9 +313,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           // Main content - padding adjusted to match floating nav height (72) + spacing (16) + system padding
           SafeArea(
             bottom: false,
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 200),
-              child: _getScreen(_currentIndex),
+            child: PageTransitionSwitcher(
+              duration: const Duration(milliseconds: 300),
+              transitionBuilder: (child, primaryAnimation, secondaryAnimation) {
+                return SharedAxisTransition(
+                  animation: primaryAnimation,
+                  secondaryAnimation: secondaryAnimation,
+                  transitionType: SharedAxisTransitionType.vertical,
+                  fillColor: Colors.transparent,
+                  child: child,
+                );
+              },
+              child: KeyedSubtree(
+                key: ValueKey<int>(_currentIndex),
+                child: _getScreen(_currentIndex),
+              ),
             ),
           ),
 
@@ -381,50 +395,80 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ),
             ],
           ),
-          child: Row(
+          child: Stack(
+            alignment: Alignment.center,
             children: [
-              // Left side - 2 tabs
-              Expanded(
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    _buildNavItem(
-                      0,
-                      Icons.home_outlined,
-                      Icons.home_rounded,
-                      'Home',
-                    ),
-                    _buildNavItem(
-                      1,
-                      Icons.chat_bubble_outline_rounded,
-                      Icons.chat_bubble_rounded,
-                      'Chats',
-                    ),
-                  ],
+              // Pill indicator sliding behind/below the icons
+              AnimatedAlign(
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.fastOutSlowIn,
+                alignment: Alignment(
+                  _navIndicatorAlignment(_currentIndex),
+                  0.75, // Lower part of the bottom nav
+                ),
+                child: Container(
+                  width: 20,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary,
+                    borderRadius: BorderRadius.circular(2),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppTheme.primary.withValues(alpha: 0.5),
+                        blurRadius: 4,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-
-              const SizedBox(width: 56),
-
-              // Right side - 2 tabs
-              Expanded(
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  children: [
-                    _buildNavItem(
-                      2,
-                      Icons.campaign_outlined,
-                      Icons.campaign_rounded,
-                      'Notices',
+              // The Row of items
+              Row(
+                children: [
+                  // Left side - 2 tabs
+                  Expanded(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        _buildNavItem(
+                          0,
+                          Icons.home_outlined,
+                          Icons.home_rounded,
+                          'Home',
+                        ),
+                        _buildNavItem(
+                          1,
+                          Icons.chat_bubble_outline_rounded,
+                          Icons.chat_bubble_rounded,
+                          'Chats',
+                        ),
+                      ],
                     ),
-                    _buildNavItem(
-                      3,
-                      Icons.person_outline_rounded,
-                      Icons.person_rounded,
-                      'Profile',
+                  ),
+
+                  const SizedBox(width: 56),
+
+                  // Right side - 2 tabs
+                  Expanded(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        _buildNavItem(
+                          2,
+                          Icons.campaign_outlined,
+                          Icons.campaign_rounded,
+                          'Notices',
+                        ),
+                        _buildNavItem(
+                          3,
+                          Icons.person_outline_rounded,
+                          Icons.person_rounded,
+                          'Profile',
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -442,7 +486,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final isActive = _currentIndex == index;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    // Active color: Primary red/brand color. Inactive: Grey.
     final activeColor = AppTheme.primary;
     final inactiveColor = isDark ? Colors.grey[400] : Colors.grey[600];
 
@@ -458,27 +501,60 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              isActive ? activeIcon : icon,
-              color: isActive ? activeColor : inactiveColor,
-              size: 26,
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 150),
+              switchInCurve: Curves.easeOutBack,
+              switchOutCurve: Curves.easeInBack,
+              transitionBuilder: (child, animation) {
+                return ScaleTransition(
+                  scale: animation,
+                  child: child,
+                );
+              },
+              child: Icon(
+                isActive ? activeIcon : icon,
+                key: ValueKey<bool>(isActive),
+                color: isActive ? activeColor : inactiveColor,
+                size: 26,
+              ),
             ),
             const SizedBox(height: 4),
-            Text(
-              label,
-              style: GoogleFonts.inter(
-                fontSize: 10, // Reduced font size
-                fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
-                color: isActive ? activeColor : inactiveColor,
+            AnimatedSlide(
+              offset: isActive ? Offset.zero : const Offset(0, 0.2),
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOutCubic,
+              child: AnimatedOpacity(
+                opacity: isActive ? 1.0 : 0.7,
+                duration: const Duration(milliseconds: 200),
+                child: Text(
+                  label,
+                  style: GoogleFonts.inter(
+                    fontSize: 10,
+                    fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+                    color: isActive ? activeColor : inactiveColor,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
       ),
     );
   }
+
+  double _navIndicatorAlignment(int index) {
+    switch (index) {
+      case 0: return -0.72;
+      case 1: return -0.28;
+      case 2: return 0.28;
+      default: return 0.72;
+    }
+  }
+
+  IconData _getFabIcon() =>
+      _currentIndex == 1 ? Icons.search_rounded : Icons.add_rounded;
 
   Widget _buildAnimatedFab(
     BuildContext context,
@@ -508,8 +584,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           onTap: () {
             HapticFeedback.mediumImpact();
             // Handle actions based on index
-            if (_currentIndex == 0) {
-              // Resources: Upload
+            if (_currentIndex == 0 || _currentIndex == 2 || _currentIndex == 3) {
+              // Defaults to Upload for undefined missing tabs 
               _showUpload();
             } else if (_currentIndex == 1) {
               // Rooms: Create/Discover
@@ -543,7 +619,24 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 ),
               ],
             ),
-            child: const Icon(Icons.add_rounded, color: Colors.white, size: 28),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 350),
+              transitionBuilder: (child, animation) {
+                return RotationTransition(
+                  turns: Tween<double>(begin: 0.0, end: 0.25).animate(animation),
+                  child: ScaleTransition(
+                    scale: animation,
+                    child: child,
+                  ),
+                );
+              },
+              child: Icon(
+                _getFabIcon(),
+                key: ValueKey<IconData>(_getFabIcon()),
+                color: Colors.white,
+                size: 28,
+              ),
+            ),
           ),
         ),
       ),

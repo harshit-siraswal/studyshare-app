@@ -321,6 +321,30 @@ class SupabaseService {
     }
   }
 
+  /// Get pending resources for a teacher to moderate
+  Future<List<Resource>> getPendingResourcesForTeacher({
+    required String collegeId,
+    required String branch,
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    try {
+      final response = await _client
+          .from('resources')
+          .select()
+          .eq('college_id', collegeId)
+          .eq('status', 'pending')
+          .eq('branch', branch)
+          .order('created_at', ascending: true) // oldest first for pending queue
+          .range(offset, offset + limit - 1);
+
+      return (response as List).map((json) => Resource.fromJson(json)).toList();
+    } catch (e) {
+      debugPrint('Error fetching pending resources for teacher: $e');
+      rethrow;
+    }
+  }
+
   /// Get resources from users the current user follows
   Future<List<Resource>> getFollowingFeed({
     required String userEmail,

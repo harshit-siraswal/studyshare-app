@@ -1,244 +1,140 @@
-Analyzing flutter_application_1...                              
+﻿Analyzing flutter_application_1...                              
 
    info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\data\departments_data.dart:17:24 - deprecated_member_use
-warning - The value of the local variable 'permanentlyDenied' isn't used - lib\main.dart:62:10 - unused_local_variable
+warning - The declaration '_requestPermissions' isn't referenced - lib\main.dart:61:14 - unused_element
+warning - The declaration '_buildSuggestionChips' isn't referenced - lib\screens\ai_chat_screen.dart:859:10 - unused_element
 warning - The declaration '_showCreateOrJoinDialog' isn't referenced - lib\screens\chatroom\chatroom_list_screen.dart:383:8 - unused_element
-   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_list_screen.dart:450:53 - use_build_context_synchronously
-   info - 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre - lib\screens\chatroom\chatroom_list_screen.dart:499:18 - deprecated_member_use
-   info - 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre - lib\screens\chatroom\chatroom_list_screen.dart:523:18 - deprecated_member_use
-   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_list_screen.dart:543:56 - use_build_context_synchronously
-   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_list_screen.dart:545:48 - use_build_context_synchronously
-   info - Unnecessary use of multiple underscores - lib\screens\chatroom\chatroom_list_screen.dart:565:29 - unnecessary_underscores
-   info - Unnecessary use of multiple underscores - lib\screens\chatroom\chatroom_list_screen.dart:566:24 - unnecessary_underscores
-   info - Don't use 'BuildContext's across async gaps - lib\screens\chatroom\chatroom_screen.dart:182:31 - use_build_context_synchronously
-   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:863:41 - use_build_context_synchronously
-   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:869:41 - use_build_context_synchronously
-   info - Don't use 'BuildContext's across async gaps - lib\screens\chatroom\chatroom_screen.dart:1284:29 - use_build_context_synchronously
-   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:1288:43 - use_build_context_synchronously
-   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:1342:43 - use_build_context_synchronously
-warning - The value of the local variable 'cardColor' isn't used - lib\screens\chatroom\discover_rooms_screen.dart:80:11 - unused_local_variable
-   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\discover_rooms_screen.dart:200:41 - use_build_context_synchronously
-   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\discover_rooms_screen.dart:205:48 - use_build_context_synchronously
-   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\discover_rooms_screen.dart:425:40 - use_build_context_synchronously
-   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\discover_rooms_screen.dart:429:50 - use_build_context_synchronously
-   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\discover_rooms_screen.dart:434:47 - use_build_context_synchronously
-warning - The declaration '_handleGifTap' isn't referenced - lib\screens\chatroom\post_detail_screen.dart:46:16 - unused_element
-   info - Don't use 'BuildContext's across async gaps - lib\screens\chatroom\post_detail_screen.dart:253:28 - use_build_context_synchronously
-   info - Unnecessary use of multiple underscores - lib\screens\chatroom\post_detail_screen.dart:598:29 - unnecessary_underscores
-   info - Unnecessary use of multiple underscores - lib\screens\chatroom\post_detail_screen.dart:806:43 - unnecessary_underscores
-   info - Don't use 'BuildContext's across async gaps - lib\screens\chatroom\post_detail_screen.dart:848:29 - use_build_context_synchronously
-warning - The declaration '_showReportDialog' isn't referenced - lib\screens\chatroom\post_detail_screen.dart:886:8 - unused_element
-   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\post_detail_screen.dart:937:41 - use_build_context_synchronously
-   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\post_detail_screen.dart:943:41 - use_build_context_synchronously
-warning - The value of the local variable 'email' isn't used - lib\screens\home\home_screen.dart:151:11 - unused_local_variable
-   info - Don't invoke 'print' in production code - lib\screens\notices\department_account_screen.dart:61:7 - avoid_print
-   info - Don't use 'BuildContext's across async gaps - lib\screens\notices\department_account_screen.dart:86:28 - use_build_context_synchronously
-   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\notices\department_account_screen.dart:282:37 - deprecated_member_use
-   info - 'Share' is deprecated and shouldn't be used. Use SharePlus instead - lib\screens\notices\notice_detail_screen.dart:335:13 - deprecated_member_use
-   info - 'shareXFiles' is deprecated and shouldn't be used. Use SharePlus.instance.share() instead - lib\screens\notices\notice_detail_screen.dart:335:19 - deprecated_member_use
-warning - The value of the field '_searchController' isn't used - lib\screens\notices\notices_screen.dart:21:31 - unused_field
-warning - The value of the field '_notices' isn't used - lib\screens\notices\notices_screen.dart:23:30 - unused_field
-warning - The value of the field '_selectedDepartment' isn't used - lib\screens\notices\notices_screen.dart:26:11 - unused_field
-warning - The value of the field '_searchFocusNode' isn't used - lib\screens\notices\notices_screen.dart:29:19 - unused_field
-warning - The declaration '_buildDateFilterHeader' isn't referenced - lib\screens\notices\notices_screen.dart:593:10 - unused_element
-   info - Unnecessary use of multiple underscores - lib\screens\notifications\notification_screen.dart:517:35 - unnecessary_underscores
-   info - Unnecessary use of multiple underscores - lib\screens\notifications\notification_screen.dart:517:39 - unnecessary_underscores
-  error - Target of URI doesn't exist: '../../models/notice.dart' - lib\screens\profile\bookmarks_screen.dart:5:8 - uri_does_not_exist
-  error - 2 positional arguments expected by 'getBookmarks', but 0 found - lib\screens\profile\bookmarks_screen.dart:44:54 - not_enough_positional_arguments
-  error - A value of type 'List<Resource>' can't be assigned to a variable of type 'List<Map<String, dynamic>>' - lib\screens\profile\bookmarks_screen.dart:47:27 - invalid_assignment
-  error - Undefined name 'Notice' - lib\screens\profile\bookmarks_screen.dart:151:26 - undefined_identifier
-  error - The named parameter 'account' is required, but there's no corresponding argument - lib\screens\profile\bookmarks_screen.dart:154:20 - missing_required_argument
-  error - The named parameter 'isDark' is required, but there's no corresponding argument - lib\screens\profile\bookmarks_screen.dart:154:20 - missing_required_argument
-  error - The named parameter 'isAdmin' isn't defined - lib\screens\profile\bookmarks_screen.dart:156:15 - undefined_named_parameter
-warning - The declaration '<unnamed>' isn't referenced - lib\screens\profile\edit_profile_screen.dart:26:7 - unused_element
-  error - Missing concrete implementation of 'abstract class State<T extends StatefulWidget> with Diagnosticable.build' - lib\screens\profile\edit_profile_screen.dart:26:7 - non_abstract_class_inherits_abstract_member
-   info - The private field _saving could be 'final' - lib\screens\profile\edit_profile_screen.dart:31:8 - prefer_final_fields
-warning - The declaration '_pickPhoto' isn't referenced - lib\screens\profile\edit_profile_screen.dart:47:16 - unused_element
-  error - A try block must be followed by an 'on', 'catch', or 'finally' clause - lib\screens\profile\edit_profile_screen.dart:64:5 - missing_catch_or_finally
-  error - Undefined name 'p' - lib\screens\profile\edit_profile_screen.dart:86:21 - undefined_identifier
-warning - The label 'name' isn't used - lib\screens\profile\edit_profile_screen.dart:90:27 - unused_label
-  error - Expected to find ';' - lib\screens\profile\edit_profile_screen.dart:90:61 - expected_token
-  error - Expected an identifier - lib\screens\profile\edit_profile_screen.dart:90:65 - missing_identifier
-  error - Unexpected text ';' - lib\screens\profile\edit_profile_screen.dart:90:65 - unexpected_token
-warning - The label 'size' isn't used - lib\screens\profile\edit_profile_screen.dart:91:13 - unused_label
-  error - Expected to find ';' - lib\screens\profile\edit_profile_screen.dart:91:25 - expected_token
-  error - Expected an identifier - lib\screens\profile\edit_profile_screen.dart:91:31 - missing_identifier
-  error - Unexpected text ';' - lib\screens\profile\edit_profile_screen.dart:91:31 - unexpected_token
-warning - The label 'path' isn't used - lib\screens\profile\edit_profile_screen.dart:92:13 - unused_label
-  error - Expected to find ';' - lib\screens\profile\edit_profile_screen.dart:92:31 - expected_token
-  error - Expected an identifier - lib\screens\profile\edit_profile_screen.dart:92:35 - missing_identifier
-  error - Unexpected text ';' - lib\screens\profile\edit_profile_screen.dart:92:35 - unexpected_token
-warning - The label 'bytes' isn't used - lib\screens\profile\edit_profile_screen.dart:93:13 - unused_label
-  error - Expected to find ';' - lib\screens\profile\edit_profile_screen.dart:93:20 - expected_token
-  error - Expected an identifier - lib\screens\profile\edit_profile_screen.dart:93:25 - missing_identifier
-  error - Expected to find ';' - lib\screens\profile\edit_profile_screen.dart:93:25 - expected_token
-  error - Unexpected text ';' - lib\screens\profile\edit_profile_screen.dart:93:25 - unexpected_token
-  error - Expected an identifier - lib\screens\profile\edit_profile_screen.dart:94:11 - missing_identifier
-  error - Unexpected text ';' - lib\screens\profile\edit_profile_screen.dart:94:11 - unexpected_token
-   info - Unnecessary empty statement - lib\screens\profile\edit_profile_screen.dart:94:12 - empty_statements
-  error - Expected a class member - lib\screens\profile\edit_profile_screen.dart:97:7 - expected_class_member
-  error - Expected an identifier - lib\screens\profile\edit_profile_screen.dart:97:13 - missing_identifier
-   info - Missing type annotation - lib\screens\profile\edit_profile_screen.dart:97:14 - strict_top_level_inference
-  error - Undefined name '_saving' - lib\screens\profile\edit_profile_screen.dart:108:9 - undefined_identifier
-  error - Undefined name '_nameController' - lib\screens\profile\edit_profile_screen.dart:109:18 - undefined_identifier
-  error - Undefined name 'context' - lib\screens\profile\edit_profile_screen.dart:111:28 - undefined_identifier
-  error - The function 'setState' isn't defined - lib\screens\profile\edit_profile_screen.dart:117:5 - undefined_function
-  error - Undefined name '_saving' - lib\screens\profile\edit_profile_screen.dart:117:20 - undefined_identifier
-  error - Undefined name 'widget' - lib\screens\profile\edit_profile_screen.dart:119:26 - undefined_identifier
-  error - Undefined name '_pickedImage' - lib\screens\profile\edit_profile_screen.dart:120:11 - undefined_identifier
-  error - Undefined name '_pickedImage' - lib\screens\profile\edit_profile_screen.dart:121:55 - undefined_identifier
-  error - Undefined name 'mounted' - lib\screens\profile\edit_profile_screen.dart:124:12 - undefined_identifier
-  error - Undefined name '_api' - lib\screens\profile\edit_profile_screen.dart:125:25 - undefined_identifier
-  error - Undefined name '_bioController' - lib\screens\profile\edit_profile_screen.dart:127:14 - undefined_identifier
-  error - Undefined name 'context' - lib\screens\profile\edit_profile_screen.dart:129:18 - undefined_identifier
-  error - Undefined name 'mounted' - lib\screens\profile\edit_profile_screen.dart:132:12 - undefined_identifier
-  error - Undefined name 'context' - lib\screens\profile\edit_profile_screen.dart:133:21 - undefined_identifier
-  error - Undefined name 'mounted' - lib\screens\profile\edit_profile_screen.dart:136:11 - undefined_identifier
-  error - Undefined name 'context' - lib\screens\profile\edit_profile_screen.dart:137:30 - undefined_identifier
-  error - Undefined name 'mounted' - lib\screens\profile\edit_profile_screen.dart:142:11 - undefined_identifier
-  error - The function 'setState' isn't defined - lib\screens\profile\edit_profile_screen.dart:142:20 - undefined_function
-  error - Undefined name '_saving' - lib\screens\profile\edit_profile_screen.dart:142:35 - undefined_identifier
-  error - Undefined name '_pickedImage' - lib\screens\profile\edit_profile_screen.dart:147:9 - undefined_identifier
-  error - Undefined name '_pickedImage' - lib\screens\profile\edit_profile_screen.dart:148:26 - undefined_identifier
-  error - Undefined name '_pickedImage' - lib\screens\profile\edit_profile_screen.dart:150:9 - undefined_identifier
-  error - Undefined name '_pickedImage' - lib\screens\profile\edit_profile_screen.dart:151:29 - undefined_identifier
-  error - Undefined name 'widget' - lib\screens\profile\edit_profile_screen.dart:153:9 - undefined_identifier
-  error - Undefined name 'widget' - lib\screens\profile\edit_profile_screen.dart:154:27 - undefined_identifier
-  error - Undefined name '_saving' - lib\screens\profile\edit_profile_screen.dart:172:24 - undefined_identifier
-  error - Undefined name '_saving' - lib\screens\profile\edit_profile_screen.dart:173:20 - undefined_identifier
-  error - Undefined name '_saving' - lib\screens\profile\edit_profile_screen.dart:185:24 - undefined_identifier
-  error - Undefined name '_pickPhoto' - lib\screens\profile\edit_profile_screen.dart:185:41 - undefined_identifier
-  error - Undefined name '_nameController' - lib\screens\profile\edit_profile_screen.dart:194:46 - undefined_identifier
-  error - Undefined name '_nameController' - lib\screens\profile\edit_profile_screen.dart:208:27 - undefined_identifier
-  error - Undefined name '_saving' - lib\screens\profile\edit_profile_screen.dart:209:25 - undefined_identifier
-  error - Undefined name '_bioController' - lib\screens\profile\edit_profile_screen.dart:217:27 - undefined_identifier
-  error - Undefined name '_saving' - lib\screens\profile\edit_profile_screen.dart:218:25 - undefined_identifier
-  error - Expected a method, getter, setter or operator declaration - lib\screens\profile\edit_profile_screen.dart:232:1 - expected_executable
-   info - Unnecessary use of multiple underscores - lib\screens\profile\explore_students_screen.dart:144:47 - unnecessary_underscores
-  error - The body might complete normally, causing 'null' to be returned, but the return type, 'Widget', is a potentially non-nullable type - lib\screens\profile\follow_list_screen.dart:133:10 - body_might_complete_normally
-warning - The label 'itemBuilder' isn't used - lib\screens\profile\follow_list_screen.dart:135:7 - unused_label
-  error - Expected to find ';' - lib\screens\profile\follow_list_screen.dart:153:7 - expected_token
-  error - Expected an identifier - lib\screens\profile\follow_list_screen.dart:153:8 - missing_identifier
-  error - Unexpected text ',' - lib\screens\profile\follow_list_screen.dart:153:8 - unexpected_token
-warning - The label 'trailing' isn't used - lib\screens\profile\follow_list_screen.dart:153:19 - unused_label
-  error - Undefined name 'user' - lib\screens\profile\follow_list_screen.dart:154:26 - undefined_identifier
-  error - Undefined name 'user' - lib\screens\profile\follow_list_screen.dart:155:25 - undefined_identifier
-  error - Expected to find ';' - lib\screens\profile\follow_list_screen.dart:157:11 - expected_token
-  error - Expected an identifier - lib\screens\profile\follow_list_screen.dart:157:12 - missing_identifier
-  error - Expected to find ';' - lib\screens\profile\follow_list_screen.dart:157:12 - expected_token
-  error - Unexpected text ',' - lib\screens\profile\follow_list_screen.dart:157:12 - unexpected_token
-  error - Expected an identifier - lib\screens\profile\follow_list_screen.dart:158:9 - missing_identifier
-  error - Unexpected text ')' - lib\screens\profile\follow_list_screen.dart:158:9 - unexpected_token
-   info - Unnecessary empty statement - lib\screens\profile\follow_list_screen.dart:158:10 - empty_statements
-  error - Expected to find ';' - lib\screens\profile\follow_list_screen.dart:159:7 - expected_token
-  error - Expected an identifier - lib\screens\profile\follow_list_screen.dart:159:8 - missing_identifier
-  error - Expected to find ';' - lib\screens\profile\follow_list_screen.dart:159:8 - expected_token
-  error - Unexpected text ';' - lib\screens\profile\follow_list_screen.dart:159:8 - unexpected_token
-  error - Expected an identifier - lib\screens\profile\follow_list_screen.dart:160:5 - missing_identifier
-  error - Unexpected text ';' - lib\screens\profile\follow_list_screen.dart:160:5 - unexpected_token
-   info - Unnecessary empty statement - lib\screens\profile\follow_list_screen.dart:160:6 - empty_statements
-warning - The value of the local variable 'subscriptions' isn't used - lib\screens\profile\following_screen.dart:130:13 - unused_local_variable
-warning - The value of the field '_isLoggingOut' isn't used - lib\screens\profile\profile_screen.dart:47:8 - unused_field
-warning - The value of the field '_statsLoading' isn't used - lib\screens\profile\profile_screen.dart:57:8 - unused_field
-   info - Unnecessary use of multiple underscores - lib\screens\profile\profile_screen.dart:687:33 - unnecessary_underscores
-warning - The value of the local variable 'postId' isn't used - lib\screens\profile\saved_posts_screen.dart:111:11 - unused_local_variable
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_list_screen.dart:456:58 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_list_screen.dart:459:50 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_list_screen.dart:559:56 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_list_screen.dart:561:48 - use_build_context_synchronously
+   info - Unnecessary use of multiple underscores - lib\screens\chatroom\chatroom_list_screen.dart:581:29 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\screens\chatroom\chatroom_list_screen.dart:582:24 - unnecessary_underscores
+   info - Don't use 'BuildContext's across async gaps - lib\screens\chatroom\chatroom_screen.dart:205:30 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:1171:38 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:1178:38 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\screens\chatroom\chatroom_screen.dart:1704:29 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:1709:31 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:1784:43 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:2077:51 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:2094:51 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:2171:51 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_screen.dart:2192:51 - use_build_context_synchronously
+warning - The value of the local variable 'cardColor' isn't used - lib\screens\chatroom\discover_rooms_screen.dart:87:11 - unused_local_variable
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\discover_rooms_screen.dart:216:41 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\discover_rooms_screen.dart:221:48 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\discover_rooms_screen.dart:447:40 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\discover_rooms_screen.dart:451:50 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\discover_rooms_screen.dart:456:47 - use_build_context_synchronously
+   info - 'dialogBackgroundColor' is deprecated and shouldn't be used. Use DialogThemeData.backgroundColor instead. This feature was deprecated after v3.27.0-0.1.pre - lib\screens\chatroom\post_detail_screen.dart:1335:44 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\post_detail_screen.dart:1416:40 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\post_detail_screen.dart:1424:40 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\post_detail_screen.dart:1432:33 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\screens\notices\department_account_screen.dart:105:9 - use_build_context_synchronously
+   info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\screens\notices\department_account_screen.dart:350:37 - deprecated_member_use
+   info - 'Share' is deprecated and shouldn't be used. Use SharePlus instead - lib\screens\notices\notice_detail_screen.dart:430:13 - deprecated_member_use
+   info - 'shareXFiles' is deprecated and shouldn't be used. Use SharePlus.instance.share() instead - lib\screens\notices\notice_detail_screen.dart:430:19 - deprecated_member_use
+warning - The value of the field '_searchController' isn't used - lib\screens\notices\notices_screen.dart:27:31 - unused_field
+warning - The value of the field '_notices' isn't used - lib\screens\notices\notices_screen.dart:29:30 - unused_field
+warning - The value of the field '_selectedDepartment' isn't used - lib\screens\notices\notices_screen.dart:32:11 - unused_field
+warning - The value of the field '_searchFocusNode' isn't used - lib\screens\notices\notices_screen.dart:36:19 - unused_field
+warning - This 'onError' handler must return a value assignable to 'bool', but ends without returning a value - lib\screens\notices\notices_screen.dart:415:24 - body_might_complete_normally_catch_error
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\screens\notices\notices_screen.dart:972:19 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\notices\notices_screen.dart:1041:35 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\notices\notices_screen.dart:1042:42 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\notices\notices_screen.dart:1050:42 - use_build_context_synchronously
+   info - Unnecessary use of multiple underscores - lib\screens\notifications\notification_screen.dart:608:35 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\screens\notifications\notification_screen.dart:608:39 - unnecessary_underscores
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\screens\profile\edit_profile_screen.dart:292:21 - deprecated_member_use
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\screens\profile\edit_profile_screen.dart:309:25 - deprecated_member_use
+   info - Unnecessary use of multiple underscores - lib\screens\profile\explore_students_screen.dart:145:47 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\screens\profile\profile_screen.dart:1144:33 - unnecessary_underscores
+warning - The value of the local variable 'offset' isn't used - lib\screens\profile\settings_screen.dart:326:33 - unused_local_variable
 warning - The value of the field '_isSearching' isn't used - lib\screens\study\pdf_viewer_screen.dart:29:8 - unused_field
-warning - The declaration '_loadSubjects' isn't referenced - lib\screens\study\resource_search_screen.dart:76:16 - unused_element
-   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\screens\study\resource_search_screen.dart:337:17 - deprecated_member_use
-   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\screens\study\resource_search_screen.dart:356:17 - deprecated_member_use
-   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\screens\study\resource_search_screen.dart:392:19 - deprecated_member_use
-   info - The private field _page could be 'final' - lib\screens\study\study_screen.dart:49:7 - prefer_final_fields
-warning - The value of the field '_page' isn't used - lib\screens\study\study_screen.dart:49:7 - unused_field
-   info - The private field _hasMore could be 'final' - lib\screens\study\study_screen.dart:50:8 - prefer_final_fields
-warning - The value of the field '_hasMore' isn't used - lib\screens\study\study_screen.dart:50:8 - unused_field
-   info - Unnecessary use of multiple underscores - lib\screens\study\study_screen.dart:711:31 - unnecessary_underscores
-warning - The declaration '_buildCompactFilterChip' isn't referenced - lib\screens\study\study_screen.dart:911:10 - unused_element
-warning - The declaration '_showSubjectPicker' isn't referenced - lib\screens\study\study_screen.dart:1053:8 - unused_element
-warning - The declaration '_loadDownloadedResources' isn't referenced - lib\screens\study\study_screen.dart:1235:8 - unused_element
-warning - The declaration '_buildDownloadsTab' isn't referenced - lib\screens\study\study_screen.dart:1241:10 - unused_element
-   info - Unnecessary use of multiple underscores - lib\screens\study\syllabus_screen.dart:303:26 - unnecessary_underscores
-   info - Unnecessary use of multiple underscores - lib\screens\study\syllabus_screen.dart:384:29 - unnecessary_underscores
-warning - Dead code - lib\screens\viewer\pdf_viewer_screen.dart:92:53 - dead_code
-warning - The left operand can't be null, so the right operand is never executed - lib\screens\viewer\pdf_viewer_screen.dart:92:56 - dead_null_aware_expression
-   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:116:9 - use_null_aware_elements
-   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:117:9 - use_null_aware_elements
-   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:150:9 - use_null_aware_elements
-   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:151:9 - use_null_aware_elements
-   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:218:9 - use_null_aware_elements
-   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:219:9 - use_null_aware_elements
-   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:347:9 - use_null_aware_elements
-   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:418:9 - use_null_aware_elements
-   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:419:9 - use_null_aware_elements
-   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:420:9 - use_null_aware_elements
-   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:421:9 - use_null_aware_elements
-   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:422:9 - use_null_aware_elements
-   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:423:9 - use_null_aware_elements
-   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:424:9 - use_null_aware_elements
+warning - The value of the field '_authService' isn't used - lib\screens\study\study_screen.dart:47:21 - unused_field
+warning - The declaration '_loadDownloadedResources' isn't referenced - lib\screens\study\study_screen.dart:1496:8 - unused_element
+warning - The declaration '_buildDownloadsTab' isn't referenced - lib\screens\study\study_screen.dart:1502:10 - unused_element
+   info - Unnecessary use of multiple underscores - lib\screens\study\syllabus_screen.dart:330:26 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\screens\study\syllabus_screen.dart:411:29 - unnecessary_underscores
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\study\syllabus_screen.dart:634:33 - use_build_context_synchronously
+   info - Unnecessary use of multiple underscores - lib\screens\viewer\pdf_viewer_screen.dart:280:43 - unnecessary_underscores
+warning - The value of the local variable 'isDark' isn't used - lib\screens\viewer\pdf_viewer_screen.dart:540:11 - unused_local_variable
+   info - Use a function declaration rather than a variable assignment to bind a function to a name - lib\screens\viewer\pdf_viewer_screen.dart:598:11 - prefer_function_declarations_over_variables
+   info - Use a function declaration rather than a variable assignment to bind a function to a name - lib\screens\viewer\pdf_viewer_screen.dart:606:11 - prefer_function_declarations_over_variables
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:212:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:215:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:216:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:245:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:246:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:307:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:308:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:430:34 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:752:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:753:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:754:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:755:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:756:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:757:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:758:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:778:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:779:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:780:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:781:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:782:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:783:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:784:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:804:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:805:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:806:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:807:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:808:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:809:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:810:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:829:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:830:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:831:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:832:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:849:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:850:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:851:9 - use_null_aware_elements
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\services\backend_api_service.dart:852:9 - use_null_aware_elements
    info - Unnecessary use of multiple underscores - lib\services\recaptcha_service.dart:22:26 - unnecessary_underscores
    info - Unnecessary use of multiple underscores - lib\services\recaptcha_service.dart:22:30 - unnecessary_underscores
 warning - The value of the field '_isLoading' isn't used - lib\services\recaptcha_service.dart:69:8 - unused_field
-warning - Unused import: 'subscription_service.dart' - lib\services\supabase_service.dart:6:8 - unused_import
-   info - Don't use 'BuildContext's across async gaps - lib\services\supabase_service.dart:213:46 - use_build_context_synchronously
-warning - A value for optional parameter 'followRequestId' isn't ever given - lib\services\supabase_service.dart:445:10 - unused_element_parameter
-warning - A value for optional parameter 'isActionable' isn't ever given - lib\services\supabase_service.dart:446:10 - unused_element_parameter
-   info - Don't use 'BuildContext's across async gaps - lib\services\supabase_service.dart:1148:9 - use_build_context_synchronously
-   info - Don't use 'BuildContext's across async gaps - lib\services\supabase_service.dart:1196:9 - use_build_context_synchronously
-  error - The name 'getBookmarks' is already defined - lib\services\supabase_service.dart:1644:26 - duplicate_definition
-warning - The label 'onPanEnd' isn't used - lib\widgets\floating_timer_bubble.dart:89:9 - unused_label
-  error - Expected to find ';' - lib\widgets\floating_timer_bubble.dart:95:9 - expected_token
-  error - Expected an identifier - lib\widgets\floating_timer_bubble.dart:95:10 - missing_identifier
-  error - Unexpected text ';' - lib\widgets\floating_timer_bubble.dart:95:10 - unexpected_token
-warning - The label 'child' isn't used - lib\widgets\floating_timer_bubble.dart:96:9 - unused_label
-  error - Expected to find ';' - lib\widgets\floating_timer_bubble.dart:159:9 - expected_token
-  error - Expected an identifier - lib\widgets\floating_timer_bubble.dart:159:10 - missing_identifier
-  error - Unexpected text ';' - lib\widgets\floating_timer_bubble.dart:159:10 - unexpected_token
-  error - Expected to find '}' - lib\widgets\floating_timer_bubble.dart:160:7 - expected_token
-  error - Undefined name 'listenable' - lib\widgets\floating_timer_bubble.dart:255:15 - undefined_identifier
-  error - Expected to find ')' - lib\widgets\floating_timer_bubble.dart:255:25 - expected_token
-  error - Expected to find ']' - lib\widgets\floating_timer_bubble.dart:255:25 - expected_token
-  error - The named parameter 'builder' is required, but there's no corresponding argument - lib\widgets\floating_timer_bubble.dart:259:13 - missing_required_argument
-  error - Too many positional arguments: 0 expected, but 1 found - lib\widgets\floating_timer_bubble.dart:259:13 - extra_positional_arguments_could_be_named
-  error - Too many positional arguments: 0 expected, but 1 found - lib\widgets\floating_timer_bubble.dart:260:55 - extra_positional_arguments_could_be_named
-  error - The named parameter 'style' isn't defined - lib\widgets\floating_timer_bubble.dart:261:17 - undefined_named_parameter
-  error - Expected an identifier - lib\widgets\floating_timer_bubble.dart:324:11 - missing_identifier
-  error - Expected to find ')' - lib\widgets\floating_timer_bubble.dart:324:11 - expected_token
-  error - Expected to find ';' - lib\widgets\floating_timer_bubble.dart:325:9 - expected_token
-warning - Dead code - lib\widgets\floating_timer_bubble.dart:325:10 - dead_code
-  error - Expected an identifier - lib\widgets\floating_timer_bubble.dart:325:10 - missing_identifier
-  error - Expected to find ';' - lib\widgets\floating_timer_bubble.dart:325:10 - expected_token
-  error - Unexpected text ';' - lib\widgets\floating_timer_bubble.dart:325:10 - unexpected_token
-  error - Expected an identifier - lib\widgets\floating_timer_bubble.dart:326:7 - missing_identifier
-  error - Expected to find ';' - lib\widgets\floating_timer_bubble.dart:326:7 - expected_token
-  error - Unexpected text ';' - lib\widgets\floating_timer_bubble.dart:326:7 - unexpected_token
-  error - Expected an identifier - lib\widgets\floating_timer_bubble.dart:326:8 - missing_identifier
-  error - Expected to find ';' - lib\widgets\floating_timer_bubble.dart:326:8 - expected_token
-  error - Unexpected text ';' - lib\widgets\floating_timer_bubble.dart:326:8 - unexpected_token
-  error - Expected an identifier - lib\widgets\floating_timer_bubble.dart:327:5 - missing_identifier
-  error - Unexpected text ';' - lib\widgets\floating_timer_bubble.dart:327:5 - unexpected_token
-   info - Unnecessary empty statement - lib\widgets\floating_timer_bubble.dart:327:6 - empty_statements
-   info - Statements in an if should be enclosed in a block - lib\widgets\follow_button.dart:52:20 - curly_braces_in_flow_control_structures
-  error - Expected to find '}' - lib\widgets\follow_button.dart:95:7 - expected_token
-   info - Don't use 'BuildContext's across async gaps - lib\widgets\follow_button.dart:113:28 - use_build_context_synchronously
-warning - The operand can't be 'null', so the condition is always 'true' - lib\widgets\follow_button.dart:169:28 - unnecessary_null_comparison
+warning - The name debugPrint is shown, but isn't used - lib\services\summary_pdf_service.dart:4:47 - unused_shown_name
+warning - Unused import: 'subscription_service.dart' - lib\services\supabase_service.dart:7:8 - unused_import
+warning - The declaration '_createNotification' isn't referenced - lib\services\supabase_service.dart:687:16 - unused_element
+   info - Don't use 'BuildContext's across async gaps - lib\services\supabase_service.dart:1598:9 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\services\supabase_service.dart:1650:9 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\services\supabase_service.dart:2480:61 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\services\supabase_service.dart:2487:9 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\utils\theme_animator.dart:43:40 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\utils\theme_animator.dart:50:27 - use_build_context_synchronously
+   info - Unnecessary use of multiple underscores - lib\widgets\ai_study_tools_sheet.dart:553:29 - unnecessary_underscores
    info - 'Share' is deprecated and shouldn't be used. Use SharePlus instead - lib\widgets\full_screen_image_viewer.dart:49:13 - deprecated_member_use
    info - 'shareXFiles' is deprecated and shouldn't be used. Use SharePlus.instance.share() instead - lib\widgets\full_screen_image_viewer.dart:49:19 - deprecated_member_use
-   info - Invalid use of a private type in a public API - lib\widgets\global_timer_overlay.dart:11:26 - library_private_types_in_public_api
-   info - Don't use 'BuildContext's across async gaps - lib\widgets\notice_card.dart:66:30 - use_build_context_synchronously
-   info - Don't use 'BuildContext's across async gaps - lib\widgets\notice_card.dart:72:28 - use_build_context_synchronously
-   info - 'Share' is deprecated and shouldn't be used. Use SharePlus instead - lib\widgets\notice_card.dart:408:13 - deprecated_member_use
-   info - 'shareXFiles' is deprecated and shouldn't be used. Use SharePlus.instance.share() instead - lib\widgets\notice_card.dart:408:19 - deprecated_member_use
-   info - Don't use 'BuildContext's across async gaps - lib\widgets\resource_card.dart:123:9 - use_build_context_synchronously
-   info - Don't use 'BuildContext's across async gaps - lib\widgets\resource_card.dart:134:28 - use_build_context_synchronously
-   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\widgets\resource_card.dart:140:41 - use_build_context_synchronously
-   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\widgets\resource_card.dart:142:41 - use_build_context_synchronously
-   info - Unnecessary use of multiple underscores - lib\widgets\resource_card.dart:180:43 - unnecessary_underscores
-   info - Unnecessary use of multiple underscores - lib\widgets\resource_card.dart:180:47 - unnecessary_underscores
-warning - The operand can't be 'null', so the condition is always 'false' - lib\widgets\resource_card.dart:504:15 - unnecessary_null_comparison
-warning - Dead code - lib\widgets\resource_card.dart:504:24 - dead_code
-warning - The '!' will have no effect because the receiver can't be null - lib\widgets\resource_card.dart:531:35 - unnecessary_non_null_assertion
-warning - The declaration '_PDFViewerDialog' isn't referenced - lib\widgets\resource_card.dart:565:7 - unused_element
-   info - Unnecessary use of multiple underscores - lib\widgets\sticker_picker.dart:190:45 - unnecessary_underscores
-   info - Unnecessary use of multiple underscores - lib\widgets\sticker_picker.dart:190:49 - unnecessary_underscores
+   info - Invalid use of a private type in a public API - lib\widgets\global_timer_overlay.dart:12:26 - library_private_types_in_public_api
+   info - The import of 'package:flutter/foundation.dart' is unnecessary because all of the used elements are also provided by the import of 'package:flutter/material.dart' - lib\widgets\notice_card.dart:2:8 - unnecessary_import
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\widgets\notice_card.dart:302:54 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\widgets\notice_card.dart:310:52 - use_build_context_synchronously
+   info - 'Share' is deprecated and shouldn't be used. Use SharePlus instead - lib\widgets\notice_card.dart:544:15 - deprecated_member_use
+   info - 'shareXFiles' is deprecated and shouldn't be used. Use SharePlus.instance.share() instead - lib\widgets\notice_card.dart:544:21 - deprecated_member_use
+   info - Don't use 'BuildContext's across async gaps - lib\widgets\resource_card.dart:158:9 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\widgets\resource_card.dart:171:28 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps - lib\widgets\resource_card.dart:178:9 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\widgets\resource_card.dart:184:11 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\widgets\resource_card.dart:190:11 - use_build_context_synchronously
+   info - Unnecessary use of multiple underscores - lib\widgets\resource_card.dart:231:41 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\widgets\resource_card.dart:231:45 - unnecessary_underscores
+  error - Expected to find ')' - lib\widgets\resource_card.dart:581:6 - expected_token
+warning - The operand can't be 'null', so the condition is always 'true' - lib\widgets\resource_card.dart:735:31 - unnecessary_null_comparison
+warning - The declaration '_deleteSticker' isn't referenced - lib\widgets\sticker_picker.dart:184:16 - unused_element
+   info - Unnecessary use of multiple underscores - lib\widgets\sticker_picker.dart:521:39 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\widgets\sticker_picker.dart:521:43 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\widgets\sticker_picker.dart:614:29 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\widgets\sticker_picker.dart:686:55 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\widgets\sticker_picker.dart:766:41 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\widgets\sticker_picker.dart:781:51 - unnecessary_underscores
    info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:22:35 - deprecated_member_use
    info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:53:56 - deprecated_member_use
    info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:53:88 - deprecated_member_use
@@ -251,6 +147,6 @@ warning - The declaration '_PDFViewerDialog' isn't referenced - lib\widgets\reso
    info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:190:80 - deprecated_member_use
    info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:228:40 - deprecated_member_use
    info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:228:72 - deprecated_member_use
-warning - The value of the field 'filterOptions' isn't used - lib\widgets\upload_resource_dialog.dart:48:16 - unused_field
+   info - Don't use 'BuildContext's across async gaps - lib\widgets\upload_resource_dialog.dart:386:9 - use_build_context_synchronously
+warning - The '!' will have no effect because the receiver can't be null - lib\widgets\upload_resource_dialog.dart:467:44 - unnecessary_non_null_assertion
 
-252 issues found. (ran in 31.0s)
