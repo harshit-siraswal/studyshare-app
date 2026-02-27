@@ -7,7 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 
 class AuthService {
-  final firebase_auth.FirebaseAuth _auth = firebase_auth.FirebaseAuth.instance;
+  firebase_auth.FirebaseAuth get _auth => firebase_auth.FirebaseAuth.instance;
   // Only create GoogleSignIn for mobile platforms
   GoogleSignIn? _googleSignIn;
   SupabaseClient get _supabase => Supabase.instance.client;
