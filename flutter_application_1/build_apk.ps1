@@ -30,6 +30,29 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
+# Patch flutter_app_badger for AGP 8+ (namespace + compileSdk)
+# This plugin is unmaintained at v1.5.0 and needs these fixes for modern builds.
+$badgerDir = "$env:LOCALAPPDATA\Pub\Cache\hosted\pub.dev\flutter_app_badger-1.5.0\android"
+if (Test-Path "$badgerDir\build.gradle") {
+    Write-Host "Patching flutter_app_badger for AGP 8+..." -ForegroundColor Yellow
+    $gradle = Get-Content "$badgerDir\build.gradle" -Raw
+    # Add namespace if missing
+    if ($gradle -notmatch "namespace") {
+        $gradle = $gradle -replace "android \{", "android {`n    namespace 'fr.g123k.flutterappbadge'"
+    }
+    # Bump compileSdkVersion to 34
+    $gradle = $gradle -replace "compileSdkVersion \d+", "compileSdkVersion 34"
+    Set-Content "$badgerDir\build.gradle" $gradle -NoNewline
+    # Remove package attribute from AndroidManifest.xml
+    $manifest = "$badgerDir\src\main\AndroidManifest.xml"
+    if (Test-Path $manifest) {
+        $xml = Get-Content $manifest -Raw
+        $xml = $xml -replace '\s*package="[^"]*"', ''
+        Set-Content $manifest $xml -NoNewline
+    }
+    Write-Host "flutter_app_badger patched successfully." -ForegroundColor Green
+}
+
 $buildArgs = @("build", "apk", "--release", "--verbose")
 
 if ($env:API_URL) {
