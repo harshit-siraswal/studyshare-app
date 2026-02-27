@@ -47,7 +47,6 @@ app.*.map.json
 # Analysis logs
 analysis_log*.txt
 analysis_results*.txt
-*.log
 analyze_output*.txt
 analyze_results*.txt
 analyze_2.txt

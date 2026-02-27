@@ -1048,10 +1048,6 @@ class _NoticesScreenState extends State<NoticesScreen>
           ],
         ),
       ),
-    ).then((_) {
-      titleCtrl.dispose();
-      contentCtrl.dispose();
-      imageUrlCtrl.dispose();
-    });
+    );
   }
 }
