@@ -28,6 +28,7 @@ class _NoticesScreenState extends State<NoticesScreen>
   List<Map<String, dynamic>> _filteredNotices = [];
   bool _isLoading = true;
   String? _selectedDepartment;
+  bool _isTeacherOrAdmin = false;
 
   // Track if search field is focused
   final FocusNode _searchFocusNode = FocusNode();
@@ -254,6 +255,16 @@ class _NoticesScreenState extends State<NoticesScreen>
     _loadNotices();
     _loadFollowedDepartments();
     _loadDepartmentFollowerCounts();
+    _checkTeacherRole();
+  }
+
+  Future<void> _checkTeacherRole() async {
+    final role = await _supabaseService.getCurrentUserRole();
+    if (mounted) {
+      setState(() {
+        _isTeacherOrAdmin = role == 'TEACHER' || role == 'ADMIN';
+      });
+    }
   }
 
   Future<void> _loadDepartmentFollowerCounts() async {
@@ -563,6 +574,13 @@ class _NoticesScreenState extends State<NoticesScreen>
           ],
         ),
       ),
+      floatingActionButton: _isTeacherOrAdmin
+          ? FloatingActionButton(
+              onPressed: () => _showPostNoticeDialog(isDark),
+              backgroundColor: AppTheme.primary,
+              child: const Icon(Icons.add_rounded, color: Colors.white, size: 28),
+            )
+          : null,
     );
   }
 
@@ -881,5 +899,135 @@ class _NoticesScreenState extends State<NoticesScreen>
     return 'Failed to update follow status.';
   }
 
+  void _showPostNoticeDialog(bool isDark) {
+    final titleCtrl = TextEditingController();
+    final contentCtrl = TextEditingController();
+    final imageUrlCtrl = TextEditingController();
+    String selectedDept = 'general';
 
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+          title: Row(
+            children: [
+              Icon(Icons.campaign_rounded, color: AppTheme.primary),
+              const SizedBox(width: 8),
+              Text(
+                'Post Notice',
+                style: GoogleFonts.inter(
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black,
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: titleCtrl,
+                  decoration: InputDecoration(
+                    labelText: 'Title',
+                    labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  style: GoogleFonts.inter(color: isDark ? Colors.white : Colors.black),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: contentCtrl,
+                  maxLines: 4,
+                  decoration: InputDecoration(
+                    labelText: 'Content',
+                    alignLabelWithHint: true,
+                    labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  style: GoogleFonts.inter(color: isDark ? Colors.white : Colors.black),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  value: selectedDept,
+                  decoration: InputDecoration(
+                    labelText: 'Department',
+                    labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  dropdownColor: isDark ? const Color(0xFF2C2C2E) : Colors.white,
+                  style: GoogleFonts.inter(
+                    color: isDark ? Colors.white : Colors.black,
+                    fontSize: 14,
+                  ),
+                  items: _departmentAccounts.map((dept) {
+                    return DropdownMenuItem(
+                      value: dept.id,
+                      child: Text(dept.name),
+                    );
+                  }).toList(),
+                  onChanged: (val) {
+                    if (val != null) setDialogState(() => selectedDept = val);
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: imageUrlCtrl,
+                  decoration: InputDecoration(
+                    labelText: 'Image URL (optional)',
+                    hintText: 'https://example.com/image.png',
+                    labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
+                    hintStyle: GoogleFonts.inter(color: AppTheme.textMuted.withValues(alpha: 0.5)),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  style: GoogleFonts.inter(color: isDark ? Colors.white : Colors.black),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('Cancel', style: GoogleFonts.inter(color: AppTheme.textMuted)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary),
+              onPressed: () async {
+                if (titleCtrl.text.isEmpty || contentCtrl.text.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please fill title and content')),
+                  );
+                  return;
+                }
+                try {
+                  await _supabaseService.addNotice(
+                    collegeId: widget.collegeId,
+                    title: titleCtrl.text.trim(),
+                    content: contentCtrl.text.trim(),
+                    department: selectedDept,
+                    imageUrl: imageUrlCtrl.text.trim().isNotEmpty ? imageUrlCtrl.text.trim() : null,
+                  );
+                  if (mounted) {
+                    Navigator.pop(ctx);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Notice posted successfully!')),
+                    );
+                    _loadNotices();
+                  }
+                } catch (e) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Failed to post notice: $e')),
+                    );
+                  }
+                }
+              },
+              child: Text('Post', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w600)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

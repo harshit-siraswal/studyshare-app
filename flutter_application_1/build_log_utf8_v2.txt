@@ -1,0 +1,163 @@
+﻿Resolving dependencies...
+Downloading packages...
+  _fe_analyzer_shared 91.0.0 (96.0.0 available)
+  analyzer 8.4.1 (10.2.0 available)
+  app_links 6.4.1 (7.0.0 available)
+  archive 4.0.7 (4.0.9 available)
+  characters 1.4.0 (1.4.1 available)
+  dart_jsonwebtoken 3.3.1 (3.3.2 available)
+  dbus 0.7.11 (0.7.12 available)
+  ffi 2.1.5 (2.2.0 available)
+  flutter_local_notifications 18.0.1 (20.1.0 available)
+  flutter_local_notifications_linux 5.0.0 (7.0.0 available)
+  flutter_local_notifications_platform_interface 8.0.0 (10.0.0 available)
+  flutter_riverpod 3.2.0 (3.2.1 available)
+  fluttertoast 8.2.14 (9.0.0 available)
+  go_router 17.0.1 (17.1.0 available)
+  google_fonts 7.1.0 (8.0.2 available)
+  google_sign_in 6.3.0 (7.2.0 available)
+  google_sign_in_android 6.2.1 (7.2.9 available)
+  google_sign_in_ios 5.9.0 (6.3.0 available)
+  google_sign_in_platform_interface 2.5.0 (3.1.0 available)
+  google_sign_in_web 0.12.4+4 (1.1.2 available)
+  hooks 1.0.0 (1.0.1 available)
+  image 4.7.2 (4.8.0 available)
+  json_annotation 4.10.0 (4.11.0 available)
+  matcher 0.12.17 (0.12.19 available)
+  material_color_utilities 0.11.1 (0.13.0 available)
+  meta 1.17.0 (1.18.1 available)
+  objective_c 9.2.5 (9.3.0 available)
+  petitparser 7.0.1 (7.0.2 available)
+  photo_view 0.14.0 (0.15.0 available)
+  posix 6.0.3 (6.5.0 available)
+  razorpay_flutter 1.4.0 (1.4.1 available)
+  riverpod 3.2.0 (3.2.1 available)
+  riverpod_annotation 4.0.1 (4.0.2 available)
+  shared_preferences_android 2.4.20 (2.4.21 available)
+  source_span 1.10.1 (1.10.2 available)
+  syncfusion_flutter_core 32.1.25 (32.2.7 available)
+  syncfusion_flutter_pdf 32.1.25 (32.2.7 available)
+  syncfusion_flutter_pdfviewer 32.1.25 (32.2.7 available)
+  syncfusion_flutter_signaturepad 32.1.25 (32.2.7 available)
+  syncfusion_pdfviewer_linux 32.1.25 (32.2.7 available)
+  syncfusion_pdfviewer_macos 32.1.25 (32.2.7 available)
+  syncfusion_pdfviewer_platform_interface 32.1.25 (32.2.7 available)
+  syncfusion_pdfviewer_web 32.1.25 (32.2.7 available)
+  syncfusion_pdfviewer_windows 32.1.25 (32.2.7 available)
+  test 1.26.3 (1.30.0 available)
+  test_api 0.7.7 (0.7.10 available)
+  test_core 0.6.12 (0.6.16 available)
+  timezone 0.10.1 (0.11.0 available)
+  url_launcher_ios 6.3.6 (6.4.1 available)
+  uuid 4.5.2 (4.5.3 available)
+  vector_graphics_compiler 1.1.20 (1.2.0 available)
+  video_player 2.10.1 (2.11.0 available)
+  video_player_android 2.9.1 (2.9.4 available)
+  video_player_avfoundation 2.9.0 (2.9.3 available)
+  webview_flutter_android 4.10.11 (4.10.13 available)
+  webview_flutter_wkwebview 3.23.5 (3.23.7 available)
+  win32 5.15.0 (6.0.0 available)
+  win32_registry 2.1.0 (3.0.1 available)
+Got dependencies!
+58 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+Running Gradle task 'assembleRelease'...                        
+flutter : lib/widgets/u
+pload_resource_dialog.d
+art:191:25: Error: The 
+getter 'kIsWeb' isn't 
+defined for the type '_
+UploadResourceDialogSta
+te'.
+At line:1 char:1
++ flutter build apk 
+--release > 
+build_log.txt 2>&1
++ ~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
+~~~~
+    + CategoryInfo     
+         : NotSpecifi  
+  ed: (lib/widgets/u   
+ pl...ceDialogState    
+'.:String) [], Rem    
+oteException
+    + FullyQualifiedEr 
+   rorId : NativeComm  
+  andError
+ 
+ - '_UploadResourceDial
+ogState' is from 'packa
+ge:flutter_application_
+1/widgets/upload_resour
+ce_dialog.dart' ('lib/w
+idgets/upload_resource_
+dialog.dart').
+Try correcting the 
+name to the name of an 
+existing getter, or 
+defining a getter or 
+field named 'kIsWeb'.
+        
+withReadStream: 
+kIsWeb, // For web, 
+streams are needed for 
+big files
+                       
+ ^^^^^^
+lib/widgets/upload_reso
+urce_dialog.dart:296:15
+: Error: The getter 
+'kIsWeb' isn't defined 
+for the type '_UploadRe
+sourceDialogState'.
+ - '_UploadResourceDial
+ogState' is from 'packa
+ge:flutter_application_
+1/widgets/upload_resour
+ce_dialog.dart' ('lib/w
+idgets/upload_resource_
+dialog.dart').
+Try correcting the 
+name to the name of an 
+existing getter, or 
+defining a getter or 
+field named 'kIsWeb'.
+          if (kIsWeb) {
+              ^^^^^^
+Target kernel_snapshot_
+program failed: 
+Exception
+
+
+FAILURE: Build failed 
+with an exception.
+
+* What went wrong:
+Execution failed for 
+task ':app:compileFlutt
+erBuildRelease'.
+> Process 'command 'C:\
+Users\ASUS\.antigravity
+\extensions\flutter\bin
+\flutter.bat'' 
+finished with non-zero 
+exit value 1
+
+* Try:
+> Run with 
+--stacktrace option to 
+get the stack trace.
+> Run with --info or 
+--debug option to get 
+more log output.
+> Run with --scan to 
+get full insights.
+> Get more help at http
+s://help.gradle.org.
+
+BUILD FAILED in 49s
+Running Gradle task 'assembleRelease'...                           49.9s
+Gradle task 
+assembleRelease failed 
+with exit code 1

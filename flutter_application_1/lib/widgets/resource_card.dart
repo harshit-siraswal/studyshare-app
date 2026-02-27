@@ -71,20 +71,24 @@ class _ResourceCardState extends State<ResourceCard> {
       debugPrint('Bookmark toggle error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to update bookmark. Please try again.')),
+          const SnackBar(
+            content: Text('Unable to update bookmark. Please try again.'),
+          ),
         );
       }
     }
   }
+
   Future<void> _vote(int direction) async {
     if (_isVoting) return;
     setState(() => _isVoting = true);
+    final oldVote = _userVote;
+    final oldUpvotes = _upvotes;
+    final oldDownvotes = _downvotes;
+
     try {
-      final oldVote = _userVote;
-      final newVote = _userVote == direction ? null : direction;
-      final oldUpvotes = _upvotes;
-      final oldDownvotes = _downvotes;
-      
+      final newVote = oldVote == direction ? null : direction;
+
       setState(() {
         if (oldVote == 1) _upvotes--;
         if (oldVote == -1) _downvotes--;
@@ -101,14 +105,16 @@ class _ResourceCardState extends State<ResourceCard> {
       widget.onVoteChanged?.call();
     } catch (e) {
       if (mounted) {
-         setState(() {
-            _upvotes = oldUpvotes;
-            _downvotes = oldDownvotes;
-            _userVote = oldVote;
-         });
-         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Unable to cast vote. Please try again.'))
-         );
+        setState(() {
+          _upvotes = oldUpvotes;
+          _downvotes = oldDownvotes;
+          _userVote = oldVote;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Unable to cast vote. Please try again.'),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _isVoting = false);
@@ -143,34 +149,41 @@ class _ResourceCardState extends State<ResourceCard> {
     if (!isPremium) {
       showDialog(
         context: context,
-        builder: (_) => PaywallDialog(onSuccess: () {
-             if (!mounted) return;
-             setState(() {}); // refresh state to likely remove lock
-             _handleDownload(context); // retry download
-        }),
+        builder: (_) => PaywallDialog(
+          onSuccess: () {
+            if (!mounted) return;
+            setState(() {}); // refresh state to likely remove lock
+            _handleDownload(context); // retry download
+          },
+        ),
       );
       return;
     }
 
     // 3. Download
     if (widget.resource.fileUrl.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No file available to download')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No file available to download')),
+      );
       return;
     }
     try {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Downloading...')));
-      await ds.downloadResource(
-        widget.resource.fileUrl, 
-        widget.resource, 
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Downloading...')));
+      await ds.downloadResource(widget.resource.fileUrl, widget.resource);
       setState(() {}); // refresh icon
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Download Complete!')));
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Download Complete!')));
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
     }
   }
-
-
 
   void _openResource() {
     if (widget.resource.type == 'video') {
@@ -186,39 +199,55 @@ class _ResourceCardState extends State<ResourceCard> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(widget.resource.title, style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+        title: Text(
+          widget.resource.title,
+          style: GoogleFonts.inter(fontWeight: FontWeight.bold),
+        ),
         content: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
               if (widget.resource.fileUrl.isNotEmpty) // If notice has image
-                 Padding(
-                   padding: const EdgeInsets.only(bottom: 12),
-                   child: ClipRRect(
-                     borderRadius: BorderRadius.circular(8),
-                     child: Image.network(
-                       widget.resource.fileUrl,
-                       fit: BoxFit.contain,
-                       loadingBuilder: (context, child, loadingProgress) {
-                         if (loadingProgress == null) return child;
-                         return const Center(child: CircularProgressIndicator());
-                       },
-                        errorBuilder: (_, __, ___) => Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(Icons.broken_image_outlined, size: 48, color: Colors.grey),
-                              const SizedBox(height: 8),
-                              Text('Image not found', style: GoogleFonts.inter(color: Colors.grey, fontSize: 12)),
-                            ],
-                          ),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
+                      widget.resource.fileUrl,
+                      fit: BoxFit.contain,
+                      loadingBuilder: (context, child, loadingProgress) {
+                        if (loadingProgress == null) return child;
+                        return const Center(child: CircularProgressIndicator());
+                      },
+                      errorBuilder: (_, __, ___) => Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(
+                              Icons.broken_image_outlined,
+                              size: 48,
+                              color: Colors.grey,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Image not found',
+                              style: GoogleFonts.inter(
+                                color: Colors.grey,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
                   ),
+                ),
               const SizedBox(height: 12),
-              Text(widget.resource.description ?? '', style: GoogleFonts.inter(fontSize: 14)),
+              Text(
+                widget.resource.description ?? '',
+                style: GoogleFonts.inter(fontSize: 14),
+              ),
             ],
           ),
         ),
@@ -234,20 +263,22 @@ class _ResourceCardState extends State<ResourceCard> {
 
   void _showPDFViewer() {
     if (widget.resource.fileUrl.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No file available')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('No file available')));
       return;
     }
 
     final downloadService = DownloadService();
     final localPath = downloadService.getLocalPath(widget.resource.id);
-    
+
     bool hasLocalFile = false;
-    if (!kIsWeb && localPath != null && downloadService.isDownloaded(widget.resource.id)) {
-        hasLocalFile = true;
+    if (!kIsWeb &&
+        localPath != null &&
+        downloadService.isDownloaded(widget.resource.id)) {
+      hasLocalFile = true;
     }
-    
+
     final url = hasLocalFile ? localPath! : widget.resource.fileUrl;
 
     Navigator.push(
@@ -280,7 +311,7 @@ class _ResourceCardState extends State<ResourceCard> {
     // ... no change needed in build if _openResource is handling dispatch ...
     // But we need to update _getTypeIcon and _getTypeColor below
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Material(
       color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
       borderRadius: BorderRadius.circular(12),
@@ -306,14 +337,10 @@ class _ResourceCardState extends State<ResourceCard> {
                   color: _getTypeColor().withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(
-                  _getTypeIcon(),
-                  color: _getTypeColor(),
-                  size: 24,
-                ),
+                child: Icon(_getTypeIcon(), color: _getTypeColor(), size: 24),
               ),
               const SizedBox(width: 12),
-              
+
               // Content
               Expanded(
                 child: Column(
@@ -330,13 +357,18 @@ class _ResourceCardState extends State<ResourceCard> {
                           style: GoogleFonts.inter(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
-                            color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
+                            color: isDark
+                                ? AppTheme.textLight
+                                : AppTheme.textPrimary,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
                           decoration: BoxDecoration(
                             color: _getTypeColor().withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(6),
@@ -350,14 +382,42 @@ class _ResourceCardState extends State<ResourceCard> {
                             ),
                           ),
                         ),
+                        if (widget.resource.isTeacherUpload)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFFF59E0B), Color(0xFFEF4444)],
+                              ),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.school_rounded, size: 10, color: Colors.white),
+                                const SizedBox(width: 3),
+                                Text(
+                                  'TEACHER',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                       ],
                     ),
                     const SizedBox(height: 4),
-                    
-                     
-                     // Author
-                     _buildAuthorWidget(),
-                    const SizedBox(height: 4),                    
+
+                    // Author
+                    _buildAuthorWidget(),
+                    const SizedBox(height: 4),
                     // Subject & Branch
                     Text(
                       '${widget.resource.subject ?? 'Unknown'} • ${widget.resource.branch ?? 'General'}',
@@ -369,7 +429,7 @@ class _ResourceCardState extends State<ResourceCard> {
                       overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 8),
-                    
+
                     // Actions row
                     SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
@@ -377,10 +437,13 @@ class _ResourceCardState extends State<ResourceCard> {
                         children: [
                           // Vote buttons
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 2,
+                            ),
                             decoration: BoxDecoration(
-                              color: isDark 
-                                  ? Colors.white.withValues(alpha: 0.05) 
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: 0.05)
                                   : Colors.black.withValues(alpha: 0.03),
                               borderRadius: BorderRadius.circular(8),
                             ),
@@ -394,17 +457,21 @@ class _ResourceCardState extends State<ResourceCard> {
                                   onTap: () => _vote(1),
                                 ),
                                 Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                  ),
                                   child: Text(
-                                    _netVotes > 0 ? '+$_netVotes' : '$_netVotes',
+                                    _netVotes > 0
+                                        ? '+$_netVotes'
+                                        : '$_netVotes',
                                     style: GoogleFonts.inter(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
-                                      color: _netVotes > 0 
-                                          ? AppTheme.success 
-                                          : _netVotes < 0 
-                                              ? AppTheme.error 
-                                              : AppTheme.textMuted,
+                                      color: _netVotes > 0
+                                          ? AppTheme.success
+                                          : _netVotes < 0
+                                          ? AppTheme.error
+                                          : AppTheme.textMuted,
                                     ),
                                   ),
                                 ),
@@ -418,7 +485,7 @@ class _ResourceCardState extends State<ResourceCard> {
                             ),
                           ),
                           const SizedBox(width: 8),
-                          
+
                           // Bookmark button
                           Material(
                             color: Colors.transparent,
@@ -428,36 +495,47 @@ class _ResourceCardState extends State<ResourceCard> {
                               child: Padding(
                                 padding: const EdgeInsets.all(8.0),
                                 child: Icon(
-                                  _isBookmarked ? Icons.bookmark : Icons.bookmark_border,
+                                  _isBookmarked
+                                      ? Icons.bookmark
+                                      : Icons.bookmark_border,
                                   size: 20,
-                                  color: _isBookmarked 
-                                      ? AppTheme.warning 
+                                  color: _isBookmarked
+                                      ? AppTheme.warning
                                       : AppTheme.textMuted,
                                 ),
                               ),
                             ),
                           ),
-                          
+
                           const SizedBox(width: 16),
-                          
+
                           // Download Button
-                          if (widget.resource.type == 'notes' || widget.resource.type == 'pyq') ...[
-                             Material(
-                               color: Colors.transparent,
-                               child: InkWell(
-                                  borderRadius: BorderRadius.circular(20),
-                                  onTap: () => _handleDownload(context),
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(8.0),
-                                    child: ds.isDownloaded(widget.resource.id)
-                                        ? Icon(Icons.offline_pin, size: 20, color: AppTheme.success)
-                                        : Icon(Icons.download_rounded, size: 20, color: AppTheme.textMuted),
-                                  ),
+                          if (widget.resource.type == 'notes' ||
+                              widget.resource.type == 'pyq') ...[
+                            Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(20),
+                                onTap: () => _handleDownload(context),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(8.0),
+                                  child: ds.isDownloaded(widget.resource.id)
+                                      ? Icon(
+                                          Icons.offline_pin,
+                                          size: 20,
+                                          color: AppTheme.success,
+                                        )
+                                      : Icon(
+                                          Icons.download_rounded,
+                                          size: 20,
+                                          color: AppTheme.textMuted,
+                                        ),
                                 ),
-                             ),
-                             const SizedBox(width: 12),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
                           ],
-  
+
                           // Date
                           Text(
                             widget.resource.formattedDate,
@@ -493,7 +571,9 @@ class _ResourceCardState extends State<ResourceCard> {
         child: Container(
           padding: const EdgeInsets.all(4),
           decoration: BoxDecoration(
-            color: isActive ? color.withValues(alpha: 0.15) : Colors.transparent,
+            color: isActive
+                ? color.withValues(alpha: 0.15)
+                : Colors.transparent,
             borderRadius: BorderRadius.circular(6),
           ),
           child: Icon(
@@ -523,7 +603,7 @@ class _ResourceCardState extends State<ResourceCard> {
   Color _getTypeColor() {
     switch (widget.resource.type.toLowerCase()) {
       case 'video':
-        return AppTheme.error;   // Red
+        return AppTheme.error; // Red
       case 'pyq':
         return AppTheme.warning; // Amber
       case 'notice':
@@ -533,7 +613,6 @@ class _ResourceCardState extends State<ResourceCard> {
         return AppTheme.primary; // Blue (now #2563EB)
     }
   }
-
 
   Widget _buildAuthorWidget() {
     final name = widget.resource.uploadedByName;
@@ -550,10 +629,8 @@ class _ResourceCardState extends State<ResourceCard> {
           onTap: () {
             Navigator.of(context).push(
               MaterialPageRoute(
-                builder: (_) => UserProfileScreen(
-                  userEmail: email,
-                  userName: name,
-                ),
+                builder: (_) =>
+                    UserProfileScreen(userEmail: email, userName: name),
               ),
             );
           },
@@ -588,7 +665,5 @@ class _ResourceCardState extends State<ResourceCard> {
         ),
       ),
     );
-  
-
   }
 } // End of _ResourceCardState

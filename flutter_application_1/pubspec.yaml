@@ -90,6 +90,7 @@ dependencies:
   path: any
   flutter_linkify: ^6.0.0
   image_cropper: ^11.0.0
+  lottie: ^3.3.2
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -126,6 +127,7 @@ flutter:
     - assets/images/
     - assets/sounds/
     - assets/videos/
+    - assets/animations/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

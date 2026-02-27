@@ -16,6 +16,7 @@ import '../../services/subscription_service.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../../widgets/paywall_dialog.dart';
 import '../../utils/theme_animator.dart';
+import 'package:lottie/lottie.dart';
 
 class SettingsScreen extends StatefulWidget {
   final VoidCallback onLogout;
@@ -293,7 +294,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 24),
                 _buildSectionHeader('App Settings', textColor),
                 _buildSettingsTile(
-                  icon: isDark ? Icons.dark_mode_outlined : Icons.light_mode_outlined,
+                  icon: Icons.brightness_6,
+                  customLeading: Lottie.asset(
+                    'assets/animations/theme_toggle.json',
+                    width: 30,
+                    height: 30,
+                    fit: BoxFit.cover,
+                    animate: false, // In a real app we'd control the animation properly based on state transition
+                  ),
                   title: 'Appearance',
                   subtitle: isDark ? 'Dark Mode' : 'Light Mode',
                   trailing: Builder(
@@ -441,6 +449,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _buildSettingsTile({
     required IconData icon,
+    Widget? customLeading,
     required String title,
     String? subtitle,
     VoidCallback? onTap,
@@ -471,7 +480,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade100,
             borderRadius: BorderRadius.circular(12),
           ),
-          child: Icon(icon, color: iconColor ?? AppTheme.primary, size: 22),
+          child: customLeading ?? Icon(icon, color: iconColor ?? AppTheme.primary, size: 22),
         ),
         title: Text(
           title,

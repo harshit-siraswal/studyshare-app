@@ -1,7 +1,9 @@
-﻿import 'dart:convert';
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
 
 /// Backend API client (same pattern as Studyspace/src/lib/api.ts).
@@ -10,12 +12,14 @@ import '../config/app_config.dart';
 /// This avoids client-side Supabase inserts that fail under RLS with anon key.
 class BackendApiService {
   BackendApiService({FirebaseAuth? firebaseAuth})
-    : _auth = firebaseAuth ?? FirebaseAuth.instance;
+    : _firebaseAuthInstance = firebaseAuth;
 
-  final FirebaseAuth _auth;
+  FirebaseAuth get _auth => _firebaseAuthInstance ?? FirebaseAuth.instance;
+  final FirebaseAuth? _firebaseAuthInstance;
 
-  String get _baseUrl =>
-      AppConfig.apiUrl; // e.g. https://studyspace-backend.onrender.com
+  static const Duration _requestTimeout = Duration(seconds: 30);
+
+  List<String> get _baseUrls => AppConfig.apiBaseUrls;
 
   Future<String?> _getIdToken() async {
     final user = _auth.currentUser;
@@ -34,8 +38,6 @@ class BackendApiService {
     Map<String, dynamic>? body,
   }) async {
     final token = await _getIdToken();
-    final uri = Uri.parse('$_baseUrl$path');
-
     final headers = <String, String>{
       'Content-Type': 'application/json',
       if (token != null) 'Authorization': 'Bearer $token',
@@ -45,49 +47,133 @@ class BackendApiService {
         ? null
         : Map<String, dynamic>.from(body);
 
-    late http.Response res;
+    Object? lastError;
+    final baseUrls = _baseUrls;
+
+    for (var i = 0; i < baseUrls.length; i++) {
+      final baseUrl = baseUrls[i];
+      final uri = Uri.parse('$baseUrl$path');
+      final hasNextBaseUrl = i < baseUrls.length - 1;
+
+      try {
+        final res = await _sendRequest(
+          uri: uri,
+          method: method,
+          headers: headers,
+          body: effectiveBody,
+        ).timeout(_requestTimeout);
+
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          return _decodeJsonBody(res);
+        }
+
+        final msg = _responseErrorMessage(res);
+        if (hasNextBaseUrl && _shouldTryNextHost(res.statusCode)) {
+          debugPrint(
+            '[BackendApi] $method $uri failed (${res.statusCode}), '
+            'trying next host. Reason: $msg',
+          );
+          continue;
+        }
+        throw Exception(msg);
+      } on TimeoutException catch (e) {
+        lastError = e;
+        if (hasNextBaseUrl) {
+          debugPrint(
+            '[BackendApi] timeout for $method $uri, trying next host.',
+          );
+          continue;
+        }
+        throw Exception('Backend request timed out for $uri');
+      } on SocketException catch (e) {
+        lastError = e;
+        if (hasNextBaseUrl) {
+          debugPrint(
+            '[BackendApi] network error for $method $uri, '
+            'trying next host: $e',
+          );
+          continue;
+        }
+        throw Exception('Network error while reaching backend: $e');
+      } on http.ClientException catch (e) {
+        lastError = e;
+        if (hasNextBaseUrl) {
+          debugPrint(
+            '[BackendApi] client error for $method $uri, '
+            'trying next host: $e',
+          );
+          continue;
+        }
+        throw Exception('HTTP client error while reaching backend: $e');
+      }
+    }
+
+    if (lastError != null) {
+      throw Exception('Unable to reach backend: $lastError');
+    }
+    throw Exception('Backend request failed before any response was received');
+  }
+
+  bool _shouldTryNextHost(int statusCode) {
+    return statusCode == 404 || statusCode >= 500;
+  }
+
+  Future<http.Response> _sendRequest({
+    required Uri uri,
+    required String method,
+    required Map<String, String> headers,
+    required Map<String, dynamic>? body,
+  }) {
     switch (method.toUpperCase()) {
       case 'POST':
-        res = await http.post(
+        return http.post(
           uri,
           headers: headers,
-          body: jsonEncode(effectiveBody ?? {}),
+          body: jsonEncode(body ?? <String, dynamic>{}),
         );
-        break;
       case 'PUT':
-        res = await http.put(
+        return http.put(
           uri,
           headers: headers,
-          body: jsonEncode(effectiveBody ?? {}),
+          body: jsonEncode(body ?? <String, dynamic>{}),
         );
-        break;
       case 'DELETE':
-        res = await http.delete(
+        return http.delete(
           uri,
           headers: headers,
-          body: jsonEncode(effectiveBody ?? {}),
+          body: jsonEncode(body ?? <String, dynamic>{}),
         );
-        break;
       default:
-        res = await http.get(uri, headers: headers);
-        break;
+        return http.get(uri, headers: headers);
+    }
+  }
+
+  Map<String, dynamic> _decodeJsonBody(http.Response res) {
+    final trimmed = res.body.trim();
+    if (trimmed.isEmpty) {
+      return <String, dynamic>{};
     }
 
-    Map<String, dynamic> data;
+    final decoded = jsonDecode(trimmed);
+    if (decoded is Map<String, dynamic>) {
+      return decoded;
+    }
+    if (decoded is Map) {
+      return Map<String, dynamic>.from(decoded);
+    }
+
+    throw Exception('Invalid API response (${res.statusCode}): ${res.body}');
+  }
+
+  String _responseErrorMessage(http.Response res) {
     try {
-      data = jsonDecode(res.body) as Map<String, dynamic>;
-    } catch (_) {
-      throw Exception('API error (${res.statusCode}): ${res.body}');
-    }
-
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      final msg =
-          data['message']?.toString() ??
+      final data = _decodeJsonBody(res);
+      return data['message']?.toString() ??
           data['error']?.toString() ??
-          'API request failed';
-      throw Exception(msg);
+          'API request failed (${res.statusCode})';
+    } catch (_) {
+      return 'API request failed (${res.statusCode}): ${res.body}';
     }
-    return data;
   }
 
   // ----------------------------
@@ -182,6 +268,7 @@ class BackendApiService {
 
   Future<void> deleteChatComment({
     required String commentId,
+    BuildContext? context,
   }) async {
     await _requestJson(
       '/api/chat/comments/${Uri.encodeComponent(commentId)}',
@@ -226,11 +313,7 @@ class BackendApiService {
     Map<String, dynamic> input, {
     required BuildContext context,
   }) async {
-    return _requestJson(
-      '/api/resources',
-      method: 'POST',
-      body: input,
-    );
+    return _requestJson('/api/resources', method: 'POST', body: input);
   }
 
   Future<Map<String, dynamic>> castVote({
@@ -348,10 +431,7 @@ class BackendApiService {
     required String noticeId,
     required BuildContext context,
   }) async {
-    return _requestJson(
-      '${_noticePath(noticeId)}/like',
-      method: 'POST',
-    );
+    return _requestJson('${_noticePath(noticeId)}/like', method: 'POST');
   }
 
   Future<Map<String, dynamic>> getNoticeLikes(String noticeId) async {
@@ -508,6 +588,7 @@ class BackendApiService {
 
   Future<void> markNotificationRead(
     Object id, {
+    BuildContext? contextForRecaptcha,
   }) async {
     await _requestJson(
       '/api/notifications/${Uri.encodeComponent(id.toString())}/read',
@@ -516,16 +597,15 @@ class BackendApiService {
   }
 
   Future<void> markAllNotificationsRead({
+    BuildContext? contextForRecaptcha,
   }) async {
-    await _requestJson(
-      '/api/notifications/read-all',
-      method: 'POST',
-    );
+    await _requestJson('/api/notifications/read-all', method: 'POST');
   }
 
   Future<void> deleteNotification(
-    Object id,
-  ) async {
+    Object id, {
+    BuildContext? contextForRecaptcha,
+  }) async {
     await _requestJson(
       '/api/notifications/${Uri.encodeComponent(id.toString())}',
       method: 'DELETE',
@@ -807,4 +887,3 @@ class BackendApiService {
     );
   }
 }
-

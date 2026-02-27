@@ -29,9 +29,22 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "flutter pub get failed!" -ForegroundColor Red
     exit $LASTEXITCODE
 }
+
+$buildArgs = @("build", "apk", "--release", "--verbose")
+
+if ($env:API_URL) {
+    Write-Host "Using API_URL from environment: $($env:API_URL)" -ForegroundColor Cyan
+    $buildArgs += "--dart-define=API_URL=$($env:API_URL)"
+}
+
+if ($env:API_FALLBACK_URLS) {
+    Write-Host "Using API_FALLBACK_URLS from environment" -ForegroundColor Cyan
+    $buildArgs += "--dart-define=API_FALLBACK_URLS=$($env:API_FALLBACK_URLS)"
+}
+
 # Build APK
 Write-Host "Building APK..." -ForegroundColor Green
-flutter build apk --release --verbose
+& flutter @buildArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Host "flutter build apk failed!" -ForegroundColor Red
     exit $LASTEXITCODE

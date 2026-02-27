@@ -28,7 +28,11 @@ class BannedUserScreen extends StatelessWidget {
       } else {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Could not launch email client. Support email: ${AppConfig.supportEmail}')),
+            SnackBar(
+              content: Text(
+                'Could not launch email client. Support email: ${AppConfig.supportEmail}',
+              ),
+            ),
           );
         }
         debugPrint('Could not launch email client.');
@@ -37,7 +41,11 @@ class BannedUserScreen extends StatelessWidget {
       debugPrint('Error launching email client: $e');
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error launching email client. Support email: ${AppConfig.supportEmail}')),
+          SnackBar(
+            content: Text(
+              'Error launching email client. Support email: ${AppConfig.supportEmail}',
+            ),
+          ),
         );
       }
     }
@@ -62,11 +70,7 @@ class BannedUserScreen extends StatelessWidget {
                 label: title,
                 child: Column(
                   children: [
-                    Icon(
-                      Icons.gavel_rounded,
-                      size: 80,
-                      color: AppTheme.error,
-                    ),
+                    Icon(Icons.gavel_rounded, size: 80, color: AppTheme.error),
                     const SizedBox(height: 24),
                     Text(
                       title,
@@ -74,7 +78,9 @@ class BannedUserScreen extends StatelessWidget {
                       style: GoogleFonts.inter(
                         fontSize: 28,
                         fontWeight: FontWeight.bold,
-                        color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
+                        color: isDark
+                            ? AppTheme.textLight
+                            : AppTheme.textPrimary,
                       ),
                     ),
                   ],
@@ -93,10 +99,10 @@ class BannedUserScreen extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: AppTheme.error.withValues(alpha: (0.1 * 255).round()),
+                  color: AppTheme.error.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: AppTheme.error.withValues(alpha: (0.3 * 255).round()),
+                    color: AppTheme.error.withValues(alpha: 0.3),
                   ),
                 ),
                 child: Column(
@@ -113,7 +119,9 @@ class BannedUserScreen extends StatelessWidget {
                     Text(
                       reason,
                       style: GoogleFonts.inter(
-                        color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
+                        color: isDark
+                            ? AppTheme.textLight
+                            : AppTheme.textPrimary,
                         height: 1.5,
                       ),
                     ),

@@ -356,29 +356,30 @@ class _FollowingScreenState extends State<FollowingScreen>
                           horizontal: 12,
                           vertical: 6,
                         ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            Icons.sort,
-                            size: 16,
-                            color: isDark ? Colors.white70 : Colors.black54,
-                          ),
-                          const SizedBox(width: 6),
-                          Text(
-                            _sortBy,
-                            style: GoogleFonts.inter(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.sort,
+                              size: 16,
                               color: isDark ? Colors.white70 : Colors.black54,
                             ),
-                          ),
-                          const SizedBox(width: 4),
-                          Icon(
-                            Icons.keyboard_arrow_down,
-                            size: 16,
-                            color: isDark ? Colors.white70 : Colors.black54,
-                          ),
-                        ],
+                            const SizedBox(width: 6),
+                            Text(
+                              _sortBy,
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500,
+                                color: isDark ? Colors.white70 : Colors.black54,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Icon(
+                              Icons.keyboard_arrow_down,
+                              size: 16,
+                              color: isDark ? Colors.white70 : Colors.black54,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -593,7 +594,8 @@ class _FollowingScreenState extends State<FollowingScreen>
                             imageUrl: photoUrl,
                             fit: BoxFit.cover,
                             placeholder: (context, url) => _buildInitials(name),
-                            errorWidget: (context, url, error) => _buildInitials(name),
+                            errorWidget: (context, url, error) =>
+                                _buildInitials(name),
                           )
                         : _buildInitials(name),
                   ),
@@ -704,8 +706,11 @@ class _FollowingScreenState extends State<FollowingScreen>
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) =>
-            UserProfileScreen(userEmail: email, userName: displayName, userPhotoUrl: photoUrl),
+        builder: (context) => UserProfileScreen(
+          userEmail: email,
+          userName: displayName,
+          userPhotoUrl: photoUrl,
+        ),
       ),
     );
   }

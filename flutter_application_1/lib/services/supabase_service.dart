@@ -6,6 +6,9 @@ import '../models/resource.dart';
 import 'backend_api_service.dart';
 import 'subscription_service.dart';
 import '../models/department_account.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import '../config/app_config.dart';
 
 class RoomLimitException implements Exception {
   final String message;
@@ -38,10 +41,12 @@ class SupabaseService {
     final supabaseEmail = _normalizeEmail(currentUserEmail);
     if (supabaseEmail.isNotEmpty) return supabaseEmail;
     final firebaseEmail = _normalizeEmail(
-      firebase_auth.FirebaseAuth.instance.currentUser?.email,
+      _firebaseAuth.currentUser?.email,
     );
     return firebaseEmail;
   }
+
+  firebase_auth.FirebaseAuth get _firebaseAuth => firebase_auth.FirebaseAuth.instance;
 
   String _normalizeEmail(String? email) => email?.trim().toLowerCase() ?? '';
 
@@ -1476,6 +1481,35 @@ class SupabaseService {
         parentId: parentId,
         context: ctx,
       );
+
+      if (parentId != null) {
+        try {
+          final parentComment = await _client
+              .from('chat_comments')
+              .select('user_email')
+              .eq('id', parentId)
+              .maybeSingle();
+
+          if (parentComment != null && parentComment['user_email'] != null) {
+            final targetEmail = parentComment['user_email'] as String;
+            if (targetEmail != userEmail) {
+              final url = Uri.parse('${AppConfig.apiBaseUrls.first}/api/user-push-notification');
+              final truncatedContent = content.length > 50 ? '${content.substring(0, 47)}...' : content;
+              await http.post(
+                url,
+                headers: {'Content-Type': 'application/json'},
+                body: jsonEncode({
+                  'targetEmail': targetEmail,
+                  'title': 'New Reply',
+                  'message': '$userName replied: "$truncatedContent"'
+                }),
+              );
+            }
+          }
+        } catch (e) {
+          debugPrint('Notice: Failed to send reply push notification: $e');
+        }
+      }
     } catch (e) {
       debugPrint('Error adding comment: $e');
       rethrow;
@@ -2537,5 +2571,67 @@ class SupabaseService {
       return countVal;
     }
     return 0;
+  }
+
+  // ============ TEACHER ROLE ============
+
+  /// Get the current user's role from the users table
+  Future<String> getCurrentUserRole() async {
+    final email = _currentSessionEmail();
+    if (email.isEmpty) return 'READ_ONLY';
+
+    try {
+      final row = await _client
+          .from('users')
+          .select('role')
+          .eq('email', email)
+          .maybeSingle();
+      return row?['role']?.toString() ?? 'READ_ONLY';
+    } catch (e) {
+      debugPrint('Error fetching user role: $e');
+      return 'READ_ONLY';
+    }
+  }
+
+  /// Upload a syllabus document (Teacher / Admin only)
+  Future<void> uploadSyllabus({
+    required String collegeId,
+    required String department,
+    required String semester,
+    required String subject,
+    required String title,
+    required String fileUrl,
+  }) async {
+    final email = _currentSessionEmail();
+    await _client.from('syllabus').insert({
+      'college_id': collegeId,
+      'branch': department,
+      'semester': semester,
+      'subject': subject,
+      'title': title,
+      'url': fileUrl,
+      'uploaded_by_email': email,
+      'created_at': DateTime.now().toUtc().toIso8601String(),
+    });
+  }
+
+  /// Add a notice (Teacher / Admin only)
+  Future<void> addNotice({
+    required String collegeId,
+    required String title,
+    required String content,
+    String? department,
+    String? imageUrl,
+  }) async {
+    final email = _currentSessionEmail();
+    await _client.from('notices').insert({
+      'college_id': collegeId,
+      'title': title,
+      'content': content,
+      'department': department ?? 'general',
+      'image_url': imageUrl,
+      'posted_by_email': email,
+      'created_at': DateTime.now().toUtc().toIso8601String(),
+    });
   }
 }

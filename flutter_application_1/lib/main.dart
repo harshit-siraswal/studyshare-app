@@ -276,8 +276,8 @@ class _AppRootState extends State<AppRoot> {
             );
             debugPrint('Supabase initialized successfully');
           } catch (e) {
-             debugPrint('Supabase initialization error: $e');
-             rethrow;
+            debugPrint('Supabase initialization error: $e');
+            rethrow;
           }
         }(),
         // 2. Firebase
@@ -326,7 +326,7 @@ class _AppRootState extends State<AppRoot> {
   Future<void> _continueStartup() async {
     // We defer _requestPermissions() so it doesn't block the UI thread during startup.
     // It will be called lazily later when needed by specific features.
-    
+
     // Bind auth-aware FCM sync now that Supabase is ready
     if (_firebaseInitialized) {
       _bindAuthAwareFcmSync();
@@ -539,7 +539,8 @@ class StudySpaceApp extends StatelessWidget {
               themeAnimationCurve: Curves.easeInOut,
               home: AppRouter(prefs: prefs, themeProvider: themeProvider),
               onGenerateRoute: (settings) {
-                if (settings.name != null && settings.name!.startsWith('/notices')) {
+                if (settings.name != null &&
+                    settings.name!.startsWith('/notices')) {
                   final uri = Uri.parse(settings.name!);
                   final noticeId = uri.queryParameters['id'];
                   if (noticeId != null) {
@@ -553,21 +554,30 @@ class StudySpaceApp extends StatelessWidget {
                         ),
                       );
                     } else {
-                        // Edge case fallback: 
-                        // Show error and navigate to college selection if no college
-                        debugPrint('Failed to route deep-link: no collegeId found.');
-                        return MaterialPageRoute(
-                          builder: (context) {
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(content: Text('Please select a college before opening deep links.')),
-                                );
-                              }
-                            });
-                            return const CollegeSelectionScreen();
-                          },
-                        );
+                      // Edge case fallback:
+                      // Show error and navigate to college selection if no college
+                      debugPrint(
+                        'Failed to route deep-link: no collegeId found.',
+                      );
+                      return MaterialPageRoute(
+                        builder: (context) {
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Please select a college before opening deep links.',
+                                  ),
+                                ),
+                              );
+                            }
+                          });
+                          return AppRouter(
+                            prefs: prefs,
+                            themeProvider: themeProvider,
+                          );
+                        },
+                      );
                     }
                   }
                 }
@@ -575,7 +585,9 @@ class StudySpaceApp extends StatelessWidget {
               },
               builder: (context, child) => RepaintBoundary(
                 key: appBoundaryKey,
-                child: GlobalTimerOverlay(child: child ?? const SizedBox.shrink()),
+                child: GlobalTimerOverlay(
+                  child: child ?? const SizedBox.shrink(),
+                ),
               ),
             );
           },
@@ -843,7 +855,11 @@ class _AuthGateResult {
   final bool isBanned;
   final String? denialMessage;
 
-  const _AuthGateResult._({required this.allowed, this.isBanned = false, this.denialMessage});
+  const _AuthGateResult._({
+    required this.allowed,
+    this.isBanned = false,
+    this.denialMessage,
+  });
 
   const _AuthGateResult.allowed() : this._(allowed: true);
 
@@ -983,15 +999,15 @@ class _NoticeDeepLinkLoaderState extends State<NoticeDeepLinkLoader> {
       if (response != null && mounted) {
         DepartmentAccount account;
         final deptId = response['department']?.toString();
-        
+
         if (deptId != null) {
           try {
             final deptResponse = await Supabase.instance.client
-              .from('departments')
-              .select()
-              .eq('id', deptId)
-              .maybeSingle()
-              .timeout(const Duration(seconds: 5));
+                .from('departments')
+                .select()
+                .eq('id', deptId)
+                .maybeSingle()
+                .timeout(const Duration(seconds: 5));
 
             if (deptResponse != null) {
               account = DepartmentAccount.fromJson(deptResponse);
@@ -1005,7 +1021,7 @@ class _NoticeDeepLinkLoaderState extends State<NoticeDeepLinkLoader> {
         } else {
           account = DepartmentAccount.unknown();
         }
-        
+
         if (mounted) {
           Navigator.pushReplacement(
             context,
@@ -1020,7 +1036,10 @@ class _NoticeDeepLinkLoaderState extends State<NoticeDeepLinkLoader> {
         }
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Notice not found'), duration: Duration(seconds: 2)),
+          const SnackBar(
+            content: Text('Notice not found'),
+            duration: Duration(seconds: 2),
+          ),
         );
         await Future.delayed(const Duration(seconds: 2));
         if (mounted) {
@@ -1045,10 +1064,6 @@ class _NoticeDeepLinkLoaderState extends State<NoticeDeepLinkLoader> {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(
-        child: CircularProgressIndicator(),
-      ),
-    );
+    return const Scaffold(body: Center(child: CircularProgressIndicator()));
   }
 }

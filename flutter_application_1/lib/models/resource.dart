@@ -18,6 +18,7 @@ class Resource {
   final String? uploadedByName;
   final String collegeId;
   final bool isApproved;
+  final bool isTeacherUpload;
   final DateTime createdAt;
 
   Resource({
@@ -38,6 +39,7 @@ class Resource {
     this.uploadedByName,
     required this.collegeId,
     this.isApproved = true,
+    this.isTeacherUpload = false,
     required this.createdAt,
   });
 
@@ -60,6 +62,7 @@ class Resource {
       uploadedByName: json['uploaded_by_name'],
       collegeId: json['college_id'] ?? '',
       isApproved: json['status'] == 'approved' || json['is_approved'] == true,
+      isTeacherUpload: json['uploader_role'] == 'TEACHER' || json['is_teacher_upload'] == true,
       createdAt: _parseCreatedAt(json),
     );
   }
@@ -94,7 +97,8 @@ class Resource {
       'uploaded_by_name': uploadedByName,
       'college_id': collegeId,
       'is_approved': isApproved,
-      'status': isApproved ? 'approved' : 'pending', // Ensure status mirrors isApproved
+      'is_teacher_upload': isTeacherUpload,
+      'status': isApproved ? 'approved' : 'pending',
       'created_at': createdAt.toIso8601String(),
     };
   }

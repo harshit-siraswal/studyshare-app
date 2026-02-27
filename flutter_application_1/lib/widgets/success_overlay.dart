@@ -58,16 +58,16 @@ class _SuccessOverlayState extends State<SuccessOverlay>
     _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(
         parent: _controller,
-        curve: const Interval(0.0, 0.5, curve: Curves.easeOut),
+        curve: const Interval(0.0, 0.4, curve: Curves.easeOutCubic),
         reverseCurve: Curves.easeIn,
       ),
     );
 
-    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.0).animate(
+    _scaleAnimation = Tween<double>(begin: 0.6, end: 1.0).animate(
       CurvedAnimation(
         parent: _controller,
-        curve: const ElasticOutCurve(0.8),
-        reverseCurve: Curves.easeIn,
+        curve: const ElasticOutCurve(0.95), // Bouncier feel
+        reverseCurve: Curves.easeInBack,
       ),
     );
 
@@ -147,13 +147,14 @@ class _SuccessOverlayState extends State<SuccessOverlay>
                             borderRadius: BorderRadius.circular(100),
                             boxShadow: [
                               BoxShadow(
-                                color: _visuals.primary.withValues(alpha: 0.15),
-                                blurRadius: 24,
-                                offset: const Offset(0, 8),
+                                color: _visuals.primary.withValues(alpha: 0.25 * _fadeAnimation.value), // Glow effect pulses in
+                                blurRadius: 36 * _scaleAnimation.value,
+                                spreadRadius: 4 * _scaleAnimation.value,
+                                offset: const Offset(0, 12),
                               ),
                               BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.08),
-                                blurRadius: 8,
+                                color: Colors.black.withValues(alpha: 0.1),
+                                blurRadius: 10,
                                 offset: const Offset(0, 4),
                               ),
                             ],

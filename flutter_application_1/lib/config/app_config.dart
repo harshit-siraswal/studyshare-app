@@ -2,6 +2,8 @@
 // Keep this file secure and do not commit to version control
 
 class AppConfig {
+  static const String _defaultApiUrl = 'https://api.studyshare.in';
+
   // Supabase Configuration
   static const String supabaseUrl = String.fromEnvironment(
     'SUPABASE_URL',
@@ -18,7 +20,49 @@ class AppConfig {
   static const String cloudinaryUploadPreset = 'studyspace_uploads';
 
   // Backend API
-  static const String apiUrl = 'http://13.48.57.16';
+  static const String apiUrl = String.fromEnvironment(
+    'API_URL',
+    defaultValue: _defaultApiUrl,
+  );
+  static const String apiFallbackUrlsRaw = String.fromEnvironment(
+    'API_FALLBACK_URLS',
+    defaultValue: '',
+  );
+
+  /// Ordered backend base URLs (primary first), normalized without trailing slash.
+  static List<String> get apiBaseUrls {
+    final urls = <String>[];
+    final seen = <String>{};
+
+    void addUrl(String value) {
+      final normalized = _normalizeBaseUrl(value);
+      if (normalized == null) return;
+      if (seen.add(normalized)) {
+        urls.add(normalized);
+      }
+    }
+
+    addUrl(apiUrl);
+    for (final value in apiFallbackUrlsRaw.split(',')) {
+      addUrl(value);
+    }
+
+    if (urls.isEmpty) {
+      urls.add(_defaultApiUrl);
+    }
+
+    return List.unmodifiable(urls);
+  }
+
+  static String? _normalizeBaseUrl(String rawUrl) {
+    final trimmed = rawUrl.trim();
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    return trimmed.endsWith('/')
+        ? trimmed.substring(0, trimmed.length - 1)
+        : trimmed;
+  }
 
   // reCAPTCHA (v3 site key from Studyspace/.env)
   static const String recaptchaSiteKey =
@@ -40,11 +84,15 @@ class AppConfig {
   static const String giphyApiKey = String.fromEnvironment('GIPHY_API_KEY');
 
   /// remove.bg API key for sticker background removal.
-  static const String removeBgApiKey = String.fromEnvironment('REMOVE_BG_API_KEY');
+  static const String removeBgApiKey = String.fromEnvironment(
+    'REMOVE_BG_API_KEY',
+  );
 
   static String get removeBgApiKeyOrThrow {
     if (removeBgApiKey.isEmpty) {
-      throw Exception('REMOVE_BG_API_KEY is not set. It is required for background removal.');
+      throw Exception(
+        'REMOVE_BG_API_KEY is not set. It is required for background removal.',
+      );
     }
     return removeBgApiKey;
   }
@@ -70,15 +118,17 @@ class AppConfig {
       errors.add('Supabase Anon Key is not configured');
     }
 
+    if (apiUrl.isEmpty) {
+      errors.add('API_URL is not configured');
+    } else if (!apiUrl.startsWith('https://')) {
+      warnings.add(
+        'API_URL is using HTTP. Prefer HTTPS to avoid cleartext transport risks.',
+      );
+    }
+
     // Optional: GIPHY_API_KEY - GIF picker won't work without it
     if (giphyApiKey.isEmpty) {
       warnings.add('GIPHY_API_KEY not set - GIF features will be disabled');
-    }
-
-    if (removeBgApiKey.isEmpty) {
-      warnings.add(
-        'REMOVE_BG_API_KEY not set - sticker background removal disabled',
-      );
     }
 
     // Optional: GOOGLE_SERVER_CLIENT_ID

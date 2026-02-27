@@ -30,6 +30,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
   List<Map<String, dynamic>> _syllabusItems = [];
   bool _isLoading = false; 
   bool _hasFetched = false;
+  bool _isTeacherOrAdmin = false;
   
   // Selection State
   String? _selectedSemester;
@@ -42,8 +43,16 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
   @override
   void initState() {
     super.initState();
-    // No initial load - wait for user selection
-    // But we sort _semesters just in case (already sorted)
+    _checkTeacherRole();
+  }
+
+  Future<void> _checkTeacherRole() async {
+    final role = await _supabaseService.getCurrentUserRole();
+    if (mounted) {
+      setState(() {
+        _isTeacherOrAdmin = role == 'TEACHER' || role == 'ADMIN';
+      });
+    }
   }
 
   void _onSemesterChanged(String? newValue) {
@@ -226,6 +235,20 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
           ),
         ],
       ),
+      floatingActionButton: _isTeacherOrAdmin
+          ? FloatingActionButton.extended(
+              onPressed: () => _showUploadSyllabusDialog(isDark),
+              backgroundColor: widget.departmentColor,
+              icon: const Icon(Icons.upload_file_rounded, color: Colors.white),
+              label: Text(
+                'Upload Syllabus',
+                style: GoogleFonts.inter(
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
+              ),
+            )
+          : null,
     );
   }
 
@@ -508,6 +531,111 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
            fontWeight: FontWeight.w600,
            color: isDark ? Colors.white70 : Colors.grey[700],
          ),
+      ),
+    );
+  }
+
+  void _showUploadSyllabusDialog(bool isDark) {
+    final titleCtrl = TextEditingController();
+    final urlCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+        title: Row(
+          children: [
+            Icon(Icons.upload_file_rounded, color: widget.departmentColor),
+            const SizedBox(width: 8),
+            Text(
+              'Upload Syllabus',
+              style: GoogleFonts.inter(
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black,
+              ),
+            ),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: titleCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Title',
+                  labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                style: GoogleFonts.inter(color: isDark ? Colors.white : Colors.black),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: urlCtrl,
+                decoration: InputDecoration(
+                  labelText: 'PDF URL',
+                  hintText: 'https://example.com/file.pdf',
+                  labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
+                  hintStyle: GoogleFonts.inter(color: AppTheme.textMuted.withValues(alpha: 0.5)),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                style: GoogleFonts.inter(color: isDark ? Colors.white : Colors.black),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Sem: ${_selectedSemester ?? '?'} • ${_selectedSubject ?? 'Select subject first'} • ${widget.department}',
+                style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textMuted),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel', style: GoogleFonts.inter(color: AppTheme.textMuted)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: widget.departmentColor),
+            onPressed: () async {
+              if (titleCtrl.text.isEmpty || urlCtrl.text.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please fill all fields')),
+                );
+                return;
+              }
+              if (_selectedSemester == null || _selectedSubject == null) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please select semester and subject first')),
+                );
+                return;
+              }
+              try {
+                await _supabaseService.uploadSyllabus(
+                  collegeId: widget.collegeId,
+                  department: widget.department,
+                  semester: _selectedSemester!,
+                  subject: _selectedSubject!,
+                  title: titleCtrl.text.trim(),
+                  fileUrl: urlCtrl.text.trim(),
+                );
+                if (mounted) {
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Syllabus uploaded successfully!')),
+                  );
+                  _fetchSyllabus(); // Refresh the list
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Upload failed: $e')),
+                  );
+                }
+              }
+            },
+            child: Text('Upload', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w600)),
+          ),
+        ],
       ),
     );
   }

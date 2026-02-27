@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:lottie/lottie.dart';
+import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:io';
 import '../config/theme.dart';
@@ -186,7 +188,8 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: _allowedFileExtensions,
-        withData: true,
+        withData: false, // Don't load full file to memory to prevent crashes
+        withReadStream: kIsWeb, // For web, streams are needed for big files
       );
 
       if (result != null && result.files.isNotEmpty) {
@@ -289,11 +292,20 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
         setState(() => _uploadProgress = 0.4);
         try {
           final file = _selectedFile!;
-          final bytes =
-              file.bytes ??
-              (file.path != null ? await File(file.path!).readAsBytes() : null);
-          if (bytes == null) {
-            throw Exception('File bytes not available');
+          
+          List<int>? bytes;
+          if (kIsWeb) {
+            if (file.bytes != null) {
+               bytes = file.bytes!;
+            } else if (file.readStream != null) {
+               bytes = await file.readStream!.expand((x) => x).toList();
+            }
+          } else if (file.path != null) {
+            bytes = await File(file.path!).readAsBytes();
+          }
+
+          if (bytes == null || bytes.isEmpty) {
+            throw Exception('File bytes are empty or could not be read. Please try again.');
           }
 
           final presign = await backendApi.getResourceUploadUrl(
@@ -311,6 +323,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
             headers: {
               'Content-Type': _getContentType(file.name),
               'Cache-Control': 'max-age=31536000',
+              'Content-Length': bytes.length.toString(),
             },
             body: bytes,
           );
@@ -403,8 +416,25 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
 
         // Show non-blocking success overlay
         late OverlayEntry overlayEntry;
+        OverlayEntry? confettiEntry;
         bool isRemoved = false;
         
+        bool isPremiumUnlock = contributionCount == 10 || (badgeUnlocked && contributionBadge?.id == 'pro');
+
+        if (isPremiumUnlock) {
+          confettiEntry = OverlayEntry(
+            builder: (context) => Positioned.fill(
+              child: IgnorePointer(
+                child: Lottie.asset(
+                  'assets/animations/premium_reward.json',
+                  fit: BoxFit.cover,
+                  repeat: false,
+                ),
+              ),
+            ),
+          );
+        }
+
         overlayEntry = OverlayEntry(
           builder: (context) => SuccessOverlay(
             variant: badgeUnlocked
@@ -426,12 +456,16 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
               if (!isRemoved) {
                  isRemoved = true;
                  overlayEntry.remove();
+                 confettiEntry?.remove();
                  onComplete?.call();
               }
             },
           ),
         );
         
+        if (confettiEntry != null) {
+          overlayState.insert(confettiEntry!);
+        }
         overlayState.insert(overlayEntry);
       }
     } catch (e) {

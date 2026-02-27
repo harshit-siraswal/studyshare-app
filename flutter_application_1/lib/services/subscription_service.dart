@@ -10,7 +10,7 @@ import 'backend_api_service.dart';
 class SubscriptionService {
   final BackendApiService _api = BackendApiService();
   final SupabaseClient _supabase = Supabase.instance.client;
-  final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
+  FirebaseAuth get _firebaseAuth => FirebaseAuth.instance;
   late Razorpay _razorpay;
   Completer<bool>? _paymentCompleter;
   String? _pendingPlanId;

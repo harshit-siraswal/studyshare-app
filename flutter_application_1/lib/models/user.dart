@@ -115,5 +115,8 @@ class AppUser {
   bool get canJoinChatrooms => role != AppRoles.readOnly;
   bool get isAdmin => role == AppRoles.admin;
   bool get isModerator => role == AppRoles.moderator || role == AppRoles.admin;
-  bool get isVerified => role == AppRoles.collegeUser || isModerator || role == AppRoles.teacher;
+  bool get isTeacher => role == AppRoles.teacher;
+  bool get canPostNotices => isTeacher || isAdmin;
+  bool get canPostSyllabus => isTeacher || isAdmin;
+  bool get isVerified => role == AppRoles.collegeUser || isModerator || isTeacher;
 }
