@@ -30,7 +30,10 @@ class AppConfig {
   );
 
   /// Ordered backend base URLs (primary first), normalized without trailing slash.
+  static List<String>? _cachedApiBaseUrls;
   static List<String> get apiBaseUrls {
+    if (_cachedApiBaseUrls != null) return _cachedApiBaseUrls!;
+
     final urls = <String>[];
     final seen = <String>{};
 
@@ -51,7 +54,8 @@ class AppConfig {
       urls.add(_defaultApiUrl);
     }
 
-    return List.unmodifiable(urls);
+    _cachedApiBaseUrls = List.unmodifiable(urls);
+    return _cachedApiBaseUrls!;
   }
 
   static String? _normalizeBaseUrl(String rawUrl) {
@@ -59,9 +63,7 @@ class AppConfig {
     if (trimmed.isEmpty) {
       return null;
     }
-    return trimmed.endsWith('/')
-        ? trimmed.substring(0, trimmed.length - 1)
-        : trimmed;
+    return trimmed.replaceAll(RegExp(r'/+$'), '');
   }
 
   // reCAPTCHA (v3 site key from Studyspace/.env)

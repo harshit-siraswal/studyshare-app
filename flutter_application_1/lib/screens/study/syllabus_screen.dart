@@ -237,8 +237,12 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
       ),
       floatingActionButton: _isTeacherOrAdmin
           ? FloatingActionButton.extended(
-              onPressed: () => _showUploadSyllabusDialog(isDark),
-              backgroundColor: widget.departmentColor,
+              onPressed: (_selectedSemester != null && _selectedSubject != null)
+                  ? () => _showUploadSyllabusDialog(isDark)
+                  : null,
+              backgroundColor: (_selectedSemester != null && _selectedSubject != null)
+                  ? widget.departmentColor
+                  : Colors.grey,
               icon: const Icon(Icons.upload_file_rounded, color: Colors.white),
               label: Text(
                 'Upload Syllabus',
@@ -603,6 +607,14 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
                 );
                 return;
               }
+              final pdfUrl = urlCtrl.text.trim();
+              final uri = Uri.tryParse(pdfUrl);
+              if (uri == null || !uri.isAbsolute || !(uri.scheme == 'http' || uri.scheme == 'https')) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please enter a valid PDF URL (http/https)')),
+                );
+                return;
+              }
               if (_selectedSemester == null || _selectedSubject == null) {
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text('Please select semester and subject first')),
@@ -616,7 +628,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
                   semester: _selectedSemester!,
                   subject: _selectedSubject!,
                   title: titleCtrl.text.trim(),
-                  fileUrl: urlCtrl.text.trim(),
+                  fileUrl: pdfUrl,
                 );
                 if (mounted) {
                   Navigator.pop(ctx);
@@ -626,9 +638,10 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
                   _fetchSyllabus(); // Refresh the list
                 }
               } catch (e) {
+                debugPrint('Syllabus upload failed: $e');
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Upload failed: $e')),
+                    const SnackBar(content: Text('Upload failed. Please try again.')),
                   );
                 }
               }

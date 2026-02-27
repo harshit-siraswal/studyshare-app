@@ -21,7 +21,6 @@ double _getDevicePixelRatio(BuildContext context) {
 /// Full-screen sun-setting / moon-rising theme transition.
 Future<void> animateThemeTransition(
   BuildContext context,
-  Offset tapOffset,
   VoidCallback toggleTheme,
 ) async {
   // Capture current screen as a screenshot
@@ -93,7 +92,7 @@ class _SunMoonTransition extends StatefulWidget {
 }
 
 class _SunMoonTransitionState extends State<_SunMoonTransition>
-    with TickerProviderStateMixin {
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _animation;
 
@@ -223,7 +222,7 @@ class _SunMoonTransitionState extends State<_SunMoonTransition>
         );
       } else {
         // Moon coming up
-        final moonT = ((t - 0.45) / 0.55).clamp(0.0, 1.0);
+        final moonT = ((t - 0.55) / 0.45).clamp(0.0, 1.0);
         final moonY = _lerpDouble(horizonY + bodySize, size.height * 0.15, moonT);
         final moonOpacity = moonT.clamp(0.0, 1.0);
         return Positioned(
@@ -250,7 +249,7 @@ class _SunMoonTransitionState extends State<_SunMoonTransition>
           ),
         );
       } else {
-        final sunT = ((t - 0.45) / 0.55).clamp(0.0, 1.0);
+        final sunT = ((t - 0.55) / 0.45).clamp(0.0, 1.0);
         final sunY = _lerpDouble(horizonY + bodySize, size.height * 0.15, sunT);
         final sunOpacity = sunT.clamp(0.0, 1.0);
         return Positioned(
@@ -270,11 +269,8 @@ class _SunMoonTransitionState extends State<_SunMoonTransition>
     if (starOpacity <= 0) return const SizedBox.shrink();
 
     return Positioned.fill(
-      child: Opacity(
-        opacity: starOpacity,
-        child: CustomPaint(
-          painter: _StarsPainter(opacity: starOpacity),
-        ),
+      child: CustomPaint(
+        painter: _StarsPainter(opacity: starOpacity),
       ),
     );
   }
@@ -482,11 +478,11 @@ class _SkyGradientPainter extends CustomPainter {
       colors: colors,
     );
 
-    final paint = Paint()
-      ..shader = gradient.createShader(rect)
-      ..color = Colors.white.withValues(alpha: opacity);
+    final paint = Paint()..shader = gradient.createShader(rect);
 
+    canvas.saveLayer(rect, Paint()..color = Colors.white.withValues(alpha: opacity));
     canvas.drawRect(rect, paint);
+    canvas.restore();
   }
 
   double _bellCurve(double t) {
@@ -496,7 +492,7 @@ class _SkyGradientPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_SkyGradientPainter oldDelegate) =>
-      progress != oldDelegate.progress;
+      progress != oldDelegate.progress || toDark != oldDelegate.toDark;
 }
 
 // ─────────────────────────────────────────────────────────────

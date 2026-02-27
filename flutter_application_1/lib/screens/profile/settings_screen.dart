@@ -315,7 +315,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ? box.localToGlobal(box.size.center(Offset.zero)) 
                               : Offset(MediaQuery.of(context).size.width - _kSwitchFallbackOffsetRight, MediaQuery.of(context).size.height / 2);
                           
-                          animateThemeTransition(context, offset, () {
+                          animateThemeTransition(context, () {
                             themeProvider.toggleTheme();
                           });
                         },

@@ -259,11 +259,20 @@ class _NoticesScreenState extends State<NoticesScreen>
   }
 
   Future<void> _checkTeacherRole() async {
-    final role = await _supabaseService.getCurrentUserRole();
-    if (mounted) {
-      setState(() {
-        _isTeacherOrAdmin = role == 'TEACHER' || role == 'ADMIN';
-      });
+    try {
+      final role = await _supabaseService.getCurrentUserRole();
+      if (mounted) {
+        setState(() {
+          _isTeacherOrAdmin = role == 'TEACHER' || role == 'ADMIN';
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to check teacher role: $e');
+      if (mounted) {
+        setState(() {
+          _isTeacherOrAdmin = false;
+        });
+      }
     }
   }
 
@@ -1000,6 +1009,16 @@ class _NoticesScreenState extends State<NoticesScreen>
                   );
                   return;
                 }
+                final imageUrl = imageUrlCtrl.text.trim();
+                if (imageUrl.isNotEmpty) {
+                  final uri = Uri.tryParse(imageUrl);
+                  if (uri == null || !uri.isAbsolute || !(uri.scheme == 'http' || uri.scheme == 'https')) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Please enter a valid image URL (http/https)')),
+                    );
+                    return;
+                  }
+                }
                 try {
                   await _supabaseService.addNotice(
                     collegeId: widget.collegeId,
@@ -1016,9 +1035,10 @@ class _NoticesScreenState extends State<NoticesScreen>
                     _loadNotices();
                   }
                 } catch (e) {
+                  debugPrint('Post notice failed: $e');
                   if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Failed to post notice: $e')),
+                      const SnackBar(content: Text('Failed to post notice. Please try again.')),
                     );
                   }
                 }
@@ -1028,6 +1048,10 @@ class _NoticesScreenState extends State<NoticesScreen>
           ],
         ),
       ),
-    );
+    ).then((_) {
+      titleCtrl.dispose();
+      contentCtrl.dispose();
+      imageUrlCtrl.dispose();
+    });
   }
 }

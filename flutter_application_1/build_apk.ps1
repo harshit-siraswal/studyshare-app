@@ -33,7 +33,7 @@ if ($LASTEXITCODE -ne 0) {
 $buildArgs = @("build", "apk", "--release", "--verbose")
 
 if ($env:API_URL) {
-    Write-Host "Using API_URL from environment: $($env:API_URL)" -ForegroundColor Cyan
+    Write-Host "Using API_URL from environment (set)" -ForegroundColor Cyan
     $buildArgs += "--dart-define=API_URL=$($env:API_URL)"
 }
 

@@ -115,7 +115,7 @@ class BackendApiService {
   }
 
   bool _shouldTryNextHost(int statusCode) {
-    return statusCode == 404 || statusCode >= 500;
+    return statusCode >= 500;
   }
 
   Future<http.Response> _sendRequest({
@@ -138,13 +138,16 @@ class BackendApiService {
           body: jsonEncode(body ?? <String, dynamic>{}),
         );
       case 'DELETE':
-        return http.delete(
-          uri,
-          headers: headers,
-          body: jsonEncode(body ?? <String, dynamic>{}),
-        );
+        if (body != null) {
+          return http.delete(
+            uri,
+            headers: headers,
+            body: jsonEncode(body),
+          );
+        }
+        return http.delete(uri, headers: headers);
       default:
-        return http.get(uri, headers: headers);
+        throw UnsupportedError('Unsupported HTTP method: $method');
     }
   }
 
@@ -154,12 +157,20 @@ class BackendApiService {
       return <String, dynamic>{};
     }
 
-    final decoded = jsonDecode(trimmed);
+    final dynamic decoded;
+    try {
+      decoded = jsonDecode(trimmed);
+    } on FormatException catch (e) {
+      throw Exception('Invalid JSON response (${res.statusCode}): $e');
+    }
     if (decoded is Map<String, dynamic>) {
       return decoded;
     }
     if (decoded is Map) {
       return Map<String, dynamic>.from(decoded);
+    }
+    if (decoded is List) {
+      return <String, dynamic>{'data': decoded};
     }
 
     throw Exception('Invalid API response (${res.statusCode}): ${res.body}');

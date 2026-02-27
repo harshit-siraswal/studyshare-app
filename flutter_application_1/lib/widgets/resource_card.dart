@@ -152,7 +152,6 @@ class _ResourceCardState extends State<ResourceCard> {
         builder: (_) => PaywallDialog(
           onSuccess: () {
             if (!mounted) return;
-            setState(() {}); // refresh state to likely remove lock
             _handleDownload(context); // retry download
           },
         ),
@@ -173,15 +172,17 @@ class _ResourceCardState extends State<ResourceCard> {
       ).showSnackBar(const SnackBar(content: Text('Downloading...')));
       await ds.downloadResource(widget.resource.fileUrl, widget.resource);
       setState(() {}); // refresh icon
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Download Complete!')));
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      }
     }
   }
 
@@ -224,16 +225,16 @@ class _ResourceCardState extends State<ResourceCard> {
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            const Icon(
+                            Icon(
                               Icons.broken_image_outlined,
                               size: 48,
-                              color: Colors.grey,
+                              color: AppTheme.textMuted,
                             ),
                             const SizedBox(height: 8),
                             Text(
                               'Image not found',
                               style: GoogleFonts.inter(
-                                color: Colors.grey,
+                                color: AppTheme.textMuted,
                                 fontSize: 12,
                               ),
                             ),
