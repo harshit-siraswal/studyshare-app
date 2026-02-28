@@ -546,10 +546,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   double _navIndicatorAlignment(int index) {
     switch (index) {
-      case 0: return -0.72;
-      case 1: return -0.28;
-      case 2: return 0.28;
-      default: return 0.72;
+      case 0: return -0.76;
+      case 1: return -0.26;
+      case 2: return 0.26;
+      default: return 0.76;
     }
   }
 

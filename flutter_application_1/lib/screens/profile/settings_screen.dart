@@ -234,18 +234,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
         final themeProvider = widget.themeProvider;
         final isDark = themeProvider.isDarkMode;
         final textColor = isDark ? Colors.white : Colors.black;
+        final bgColor = isDark ? const Color(0xFF000000) : const Color(0xFFF2F2F7);
 
         return Scaffold(
-          backgroundColor: isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
+          backgroundColor: bgColor,
           appBar: AppBar(
             title: Text(
               'Settings',
               style: GoogleFonts.inter(
-                fontWeight: FontWeight.w600,
+                fontWeight: FontWeight.w700,
                 color: textColor,
               ),
             ),
-            backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
+            backgroundColor: bgColor,
             elevation: 0,
             leading: IconButton(
               icon: Icon(Icons.arrow_back_ios_rounded, color: textColor),
@@ -255,199 +256,200 @@ class _SettingsScreenState extends State<SettingsScreen> {
           body: _isLoading 
             ? const Center(child: CircularProgressIndicator())
             : SingleChildScrollView(
-            padding: const EdgeInsets.all(20),
+            physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildSectionHeader('Account', textColor),
-                _buildSettingsTile(
-                  icon: Icons.person_outline_rounded,
-                  title: 'Edit Profile',
-                  subtitle: 'Change name, bio, and photo',
-                  onTap: () async {
-                    final updatedFn = await Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => EditProfileScreen(
-                          initialName: _displayName ?? '',
-                          initialPhotoUrl: _photoUrl,
-                          initialBio: _bio,
-                          role: widget.userRole,
-                          initialSemester: widget.semester,
-                          initialBranch: widget.branch,
-                          initialAdminKey: widget.adminKey,
+                // Profile Header Card
+                Container(
+                  margin: const EdgeInsets.only(bottom: 24),
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 60,
+                        height: 60,
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary,
+                          shape: BoxShape.circle,
+                        ),
+                        clipBehavior: Clip.antiAlias,
+                        child: _photoUrl != null && _photoUrl!.isNotEmpty
+                            ? Image.network(_photoUrl!, fit: BoxFit.cover)
+                            : Center(
+                                child: Text(
+                                  _displayName?.isNotEmpty == true ? _displayName![0].toUpperCase() : 'U',
+                                  style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
+                                ),
+                              ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _displayName ?? 'User',
+                              style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold, color: textColor),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              widget.userEmail,
+                              style: GoogleFonts.inter(fontSize: 13, color: AppTheme.textMuted),
+                            ),
+                          ],
                         ),
                       ),
-                    );
-                    
-                    if (updatedFn != null && updatedFn is Map<String, dynamic> && mounted) {
-                       setState(() {
-                         _displayName = updatedFn['display_name']?.toString();
-                         _photoUrl = updatedFn['profile_photo_url']?.toString();
-                         _bio = updatedFn['bio']?.toString();
-                       });
-                    }
-                  },
-                  isDark: isDark,
+                    ],
+                  ),
                 ),
-                _buildSettingsTile(
-                  icon: Icons.bookmark_outline_rounded,
-                  title: 'Saved Posts',
-                  subtitle: 'View your bookmarked discussions',
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => SavedPostsScreen(userEmail: widget.userEmail),
-                      ),
-                    );
-                  },
+
+                _buildSectionHeader('Account', isDark),
+                _buildSettingsGroup(
                   isDark: isDark,
-                ),
-                _buildSettingsTile(
-                  icon: _isPremium ? Icons.star_rounded : Icons.star_outline_rounded,
-                  title: _isPremium ? 'Premium Membership' : 'Upgrade to Premium',
-                  subtitle: _isPremium ? 'Active' : 'Unlock exclusive features',
-                  iconColor: const Color(0xFFFFD700),
-                  onTap: () {
-                     showModalBottomSheet(
-                       context: context, 
-                       isScrollControlled: true,
-                       backgroundColor: Colors.transparent,
-                       builder: (_) => PaywallDialog(
-                         onSuccess: () => _loadSettings(), // Refresh premium status
-                       ),
-                     );
-                  },
-                  isDark: isDark,
+                  children: [
+                    _buildGroupedTile(
+                      icon: Icons.bookmark_outline_rounded,
+                      iconBgColor: Colors.green.shade500,
+                      title: 'Saved Posts',
+                      onTap: () {
+                        Navigator.push(context, MaterialPageRoute(builder: (_) => SavedPostsScreen(userEmail: widget.userEmail)));
+                      },
+                      isDark: isDark,
+                    ),
+                    _buildDivider(isDark),
+                    _buildGroupedTile(
+                      icon: _isPremium ? Icons.star_rounded : Icons.star_outline_rounded,
+                      iconBgColor: Colors.orange.shade500,
+                      title: _isPremium ? 'Premium Membership' : 'Upgrade to Premium',
+                      subtitle: _isPremium ? 'Active' : null,
+                      onTap: () {
+                         showModalBottomSheet(
+                           context: context, 
+                           isScrollControlled: true,
+                           backgroundColor: Colors.transparent,
+                           builder: (_) => PaywallDialog(
+                             onSuccess: () => _loadSettings(),
+                           ),
+                         );
+                      },
+                      isDark: isDark,
+                    ),
+                  ],
                 ),
                 
                 const SizedBox(height: 24),
-                _buildSectionHeader('App Settings', textColor),
-                _buildSettingsTile(
-                  icon: Icons.brightness_6,
-                  customLeading: Lottie.asset(
-                    'assets/animations/theme_toggle.json',
-                    width: 30,
-                    height: 30,
-                    fit: BoxFit.cover,
-                    animate: false, // In a real app we'd control the animation properly based on state transition
-                  ),
-                  title: 'Appearance',
-                  subtitle: isDark ? 'Dark Mode' : 'Light Mode',
-                  trailing: Builder(
-                    builder: (switchContext) {
-                      return Switch(
+                _buildSectionHeader('App Settings', isDark),
+                _buildSettingsGroup(
+                  isDark: isDark,
+                  children: [
+                    _buildGroupedTile(
+                      icon: Icons.brightness_6_outlined,
+                      iconBgColor: Colors.indigo.shade500,
+                      title: 'Appearance',
+                      trailing: Switch.adaptive(
                         value: isDark,
-                        activeTrackColor: AppTheme.primary,
+                        activeColor: AppTheme.primary,
                         onChanged: (val) {
-                          animateThemeTransition(context, () {
-                            themeProvider.toggleTheme();
-                          });
+                          themeProvider.toggleTheme();
                         },
-                      );
-                    }
-                  ),
-                  isDark: isDark,
-                ),
-                _buildSettingsTile(
-                  icon: Icons.notifications_none_rounded,
-                  title: 'Notifications',
-                  subtitle: 'Manage push notifications',
-                  trailing: Switch(
-                    value: _notificationsEnabled,
-                    activeTrackColor: AppTheme.primary,
-                    onChanged: _toggleNotifications,
-                  ),
-                   isDark: isDark,
-                ),
-                _buildSettingsTile(
-                  icon: Icons.cleaning_services_outlined,
-                  title: 'Clear Cache',
-                  subtitle: 'Free up storage space',
-                  onTap: _clearCache,
-                  isDark: isDark,
-                ),
-
-                const SizedBox(height: 24),
-                _buildSectionHeader('Legal', textColor),
-                _buildSettingsTile(
-                  icon: Icons.privacy_tip_outlined,
-                  title: 'Privacy Policy',
-                  onTap: () => _showLegalDialog('Privacy Policy', 'This is a placeholder for the Privacy Policy.\n\nWe value your privacy...'),
-                  isDark: isDark,
-                ),
-                _buildSettingsTile(
-                  icon: Icons.description_outlined,
-                  title: 'Terms of Service',
-                  onTap: () => _showLegalDialog('Terms of Service', 'This is a placeholder for the Terms of Service.\n\nBy using this app...'),
-                  isDark: isDark,
-                ),
-
-                const SizedBox(height: 24),
-                _buildSectionHeader('Support', textColor),
-                _buildSettingsTile(
-                  icon: Icons.help_outline_rounded,
-                  title: 'Help & Support',
-                  subtitle: 'FAQs and contact us',
-                  onTap: () {
-                     Navigator.push(
-                      context,
-                      MaterialPageRoute(builder: (_) => const HelpSupportScreen()),
-                    );
-                  },
-                  isDark: isDark,
-                ),
-                _buildSettingsTile(
-                  icon: Icons.info_outline_rounded,
-                  title: 'About MyStudySpace',
-                  subtitle: 'Version $_appVersion',
-                  onTap: () {
-                    showAboutDialog(
-                      context: context,
-                      applicationName: 'MyStudySpace',
-                      applicationVersion: _appVersion,
-                      applicationIcon: Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primary,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Icon(Icons.school, color: Colors.white),
                       ),
-                      children: [
-                        const Text('MyStudySpace is a college-centric educational platform.'),
-                        const SizedBox(height: 10),
-                        const Text('Developed by the MyStudySpace Team.'),
-                      ],
-                    );
-                  },
-                  isDark: isDark,
+                      isDark: isDark,
+                    ),
+                    _buildDivider(isDark),
+                    _buildGroupedTile(
+                      icon: Icons.notifications_none_rounded,
+                      iconBgColor: Colors.red.shade400,
+                      title: 'Notifications',
+                      trailing: Switch.adaptive(
+                        value: _notificationsEnabled,
+                        activeColor: AppTheme.primary,
+                        onChanged: _toggleNotifications,
+                      ),
+                      isDark: isDark,
+                    ),
+                    _buildDivider(isDark),
+                    _buildGroupedTile(
+                      icon: Icons.cleaning_services_outlined,
+                      iconBgColor: Colors.teal.shade500,
+                      title: 'Clear Cache',
+                      onTap: _clearCache,
+                      isDark: isDark,
+                    ),
+                  ],
                 ),
 
                 const SizedBox(height: 24),
+                _buildSectionHeader('About', isDark),
+                _buildSettingsGroup(
+                  isDark: isDark,
+                  children: [
+                    _buildGroupedTile(
+                      icon: Icons.privacy_tip_outlined,
+                      iconBgColor: Colors.grey.shade600,
+                      title: 'Privacy Policy',
+                      onTap: () => _showLegalDialog('Privacy Policy', 'This is a placeholder for the Privacy Policy.\n\nWe value your privacy...'),
+                      isDark: isDark,
+                    ),
+                    _buildDivider(isDark),
+                    _buildGroupedTile(
+                      icon: Icons.description_outlined,
+                      iconBgColor: Colors.blueGrey.shade500,
+                      title: 'Terms of Service',
+                      onTap: () => _showLegalDialog('Terms of Service', 'This is a placeholder for the Terms of Service.\n\nBy using this app...'),
+                      isDark: isDark,
+                    ),
+                    _buildDivider(isDark),
+                    _buildGroupedTile(
+                      icon: Icons.help_outline_rounded,
+                      iconBgColor: Colors.deepPurple.shade400,
+                      title: 'Help & Support',
+                      onTap: () {
+                         Navigator.push(context, MaterialPageRoute(builder: (_) => const HelpSupportScreen()));
+                      },
+                      isDark: isDark,
+                    ),
+                    _buildDivider(isDark),
+                    _buildGroupedTile(
+                      icon: Icons.info_outline_rounded,
+                      iconBgColor: Colors.brown.shade400,
+                      title: 'About MyStudySpace',
+                      subtitle: 'Version $_appVersion',
+                      onTap: () {
+                        showAboutDialog(
+                          context: context,
+                          applicationName: 'MyStudySpace',
+                          applicationVersion: _appVersion,
+                          applicationIcon: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(color: AppTheme.primary, borderRadius: BorderRadius.circular(12)),
+                            child: const Icon(Icons.school, color: Colors.white),
+                          ),
+                        );
+                      },
+                      isDark: isDark,
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 32),
                 Container(
                   width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  margin: const EdgeInsets.only(bottom: 20),
                   child: TextButton(
                     onPressed: _handleLogout,
                     style: TextButton.styleFrom(
                       foregroundColor: AppTheme.error,
                       padding: const EdgeInsets.symmetric(vertical: 16),
-                      backgroundColor: AppTheme.error.withValues(alpha: 0.1),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Icon(Icons.logout_rounded, size: 20),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Log Out',
-                          style: GoogleFonts.inter(fontWeight: FontWeight.w600),
-                        ),
-                      ],
-                    ),
+                    child: Text('Sign Out', style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 16)),
                   ),
                 ),
               ],
@@ -458,74 +460,100 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  Widget _buildSectionHeader(String title, Color textColor) {
+  Widget _buildSectionHeader(String title, bool isDark) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12, left: 4),
+      padding: const EdgeInsets.only(bottom: 8, left: 16),
       child: Text(
         title.toUpperCase(),
         style: GoogleFonts.inter(
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-          color: AppTheme.textMuted,
-          letterSpacing: 1.2,
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: isDark ? Colors.white60 : Colors.black54,
+          letterSpacing: 0.5,
         ),
       ),
     );
   }
 
-  Widget _buildSettingsTile({
+  Widget _buildSettingsGroup({required List<Widget> children, required bool isDark}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        children: children,
+      ),
+    );
+  }
+
+  Widget _buildDivider(bool isDark) {
+    return Divider(
+      height: 1, 
+      thickness: 0.5, 
+      indent: 56, 
+      color: isDark ? Colors.white12 : Colors.grey.shade200
+    );
+  }
+
+  Widget _buildGroupedTile({
     required IconData icon,
-    Widget? customLeading,
+    required Color iconBgColor,
     required String title,
     String? subtitle,
     VoidCallback? onTap,
     Widget? trailing,
     required bool isDark,
-    Color? iconColor,
   }) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkCard : Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          if (!isDark)
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 10,
-              offset: const Offset(0, 2),
-            ),
-        ],
-      ),
-      child: ListTile(
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
         onTap: onTap,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        leading: Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.grey.shade100,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: customLeading ?? Icon(icon, color: iconColor ?? AppTheme.primary, size: 22),
-        ),
-        title: Text(
-          title,
-          style: GoogleFonts.inter(
-            fontWeight: FontWeight.w600,
-            color: isDark ? Colors.white : Colors.black,
-            fontSize: 15,
-          ),
-        ),
-        subtitle: subtitle != null
-            ? Text(
-                subtitle,
-                style: GoogleFonts.inter(
-                  color: AppTheme.textMuted,
-                  fontSize: 13,
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), // Reduced vertical padding
+          child: Row(
+            children: [
+              Container(
+                width: 28, // Reduced from 30
+                height: 28, // Reduced from 30
+                decoration: BoxDecoration(
+                  color: iconBgColor,
+                  borderRadius: BorderRadius.circular(8),
                 ),
-              )
-            : null,
-        trailing: trailing ?? const Icon(Icons.chevron_right_rounded, color: Colors.grey),
+                child: Icon(icon, color: Colors.white, size: 16), // Reduced from 18
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      title,
+                      style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w500,
+                        color: isDark ? Colors.white : Colors.black,
+                        fontSize: 15, // Reduced from 16
+                      ),
+                    ),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: GoogleFonts.inter(
+                          color: AppTheme.textMuted,
+                          fontSize: 12, // Reduced from 13
+                        ),
+                      ),
+                    ]
+                  ],
+                ),
+              ),
+              trailing ?? Icon(Icons.chevron_right_rounded, color: isDark ? Colors.white38 : Colors.black38, size: 20), // Added fixed smaller size
+            ],
+          ),
+        ),
       ),
     );
   }

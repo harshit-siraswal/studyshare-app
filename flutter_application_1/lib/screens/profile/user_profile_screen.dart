@@ -364,7 +364,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                         ),
                       )
                     : SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 100), // Extra bottom padding for floating bar
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 140), // Extra bottom padding for floating bar
                         sliver: AnimationLimiter(
                           child: SliverList(
                             delegate: SliverChildBuilderDelegate(
@@ -437,6 +437,19 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         textColor = isDark ? Colors.black : Colors.white;
         onTap = _toggleFollow;
         break;
+    }
+
+    if (_authService.userEmail == widget.userEmail) {
+      text = 'Edit Profile';
+      bgColor = isDark ? Colors.white12 : Colors.grey.shade200;
+      textColor = isDark ? Colors.white : Colors.black;
+      onTap = () {
+        // Pop this screen (returning to where we came from) then maybe we could signal.
+        // But for now just tell them to edit from the main tab.
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Please navigate to the Profile tab on your Home screen to edit your profile.')),
+        );
+      };
     }
 
     return ElevatedButton(

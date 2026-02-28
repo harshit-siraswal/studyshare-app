@@ -147,7 +147,7 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
                 : _rooms.isEmpty
                     ? Center(child: Text('No public rooms found', style: TextStyle(color: isDark ? Colors.white54 : Colors.grey)))
                     : GridView.builder(
-                        padding: const EdgeInsets.all(20),
+                        padding: const EdgeInsets.fromLTRB(20, 20, 20, 120),
                         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 2,
                           childAspectRatio: 0.85, // Adjusted for RoomCard content

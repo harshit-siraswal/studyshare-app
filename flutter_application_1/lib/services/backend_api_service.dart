@@ -129,6 +129,8 @@ class BackendApiService {
     required Map<String, dynamic>? body,
   }) {
     switch (method.toUpperCase()) {
+      case 'GET':
+        return http.get(uri, headers: headers);
       case 'POST':
         return http.post(
           uri,
@@ -141,13 +143,15 @@ class BackendApiService {
           headers: headers,
           body: jsonEncode(body ?? <String, dynamic>{}),
         );
+      case 'PATCH':
+        return http.patch(
+          uri,
+          headers: headers,
+          body: jsonEncode(body ?? <String, dynamic>{}),
+        );
       case 'DELETE':
         if (body != null) {
-          return http.delete(
-            uri,
-            headers: headers,
-            body: jsonEncode(body),
-          );
+          return http.delete(uri, headers: headers, body: jsonEncode(body));
         }
         return http.delete(uri, headers: headers);
       default:
@@ -512,21 +516,18 @@ class BackendApiService {
     const allowedStatuses = {'approved', 'rejected', 'pending'};
     final normalizedStatus = status.toLowerCase();
     if (!allowedStatuses.contains(normalizedStatus)) {
-      throw ArgumentError('Invalid status: $status. Must be one of $allowedStatuses');
+      throw ArgumentError(
+        'Invalid status: $status. Must be one of $allowedStatuses',
+      );
     }
 
     return _requestJson(
-      '/api/admin',
-      method: 'POST',
-      body: {
-        'action': 'update_resource_status',
-        'admin_key': adminKey,
-        'resource_id': resourceId,
-        'new_status': normalizedStatus,
-      }
+      '/api/admin/resources/${Uri.encodeComponent(resourceId)}/status',
+      method: 'PATCH',
+      body: {'status': normalizedStatus},
+      customHeaders: {'Authorization': 'Bearer $adminKey'},
     );
   }
-
 
   // ----------------------------
   // Payments
@@ -568,7 +569,7 @@ class BackendApiService {
     return _requestJson(
       '/api/chat/join',
       method: 'POST',
-      body: {'code': code, 'userEmail': userEmail, 'collegeId': collegeId},
+      body: {'joinCode': code, 'userEmail': userEmail, 'collegeId': collegeId},
     );
   }
 
@@ -903,7 +904,9 @@ class BackendApiService {
           throw Exception(errMsg);
         }
 
-        final stream = response.stream.transform(utf8.decoder).transform(const LineSplitter());
+        final stream = response.stream
+            .transform(utf8.decoder)
+            .transform(const LineSplitter());
         await for (var line in stream) {
           if (line.startsWith('data: ')) {
             yield line.substring(6);
@@ -913,7 +916,9 @@ class BackendApiService {
       } catch (e) {
         lastError = e;
         if (i < baseUrls.length - 1) {
-          debugPrint('[BackendApi] queryRagStream failed on $baseUrl, trying next...');
+          debugPrint(
+            '[BackendApi] queryRagStream failed on $baseUrl, trying next...',
+          );
           continue;
         }
       } finally {
