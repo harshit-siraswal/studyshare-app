@@ -525,7 +525,7 @@ class BackendApiService {
       '/api/admin/resources/${Uri.encodeComponent(resourceId)}/status',
       method: 'PATCH',
       body: {'status': normalizedStatus},
-      customHeaders: {'Authorization': 'Bearer $adminKey'},
+      customHeaders: {'X-Admin-Key': adminKey},
     );
   }
 

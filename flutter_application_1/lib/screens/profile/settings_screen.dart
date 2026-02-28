@@ -50,6 +50,10 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   static const double _kSwitchFallbackOffsetRight = 40.0;
+  
+  static const Color darkCardBackground = Color(0xFF1C1C1E);
+  static const Color lightSystemBackground = Color(0xFFF2F2F7);
+  static const Color darkSystemBackground = Color(0xFF000000);
 
   final AuthService _authService = AuthService();
   final SubscriptionService _subscriptionService = SubscriptionService();
@@ -234,7 +238,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         final themeProvider = widget.themeProvider;
         final isDark = themeProvider.isDarkMode;
         final textColor = isDark ? Colors.white : Colors.black;
-        final bgColor = isDark ? const Color(0xFF000000) : const Color(0xFFF2F2F7);
+        final bgColor = isDark ? _SettingsScreenState.darkSystemBackground : _SettingsScreenState.lightSystemBackground;
 
         return Scaffold(
           backgroundColor: bgColor,
@@ -266,7 +270,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   margin: const EdgeInsets.only(bottom: 24),
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                    color: isDark ? _SettingsScreenState.darkCardBackground : Colors.white,
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Row(
@@ -280,7 +284,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         ),
                         clipBehavior: Clip.antiAlias,
                         child: _photoUrl != null && _photoUrl!.isNotEmpty
-                            ? Image.network(_photoUrl!, fit: BoxFit.cover)
+                            ? Image.network(
+                                _photoUrl!,
+                                fit: BoxFit.cover,
+                                loadingBuilder: (context, child, loadingProgress) {
+                                  if (loadingProgress == null) return child;
+                                  return const Center(
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  );
+                                },
+                                errorBuilder: (context, error, stackTrace) {
+                                  return Center(
+                                    child: Text(
+                                      _displayName?.isNotEmpty == true ? _displayName![0].toUpperCase() : 'U',
+                                      style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white),
+                                    ),
+                                  );
+                                },
+                              )
                             : Center(
                                 child: Text(
                                   _displayName?.isNotEmpty == true ? _displayName![0].toUpperCase() : 'U',
@@ -446,7 +467,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: TextButton.styleFrom(
                       foregroundColor: AppTheme.error,
                       padding: const EdgeInsets.symmetric(vertical: 16),
-                      backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                      backgroundColor: isDark ? _SettingsScreenState.darkCardBackground : Colors.white,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                     ),
                     child: Text('Sign Out', style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 16)),
@@ -478,7 +499,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget _buildSettingsGroup({required List<Widget> children, required bool isDark}) {
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+        color: isDark ? _SettingsScreenState.darkCardBackground : Colors.white,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Column(
@@ -505,10 +526,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
     Widget? trailing,
     required bool isDark,
   }) {
+    VoidCallback? fallbackTap = onTap;
+    if (fallbackTap == null && trailing is Switch) {
+      final switchTrailing = trailing as Switch;
+      if (switchTrailing.onChanged != null) {
+        fallbackTap = () => switchTrailing.onChanged!(!switchTrailing.value);
+      }
+    }
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: onTap,
+        onTap: fallbackTap,
         borderRadius: BorderRadius.circular(20),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), // Reduced vertical padding

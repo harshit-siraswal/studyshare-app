@@ -8,6 +8,7 @@ import '../../widgets/resource_card.dart';
 import '../../models/resource.dart';
 import 'following_screen.dart';
 import '../../widgets/full_screen_image_viewer.dart';
+import 'edit_profile_screen.dart';
 
 class UserProfileScreen extends StatefulWidget {
   final String userEmail;
@@ -418,38 +419,47 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     Color textColor;
     VoidCallback? onTap;
 
-    switch (_followStatus) {
-      case FollowStatus.following:
-        text = 'Following';
-        bgColor = Colors.transparent;
-        textColor = isDark ? Colors.white : Colors.black;
-        onTap = _toggleFollow;
-        break;
-      case FollowStatus.pending:
-        text = 'Requested';
-        bgColor = Colors.transparent;
-        textColor = isDark ? Colors.white70 : Colors.black87;
-        onTap = _toggleFollow;
-        break;
-      case FollowStatus.notFollowing:
-        text = 'Follow';
-        bgColor = isDark ? Colors.white : Colors.black;
-        textColor = isDark ? Colors.black : Colors.white;
-        onTap = _toggleFollow;
-        break;
-    }
+    final isSelfProfile = _authService.userEmail == widget.userEmail;
 
-    if (_authService.userEmail == widget.userEmail) {
+    if (isSelfProfile) {
       text = 'Edit Profile';
       bgColor = isDark ? Colors.white12 : Colors.grey.shade200;
       textColor = isDark ? Colors.white : Colors.black;
-      onTap = () {
-        // Pop this screen (returning to where we came from) then maybe we could signal.
-        // But for now just tell them to edit from the main tab.
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Please navigate to the Profile tab on your Home screen to edit your profile.')),
+      onTap = () async {
+        final currentBio = ''; // You'd need a real bio if fetched, but edit profile can fetch it or get from current user
+        await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => EditProfileScreen(
+               initialName: widget.userName ?? '',
+               initialPhotoUrl: widget.userPhotoUrl ?? '',
+               initialBio: currentBio,
+               role: 'STUDENT', 
+            ),
+          ),
         );
       };
+    } else {
+      switch (_followStatus) {
+        case FollowStatus.following:
+          text = 'Following';
+          bgColor = Colors.transparent;
+          textColor = isDark ? Colors.white : Colors.black;
+          onTap = _toggleFollow;
+          break;
+        case FollowStatus.pending:
+          text = 'Requested';
+          bgColor = Colors.transparent;
+          textColor = isDark ? Colors.white70 : Colors.black87;
+          onTap = _toggleFollow;
+          break;
+        case FollowStatus.notFollowing:
+          text = 'Follow';
+          bgColor = isDark ? Colors.white : Colors.black;
+          textColor = isDark ? Colors.black : Colors.white;
+          onTap = _toggleFollow;
+          break;
+      }
     }
 
     return ElevatedButton(
@@ -458,7 +468,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         backgroundColor: bgColor,
         foregroundColor: textColor,
         elevation: 0,
-        side: (_followStatus == FollowStatus.following || _followStatus == FollowStatus.pending)
+        side: (!isSelfProfile && (_followStatus == FollowStatus.following || _followStatus == FollowStatus.pending))
             ? BorderSide(color: isDark ? Colors.white30 : Colors.black26)
             : null,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
