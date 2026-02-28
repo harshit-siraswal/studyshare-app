@@ -65,6 +65,19 @@ if ($env:API_FALLBACK_URLS) {
     $buildArgs += "--dart-define=API_FALLBACK_URLS=$($env:API_FALLBACK_URLS)"
 }
 
+if ($env:REMOVE_BG_API_KEY) {
+    Write-Host "Using REMOVE_BG_API_KEY from environment" -ForegroundColor Cyan
+    $buildArgs += "--dart-define=REMOVE_BG_API_KEY=$($env:REMOVE_BG_API_KEY)"
+}
+else {
+    Write-Host "WARNING: REMOVE_BG_API_KEY not set. Sticker background removal will be disabled." -ForegroundColor Yellow
+}
+
+if ($env:GIPHY_API_KEY) {
+    Write-Host "Using GIPHY_API_KEY from environment" -ForegroundColor Cyan
+    $buildArgs += "--dart-define=GIPHY_API_KEY=$($env:GIPHY_API_KEY)"
+}
+
 # Build APK
 Write-Host "Building APK..." -ForegroundColor Green
 & flutter @buildArgs
