@@ -813,7 +813,7 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
               children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(4),
-                  child: Image.asset('assets/icon/app_icon.png', width: 14, height: 14),
+                  child: Image.asset('assets/images/ai_logo.png', width: 14, height: 14),
                 ),
                 const SizedBox(width: 6),
                 Text(
@@ -1055,7 +1055,7 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(16),
                                 child: Image.asset(
-                                  'assets/icon/app_icon.png',
+                                  'assets/images/ai_logo.png',
                                   width: 72,
                                   height: 72,
                                   fit: BoxFit.cover,
