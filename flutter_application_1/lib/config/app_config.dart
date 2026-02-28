@@ -78,26 +78,25 @@ class AppConfig {
   // Razorpay Live Key
   static const String razorpayKeyId = String.fromEnvironment(
     'RAZORPAY_KEY_ID',
-    defaultValue: 'rzp_live_S9IWIDxf81JDDM',
+    defaultValue: '',
   );
   // Support Email
   static const String supportEmail = 'support@mystudyspace.me';
   // Giphy API Key (Get from Giphy Developers Dashboard: developers.giphy.com)
   static const String giphyApiKey = String.fromEnvironment(
     'GIPHY_API_KEY',
-    defaultValue: 'E2CYfJbrw5NGA8aUUN2d8nDn4Q6PoH77',
+    defaultValue: '',
   );
 
   /// remove.bg API key for sticker background removal.
   static const String removeBgApiKey = String.fromEnvironment(
     'REMOVE_BG_API_KEY',
-    defaultValue: 'D53uXgDqrEyuxCXHXQWFZ7n4',
   );
 
   static String get removeBgApiKeyOrThrow {
     if (removeBgApiKey.isEmpty) {
       throw Exception(
-        'REMOVE_BG_API_KEY is not set. It is required for background removal.',
+        'REMOVE_BG_API_KEY is not set. It is required for background removal. Setup your keys via .env or --dart-define',
       );
     }
     return removeBgApiKey;
@@ -142,6 +141,11 @@ class AppConfig {
       warnings.add(
         'GOOGLE_SERVER_CLIENT_ID not set - Google Sign-In may not work',
       );
+    }
+
+    // Razorpay Check
+    if (razorpayKeyId.isEmpty) {
+      warnings.add('RAZORPAY_KEY_ID not set - Payment features will be disabled');
     }
 
     return ValidationResult(errors, warnings);

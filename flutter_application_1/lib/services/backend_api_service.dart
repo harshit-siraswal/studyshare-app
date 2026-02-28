@@ -854,7 +854,6 @@ class BackendApiService {
         if (minScore != null) 'min_score': minScore,
         if (allowWeb != null) 'allow_web': allowWeb,
       },
-      },
     );
   }
 
@@ -891,16 +890,17 @@ class BackendApiService {
 
       final client = http.Client();
       try {
-        final response = await client.send(request).timeout(const Duration(seconds: 15));
+        final response = await client.send(request).timeout(_requestTimeout);
         if (response.statusCode >= 400) {
           final errorResponse = await response.stream.bytesToString();
-          client.close();
+          String errMsg;
           try {
             final errorJson = jsonDecode(errorResponse);
-            throw Exception(errorJson['error'] ?? 'API error: ${response.statusCode}');
-          } catch (_) {
-            throw Exception('API error: ${response.statusCode}');
+            errMsg = errorJson['error'] ?? 'API error: ${response.statusCode}';
+          } on FormatException {
+            errMsg = 'API error: ${response.statusCode}';
           }
+          throw Exception(errMsg);
         }
 
         final stream = response.stream.transform(utf8.decoder).transform(const LineSplitter());
@@ -909,15 +909,15 @@ class BackendApiService {
             yield line.substring(6);
           }
         }
-        client.close();
         return;
       } catch (e) {
-        client.close();
         lastError = e;
         if (i < baseUrls.length - 1) {
           debugPrint('[BackendApi] queryRagStream failed on $baseUrl, trying next...');
           continue;
         }
+      } finally {
+        client.close();
       }
     }
     throw lastError ?? Exception('Failed to connect to any backend URL');

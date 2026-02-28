@@ -647,14 +647,18 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
     await _persistCurrentSession();
     await _scrollToBottom();
 
+    AIChatMessage? aiMessage;
+    var malformedChunkCount = 0;
+
     try {
-      final aiMessage = AIChatMessage(
+      aiMessage = AIChatMessage(
         isUser: false,
         content: '',
       );
 
       setState(() {
-        _messages.add(aiMessage);
+        _messages.add(aiMessage!);
+        _isLoading = false;
       });
 
       final stream = _api.queryRagStream(
@@ -679,36 +683,46 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
                 .toList();
 
             setState(() {
-              aiMessage.sources = sources;
-              aiMessage.noLocal = data['no_local'] == true;
+              aiMessage!.sources = sources;
+              aiMessage!.noLocal = data['no_local'] == true;
             });
           } else if (type == 'chunk') {
             setState(() {
-              aiMessage.content += (chunk['text']?.toString() ?? '');
+              aiMessage!.content += (chunk['text']?.toString() ?? '');
             });
             _scrollToBottom();
           } else if (type == 'error') {
             setState(() {
-              aiMessage.content += '\n\nError: ${chunk['message']}';
+              aiMessage!.content += '\n\nError: ${chunk['message']}';
             });
             _scrollToBottom();
           } else if (type == 'done') {
             // Done
           }
-        } catch (_) {
-          // ignore broken chunks
+        } catch (e, st) {
+          debugPrint('Chunk parse error: $e\nStack: $st');
+          malformedChunkCount++;
         }
       }
+      
+      if (malformedChunkCount > 0) {
+        debugPrint('Stream finished with $malformedChunkCount malformed chunks.');
+      }
+      
       await _persistCurrentSession();
     } catch (e) {
       if (mounted) {
         setState(() {
-          _messages.add(
-            AIChatMessage(
-              isUser: false,
-              content: e.toString().replaceFirst('Exception: ', ''),
-            ),
-          );
+          if (aiMessage != null) {
+            aiMessage.content += '\n\n${e.toString().replaceFirst('Exception: ', '')}';
+          } else {
+            _messages.add(
+              AIChatMessage(
+                isUser: false,
+                content: e.toString().replaceFirst('Exception: ', ''),
+              ),
+            );
+          }
         });
         await _persistCurrentSession();
       }

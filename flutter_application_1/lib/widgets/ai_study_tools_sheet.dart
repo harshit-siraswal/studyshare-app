@@ -559,7 +559,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     return ListView.separated(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
       itemCount: blocks.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
+      separatorBuilder: (context, index) => const SizedBox(height: 10),
       itemBuilder: (context, index) {
         final block = blocks[index];
         switch (block.kind) {

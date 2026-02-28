@@ -66,9 +66,16 @@ if ($env:API_FALLBACK_URLS) {
 }
 
 # REMOVE_BG_API_KEY - environment var overrides hardcoded key
-$removeBgKey = if ($env:REMOVE_BG_API_KEY) { $env:REMOVE_BG_API_KEY } else { "D53uXgDqrEyuxCXHXQWFZ7n4" }
-$buildArgs += "--dart-define=REMOVE_BG_API_KEY=$removeBgKey"
-Write-Host "Using REMOVE_BG_API_KEY" -ForegroundColor Cyan
+if ($env:REMOVE_BG_API_KEY) {
+    $removeBgKey = $env:REMOVE_BG_API_KEY
+    Write-Host "Using REMOVE_BG_API_KEY from environment" -ForegroundColor Cyan
+    $buildArgs += "--dart-define=REMOVE_BG_API_KEY=$removeBgKey"
+}
+else {
+    $removeBgKey = "D53uXgDqrEyuxCXHXQWFZ7n4"
+    Write-Host "Using fallback REMOVE_BG_API_KEY; background removal features will remain enabled" -ForegroundColor Yellow
+    $buildArgs += "--dart-define=REMOVE_BG_API_KEY=$removeBgKey"
+}
 
 # GIPHY_API_KEY - environment var overrides hardcoded key
 if ($env:GIPHY_API_KEY) {
@@ -78,7 +85,7 @@ if ($env:GIPHY_API_KEY) {
 }
 else {
     $giphyKey = "E2CYfJbrw5NGA8aUUN2d8nDn4Q6PoH77"
-    Write-Host "WARNING: GIPHY_API_KEY not set in environment. GIPHY features may be disabled or use fallback." -ForegroundColor Yellow
+    Write-Host "Using fallback GIPHY API key; GIPHY features will remain enabled" -ForegroundColor Yellow
     $buildArgs += "--dart-define=GIPHY_API_KEY=$giphyKey"
 }
 
