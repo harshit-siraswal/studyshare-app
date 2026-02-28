@@ -496,7 +496,7 @@ class BackendApiService {
     }
 
     return _requestJson(
-      '/api/profile',
+      '/api/users/profile',
       method: 'PUT',
       body: payload,
       customHeaders: customHeaders.isEmpty ? null : customHeaders,
