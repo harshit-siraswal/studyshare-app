@@ -4,12 +4,63 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
 import 'package:image_cropper/image_cropper.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../config/app_config.dart';
+
+// ─── Giphy Models ────────────────────────────────────────────────────────────
+
+class GiphyStickerItem {
+  final String id;
+  final String title;
+  final String previewUrl;   // fixed_width_small gif / downsampled
+  final String originalUrl;  // original mp4 or gif url to save
+
+  const GiphyStickerItem({
+    required this.id,
+    required this.title,
+    required this.previewUrl,
+    required this.originalUrl,
+  });
+
+  factory GiphyStickerItem.fromJson(Map<String, dynamic> j) {
+    final images = j['images'] as Map<String, dynamic>? ?? {};
+    // Prefer a static webp/gif at fixed_width_small; fallback to downsized
+    final small = images['fixed_width_small'] as Map<String, dynamic>? ?? {};
+    final downsized = images['downsized'] as Map<String, dynamic>? ?? {};
+    final original = images['original'] as Map<String, dynamic>? ?? {};
+    return GiphyStickerItem(
+      id: j['id']?.toString() ?? '',
+      title: j['title']?.toString() ?? 'Sticker',
+      previewUrl: (small['url'] ?? downsized['url'] ?? original['url'] ?? '').toString(),
+      originalUrl: (original['url'] ?? downsized['url'] ?? small['url'] ?? '').toString(),
+    );
+  }
+}
+
+class GiphyStickerCategory {
+  final String name;
+  final String encodedSearchTerm;
+  final String previewGifUrl;
+
+  const GiphyStickerCategory({
+    required this.name,
+    required this.encodedSearchTerm,
+    required this.previewGifUrl,
+  });
+
+  factory GiphyStickerCategory.fromJson(Map<String, dynamic> j) {
+    return GiphyStickerCategory(
+      name: j['name']?.toString() ?? 'Unknown',
+      encodedSearchTerm: j['name_encoded']?.toString() ?? j['name']?.toString() ?? '',
+      previewGifUrl: ((j['gif'] as Map<String, dynamic>?)?['images'] as Map<String, dynamic>?)?['fixed_width_small']?['url']?.toString() ?? '',
+    );
+  }
+}
 
 class StickerPack {
   final String id;
@@ -108,6 +159,88 @@ class StickerService {
       ],
     ),
   ];
+
+  // ─── Giphy Sticker API ────────────────────────────────────────────────────
+
+  static const String _giphyBase = 'https://api.giphy.com/v1';
+
+  String get _giphyKey => AppConfig.giphyApiKey;
+
+  bool get hasGiphy => _giphyKey.isNotEmpty;
+
+  /// Fetch trending stickers or search results from Giphy.
+  Future<List<GiphyStickerItem>> fetchGiphyStickers({
+    String? query,
+    int limit = 24,
+    int offset = 0,
+    String rating = 'g',
+  }) async {
+    if (_giphyKey.isEmpty) return [];
+    final endpoint = query != null && query.trim().isNotEmpty
+        ? '$_giphyBase/stickers/search'
+        : '$_giphyBase/stickers/trending';
+    final uri = Uri.parse(endpoint).replace(queryParameters: {
+      'api_key': _giphyKey,
+      'limit': limit.toString(),
+      'offset': offset.toString(),
+      'rating': rating,
+      if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
+    });
+    try {
+      final res = await http.get(uri).timeout(const Duration(seconds: 15));
+      if (res.statusCode != 200) return [];
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>?;
+      final data = (decoded?['data'] as List?) ?? [];
+      return data
+          .map((e) => GiphyStickerItem.fromJson(e as Map<String, dynamic>))
+          .where((s) => s.previewUrl.isNotEmpty)
+          .toList();
+    } catch (e) {
+      debugPrint('[Giphy] fetchGiphyStickers error: $e');
+      return [];
+    }
+  }
+
+  /// Fetch sticker categories from Giphy.
+  Future<List<GiphyStickerCategory>> fetchGiphyCategories() async {
+    if (_giphyKey.isEmpty) return [];
+    final uri = Uri.parse('$_giphyBase/stickers/categories').replace(
+      queryParameters: {'api_key': _giphyKey},
+    );
+    try {
+      final res = await http.get(uri).timeout(const Duration(seconds: 15));
+      if (res.statusCode != 200) return [];
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>?;
+      final data = (decoded?['data'] as List?) ?? [];
+      return data
+          .map((e) => GiphyStickerCategory.fromJson(e as Map<String, dynamic>))
+          .where((c) => c.name.isNotEmpty)
+          .toList();
+    } catch (e) {
+      debugPrint('[Giphy] fetchGiphyCategories error: $e');
+      return [];
+    }
+  }
+
+  /// Download a Giphy sticker and save it to the local sticker directory.
+  Future<File?> saveGiphySticker(GiphyStickerItem sticker) async {
+    try {
+      final res = await http.get(Uri.parse(sticker.originalUrl))
+          .timeout(const Duration(seconds: 30));
+      if (res.statusCode != 200) return null;
+      final dir = await getStickerDirectory();
+      final ext = sticker.originalUrl.contains('.webp') ? '.webp'
+          : sticker.originalUrl.contains('.gif') ? '.gif' : '.gif';
+      final filename = 'giphy_${sticker.id}$ext';
+      final file = File(path.join(dir.path, filename));
+      if (await file.exists()) return file; // already saved
+      await file.writeAsBytes(res.bodyBytes, flush: true);
+      return file;
+    } catch (e) {
+      debugPrint('[Giphy] saveGiphySticker error: $e');
+      return null;
+    }
+  }
 
   /// Returns true when background removal is available.
   bool get canRemoveBackground => AppConfig.removeBgApiKey.isNotEmpty;

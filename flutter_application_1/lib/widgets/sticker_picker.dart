@@ -24,6 +24,7 @@ class _StickerPickerState extends State<StickerPicker>
   final StickerService _stickerService = StickerService();
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _giphySearchController = TextEditingController();
 
   List<File> _stickers = [];
   Set<String> _installedPacks = {};
@@ -32,10 +33,20 @@ class _StickerPickerState extends State<StickerPicker>
   String? _packActionInProgress;
   String _stickerQuery = '';
 
+  // Giphy state
+  List<GiphyStickerItem> _giphyStickers = [];
+  bool _giphyLoading = false;
+  String? _giphySavingId; // ID of the sticker currently being saved
+
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(() {
+      if (_tabController.index == 2 && _giphyStickers.isEmpty) {
+        _loadGiphy();
+      }
+    });
     _loadAll();
   }
 
@@ -43,6 +54,7 @@ class _StickerPickerState extends State<StickerPicker>
   void dispose() {
     _tabController.dispose();
     _searchController.dispose();
+    _giphySearchController.dispose();
     super.dispose();
   }
 
@@ -399,7 +411,8 @@ class _StickerPickerState extends State<StickerPicker>
                 ),
                 tabs: const [
                   Tab(text: 'My Stickers'),
-                  Tab(text: 'Sticker Packs'),
+                  Tab(text: 'Packs'),
+                  Tab(text: '✨ Giphy'),
                 ],
               ),
             ),
@@ -408,7 +421,11 @@ class _StickerPickerState extends State<StickerPicker>
           Expanded(
             child: TabBarView(
               controller: _tabController,
-              children: [_buildStickersGrid(isDark), _buildPackList(isDark)],
+              children: [
+                _buildStickersGrid(isDark),
+                _buildPackList(isDark),
+                _buildGiphyTab(isDark),
+              ],
             ),
           ),
         ],
@@ -793,6 +810,175 @@ class _StickerPickerState extends State<StickerPicker>
           ),
         );
       },
+    );
+  }
+
+  // ─── GIPHY TAB ────────────────────────────────────────────────────────────
+
+  Future<void> _loadGiphy({String? query}) async {
+    if (!mounted) return;
+    setState(() => _giphyLoading = true);
+    final results = await _stickerService.fetchGiphyStickers(query: query);
+    if (!mounted) return;
+    setState(() {
+      _giphyStickers = results;
+      _giphyLoading = false;
+    });
+  }
+
+  Future<void> _saveAndSendGiphy(GiphyStickerItem item) async {
+    if (_giphySavingId != null) return;
+    if (!mounted) return;
+    setState(() => _giphySavingId = item.id);
+    try {
+      final file = await _stickerService.saveGiphySticker(item);
+      if (file != null && mounted) {
+        widget.onStickerSelected(file);
+        await _loadAll(); // refresh My Stickers tab
+      }
+    } catch (e) {
+      debugPrint('Giphy save error: \$e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to save sticker. Try again.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _giphySavingId = null);
+    }
+  }
+
+  Widget _buildGiphyTab(bool isDark) {
+    final mutedColor = AppTheme.getTextColor(context).withValues(alpha: 0.55);
+    if (!_stickerService.hasGiphy) {
+      return Center(
+        child: Text(
+          'Giphy stickers unavailable.\nGIPHY_API_KEY not configured.',
+          textAlign: TextAlign.center,
+          style: GoogleFonts.inter(color: mutedColor),
+        ),
+      );
+    }
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: TextField(
+            controller: _giphySearchController,
+            onSubmitted: (q) =>
+                _loadGiphy(query: q.trim().isEmpty ? null : q.trim()),
+            textInputAction: TextInputAction.search,
+            decoration: InputDecoration(
+              hintText: 'Search Giphy stickers...',
+              isDense: true,
+              prefixIcon: Icon(
+                Icons.search_rounded,
+                size: 18,
+                color: isDark ? Colors.white54 : Colors.black54,
+              ),
+              suffixIcon: _giphySearchController.text.isEmpty
+                  ? null
+                  : IconButton(
+                      icon: Icon(Icons.close_rounded,
+                          size: 16,
+                          color: isDark ? Colors.white54 : Colors.black54),
+                      onPressed: () {
+                        _giphySearchController.clear();
+                        _loadGiphy();
+                        setState(() {});
+                      },
+                    ),
+              filled: true,
+              fillColor: isDark ? Colors.white10 : const Color(0xFFF4F6FB),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(18),
+                borderSide: BorderSide.none,
+              ),
+              contentPadding: const EdgeInsets.symmetric(vertical: 12),
+            ),
+            onChanged: (_) => setState(() {}),
+          ),
+        ),
+        Expanded(
+          child: _giphyLoading
+              ? const Center(child: CircularProgressIndicator())
+              : _giphyStickers.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.gif_box_outlined,
+                              size: 48, color: mutedColor),
+                          const SizedBox(height: 8),
+                          Text('No stickers found',
+                              style: GoogleFonts.inter(color: mutedColor)),
+                          const SizedBox(height: 4),
+                          TextButton(
+                            onPressed: _loadGiphy,
+                            child: const Text('Load Trending'),
+                          ),
+                        ],
+                      ),
+                    )
+                  : GridView.builder(
+                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+                      gridDelegate:
+                          const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 4,
+                        mainAxisSpacing: 8,
+                        crossAxisSpacing: 8,
+                        childAspectRatio: 1,
+                      ),
+                      itemCount: _giphyStickers.length,
+                      itemBuilder: (context, idx) {
+                        final item = _giphyStickers[idx];
+                        final isSaving = _giphySavingId == item.id;
+                        return GestureDetector(
+                          onTap: () => _saveAndSendGiphy(item),
+                          child: Tooltip(
+                            message: item.title,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                    color: AppTheme.getBorderColor(context)),
+                                color: isDark ? Colors.white10 : Colors.white,
+                              ),
+                              clipBehavior: Clip.antiAlias,
+                              child: isSaving
+                                  ? const Center(
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2),
+                                    )
+                                  : CachedNetworkImage(
+                                      imageUrl: item.previewUrl,
+                                      fit: BoxFit.cover,
+                                      placeholder: (_, __) => Container(
+                                        color: isDark
+                                            ? Colors.white10
+                                            : const Color(0xFFF0F0F0),
+                                      ),
+                                      errorWidget: (_, __, ___) => const Icon(
+                                          Icons.broken_image,
+                                          size: 24),
+                                    ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6, top: 2),
+          child: Text(
+            'Powered by GIPHY',
+            style: GoogleFonts.inter(
+                fontSize: 10,
+                color: mutedColor,
+                fontStyle: FontStyle.italic),
+          ),
+        ),
+      ],
     );
   }
 }
