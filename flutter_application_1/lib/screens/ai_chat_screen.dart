@@ -71,14 +71,43 @@ class _ChatAttachment {
   });
 }
 
+/// Context for pinning a RAG chat to a specific resource/PDF.
+class ResourceContext {
+  final String fileId;
+  final String title;
+  final String? subject;
+  final String? semester;
+  final String? branch;
+
+  const ResourceContext({
+    required this.fileId,
+    required this.title,
+    this.subject,
+    this.semester,
+    this.branch,
+  });
+
+  /// Human-readable label shown in the context banner.
+  String get label {
+    final parts = <String>[];
+    if (semester != null && semester!.isNotEmpty) parts.add('Sem $semester');
+    if (branch != null && branch!.isNotEmpty) parts.add(branch!);
+    if (subject != null && subject!.isNotEmpty) parts.add(subject!);
+    return parts.isEmpty ? title : parts.join(' · ');
+  }
+}
+
 class AIChatScreen extends StatefulWidget {
   final String collegeId;
   final String collegeName;
+  /// Optional: if set, all RAG queries are pinned to this resource.
+  final ResourceContext? resourceContext;
 
   const AIChatScreen({
     super.key,
     required this.collegeId,
     required this.collegeName,
+    this.resourceContext,
   });
 
   @override
@@ -182,6 +211,26 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
     
     // Defer splash animation until after stored sessions load
     _loadStoredSessions();
+  }
+
+  /// Injects an AI greeting when chat is opened with a pinned resource.
+  void _injectResourceGreeting() {
+    final ctx = widget.resourceContext;
+    if (ctx == null) return;
+
+    final parts = <String>[];
+    if (ctx.subject != null && ctx.subject!.isNotEmpty) parts.add(ctx.subject!);
+    if (ctx.semester != null && ctx.semester!.isNotEmpty) parts.add('Semester ${ctx.semester}');
+    if (ctx.branch != null && ctx.branch!.isNotEmpty) parts.add(ctx.branch!);
+
+    final meta = parts.isEmpty ? '' : ' (${parts.join(', ')})';
+
+    final greeting =
+        'I have loaded "${ctx.title}"$meta. Ask me anything from this document — I will answer based on its contents. If I need to search beyond your notes, I will let you know.';
+
+    setState(() {
+      _messages.add(AIChatMessage(isUser: false, content: greeting));
+    });
   }
 
   @override
@@ -315,8 +364,13 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
       }
     });
 
-    // Start splash animation only if no messages were loaded
-    if (_messages.isEmpty && mounted) {
+    // If opened with a resource context, always start fresh so history
+    // from unrelated sessions is not shown.
+    if (widget.resourceContext != null) {
+      _activeSessionId = _newSessionId();
+      _messages.clear();
+      _injectResourceGreeting();
+    } else if (_messages.isEmpty && mounted) {
       _splashAnimationController.forward().then((_) {
         if (_messages.isEmpty && mounted) {
           _suggestionsController.forward();
@@ -596,6 +650,7 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
       final response = await _api.queryRag(
         question: sendPrompt,
         collegeId: widget.collegeId,
+        fileId: widget.resourceContext?.fileId,
         allowWeb: true,
       );
 

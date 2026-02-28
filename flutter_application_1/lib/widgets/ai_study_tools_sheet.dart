@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../config/theme.dart';
+import '../screens/ai_chat_screen.dart';
 import '../services/ai_output_local_service.dart';
 import '../services/backend_api_service.dart';
 import '../services/summary_pdf_service.dart';
@@ -55,6 +56,10 @@ class AiStudyToolsSheet extends StatefulWidget {
   final String resourceId;
   final String resourceTitle;
   final String? collegeId;
+  final String? collegeName;
+  final String? subject;
+  final String? semester;
+  final String? branch;
   final String resourceType;
   final String? videoUrl;
   final AiOutputLocalService localStore;
@@ -65,6 +70,10 @@ class AiStudyToolsSheet extends StatefulWidget {
     required this.resourceId,
     required this.resourceTitle,
     this.collegeId,
+    this.collegeName,
+    this.subject,
+    this.semester,
+    this.branch,
     this.resourceType = 'notes',
     this.videoUrl,
     AiOutputLocalService? localStore,
@@ -1280,19 +1289,14 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                     else ...[
                       if (!isSavedLocally)
                         OutlinedButton.icon(
-                          onPressed: _isSaving
-                              ? null
-                              : _saveActiveOutput,
+                          onPressed: _isSaving ? null : _saveActiveOutput,
                           icon: _isSaving
                               ? const SizedBox(
                                   width: 14,
                                   height: 14,
                                   child: CircularProgressIndicator(strokeWidth: 2),
                                 )
-                              : const Icon(
-                                  Icons.save_outlined,
-                                  size: 16,
-                                ),
+                              : const Icon(Icons.save_outlined, size: 16),
                           label: const Text('Save'),
                         ),
                       if (!isSavedLocally) const SizedBox(width: 6),
@@ -1300,16 +1304,12 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                         IconButton(
                           key: _pdfButtonKey,
                           tooltip: 'Download PDF',
-                          onPressed: _isDownloadingSummary
-                              ? null
-                              : _downloadSummaryPdf,
+                          onPressed: _isDownloadingSummary ? null : _downloadSummaryPdf,
                           icon: _isDownloadingSummary
                               ? const SizedBox(
                                   width: 16,
                                   height: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
+                                  child: CircularProgressIndicator(strokeWidth: 2),
                                 )
                               : const Icon(Icons.picture_as_pdf_outlined),
                         ),
@@ -1333,6 +1333,43 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                         ),
                       ),
                     ],
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        if (widget.resourceId.isEmpty) return;
+                        final ctx = ResourceContext(
+                          fileId: widget.resourceId,
+                          title: widget.resourceTitle,
+                          subject: widget.subject,
+                          semester: widget.semester,
+                          branch: widget.branch,
+                        );
+                        final nav = Navigator.of(context);
+                        nav.pop();
+                        nav.push(
+                          MaterialPageRoute(
+                            builder: (_) => AIChatScreen(
+                              collegeId: widget.collegeId ?? '',
+                              collegeName: widget.collegeName ?? '',
+                              resourceContext: ctx,
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.chat_outlined, size: 16),
+                      label: const Text('Study Chat'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTheme.primary,
+                        side: const BorderSide(color: AppTheme.primary),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),

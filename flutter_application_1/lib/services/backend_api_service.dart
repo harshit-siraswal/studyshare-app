@@ -838,6 +838,7 @@ class BackendApiService {
   Future<Map<String, dynamic>> queryRag({
     required String question,
     String? collegeId,
+    String? fileId,
     int? topK,
     double? minScore,
     bool? allowWeb,
@@ -848,6 +849,7 @@ class BackendApiService {
       body: {
         'question': question,
         if (collegeId != null) 'college_id': collegeId,
+        if (fileId != null) 'file_id': fileId,
         if (topK != null) 'top_k': topK,
         if (minScore != null) 'min_score': minScore,
         if (allowWeb != null) 'allow_web': allowWeb,
