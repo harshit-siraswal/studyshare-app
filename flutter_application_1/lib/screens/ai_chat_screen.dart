@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
@@ -45,10 +46,10 @@ class RagSource {
 
 class AIChatMessage {
   final bool isUser;
-  final String content;
-  final List<RagSource> sources;
-  final bool cached;
-  final bool noLocal;
+  String content;
+  List<RagSource> sources;
+  bool cached;
+  bool noLocal;
 
   AIChatMessage({
     required this.isUser,
@@ -647,41 +648,70 @@ class _AIChatScreenState extends State<AIChatScreen> with TickerProviderStateMix
     await _scrollToBottom();
 
     try {
-      final response = await _api.queryRag(
+      final aiMessage = AIChatMessage(
+        isUser: false,
+        content: '',
+      );
+
+      setState(() {
+        _messages.add(aiMessage);
+      });
+
+      final stream = _api.queryRagStream(
         question: sendPrompt,
         collegeId: widget.collegeId,
         fileId: widget.resourceContext?.fileId,
         allowWeb: true,
       );
 
-      final sourcesRaw = (response['sources'] as List?) ?? const [];
-      final sources = sourcesRaw
-          .whereType<Map>()
-          .map((s) => RagSource.fromJson(Map<String, dynamic>.from(s)))
-          .toList();
+      await for (final chunkStr in stream) {
+        if (!mounted) break;
+        try {
+          final chunk = jsonDecode(chunkStr);
+          final type = chunk['type'];
+          
+          if (type == 'metadata') {
+            final data = chunk['data'] as Map<String, dynamic>? ?? {};
+            final sourcesRaw = (data['sources'] as List?) ?? const [];
+            final sources = sourcesRaw
+                .whereType<Map>()
+                .map((s) => RagSource.fromJson(Map<String, dynamic>.from(s)))
+                .toList();
 
-      setState(() {
-        _messages.add(
-          AIChatMessage(
-            isUser: false,
-            content: response['answer']?.toString() ?? 'No answer returned.',
-            sources: sources,
-            cached: response['cached'] == true,
-            noLocal: response['no_local'] == true,
-          ),
-        );
-      });
+            setState(() {
+              aiMessage.sources = sources;
+              aiMessage.noLocal = data['no_local'] == true;
+            });
+          } else if (type == 'chunk') {
+            setState(() {
+              aiMessage.content += (chunk['text']?.toString() ?? '');
+            });
+            _scrollToBottom();
+          } else if (type == 'error') {
+            setState(() {
+              aiMessage.content += '\n\nError: ${chunk['message']}';
+            });
+            _scrollToBottom();
+          } else if (type == 'done') {
+            // Done
+          }
+        } catch (_) {
+          // ignore broken chunks
+        }
+      }
       await _persistCurrentSession();
     } catch (e) {
-      setState(() {
-        _messages.add(
-          AIChatMessage(
-            isUser: false,
-            content: e.toString().replaceFirst('Exception: ', ''),
-          ),
-        );
-      });
-      await _persistCurrentSession();
+      if (mounted) {
+        setState(() {
+          _messages.add(
+            AIChatMessage(
+              isUser: false,
+              content: e.toString().replaceFirst('Exception: ', ''),
+            ),
+          );
+        });
+        await _persistCurrentSession();
+      }
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);

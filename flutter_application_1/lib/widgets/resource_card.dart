@@ -298,6 +298,9 @@ class _ResourceCardState extends State<ResourceCard> {
           title: widget.resource.title,
           resourceId: widget.resource.id,
           collegeId: widget.resource.collegeId,
+          subject: widget.resource.subject,
+          semester: widget.resource.semester?.toString(),
+          branch: widget.resource.branch,
         ),
       ),
     );

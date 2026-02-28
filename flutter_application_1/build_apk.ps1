@@ -71,9 +71,16 @@ $buildArgs += "--dart-define=REMOVE_BG_API_KEY=$removeBgKey"
 Write-Host "Using REMOVE_BG_API_KEY" -ForegroundColor Cyan
 
 # GIPHY_API_KEY - environment var overrides hardcoded key
-$giphyKey = if ($env:GIPHY_API_KEY) { $env:GIPHY_API_KEY } else { "E2CYfJbrw5NGA8aUUN2d8nDn4Q6PoH77" }
-$buildArgs += "--dart-define=GIPHY_API_KEY=$giphyKey"
-Write-Host "Using GIPHY_API_KEY" -ForegroundColor Cyan
+if ($env:GIPHY_API_KEY) {
+    $giphyKey = $env:GIPHY_API_KEY
+    Write-Host "Using GIPHY_API_KEY from environment" -ForegroundColor Cyan
+    $buildArgs += "--dart-define=GIPHY_API_KEY=$giphyKey"
+}
+else {
+    $giphyKey = "E2CYfJbrw5NGA8aUUN2d8nDn4Q6PoH77"
+    Write-Host "WARNING: GIPHY_API_KEY not set in environment. GIPHY features may be disabled or use fallback." -ForegroundColor Yellow
+    $buildArgs += "--dart-define=GIPHY_API_KEY=$giphyKey"
+}
 
 # Build APK
 Write-Host "Building APK..." -ForegroundColor Green

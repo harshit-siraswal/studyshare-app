@@ -83,11 +83,15 @@ class AppConfig {
   // Support Email
   static const String supportEmail = 'support@mystudyspace.me';
   // Giphy API Key (Get from Giphy Developers Dashboard: developers.giphy.com)
-  static const String giphyApiKey = String.fromEnvironment('GIPHY_API_KEY');
+  static const String giphyApiKey = String.fromEnvironment(
+    'GIPHY_API_KEY',
+    defaultValue: 'E2CYfJbrw5NGA8aUUN2d8nDn4Q6PoH77',
+  );
 
   /// remove.bg API key for sticker background removal.
   static const String removeBgApiKey = String.fromEnvironment(
     'REMOVE_BG_API_KEY',
+    defaultValue: 'D53uXgDqrEyuxCXHXQWFZ7n4',
   );
 
   static String get removeBgApiKeyOrThrow {

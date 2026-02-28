@@ -854,7 +854,73 @@ class BackendApiService {
         if (minScore != null) 'min_score': minScore,
         if (allowWeb != null) 'allow_web': allowWeb,
       },
+      },
     );
+  }
+
+  Stream<String> queryRagStream({
+    required String question,
+    String? collegeId,
+    String? fileId,
+    int? topK,
+    double? minScore,
+    bool? allowWeb,
+  }) async* {
+    final token = await _getIdToken();
+    final bodyStr = jsonEncode({
+      'question': question,
+      if (collegeId != null) 'college_id': collegeId,
+      if (fileId != null) 'file_id': fileId,
+      if (topK != null) 'top_k': topK,
+      if (minScore != null) 'min_score': minScore,
+      if (allowWeb != null) 'allow_web': allowWeb,
+    });
+
+    Object? lastError;
+    final baseUrls = _baseUrls;
+
+    for (var i = 0; i < baseUrls.length; i++) {
+      final baseUrl = baseUrls[i];
+      final uri = Uri.parse('$baseUrl/api/rag/query/stream');
+      final request = http.Request('POST', uri);
+      request.headers.addAll({
+        'Content-Type': 'application/json',
+        if (token != null) 'Authorization': 'Bearer $token',
+      });
+      request.body = bodyStr;
+
+      final client = http.Client();
+      try {
+        final response = await client.send(request).timeout(const Duration(seconds: 15));
+        if (response.statusCode >= 400) {
+          final errorResponse = await response.stream.bytesToString();
+          client.close();
+          try {
+            final errorJson = jsonDecode(errorResponse);
+            throw Exception(errorJson['error'] ?? 'API error: ${response.statusCode}');
+          } catch (_) {
+            throw Exception('API error: ${response.statusCode}');
+          }
+        }
+
+        final stream = response.stream.transform(utf8.decoder).transform(const LineSplitter());
+        await for (var line in stream) {
+          if (line.startsWith('data: ')) {
+            yield line.substring(6);
+          }
+        }
+        client.close();
+        return;
+      } catch (e) {
+        client.close();
+        lastError = e;
+        if (i < baseUrls.length - 1) {
+          debugPrint('[BackendApi] queryRagStream failed on $baseUrl, trying next...');
+          continue;
+        }
+      }
+    }
+    throw lastError ?? Exception('Failed to connect to any backend URL');
   }
   // ----------------------------
   // Push Notifications (FCM)

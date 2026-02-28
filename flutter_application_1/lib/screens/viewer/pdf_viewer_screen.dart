@@ -20,6 +20,10 @@ class PdfViewerScreen extends StatefulWidget {
   final String title;
   final String? resourceId;
   final String? collegeId;
+  final String? collegeName;
+  final String? subject;
+  final String? semester;
+  final String? branch;
 
   const PdfViewerScreen({
     super.key,
@@ -27,6 +31,10 @@ class PdfViewerScreen extends StatefulWidget {
     required this.title,
     this.resourceId,
     this.collegeId,
+    this.collegeName,
+    this.subject,
+    this.semester,
+    this.branch,
   });
 
   @override
@@ -322,6 +330,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         resourceId: resourceId,
         resourceTitle: widget.title,
         collegeId: widget.collegeId,
+        collegeName: widget.collegeName,
+        subject: widget.subject,
+        semester: widget.semester,
+        branch: widget.branch,
       ),
     );
   }
