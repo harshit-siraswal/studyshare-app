@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
+import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import '../../config/theme.dart';
 import '../../services/supabase_service.dart';
 import 'department_account_screen.dart' as dept_screen;
@@ -560,45 +561,58 @@ class _NoticesScreenState extends State<NoticesScreen>
                         ? _buildLoadingSkeleton(isDark)
                         : _filteredNotices.isEmpty
                         ? _buildEmptyState(isDark)
-                        : ListView.builder(
-                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
-                            itemCount: _filteredNotices.length,
-                            itemBuilder: (context, index) {
-                              final notice = _filteredNotices[index];
-                              // Attempt to map to department, fallback to General
-                              // Depending on notice schema, it might have 'department' key
-                              final deptId =
-                                  notice['department'] as String? ?? 'general';
-                              final account = _departmentAccounts.firstWhere(
-                                (a) => a.id == deptId,
-                                orElse: () => _departmentAccounts.first,
-                              );
+                        : AnimationLimiter(
+                            child: ListView.builder(
+                              padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+                              itemCount: _filteredNotices.length,
+                              itemBuilder: (context, index) {
+                                final notice = _filteredNotices[index];
+                                // Attempt to map to department, fallback to General
+                                // Depending on notice schema, it might have 'department' key
+                                final deptId =
+                                    notice['department'] as String? ?? 'general';
+                                final account = _departmentAccounts.firstWhere(
+                                  (a) => a.id == deptId,
+                                  orElse: () => _departmentAccounts.first,
+                                );
 
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 16),
-                                child: NoticeCard(
-                                  notice: notice,
-                                  account: account,
-                                  collegeId: widget.collegeId,
-                                  isDark: isDark,
-                                ),
-                              );
-                            },
+                                return AnimationConfiguration.staggeredList(
+                                  position: index,
+                                  duration: const Duration(milliseconds: 375),
+                                  child: SlideAnimation(
+                                    verticalOffset: 20.0,
+                                    child: FadeInAnimation(
+                                      child: Padding(
+                                        padding: const EdgeInsets.only(bottom: 16),
+                                        child: NoticeCard(
+                                          notice: notice,
+                                          account: account,
+                                          collegeId: widget.collegeId,
+                                          isDark: isDark,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
                           ),
                   ),
 
                   // Tab 2: Departments List
-                  ListView.builder(
-                    padding: const EdgeInsets.only(top: 12, bottom: 120),
-                    itemCount: _departmentAccounts.length,
-                    itemBuilder: (context, index) {
-                      final account = _departmentAccounts[index];
-                      return _buildDepartmentAccountTile(
-                        account,
-                        isDark,
-                        index,
-                      );
-                    },
+                  AnimationLimiter(
+                    child: ListView.builder(
+                      padding: const EdgeInsets.only(top: 12, bottom: 120),
+                      itemCount: _departmentAccounts.length,
+                      itemBuilder: (context, index) {
+                        final account = _departmentAccounts[index];
+                        return _buildDepartmentAccountTile(
+                          account,
+                          isDark,
+                          index,
+                        );
+                      },
+                    ),
                   ),
                 ],
               ),
@@ -624,20 +638,13 @@ class _NoticesScreenState extends State<NoticesScreen>
     final isFollowing = _followedDepartments.contains(account.id);
     final followerCount = _departmentFollowerCounts[account.id] ?? 0;
 
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0.0, end: 1.0),
-      duration: Duration(milliseconds: 200 + index * 50),
-      curve: Curves.easeOut,
-      builder: (context, value, child) {
-        return Opacity(
-          opacity: value,
-          child: Transform.translate(
-            offset: Offset(20 * (1 - value), 0),
-            child: child,
-          ),
-        );
-      },
-      child: InkWell(
+    return AnimationConfiguration.staggeredList(
+      position: index,
+      duration: const Duration(milliseconds: 375),
+      child: SlideAnimation(
+        horizontalOffset: 20.0,
+        child: FadeInAnimation(
+          child: InkWell(
         onTap: () async {
           // Navigate to department account page and refresh on return
           await Navigator.push(
@@ -775,6 +782,8 @@ class _NoticesScreenState extends State<NoticesScreen>
           ),
         ),
       ),
+      ),
+    ),
     );
   }
 
