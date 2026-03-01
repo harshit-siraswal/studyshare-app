@@ -7,7 +7,7 @@ class HomeWidgetService {
   String _groupId = 'group.com.mystudyspace.app';
   String _noticesWidgetName = 'NoticesWidgetProvider';
   String _syllabusWidgetName = 'SyllabusWidgetProvider';
-  
+
   bool _isInitialized = false;
   Future<bool>? _initializing;
 
@@ -51,6 +51,10 @@ class HomeWidgetService {
   }
 
   Future<bool> _doInitialize() async {
+    if (kIsWeb) {
+      _isInitialized = false;
+      return false;
+    }
     try {
       await HomeWidget.setAppGroupId(_groupId);
       _isInitialized = true;
@@ -66,7 +70,9 @@ class HomeWidgetService {
 
   Future<bool> syncNotices(List<Notice> notices) async {
     if (!_isInitialized) {
-      debugPrint('HomeWidgetService not initialized');
+      if (!kIsWeb) {
+        debugPrint('HomeWidgetService not initialized');
+      }
       return false;
     }
     try {
@@ -80,7 +86,10 @@ class HomeWidgetService {
         }
       }
 
-      await HomeWidget.saveWidgetData<String>('notices_data', displayText.trim());
+      await HomeWidget.saveWidgetData<String>(
+        'notices_data',
+        displayText.trim(),
+      );
       await HomeWidget.updateWidget(name: _noticesWidgetName);
       return true;
     } catch (e) {
@@ -89,9 +98,15 @@ class HomeWidgetService {
     }
   }
 
-  Future<bool> syncSyllabus(String semester, String branch, List<Resource> preFilteredSyllabusItems) async {
+  Future<bool> syncSyllabus(
+    String semester,
+    String branch,
+    List<Resource> preFilteredSyllabusItems,
+  ) async {
     if (!_isInitialized) {
-      debugPrint('HomeWidgetService not initialized');
+      if (!kIsWeb) {
+        debugPrint('HomeWidgetService not initialized');
+      }
       return false;
     }
     try {
@@ -106,8 +121,14 @@ class HomeWidgetService {
         }
       }
 
-      await HomeWidget.saveWidgetData<String>('syllabus_data', displayText.trim());
-      await HomeWidget.saveWidgetData<String>('syllabus_title', 'Syllabus: $branch S$semester');
+      await HomeWidget.saveWidgetData<String>(
+        'syllabus_data',
+        displayText.trim(),
+      );
+      await HomeWidget.saveWidgetData<String>(
+        'syllabus_title',
+        'Syllabus: $branch S$semester',
+      );
       await HomeWidget.updateWidget(name: _syllabusWidgetName);
       return true;
     } catch (e) {
