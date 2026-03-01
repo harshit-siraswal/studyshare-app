@@ -56,6 +56,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   StreamSubscription<IncomingSharePayload>? _shareSubscription;
   bool _isHandlingIncomingShare = false;
 
+  String get _effectiveUserEmail {
+    final authEmail = (_authService.userEmail ?? '').trim();
+    if (authEmail.isNotEmpty) return authEmail;
+    return (_supabaseService.currentUserEmail ?? '').trim();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -115,7 +121,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     await showUploadDialog(
       context,
       widget.collegeId,
-      _authService.userEmail ?? '',
+      _effectiveUserEmail,
       prefilledFile: prefilledFile,
     );
   }
@@ -238,14 +244,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           collegeId: widget.collegeId,
           collegeDomain: widget.collegeDomain,
           collegeName: widget.collegeName,
-          userEmail: _authService.userEmail ?? '',
+          userEmail: _effectiveUserEmail,
           onChangeCollege: widget.onChangeCollege,
         );
       case 1:
         return ChatroomListScreen(
           collegeId: widget.collegeId,
           collegeDomain: widget.collegeDomain,
-          userEmail: _authService.userEmail ?? '',
+          userEmail: _effectiveUserEmail,
         );
       case 2:
         return NoticesScreen(collegeId: widget.collegeId);
@@ -262,7 +268,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           collegeId: widget.collegeId,
           collegeDomain: widget.collegeDomain,
           collegeName: widget.collegeName,
-          userEmail: _authService.userEmail ?? '',
+          userEmail: _effectiveUserEmail,
           onChangeCollege: widget.onChangeCollege,
         );
     }
@@ -398,31 +404,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           child: Stack(
             alignment: Alignment.center,
             children: [
-              // Pill indicator sliding behind/below the icons
-              AnimatedAlign(
-                duration: const Duration(milliseconds: 300),
-                curve: Curves.fastOutSlowIn,
-                alignment: Alignment(
-                  _navIndicatorAlignment(_currentIndex),
-                  0.75, // Lower part of the bottom nav
-                ),
-                child: Container(
-                  width: 20,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary,
-                    borderRadius: BorderRadius.circular(2),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppTheme.primary.withValues(alpha: 0.5),
-                        blurRadius: 4,
-                        offset: const Offset(0, 1),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              // The Row of items
+              // Row of nav items
               Row(
                 children: [
                   // Left side - 2 tabs
@@ -506,10 +488,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               switchInCurve: Curves.easeOutBack,
               switchOutCurve: Curves.easeInBack,
               transitionBuilder: (child, animation) {
-                return ScaleTransition(
-                  scale: animation,
-                  child: child,
-                );
+                return ScaleTransition(scale: animation, child: child);
               },
               child: Icon(
                 isActive ? activeIcon : icon,
@@ -544,15 +523,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  double _navIndicatorAlignment(int index) {
-    switch (index) {
-      case 0: return -0.76;
-      case 1: return -0.26;
-      case 2: return 0.26;
-      default: return 0.76;
-    }
-  }
-
   IconData _getFabIcon() =>
       _currentIndex == 1 ? Icons.search_rounded : Icons.add_rounded;
 
@@ -584,8 +554,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           onTap: () {
             HapticFeedback.mediumImpact();
             // Handle actions based on index
-            if (_currentIndex == 0 || _currentIndex == 2 || _currentIndex == 3) {
-              // Defaults to Upload for undefined missing tabs 
+            if (_currentIndex != 1) {
               _showUpload();
             } else if (_currentIndex == 1) {
               // Rooms: Create/Discover
@@ -595,7 +564,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                   builder: (_) => DiscoverRoomsScreen(
                     collegeId: widget.collegeId,
                     collegeDomain: widget.collegeDomain,
-                    userEmail: _authService.userEmail ?? '',
+                    userEmail: _effectiveUserEmail,
                   ),
                 ),
               );
@@ -623,11 +592,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               duration: const Duration(milliseconds: 350),
               transitionBuilder: (child, animation) {
                 return RotationTransition(
-                  turns: Tween<double>(begin: 0.0, end: 0.25).animate(animation),
-                  child: ScaleTransition(
-                    scale: animation,
-                    child: child,
-                  ),
+                  turns: Tween<double>(
+                    begin: 0.0,
+                    end: 0.25,
+                  ).animate(animation),
+                  child: ScaleTransition(scale: animation, child: child),
                 );
               },
               child: Icon(

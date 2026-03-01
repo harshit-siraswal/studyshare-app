@@ -50,10 +50,12 @@ class AppUser {
     if (id.isEmpty) {
       throw FormatException('AppUser.fromJson: id is null or empty');
     }
-    
+
     final email = json['email']?.toString() ?? '';
     if (email.isEmpty) {
-      throw FormatException('AppUser.fromJson: email is null or empty for id=$id');
+      throw FormatException(
+        'AppUser.fromJson: email is null or empty for id=$id',
+      );
     }
 
     return AppUser(
@@ -68,19 +70,34 @@ class AppUser {
       branch: json['branch']?.toString(),
       adminKey: json['admin_key']?.toString(),
       role: () {
-        final r = json['role']?.toString();
-        if (r != null && AppRoles.validRoles.contains(r)) {
-          return r;
+        final raw = json['role']?.toString().trim().toUpperCase() ?? '';
+        final hasAdminKey =
+            (json['admin_key']?.toString().trim().isNotEmpty ?? false);
+        if (AppRoles.validRoles.contains(raw)) {
+          if (hasAdminKey && raw != AppRoles.admin && raw != AppRoles.teacher) {
+            return AppRoles.teacher;
+          }
+          return raw;
+        }
+        if (raw == 'STUDENT') {
+          return hasAdminKey ? AppRoles.teacher : AppRoles.collegeUser;
+        }
+        if (hasAdminKey) {
+          return AppRoles.teacher;
         }
         return AppRoles.readOnly;
       }(),
       createdAt: () {
         if (json['created_at'] == null) {
-          throw FormatException('AppUser.fromJson: created_at is null for id=${json['id']}');
+          throw FormatException(
+            'AppUser.fromJson: created_at is null for id=${json['id']}',
+          );
         }
         final parsed = DateTime.tryParse(json['created_at'].toString());
         if (parsed == null) {
-          throw FormatException('AppUser.fromJson: failed to parse created_at for id=${json['id']}');
+          throw FormatException(
+            'AppUser.fromJson: failed to parse created_at for id=${json['id']}',
+          );
         }
         return parsed;
       }(),
@@ -110,7 +127,11 @@ class AppUser {
   /// Get initials for avatar
   String get initials {
     if (displayName != null && displayName!.isNotEmpty) {
-      final parts = displayName!.trim().split(' ').where((p) => p.isNotEmpty).toList();
+      final parts = displayName!
+          .trim()
+          .split(' ')
+          .where((p) => p.isNotEmpty)
+          .toList();
       if (parts.length >= 2) {
         return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
       } else if (parts.isNotEmpty) {
@@ -130,5 +151,6 @@ class AppUser {
   bool get isTeacher => role == AppRoles.teacher;
   bool get canPostNotices => isTeacher || isAdmin;
   bool get canPostSyllabus => isTeacher || isAdmin;
-  bool get isVerified => role == AppRoles.collegeUser || isModerator || isTeacher;
+  bool get isVerified =>
+      role == AppRoles.collegeUser || isModerator || isTeacher;
 }

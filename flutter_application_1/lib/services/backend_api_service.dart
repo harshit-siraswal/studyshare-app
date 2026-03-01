@@ -13,6 +13,7 @@ class BackendApiService {
     : _injectedAuth = firebaseAuth;
 
   final FirebaseAuth? _injectedAuth;
+  bool _ragStreamUnavailable = false;
 
   FirebaseAuth? get _auth {
     if (_injectedAuth != null) return _injectedAuth;
@@ -652,7 +653,12 @@ class BackendApiService {
 
   Future<List<Map<String, dynamic>>> getSavedPosts() async {
     final data = await _requestJson('/api/chat/saved', method: 'GET');
-    final list = (data['savedPosts'] as List?) ?? const [];
+    final list =
+        (data['savedPosts'] as List?) ??
+        (data['saved_posts'] as List?) ??
+        (data['posts'] as List?) ??
+        (data['items'] as List?) ??
+        const [];
     return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
 
@@ -794,6 +800,77 @@ class BackendApiService {
     );
   }
 
+  bool _isUnsupportedRagStreamStatus(int statusCode) {
+    return statusCode == 404 ||
+        statusCode == 405 ||
+        statusCode == 406 ||
+        statusCode == 415 ||
+        statusCode == 501;
+  }
+
+  Stream<String> _queryRagAsSyntheticStream({
+    required String question,
+    String? collegeId,
+    int? topK,
+    double? minScore,
+    bool? allowWeb,
+    String? fileId,
+    bool? useOcr,
+    bool? forceOcr,
+    String? ocrProvider,
+    List<Map<String, dynamic>>? attachments,
+    List<Map<String, String>>? history,
+    Map<String, dynamic>? filters,
+  }) async* {
+    final response = await queryRag(
+      question: question,
+      collegeId: collegeId,
+      topK: topK,
+      minScore: minScore,
+      allowWeb: allowWeb,
+      fileId: fileId,
+      useOcr: useOcr,
+      forceOcr: forceOcr,
+      ocrProvider: ocrProvider,
+      attachments: attachments,
+      history: history,
+      filters: filters,
+    );
+
+    List<dynamic> sourcesRaw = const [];
+    final data = response['data'];
+    if (response['sources'] is List) {
+      sourcesRaw = response['sources'] as List;
+    } else if (data is Map && data['sources'] is List) {
+      sourcesRaw = data['sources'] as List;
+    }
+
+    final normalizedSources = sourcesRaw
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList();
+    final noLocal =
+        response['no_local'] == true ||
+        (data is Map && data['no_local'] == true);
+
+    if (normalizedSources.isNotEmpty || noLocal) {
+      yield jsonEncode({
+        'type': 'metadata',
+        'data': {'sources': normalizedSources, 'no_local': noLocal},
+      });
+    }
+
+    final answerRaw =
+        response['answer'] ??
+        response['response'] ??
+        (data is Map ? (data['answer'] ?? data['response']) : data);
+    final answer = answerRaw?.toString() ?? '';
+    if (answer.trim().isNotEmpty) {
+      yield jsonEncode({'type': 'chunk', 'text': answer});
+    }
+    yield jsonEncode({'type': 'done'});
+  }
+
   Stream<String> queryRagStream({
     required String question,
     String? collegeId,
@@ -808,6 +885,24 @@ class BackendApiService {
     List<Map<String, String>>? history,
     Map<String, dynamic>? filters,
   }) async* {
+    if (_ragStreamUnavailable) {
+      yield* _queryRagAsSyntheticStream(
+        question: question,
+        collegeId: collegeId,
+        topK: topK,
+        minScore: minScore,
+        allowWeb: allowWeb,
+        fileId: fileId,
+        useOcr: useOcr,
+        forceOcr: forceOcr,
+        ocrProvider: ocrProvider,
+        attachments: attachments,
+        history: history,
+        filters: filters,
+      );
+      return;
+    }
+
     final token = await _getIdToken();
     final uri = Uri.parse('$_baseUrl/api/rag/query/stream');
     final headers = <String, String>{
@@ -836,6 +931,28 @@ class BackendApiService {
     final response = await request.send();
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final body = await response.stream.bytesToString();
+      if (_isUnsupportedRagStreamStatus(response.statusCode)) {
+        _ragStreamUnavailable = true;
+        debugPrint(
+          '[BackendApi] Stream endpoint unavailable '
+          '(${response.statusCode}). Falling back to /api/rag/query.',
+        );
+        yield* _queryRagAsSyntheticStream(
+          question: question,
+          collegeId: collegeId,
+          topK: topK,
+          minScore: minScore,
+          allowWeb: allowWeb,
+          fileId: fileId,
+          useOcr: useOcr,
+          forceOcr: forceOcr,
+          ocrProvider: ocrProvider,
+          attachments: attachments,
+          history: history,
+          filters: filters,
+        );
+        return;
+      }
       try {
         final data = jsonDecode(body) as Map<String, dynamic>;
         final message =

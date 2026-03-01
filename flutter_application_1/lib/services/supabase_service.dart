@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/college.dart';
 import '../models/resource.dart';
+import '../models/user.dart';
 import 'backend_api_service.dart';
 import '../models/department_account.dart';
 
@@ -43,6 +44,37 @@ class SupabaseService {
   }
 
   String _normalizeEmail(String? email) => email?.trim().toLowerCase() ?? '';
+
+  String _normalizeRoleValue(String? role) {
+    final raw = role?.trim().toUpperCase() ?? '';
+    switch (raw) {
+      case 'ADMIN':
+        return AppRoles.admin;
+      case 'MODERATOR':
+        return AppRoles.moderator;
+      case 'COLLEGE_USER':
+        return AppRoles.collegeUser;
+      case 'TEACHER':
+        return AppRoles.teacher;
+      case 'READ_ONLY':
+        return AppRoles.readOnly;
+      case 'STUDENT':
+        return AppRoles.collegeUser;
+      default:
+        return AppRoles.readOnly;
+    }
+  }
+
+  String _resolveEffectiveRole(Map<String, dynamic> profile) {
+    final normalizedRole = _normalizeRoleValue(profile['role']?.toString());
+    final adminKey = profile['admin_key']?.toString().trim() ?? '';
+    if (adminKey.isNotEmpty &&
+        normalizedRole != AppRoles.admin &&
+        normalizedRole != AppRoles.teacher) {
+      return AppRoles.teacher;
+    }
+    return normalizedRole;
+  }
 
   bool _isDuplicateKeyError(Object error) {
     final message = error.toString().toLowerCase();
@@ -316,14 +348,116 @@ class SupabaseService {
   }
 
   /// Get resources from users the current user follows
+  Future<List<Resource>> _fetchApprovedResourcesByUploaderEmails({
+    required String collegeId,
+    required List<String> uploaderEmails,
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    final normalizedEmails = uploaderEmails
+        .map(_normalizeEmail)
+        .where((email) => email.isNotEmpty)
+        .toSet()
+        .toList();
+    if (normalizedEmails.isEmpty) return [];
+
+    try {
+      final response = await _client
+          .from('resources')
+          .select()
+          .eq('college_id', collegeId)
+          .eq('status', 'approved')
+          .inFilter('uploaded_by_email', normalizedEmails)
+          .order('created_at', ascending: false)
+          .range(offset, offset + limit - 1);
+
+      final rows = (response as List)
+          .map((json) => Resource.fromJson(json as Map<String, dynamic>))
+          .toList();
+      if (rows.isNotEmpty) {
+        return rows;
+      }
+    } catch (e) {
+      debugPrint(
+        'Following feed exact-email query failed, falling back to '
+        'case-insensitive filter: $e',
+      );
+    }
+
+    // Fallback for schemas/data with mixed-case email values.
+    try {
+      final fetchWindow = (limit * 8).clamp(80, 240).toInt();
+      final raw = await _client
+          .from('resources')
+          .select()
+          .eq('college_id', collegeId)
+          .eq('status', 'approved')
+          .order('created_at', ascending: false)
+          .range(0, offset + fetchWindow - 1);
+      final emailSet = normalizedEmails.toSet();
+      final filtered = (raw as List)
+          .whereType<Map>()
+          .map((row) => Map<String, dynamic>.from(row))
+          .where(
+            (row) => emailSet.contains(
+              _normalizeEmail(row['uploaded_by_email']?.toString()),
+            ),
+          )
+          .skip(offset)
+          .take(limit)
+          .map(Resource.fromJson)
+          .toList();
+      return filtered;
+    } catch (fallbackError) {
+      debugPrint('Following feed fallback query failed: $fallbackError');
+      return [];
+    }
+  }
+
   Future<List<Resource>> getFollowingFeed({
     required String userEmail,
     required String collegeId,
     int limit = 20,
     int offset = 0,
   }) async {
+    final normalizedEmail = _normalizeEmail(userEmail);
+    final activeUserEmail = normalizedEmail.isNotEmpty
+        ? normalizedEmail
+        : _currentSessionEmail();
+    if (activeUserEmail.isEmpty) return [];
+
+    // Primary path: backend endpoint already handles follow schema variants.
     try {
-      final identifiers = await _resolveUserIdentifiers(userEmail);
+      final followingPayload = await _api.getFollowing();
+      final followingRows = List<Map<String, dynamic>>.from(
+        followingPayload['following'] ?? const [],
+      );
+      final followingEmails = followingRows
+          .map(
+            (row) => _normalizeEmail(
+              row['email']?.toString() ??
+                  row['user_email']?.toString() ??
+                  row['following_email']?.toString(),
+            ),
+          )
+          .where((email) => email.isNotEmpty)
+          .toSet()
+          .toList();
+
+      if (followingEmails.isNotEmpty) {
+        return _fetchApprovedResourcesByUploaderEmails(
+          collegeId: collegeId,
+          uploaderEmails: followingEmails,
+          limit: limit,
+          offset: offset,
+        );
+      }
+    } catch (e) {
+      debugPrint('Error fetching following feed via backend endpoint: $e');
+    }
+
+    try {
+      final identifiers = await _resolveUserIdentifiers(activeUserEmail);
       List<String> followingIds = [];
 
       for (final id in identifiers) {
@@ -352,18 +486,12 @@ class SupabaseService {
             .toList();
 
         if (followingEmails.isNotEmpty) {
-          final response = await _client
-              .from('resources')
-              .select()
-              .eq('college_id', collegeId)
-              .eq('status', 'approved')
-              .filter('uploaded_by_email', 'in', followingEmails)
-              .order('created_at', ascending: false)
-              .range(offset, offset + limit - 1);
-
-          return (response as List)
-              .map((json) => Resource.fromJson(json))
-              .toList();
+          return _fetchApprovedResourcesByUploaderEmails(
+            collegeId: collegeId,
+            uploaderEmails: followingEmails,
+            limit: limit,
+            offset: offset,
+          );
         }
       }
     } catch (e) {
@@ -375,7 +503,7 @@ class SupabaseService {
       final followsResponse = await _fetchAcceptedOrApprovedFollows(
         selectColumns: 'following_email',
         filterColumn: 'follower_email',
-        filterValue: userEmail.toLowerCase(),
+        filterValue: activeUserEmail,
       );
 
       final followingEmails = followsResponse
@@ -385,16 +513,12 @@ class SupabaseService {
 
       if (followingEmails.isEmpty) return [];
 
-      final response = await _client
-          .from('resources')
-          .select()
-          .eq('college_id', collegeId)
-          .eq('status', 'approved')
-          .filter('uploaded_by_email', 'in', followingEmails)
-          .order('created_at', ascending: false)
-          .range(offset, offset + limit - 1);
-
-      return (response as List).map((json) => Resource.fromJson(json)).toList();
+      return _fetchApprovedResourcesByUploaderEmails(
+        collegeId: collegeId,
+        uploaderEmails: followingEmails,
+        limit: limit,
+        offset: offset,
+      );
     } catch (e) {
       debugPrint('Error fetching following feed (email): $e');
       return [];
@@ -687,13 +811,15 @@ class SupabaseService {
 
   Future<String> getCurrentUserRole() async {
     try {
-      final profile = await _api.getProfile();
-      final role = (profile['profile'] as Map?)?['role'] ?? profile['role'];
-      if (role == null) return 'READ_ONLY';
-      return role.toString().toUpperCase();
+      final payload = await _api.getProfile();
+      final profile =
+          (payload['profile'] as Map?)?.cast<String, dynamic>() ??
+          payload.cast<String, dynamic>();
+      if (profile.isEmpty) return AppRoles.readOnly;
+      return _resolveEffectiveRole(profile);
     } catch (e) {
       debugPrint('Error resolving current user role: $e');
-      return 'READ_ONLY';
+      return AppRoles.readOnly;
     }
   }
 
@@ -1608,11 +1734,25 @@ class SupabaseService {
   Map<String, dynamic> _normalizeSavedPostFromBackend(
     Map<String, dynamic> raw,
   ) {
-    final messageId = (raw['messageId'] ?? raw['message_id'] ?? '')
+    final messageId =
+        (raw['messageId'] ??
+                raw['message_id'] ??
+                raw['postId'] ??
+                raw['post_id'] ??
+                '')
+            .toString()
+            .trim();
+    final savedRecordId = (raw['savedId'] ?? raw['saved_id'] ?? raw['id'] ?? '')
         .toString()
         .trim();
-    final fallbackId = (raw['id'] ?? '').toString().trim();
-    final effectiveMessageId = messageId.isNotEmpty ? messageId : fallbackId;
+    final hasExplicitMessageField =
+        raw.containsKey('messageId') ||
+        raw.containsKey('message_id') ||
+        raw.containsKey('postId') ||
+        raw.containsKey('post_id');
+    final effectiveMessageId = messageId.isNotEmpty
+        ? messageId
+        : (!hasExplicitMessageField ? savedRecordId : '');
     final roomId = (raw['roomId'] ?? raw['room_id'] ?? '').toString().trim();
     final savedAt = raw['savedAt'] ?? raw['saved_at'] ?? raw['created_at'];
     final postedAt = raw['postedAt'] ?? raw['posted_at'] ?? raw['created_at'];
@@ -1640,7 +1780,7 @@ class SupabaseService {
       'room_name': raw['roomName'] ?? raw['room_name'],
       '_saved_at': savedAt,
       '_saved_room_id': roomId,
-      '_saved_post_id': fallbackId.isNotEmpty ? fallbackId : null,
+      '_saved_post_id': savedRecordId.isNotEmpty ? savedRecordId : null,
     };
   }
 
@@ -1979,13 +2119,22 @@ class SupabaseService {
   Future<List<Resource>> getPendingResourcesForTeacher({
     required String collegeId,
     String? branch,
+    List<String> statuses = const ['pending'],
   }) async {
     try {
       var query = _client
           .from('resources')
           .select()
-          .eq('college_id', collegeId)
-          .eq('status', 'pending');
+          .eq('college_id', collegeId);
+
+      final normalizedStatuses = statuses
+          .map((status) => status.trim().toLowerCase())
+          .where((status) => status.isNotEmpty)
+          .toSet()
+          .toList();
+      if (normalizedStatuses.isNotEmpty) {
+        query = query.inFilter('status', normalizedStatuses);
+      }
 
       if (branch != null && branch.trim().isNotEmpty) {
         query = query.eq('branch', branch.trim());

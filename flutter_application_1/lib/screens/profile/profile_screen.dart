@@ -89,8 +89,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _profileSemester = profile['semester']?.toString();
         _profileBranch = profile['branch']?.toString();
         _profileAdminKey = profile['admin_key']?.toString();
-        final roleStr = profile['role']?.toString() ?? '';
-        _profileRole = AppRoles.validRoles.contains(roleStr) ? roleStr : AppRoles.readOnly;
+        final roleRaw = profile['role']?.toString().trim().toUpperCase() ?? '';
+        final hasAdminKey =
+            _profileAdminKey != null && _profileAdminKey!.trim().isNotEmpty;
+        if (roleRaw == AppRoles.admin ||
+            roleRaw == AppRoles.teacher ||
+            roleRaw == AppRoles.moderator ||
+            roleRaw == AppRoles.collegeUser ||
+            roleRaw == AppRoles.readOnly) {
+          if (hasAdminKey &&
+              roleRaw != AppRoles.admin &&
+              roleRaw != AppRoles.teacher) {
+            _profileRole = AppRoles.teacher;
+          } else {
+            _profileRole = roleRaw;
+          }
+        } else if (hasAdminKey) {
+          _profileRole = AppRoles.teacher;
+        } else if (roleRaw == 'STUDENT') {
+          _profileRole = AppRoles.collegeUser;
+        } else {
+          _profileRole = AppRoles.readOnly;
+        }
         _profileLoading = false;
       });
     } catch (_) {
@@ -125,7 +145,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  String get _userEmail => _authService.userEmail ?? 'guest@example.com';
+  String get _userEmail {
+    final authEmail = (_authService.userEmail ?? '').trim();
+    if (authEmail.isNotEmpty) return authEmail;
+    return (_supabaseService.currentUserEmail ?? '').trim();
+  }
+
   String get _displayName =>
       _profileDisplayName ?? _authService.displayName ?? 'User';
   String? get _photoUrl => _profilePhotoUrl ?? _authService.photoUrl;
@@ -226,19 +251,24 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     const SizedBox(height: 24),
                     _buildStatsRow(textColor, subTextColor),
                     const SizedBox(height: 24),
-                    _buildContributionBadgeCard(textColor, subTextColor, isDark),
+                    _buildContributionBadgeCard(
+                      textColor,
+                      subTextColor,
+                      isDark,
+                    ),
                     const SizedBox(height: 24),
                     // Premium Badge / Status
                     FutureBuilder<bool>(
                       future: _subscriptionService.isPremium(),
                       builder: (context, snapshot) {
                         final isPremium = snapshot.data ?? false;
-                        final isVerified = _authService.currentUser?.emailVerified ?? false;
+                        final isVerified =
+                            _authService.currentUser?.emailVerified ?? false;
                         return isPremium && isVerified
                             ? _buildPremiumBadge()
-                            : !isPremium 
-                                ? _buildUpgradeCard() 
-                                : const SizedBox.shrink();
+                            : !isPremium
+                            ? _buildUpgradeCard()
+                            : const SizedBox.shrink();
                       },
                     ),
                     const SizedBox(height: 24),
@@ -410,77 +440,79 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ],
             ),
-          const SizedBox(height: 16),
-          TweenAnimationBuilder<double>(
-            tween: Tween<double>(begin: 0.0, end: 1.0),
-            duration: const Duration(milliseconds: 500),
-            curve: Curves.easeOutCubic,
-            builder: (context, value, child) {
-              return Transform.translate(
-                offset: Offset(-20 * (1 - value), 0),
-                child: Opacity(opacity: value, child: child),
-              );
-            },
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _displayName,
-                  style: GoogleFonts.inter(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    color: textColor,
-                  ),
-                ),
-                if (isPremium) ...[
-                  const SizedBox(width: 6),
-                  const Icon(
-                    Icons.verified,
-                    color: Color(0xFFFFD700),
-                    size: 20,
-                  ),
-                ],
-                const SizedBox(width: 8),
-                Tooltip(
-                  message:
-                      '${_contributionBadge.label}: ${_contributionBadge.description}',
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
+            const SizedBox(height: 16),
+            TweenAnimationBuilder<double>(
+              tween: Tween<double>(begin: 0.0, end: 1.0),
+              duration: const Duration(milliseconds: 500),
+              curve: Curves.easeOutCubic,
+              builder: (context, value, child) {
+                return Transform.translate(
+                  offset: Offset(-20 * (1 - value), 0),
+                  child: Opacity(opacity: value, child: child),
+                );
+              },
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _displayName,
+                    style: GoogleFonts.inter(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      color: textColor,
                     ),
-                    decoration: BoxDecoration(
-                      color: _contributionBadge.color.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(999),
-                      border: Border.all(
-                        color: _contributionBadge.color.withValues(alpha: 0.35),
+                  ),
+                  if (isPremium) ...[
+                    const SizedBox(width: 6),
+                    const Icon(
+                      Icons.verified,
+                      color: Color(0xFFFFD700),
+                      size: 20,
+                    ),
+                  ],
+                  const SizedBox(width: 8),
+                  Tooltip(
+                    message:
+                        '${_contributionBadge.label}: ${_contributionBadge.description}',
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
                       ),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          _contributionBadge.icon,
-                          size: 14,
-                          color: _contributionBadge.color,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          _contributionBadge.label,
-                          style: GoogleFonts.inter(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: _contributionBadge.color,
+                      decoration: BoxDecoration(
+                        color: _contributionBadge.color.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: _contributionBadge.color.withValues(
+                            alpha: 0.35,
                           ),
                         ),
-                      ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _contributionBadge.icon,
+                            size: 14,
+                            color: _contributionBadge.color,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _contributionBadge.label,
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: _contributionBadge.color,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          TweenAnimationBuilder<double>(
+            TweenAnimationBuilder<double>(
               tween: Tween<double>(begin: 0.0, end: 1.0),
               duration: const Duration(milliseconds: 600),
               curve: Curves.easeOutCubic,
@@ -497,65 +529,82 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     '@${_profileDisplayName?.replaceAll(" ", "").toLowerCase() ?? "user"}',
                     style: GoogleFonts.inter(fontSize: 14, color: subTextColor),
                   ),
-            const SizedBox(height: 4),
-            Text(
-              _authService.userEmail ?? '', // Show Email
-              style: GoogleFonts.inter(fontSize: 13, color: subTextColor),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              widget.collegeName,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.inter(fontSize: 14, color: subTextColor),
-            ),
-            const SizedBox(height: 8),
-            if ((_profileSemester != null && _profileSemester!.isNotEmpty) ||
-                (_profileBranch != null && _profileBranch!.isNotEmpty))
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                margin: const EdgeInsets.only(bottom: 8),
-                decoration: BoxDecoration(
-                  color: AppTheme.primary.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.school_outlined, size: 16, color: AppTheme.primary),
-                    const SizedBox(width: 6),
-                    Text(
-                      [
-                        if (_profileBranch != null && _profileBranch!.isNotEmpty) _profileBranch,
-                        if (_profileSemester != null && _profileSemester!.isNotEmpty) 'Sem $_profileSemester',
-                      ].join(' • '),
-                      style: GoogleFonts.inter(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.primary,
+                  const SizedBox(height: 4),
+                  Text(
+                    _authService.userEmail ?? '', // Show Email
+                    style: GoogleFonts.inter(fontSize: 13, color: subTextColor),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    widget.collegeName,
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.inter(fontSize: 14, color: subTextColor),
+                  ),
+                  const SizedBox(height: 8),
+                  if ((_profileSemester != null &&
+                          _profileSemester!.isNotEmpty) ||
+                      (_profileBranch != null && _profileBranch!.isNotEmpty))
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      margin: const EdgeInsets.only(bottom: 8),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: AppTheme.primary.withValues(alpha: 0.2),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.school_outlined,
+                            size: 16,
+                            color: AppTheme.primary,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            [
+                              if (_profileBranch != null &&
+                                  _profileBranch!.isNotEmpty)
+                                _profileBranch,
+                              if (_profileSemester != null &&
+                                  _profileSemester!.isNotEmpty)
+                                'Sem $_profileSemester',
+                            ].join(' • '),
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.primary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (_profileBio != null && _profileBio!.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        _profileBio!,
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          color: textColor,
+                        ),
                       ),
                     ),
                   ],
-                ),
+                ],
               ),
-            if (_profileBio != null && _profileBio!.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Text(
-                  _profileBio!,
-                  textAlign: TextAlign.center,
-                  style: GoogleFonts.inter(fontSize: 14, color: textColor),
-                ),
-              ),
-            ],
-            ],
-          ),
-        ),
-      ],
+            ),
+          ],
+        );
+      },
     );
-  },
-);
   }
 
   Widget _buildStatsRow(Color textColor, Color subTextColor) {
@@ -660,7 +709,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildContributionBadgeCard(Color textColor, Color subTextColor, bool isDark) {
+  Widget _buildContributionBadgeCard(
+    Color textColor,
+    Color subTextColor,
+    bool isDark,
+  ) {
     final next = _contributionBadge.nextThreshold;
     final progress = ContributionBadgeCatalog.progressToNext(_uploadCount);
     final remaining = next == null ? 0 : (next - _uploadCount).clamp(0, 9999);
@@ -739,7 +792,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: LinearProgressIndicator(
                 value: progress,
                 minHeight: 7,
-                backgroundColor: _contributionBadge.color.withValues(alpha: 0.12),
+                backgroundColor: _contributionBadge.color.withValues(
+                  alpha: 0.12,
+                ),
                 valueColor: AlwaysStoppedAnimation<Color>(
                   _contributionBadge.color,
                 ),
@@ -825,7 +880,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           width: 1,
                         ),
                       ),
-                      child: Icon(Icons.workspace_premium_rounded, color: AppTheme.primary, size: 28),
+                      child: Icon(
+                        Icons.workspace_premium_rounded,
+                        color: AppTheme.primary,
+                        size: 28,
+                      ),
                     ),
                     const SizedBox(width: 16),
                     Expanded(
@@ -852,10 +911,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 8,
+                      ),
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
-                          colors: [AppTheme.primary, AppTheme.primary.withValues(alpha: 0.8)],
+                          colors: [
+                            AppTheme.primary,
+                            AppTheme.primary.withValues(alpha: 0.8),
+                          ],
                         ),
                         borderRadius: BorderRadius.circular(20),
                         boxShadow: [
@@ -868,7 +933,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.upload_rounded, size: 14, color: Colors.white),
+                          const Icon(
+                            Icons.upload_rounded,
+                            size: 14,
+                            color: Colors.white,
+                          ),
                           const SizedBox(width: 4),
                           Text(
                             '$_uploadCount',
@@ -884,34 +953,52 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ],
                 ),
               ),
-              Divider(height: 1, color: isDark ? Colors.white10 : Colors.grey.shade200),
+              Divider(
+                height: 1,
+                color: isDark ? Colors.white10 : Colors.grey.shade200,
+              ),
               Expanded(
                 child: ListView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 24,
+                  ),
                   physics: const BouncingScrollPhysics(),
                   itemCount: ContributionBadgeCatalog.tiers.length,
                   itemBuilder: (context, index) {
                     final badge = ContributionBadgeCatalog.tiers[index];
                     final isUnlocked = _uploadCount >= badge.minContributions;
-                    
+
                     return Container(
                       margin: const EdgeInsets.only(bottom: 16),
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        gradient: isUnlocked ? LinearGradient(
-                          colors: [
-                            badge.color.withValues(alpha: isDark ? 0.15 : 0.08),
-                            badge.color.withValues(alpha: isDark ? 0.05 : 0.02),
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ) : null,
-                        color: !isUnlocked ? (isDark ? Colors.white.withValues(alpha: 0.03) : Colors.grey.shade50) : null,
+                        gradient: isUnlocked
+                            ? LinearGradient(
+                                colors: [
+                                  badge.color.withValues(
+                                    alpha: isDark ? 0.15 : 0.08,
+                                  ),
+                                  badge.color.withValues(
+                                    alpha: isDark ? 0.05 : 0.02,
+                                  ),
+                                ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              )
+                            : null,
+                        color: !isUnlocked
+                            ? (isDark
+                                  ? Colors.white.withValues(alpha: 0.03)
+                                  : Colors.grey.shade50)
+                            : null,
                         borderRadius: BorderRadius.circular(24),
                         border: Border.all(
-                          color: isUnlocked 
-                              ? badge.color.withValues(alpha: 0.3) 
-                              : (isDark ? Colors.white12 : Colors.grey.shade200),
+                          color: isUnlocked
+                              ? badge.color.withValues(alpha: 0.3)
+                              : (isDark
+                                    ? Colors.white12
+                                    : Colors.grey.shade200),
                           width: isUnlocked ? 1.5 : 1,
                         ),
                       ),
@@ -922,19 +1009,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             width: 56,
                             height: 56,
                             decoration: BoxDecoration(
-                              color: isUnlocked ? badge.color : (isDark ? Colors.white12 : Colors.grey.shade200),
+                              color: isUnlocked
+                                  ? badge.color
+                                  : (isDark
+                                        ? Colors.white12
+                                        : Colors.grey.shade200),
                               shape: BoxShape.circle,
-                              boxShadow: isUnlocked ? [
-                                BoxShadow(
-                                  color: badge.color.withValues(alpha: 0.4),
-                                  blurRadius: 12,
-                                  offset: const Offset(0, 4),
-                                )
-                              ] : null,
+                              boxShadow: isUnlocked
+                                  ? [
+                                      BoxShadow(
+                                        color: badge.color.withValues(
+                                          alpha: 0.4,
+                                        ),
+                                        blurRadius: 12,
+                                        offset: const Offset(0, 4),
+                                      ),
+                                    ]
+                                  : null,
                             ),
                             child: Icon(
-                              isUnlocked ? badge.icon : Icons.lock_outline_rounded,
-                              color: isUnlocked ? Colors.white : (isDark ? Colors.white54 : Colors.black45),
+                              isUnlocked
+                                  ? badge.icon
+                                  : Icons.lock_outline_rounded,
+                              color: isUnlocked
+                                  ? Colors.white
+                                  : (isDark ? Colors.white54 : Colors.black45),
                               size: 28,
                             ),
                           ),
@@ -952,31 +1051,47 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                         style: GoogleFonts.inter(
                                           fontSize: 18,
                                           fontWeight: FontWeight.w800,
-                                          color: isUnlocked ? badge.color : subTextColor,
+                                          color: isUnlocked
+                                              ? badge.color
+                                              : subTextColor,
                                           letterSpacing: -0.3,
                                         ),
                                       ),
                                     ),
                                     if (badge.isPremiumReward && !isUnlocked)
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 4,
+                                        ),
                                         decoration: BoxDecoration(
                                           gradient: const LinearGradient(
-                                            colors: [Color(0xFFFFD700), Color(0xFFFFA000)],
+                                            colors: [
+                                              Color(0xFFFFD700),
+                                              Color(0xFFFFA000),
+                                            ],
                                           ),
-                                          borderRadius: BorderRadius.circular(10),
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
                                           boxShadow: [
                                             BoxShadow(
-                                              color: const Color(0xFFFFD700).withValues(alpha: 0.3),
+                                              color: const Color(
+                                                0xFFFFD700,
+                                              ).withValues(alpha: 0.3),
                                               blurRadius: 8,
                                               offset: const Offset(0, 2),
-                                            )
+                                            ),
                                           ],
                                         ),
                                         child: Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            const Icon(Icons.star_rounded, size: 12, color: Colors.white),
+                                            const Icon(
+                                              Icons.star_rounded,
+                                              size: 12,
+                                              color: Colors.white,
+                                            ),
                                             const SizedBox(width: 4),
                                             Text(
                                               'PREMIUM REWARD',
@@ -1004,22 +1119,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 if (!isUnlocked) ...[
                                   const SizedBox(height: 12),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 6,
+                                    ),
                                     decoration: BoxDecoration(
-                                      color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+                                      color: isDark
+                                          ? Colors.white10
+                                          : Colors.black.withValues(
+                                              alpha: 0.05,
+                                            ),
                                       borderRadius: BorderRadius.circular(8),
                                     ),
                                     child: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Icon(Icons.lock_clock, size: 14, color: subTextColor.withValues(alpha: 0.7)),
+                                        Icon(
+                                          Icons.lock_clock,
+                                          size: 14,
+                                          color: subTextColor.withValues(
+                                            alpha: 0.7,
+                                          ),
+                                        ),
                                         const SizedBox(width: 6),
                                         Text(
                                           'Requires ${badge.minContributions} uploads',
                                           style: GoogleFonts.inter(
                                             fontSize: 12,
                                             fontWeight: FontWeight.w600,
-                                            color: subTextColor.withValues(alpha: 0.8),
+                                            color: subTextColor.withValues(
+                                              alpha: 0.8,
+                                            ),
                                           ),
                                         ),
                                       ],

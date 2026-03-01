@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
 import '../../config/theme.dart';
+import '../../models/user.dart';
 import '../../services/supabase_service.dart';
 import '../viewer/pdf_viewer_screen.dart';
 import '../../data/syllabus_subjects_data.dart'; // Import the new data file
@@ -26,16 +27,16 @@ class SyllabusScreen extends StatefulWidget {
 
 class _SyllabusScreenState extends State<SyllabusScreen> {
   final SupabaseService _supabaseService = SupabaseService();
-  
+
   List<Map<String, dynamic>> _syllabusItems = [];
-  bool _isLoading = false; 
+  bool _isLoading = false;
   bool _hasFetched = false;
   bool _isTeacherOrAdmin = false;
-  
+
   // Selection State
   String? _selectedSemester;
   String? _selectedSubject;
-  
+
   // Available Options
   final List<String> _semesters = ['1', '2', '3', '4', '5', '6', '7', '8'];
   List<String> _availableSubjects = [];
@@ -50,14 +51,17 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
     final role = await _supabaseService.getCurrentUserRole();
     if (mounted) {
       setState(() {
-        _isTeacherOrAdmin = role == 'TEACHER' || role == 'ADMIN';
+        _isTeacherOrAdmin =
+            role == AppRoles.teacher ||
+            role == AppRoles.admin ||
+            role == AppRoles.moderator;
       });
     }
   }
 
   void _onSemesterChanged(String? newValue) {
     if (newValue == null || newValue == _selectedSemester) return;
-    
+
     setState(() {
       _selectedSemester = newValue;
       _selectedSubject = null; // Reset subject
@@ -69,24 +73,25 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
 
   void _onSubjectChanged(String? newValue) {
     if (newValue == null || newValue == _selectedSubject) return;
-    
+
     setState(() {
       _selectedSubject = newValue;
     });
-    
+
     _fetchSyllabus();
   }
+
   List<String> _getSubjectsForBranch() {
     // Map 'CSE' -> 'cse' for lookup
     final branchKey = widget.department.toLowerCase();
-    
+
     // Convert string to Branch enum safely
     final branch = Branch.values.cast<Branch?>().firstWhere(
       (e) => e?.name == branchKey,
       orElse: () => null,
     );
     if (branch == null) return [];
-    
+
     final subjects = syllabusSubjects[branch] ?? [];
     return List<String>.from(subjects)..sort();
   }
@@ -106,7 +111,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
         semester: _selectedSemester,
         subject: _selectedSubject,
       );
-      
+
       if (mounted) {
         setState(() {
           _syllabusItems = items;
@@ -117,7 +122,9 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
       if (mounted) {
         setState(() => _isLoading = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to load syllabus. Please try again.')),
+          const SnackBar(
+            content: Text('Failed to load syllabus. Please try again.'),
+          ),
         );
       }
     }
@@ -126,14 +133,19 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : const Color(0xFFF8FAFC),
+      backgroundColor: isDark
+          ? AppTheme.darkBackground
+          : const Color(0xFFF8FAFC),
       appBar: AppBar(
         backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_rounded, color: isDark ? Colors.white : Colors.black),
+          icon: Icon(
+            Icons.arrow_back_ios_rounded,
+            color: isDark ? Colors.white : Colors.black,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
         title: Row(
@@ -201,9 +213,9 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
                   isDark: isDark,
                   hint: 'Select Semester',
                 ),
-                
+
                 const SizedBox(height: 12),
-                
+
                 // Subject Dropdown
                 _buildDropdown(
                   label: 'Subject',
@@ -212,26 +224,28 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
                   onChanged: _onSubjectChanged,
                   icon: Icons.book_rounded,
                   isDark: isDark,
-                  hint: _selectedSemester == null 
-                      ? 'Select Semester First' 
-                      : (_availableSubjects.isEmpty ? 'No subjects found' : 'Select Subject'),
+                  hint: _selectedSemester == null
+                      ? 'Select Semester First'
+                      : (_availableSubjects.isEmpty
+                            ? 'No subjects found'
+                            : 'Select Subject'),
                   isDisabled: _selectedSemester == null,
                 ),
               ],
             ),
           ),
-          
+
           const Divider(height: 1),
-          
+
           // Content
           Expanded(
             child: _isLoading
                 ? _buildShimmerLoading(isDark)
                 : (!_hasFetched)
-                    ? _buildInitialState(isDark)
-                    : _syllabusItems.isEmpty
-                        ? _buildEmptyState(isDark)
-                        : _buildSyllabusList(isDark),
+                ? _buildInitialState(isDark)
+                : _syllabusItems.isEmpty
+                ? _buildEmptyState(isDark)
+                : _buildSyllabusList(isDark),
           ),
         ],
       ),
@@ -240,7 +254,8 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
               onPressed: (_selectedSemester != null && _selectedSubject != null)
                   ? () => _showUploadSyllabusDialog(isDark)
                   : null,
-              backgroundColor: (_selectedSemester != null && _selectedSubject != null)
+              backgroundColor:
+                  (_selectedSemester != null && _selectedSubject != null)
                   ? widget.departmentColor
                   : Colors.grey,
               icon: const Icon(Icons.upload_file_rounded, color: Colors.white),
@@ -274,7 +289,9 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        color: isDisabled ? (isDark ? Colors.white10 : Colors.grey[100]) : bgColor,
+        color: isDisabled
+            ? (isDark ? Colors.white10 : Colors.grey[100])
+            : bgColor,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: borderColor),
       ),
@@ -295,7 +312,10 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
               ),
             ],
           ),
-          icon: Icon(Icons.arrow_drop_down_rounded, color: isDisabled ? Colors.grey : widget.departmentColor),
+          icon: Icon(
+            Icons.arrow_drop_down_rounded,
+            color: isDisabled ? Colors.grey : widget.departmentColor,
+          ),
           style: GoogleFonts.inter(
             fontSize: 14,
             fontWeight: FontWeight.w500,
@@ -308,7 +328,13 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
               value: item,
               child: Row(
                 children: [
-                  Icon(icon, size: 18, color: value == item ? widget.departmentColor : AppTheme.textMuted),
+                  Icon(
+                    icon,
+                    size: 18,
+                    color: value == item
+                        ? widget.departmentColor
+                        : AppTheme.textMuted,
+                  ),
                   const SizedBox(width: 10),
                   Text(item),
                 ],
@@ -361,10 +387,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
           const SizedBox(height: 8),
           Text(
             'Choose a Semester and Subject\nto view syllabus documents',
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              color: AppTheme.textMuted,
-            ),
+            style: GoogleFonts.inter(fontSize: 14, color: AppTheme.textMuted),
             textAlign: TextAlign.center,
           ),
         ],
@@ -383,7 +406,8 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
             color: AppTheme.textMuted.withValues(alpha: 0.5),
           ),
           const SizedBox(height: 16),
-          Text(            'No documents found',
+          Text(
+            'No documents found',
             style: GoogleFonts.inter(
               fontSize: 18,
               fontWeight: FontWeight.w600,
@@ -393,10 +417,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
           const SizedBox(height: 8),
           Text(
             'No syllabus available for\n${_selectedSubject ?? 'Unknown'} (Sem ${_selectedSemester ?? '?'})',
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              color: AppTheme.textMuted,
-            ),
+            style: GoogleFonts.inter(fontSize: 14, color: AppTheme.textMuted),
             textAlign: TextAlign.center,
           ),
         ],
@@ -419,33 +440,36 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
   Widget _buildSyllabusCard(Map<String, dynamic> item, bool isDark) {
     final title = item['title'] ?? item['name'] ?? 'Syllabus Document';
     final semester = item['semester']?.toString() ?? '';
-    final fileUrl = item['pdf_url'] ?? item['file_url'] ?? item['url'] ?? ''; // Web uses 'pdf_url'
+    final fileUrl =
+        item['pdf_url'] ??
+        item['file_url'] ??
+        item['url'] ??
+        ''; // Web uses 'pdf_url'
     final subject = item['subject'] ?? '';
-    
+
     // Note: 'pdf_url' seems to be the key in Web (SyllabusItem interface)
-    // SupabaseService generally returns raw JSON, so check DB keys if needed. 
+    // SupabaseService generally returns raw JSON, so check DB keys if needed.
     // Usually 'url' or 'file_url'. I added fallback to 'pdf_url'.
 
     return Material(
       color: isDark ? AppTheme.darkCard : Colors.white,
       borderRadius: BorderRadius.circular(12),
       elevation: 2,
-      shadowColor: Colors.black.withValues(alpha: 0.05),      child: InkWell(
+      shadowColor: Colors.black.withValues(alpha: 0.05),
+      child: InkWell(
         onTap: () {
           if (fileUrl.isNotEmpty) {
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (context) => PdfViewerScreen(
-                  pdfUrl: fileUrl,
-                  title: title,
-                ),
+                builder: (context) =>
+                    PdfViewerScreen(pdfUrl: fileUrl, title: title),
               ),
             );
           } else {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('No PDF available')),
-            );
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(const SnackBar(content: Text('No PDF available')));
           }
         },
         borderRadius: BorderRadius.circular(12),
@@ -468,7 +492,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
                 ),
               ),
               const SizedBox(width: 16),
-              
+
               // Content
               Expanded(
                 child: Column(
@@ -490,8 +514,8 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
                       children: [
                         _buildTag('Sem $semester', isDark),
                         const SizedBox(width: 8),
-                         Expanded(
-                           child: Text(
+                        Expanded(
+                          child: Text(
                             subject,
                             style: GoogleFonts.inter(
                               fontSize: 12,
@@ -501,13 +525,13 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                           ),
-                         ),
+                        ),
                       ],
                     ),
                   ],
                 ),
               ),
-              
+
               // Arrow
               Icon(
                 Icons.chevron_right_rounded,
@@ -519,7 +543,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
       ),
     );
   }
-  
+
   Widget _buildTag(String text, bool isDark) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -529,12 +553,12 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
         border: Border.all(color: isDark ? Colors.white24 : Colors.grey[200]!),
       ),
       child: Text(
-         text,
-         style: GoogleFonts.inter(
-           fontSize: 11,
-           fontWeight: FontWeight.w600,
-           color: isDark ? Colors.white70 : Colors.grey[700],
-         ),
+        text,
+        style: GoogleFonts.inter(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: isDark ? Colors.white70 : Colors.grey[700],
+        ),
       ),
     );
   }
@@ -569,9 +593,13 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
                 decoration: InputDecoration(
                   labelText: 'Title',
                   labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
-                style: GoogleFonts.inter(color: isDark ? Colors.white : Colors.black),
+                style: GoogleFonts.inter(
+                  color: isDark ? Colors.white : Colors.black,
+                ),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -580,15 +608,24 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
                   labelText: 'PDF URL',
                   hintText: 'https://example.com/file.pdf',
                   labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
-                  hintStyle: GoogleFonts.inter(color: AppTheme.textMuted.withValues(alpha: 0.5)),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  hintStyle: GoogleFonts.inter(
+                    color: AppTheme.textMuted.withValues(alpha: 0.5),
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
-                style: GoogleFonts.inter(color: isDark ? Colors.white : Colors.black),
+                style: GoogleFonts.inter(
+                  color: isDark ? Colors.white : Colors.black,
+                ),
               ),
               const SizedBox(height: 8),
               Text(
                 'Sem: ${_selectedSemester ?? '?'} • ${_selectedSubject ?? 'Select subject first'} • ${widget.department}',
-                style: GoogleFonts.inter(fontSize: 12, color: AppTheme.textMuted),
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  color: AppTheme.textMuted,
+                ),
               ),
             ],
           ),
@@ -596,10 +633,15 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text('Cancel', style: GoogleFonts.inter(color: AppTheme.textMuted)),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.inter(color: AppTheme.textMuted),
+            ),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: widget.departmentColor),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: widget.departmentColor,
+            ),
             onPressed: () async {
               if (titleCtrl.text.isEmpty || urlCtrl.text.isEmpty) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -609,15 +651,21 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
               }
               final pdfUrl = urlCtrl.text.trim();
               final uri = Uri.tryParse(pdfUrl);
-              if (uri == null || !uri.isAbsolute || !(uri.scheme == 'http' || uri.scheme == 'https')) {
+              if (uri == null ||
+                  !uri.isAbsolute ||
+                  !(uri.scheme == 'http' || uri.scheme == 'https')) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please enter a valid PDF URL (http/https)')),
+                  const SnackBar(
+                    content: Text('Please enter a valid PDF URL (http/https)'),
+                  ),
                 );
                 return;
               }
               if (_selectedSemester == null || _selectedSubject == null) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please select semester and subject first')),
+                  const SnackBar(
+                    content: Text('Please select semester and subject first'),
+                  ),
                 );
                 return;
               }
@@ -633,7 +681,9 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
                 if (mounted) {
                   Navigator.pop(ctx);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Syllabus uploaded successfully!')),
+                    const SnackBar(
+                      content: Text('Syllabus uploaded successfully!'),
+                    ),
                   );
                   _fetchSyllabus(); // Refresh the list
                 }
@@ -641,12 +691,20 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
                 debugPrint('Syllabus upload failed: $e');
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Upload failed. Please try again.')),
+                    const SnackBar(
+                      content: Text('Upload failed. Please try again.'),
+                    ),
                   );
                 }
               }
             },
-            child: Text('Upload', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w600)),
+            child: Text(
+              'Upload',
+              style: GoogleFonts.inter(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
         ],
       ),

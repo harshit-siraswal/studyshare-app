@@ -9,18 +9,19 @@ import 'package:badges/badges.dart' as badges;
 import 'package:flutter_app_badger/flutter_app_badger.dart';
 import '../../config/theme.dart';
 import '../../models/resource.dart';
+import '../../models/user.dart';
 import '../../services/supabase_service.dart';
 import '../../services/download_service.dart';
+import '../../services/subscription_service.dart';
 import '../../widgets/resource_card.dart';
 import '../notifications/notification_screen.dart';
 import '../profile/bookmarks_screen.dart';
 import '../ai_chat_screen.dart';
 import '../../services/backend_api_service.dart';
-import '../../services/auth_service.dart';
 import '../profile/explore_students_screen.dart';
-import 'syllabus_screen.dart';
 import 'resource_search_screen.dart';
 import '../../services/home_widget_service.dart';
+import '../../widgets/study/department_card_3d.dart';
 
 import '../../data/departments_data.dart'; // Added for DepartmentData and DepartmentsProvider
 
@@ -48,7 +49,8 @@ class _StudyScreenState extends State<StudyScreen>
     with SingleTickerProviderStateMixin {
   final SupabaseService _supabaseService = SupabaseService();
   final BackendApiService _apiService = BackendApiService();
-  final AuthService _authService = AuthService();
+  final SubscriptionService _subscriptionService = SubscriptionService();
+  final DownloadService _downloadService = DownloadService();
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   late TabController _tabController;
@@ -70,11 +72,9 @@ class _StudyScreenState extends State<StudyScreen>
   // User Profile Data
   String _userRole = 'READ_ONLY';
   String _userSemester = '1';
-  String _userBranch = 'CSE';
+  String _userBranch = '';
   String? _userAdminKey;
-
-  // Downloaded resources
-  List<Resource> _downloadedResources = [];
+  bool _didRetryInitialEmptyLoad = false;
 
   // Filters
   String? _selectedSemester;
@@ -92,21 +92,60 @@ class _StudyScreenState extends State<StudyScreen>
 
   int _unreadNotificationCount = 0;
 
+  String get _effectiveUserEmail {
+    final fromWidget = widget.userEmail.trim();
+    if (fromWidget.isNotEmpty) return fromWidget;
+    return (_supabaseService.currentUserEmail ?? '').trim();
+  }
+
+  bool get _isTeacherOrAdmin =>
+      _userRole == AppRoles.teacher || _userRole == AppRoles.admin;
+
+  String _resolveProfileRole(Map<String, dynamic> profile) {
+    final rawRole = profile['role']?.toString().trim().toUpperCase() ?? '';
+    final hasAdminKey =
+        (profile['admin_key']?.toString().trim().isNotEmpty ?? false);
+
+    switch (rawRole) {
+      case 'ADMIN':
+        return AppRoles.admin;
+      case 'MODERATOR':
+        return hasAdminKey ? AppRoles.teacher : AppRoles.moderator;
+      case 'TEACHER':
+        return AppRoles.teacher;
+      case 'COLLEGE_USER':
+      case 'STUDENT':
+        return hasAdminKey ? AppRoles.teacher : AppRoles.collegeUser;
+      case 'READ_ONLY':
+        return hasAdminKey ? AppRoles.teacher : AppRoles.readOnly;
+      default:
+        return hasAdminKey ? AppRoles.teacher : AppRoles.collegeUser;
+    }
+  }
+
   Future<void> _loadUnreadNotificationCount() async {
     try {
-      final notifications = await _apiService.getNotifications(limit: 50);
       int unread = 0;
-      for (var n in notifications) {
-        if (n['is_read'] != true && n['isRead'] != true) {
-          unread++;
-        }
+      try {
+        unread = await _apiService.getUnreadNotificationCount();
+      } catch (e) {
+        debugPrint('Unread count endpoint unavailable, using fallback: $e');
+        final notifications = await _apiService.getNotifications(limit: 200);
+        unread = notifications.where((notification) {
+          final isReadRaw = notification.containsKey('is_read')
+              ? notification['is_read']
+              : notification['isRead'];
+          final isRead = isReadRaw == true;
+          return !isRead;
+        }).length;
       }
+
       if (mounted) {
         setState(() {
           _unreadNotificationCount = unread;
         });
       }
-      
+
       // Update OS level app badge
       final isSupported = await FlutterAppBadger.isAppBadgeSupported();
       if (!mounted) return;
@@ -129,11 +168,18 @@ class _StudyScreenState extends State<StudyScreen>
       length: 3,
       vsync: this,
     ); // 3 tabs: For You, Following, Syllabus
+    _tabController.addListener(() {
+      if (_tabController.indexIsChanging) return;
+      if (_tabController.index == 1) {
+        _loadFollowingFeed();
+      }
+    });
     _loadFilters();
     _departmentsFuture = DepartmentsProvider.getDepartments();
     _scrollController.addListener(_onScroll);
-    
-    _loadUserProfile().then((_) {
+
+    _loadUserProfile().whenComplete(() {
+      if (!mounted) return;
       _loadResources();
       _loadFollowingFeed();
       _loadUnreadNotificationCount();
@@ -144,11 +190,19 @@ class _StudyScreenState extends State<StudyScreen>
     try {
       final data = await _apiService.getProfile();
       final profile = (data['profile'] as Map?)?.cast<String, dynamic>() ?? {};
+      if (profile.isEmpty) return;
+      final role = _resolveProfileRole(profile);
+      final semester = profile['semester']?.toString();
+      final branch = profile['branch']?.toString();
       if (mounted) {
         setState(() {
-          _userRole = profile['role']?.toString() ?? 'READ_ONLY';
-          _userSemester = profile['semester']?.toString() ?? '1';
-          _userBranch = profile['branch']?.toString() ?? 'CSE';
+          _userRole = role;
+          _userSemester = (semester == null || semester.isEmpty)
+              ? '1'
+              : semester;
+          _userBranch = (branch == null || branch.isEmpty)
+              ? _userBranch
+              : branch;
           _userAdminKey = profile['admin_key']?.toString();
         });
       }
@@ -167,21 +221,38 @@ class _StudyScreenState extends State<StudyScreen>
   }
 
   Future<void> _loadFollowingFeed() async {
+    if (mounted) {
+      setState(() => _isLoadingFollowing = true);
+    }
+
     try {
-      if (_userRole == 'TEACHER') {
+      if (_isTeacherOrAdmin) {
         final resources = await _supabaseService.getPendingResourcesForTeacher(
           collegeId: widget.collegeId,
-          branch: _userBranch, 
+          branch: _userBranch,
+          statuses: const ['pending', 'approved', 'rejected'],
         );
+        if (!mounted) return;
         setState(() {
           _followingResources = resources;
           _isLoadingFollowing = false;
         });
       } else {
+        final activeEmail = _effectiveUserEmail;
+        if (activeEmail.isEmpty) {
+          if (!mounted) return;
+          setState(() {
+            _followingResources = [];
+            _isLoadingFollowing = false;
+          });
+          return;
+        }
+
         final resources = await _supabaseService.getFollowingFeed(
-          userEmail: widget.userEmail,
+          userEmail: activeEmail,
           collegeId: widget.collegeId,
         );
+        if (!mounted) return;
         setState(() {
           _followingResources = resources;
           _isLoadingFollowing = false;
@@ -235,8 +306,13 @@ class _StudyScreenState extends State<StudyScreen>
 
     // Handle Downloads Filter
     if (_selectedType == 'Downloads') {
+      final hasPremiumAccess = await _subscriptionService.isPremium();
+      if (!mounted) return;
       setState(() {
-        _resources = DownloadService().getAllDownloadedResources();
+        _resources = _downloadService.getAllDownloadedResourcesForUser(
+          _effectiveUserEmail,
+          hasPremiumAccess: hasPremiumAccess,
+        );
         _isLoading = false;
       });
       return;
@@ -262,20 +338,51 @@ class _StudyScreenState extends State<StudyScreen>
         _resources = resources;
         _isLoading = false;
       });
-      
+
+      // Retry once when first load returns empty with default filters.
+      if (!_didRetryInitialEmptyLoad &&
+          !refresh &&
+          resources.isEmpty &&
+          !_hasActiveFilters) {
+        _didRetryInitialEmptyLoad = true;
+        Future.delayed(const Duration(milliseconds: 900), () {
+          if (!mounted) return;
+          _loadResources(refresh: true);
+        });
+      }
+
       // Update Home Widget by filtering syllabus resources
       if (_selectedType == null) {
-        final syllabusResources = resources.where((r) => r.type.toLowerCase() == 'syllabus').toList();
+        final syllabusResources = resources
+            .where((r) => r.type.toLowerCase() == 'syllabus')
+            .toList();
         HomeWidgetService.instance.syncSyllabus(
-          _userSemester, 
-          _userBranch, 
+          _userSemester,
+          _userBranch,
           syllabusResources,
         );
       }
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
+
+      if (!_didRetryInitialEmptyLoad && !refresh && !_hasActiveFilters) {
+        _didRetryInitialEmptyLoad = true;
+        Future.delayed(const Duration(milliseconds: 900), () {
+          if (!mounted) return;
+          _loadResources(refresh: true);
+        });
+      }
     }
+  }
+
+  bool get _hasActiveFilters {
+    return (_selectedSemester != null && _selectedSemester != 'All') ||
+        (_selectedBranch != null && _selectedBranch != 'All') ||
+        (_selectedSubject != null && _selectedSubject != 'All') ||
+        (_selectedType != null && _selectedType != 'All') ||
+        _selectedSort != 'Recent' ||
+        _searchController.text.trim().isNotEmpty;
   }
 
   void _onScroll() {
@@ -322,7 +429,7 @@ class _StudyScreenState extends State<StudyScreen>
 
   @override
   Widget build(BuildContext context) {
-    final isTeacher = _userRole == 'TEACHER';
+    final isTeacher = _isTeacherOrAdmin;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
@@ -364,7 +471,10 @@ class _StudyScreenState extends State<StudyScreen>
                                           height: 80,
                                           width: 80,
                                           child: Opacity(
-                                            opacity: controller.value.clamp(0.0, 1.0),
+                                            opacity: controller.value.clamp(
+                                              0.0,
+                                              1.0,
+                                            ),
                                             child: Lottie.asset(
                                               'assets/lottie/refresh.json',
                                               animate: controller.isLoading,
@@ -425,7 +535,9 @@ class _StudyScreenState extends State<StudyScreen>
                       child: _isLoadingFollowing
                           ? _buildLoadingSkeleton()
                           : _followingResources.isEmpty
-                          ? (isTeacher ? _buildModerationEmptyState() : _buildFollowingEmptyState())
+                          ? (isTeacher
+                                ? _buildModerationEmptyState()
+                                : _buildFollowingEmptyState())
                           : _buildFollowingGrid(),
                     ),
                     // Syllabus Tab
@@ -471,7 +583,7 @@ class _StudyScreenState extends State<StudyScreen>
         padding: const EdgeInsets.all(4),
         tabs: [
           const Tab(text: 'For You'),
-          Tab(text: _userRole == 'TEACHER' ? 'Moderation' : 'Following'),
+          Tab(text: _isTeacherOrAdmin ? 'Moderation' : 'Following'),
           const Tab(text: 'Syllabus'),
         ],
       ),
@@ -484,7 +596,7 @@ class _StudyScreenState extends State<StudyScreen>
       MaterialPageRoute(
         builder: (_) => ExploreStudentsScreen(
           collegeDomain: widget.collegeDomain,
-          userEmail: widget.userEmail,
+          userEmail: _effectiveUserEmail,
         ),
       ),
     );
@@ -507,7 +619,7 @@ class _StudyScreenState extends State<StudyScreen>
           ),
           const SizedBox(height: 8),
           Text(
-            'No pending resources to moderate for your branch.',
+            'No resources to moderate for your branch.',
             style: GoogleFonts.inter(
               fontSize: 13,
               color: AppTheme.textMuted.withValues(alpha: 0.7),
@@ -559,7 +671,7 @@ class _StudyScreenState extends State<StudyScreen>
   }
 
   Widget _buildFollowingGrid() {
-    final isTeacher = _userRole == 'TEACHER';
+    final isTeacher = _isTeacherOrAdmin;
 
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(
@@ -571,14 +683,32 @@ class _StudyScreenState extends State<StudyScreen>
       itemCount: _followingResources.length,
       itemBuilder: (context, index) {
         final resource = _followingResources[index];
+        final status = resource.status.toLowerCase();
+        final bool isApproved = status == 'approved';
+        final bool isPending = status == 'pending';
+        final bool isRejected = status == 'rejected';
+
+        final VoidCallback? onApprove = isTeacher && !isApproved
+            ? () => _moderateResource(resource.id, 'approved')
+            : null;
+        final VoidCallback? onReject = isTeacher && isPending
+            ? () => _moderateResource(resource.id, 'rejected')
+            : null;
+        final VoidCallback? onRetract = isTeacher && isApproved
+            ? () => _moderateResource(resource.id, 'rejected')
+            : (isTeacher && isRejected
+                  ? () => _moderateResource(resource.id, 'pending')
+                  : null);
+
         return Padding(
           padding: const EdgeInsets.only(bottom: 10),
           child: ResourceCard(
             resource: resource,
-            userEmail: widget.userEmail,
+            userEmail: _effectiveUserEmail,
             showModerationControls: isTeacher,
-            onApprove: isTeacher ? () => _moderateResource(resource.id, 'approved') : null,
-            onReject: isTeacher ? () => _moderateResource(resource.id, 'rejected') : null,
+            onApprove: onApprove,
+            onRetract: onRetract,
+            onReject: onReject,
           ),
         );
       },
@@ -590,7 +720,9 @@ class _StudyScreenState extends State<StudyScreen>
     if (_userAdminKey == null || _userAdminKey!.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Missing Admin Key. Update your profile.')),
+        const SnackBar(
+          content: Text('Missing Admin Key. Update your profile.'),
+        ),
       );
       return;
     }
@@ -606,19 +738,26 @@ class _StudyScreenState extends State<StudyScreen>
       );
 
       if (!mounted) return;
-      // Remove from list or refresh
-      setState(() {
-        _followingResources.removeWhere((r) => r.id == resourceId);
-      });
+      await _loadFollowingFeed();
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Resource $newStatus successfully')),
+        SnackBar(
+          content: Text(
+            newStatus == 'rejected'
+                ? 'Resource retracted/rejected successfully'
+                : newStatus == 'pending'
+                ? 'Resource retracted successfully'
+                : 'Resource $newStatus successfully',
+          ),
+        ),
       );
     } catch (e) {
       debugPrint('Error moderating resource: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to moderate resource. Please try again.')),
+        const SnackBar(
+          content: Text('Failed to moderate resource. Please try again.'),
+        ),
       );
     } finally {
       if (mounted) setState(() => _isModerating = false);
@@ -827,7 +966,9 @@ class _StudyScreenState extends State<StudyScreen>
             icon: badges.Badge(
               showBadge: _unreadNotificationCount > 0,
               badgeContent: Text(
-                _unreadNotificationCount > 9 ? '9+' : _unreadNotificationCount.toString(),
+                _unreadNotificationCount > 9
+                    ? '9+'
+                    : _unreadNotificationCount.toString(),
                 style: GoogleFonts.inter(
                   color: Colors.white,
                   fontSize: 10,
@@ -835,7 +976,7 @@ class _StudyScreenState extends State<StudyScreen>
                 ),
               ),
               badgeStyle: badges.BadgeStyle(
-                badgeColor: const Color(0xFFEF4444),
+                badgeColor: AppTheme.error,
                 padding: const EdgeInsets.all(4),
               ),
               child: Icon(
@@ -855,7 +996,7 @@ class _StudyScreenState extends State<StudyScreen>
     final (:textColor, :secondaryColor, :cardColor, :borderColor) =
         _getThemeColors(isDark);
 
-    return _DepartmentCard3D(
+    return DepartmentCard3D(
       dept: dept,
       collegeId: widget.collegeId,
       textColor: textColor,
@@ -901,7 +1042,7 @@ class _StudyScreenState extends State<StudyScreen>
             pageBuilder: (context, animation, secondaryAnimation) =>
                 ResourceSearchScreen(
                   collegeId: widget.collegeId,
-                  userEmail: widget.userEmail,
+                  userEmail: _effectiveUserEmail,
                 ),
             transitionsBuilder:
                 (context, animation, secondaryAnimation, child) {
@@ -1445,41 +1586,41 @@ class _StudyScreenState extends State<StudyScreen>
         child: ListView.separated(
           controller: _scrollController,
           padding: const EdgeInsets.fromLTRB(
-          16,
-          8,
-          16,
-          100,
-        ), // Bottom padding for FAB/Nav
-        itemCount: _resources.length + (_isLoadingMore ? 1 : 0),
-        separatorBuilder: (context, index) => const SizedBox(height: 12),
-        itemBuilder: (context, index) {
-          if (index == _resources.length) {
-            return const Padding(
-              padding: EdgeInsets.all(16.0),
-              child: Center(child: CircularProgressIndicator()),
-            );
-          }
-          final resource = _resources[index];
-          return AnimationConfiguration.staggeredList(
-            position: index,
-            delay: const Duration(milliseconds: 50),
-            duration: const Duration(milliseconds: 375),
-            child: SlideAnimation(
-              verticalOffset: 30.0,
-              child: FadeInAnimation(
-                child: ResourceCard(
-                  resource: resource,
-                  userEmail: widget.userEmail,
-                  onVoteChanged: () => _loadResources(),
+            16,
+            8,
+            16,
+            100,
+          ), // Bottom padding for FAB/Nav
+          itemCount: _resources.length + (_isLoadingMore ? 1 : 0),
+          separatorBuilder: (context, index) => const SizedBox(height: 12),
+          itemBuilder: (context, index) {
+            if (index == _resources.length) {
+              return const Padding(
+                padding: EdgeInsets.all(16.0),
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+            final resource = _resources[index];
+            return AnimationConfiguration.staggeredList(
+              position: index,
+              delay: const Duration(milliseconds: 50),
+              duration: const Duration(milliseconds: 375),
+              child: SlideAnimation(
+                verticalOffset: 30.0,
+                child: FadeInAnimation(
+                  child: ResourceCard(
+                    resource: resource,
+                    userEmail: _effectiveUserEmail,
+                    onVoteChanged: () => _loadResources(),
+                  ),
                 ),
               ),
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
-    ),
-  );
-}
+    );
+  }
 
   Widget _buildLoadingSkeleton() {
     return GridView.builder(
@@ -1552,254 +1693,6 @@ class _StudyScreenState extends State<StudyScreen>
           ),
         ],
       ),
-    );
-  }
-
-  void _loadDownloadedResources() {
-    setState(() {
-      _downloadedResources = DownloadService().getAllDownloadedResources();
-    });
-  }
-
-  Widget _buildDownloadsTab() {
-    if (_downloadedResources.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.offline_pin_rounded,
-              size: 64,
-              color: AppTheme.textMuted.withValues(alpha: 0.5),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No downloads yet',
-              style: GoogleFonts.inter(fontSize: 16, color: AppTheme.textMuted),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Download notes to access them offline',
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                color: AppTheme.textMuted.withValues(alpha: 0.7),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.all(16),
-      itemCount: _downloadedResources.length,
-      itemBuilder: (context, index) {
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: ResourceCard(
-            resource: _downloadedResources[index],
-            userEmail: widget.userEmail,
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _DepartmentCard3D extends StatefulWidget {
-  final DepartmentData dept;
-  final String collegeId;
-  final Color textColor;
-  final Color secondaryColor;
-  final Color cardColor;
-  final Color borderColor;
-
-  const _DepartmentCard3D({
-    required this.dept,
-    required this.collegeId,
-    required this.textColor,
-    required this.secondaryColor,
-    required this.cardColor,
-    required this.borderColor,
-  });
-
-  @override
-  State<_DepartmentCard3D> createState() => _DepartmentCard3DState();
-}
-
-class _DepartmentCard3DState extends State<_DepartmentCard3D>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<Matrix4> _transformAnimation;
-
-  double _xRotation = 0.0;
-  double _yRotation = 0.0;
-  bool _isTapped = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 300));
-    _transformAnimation = Matrix4Tween(
-      begin: Matrix4.identity(),
-      end: Matrix4.identity(),
-    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _onPanUpdate(DragUpdateDetails details, Size size) {
-    // Determine the local position
-    final localPosition = details.localPosition;
-    
-    // Calculate rotation based on pointer pos (max 15 degrees = 0.26 radians)
-    final double halfWidth = size.width / 2;
-    final double halfHeight = size.height / 2;
-    
-    // Normalize mapping from -1.0 to 1.0
-    final double xFactor = (localPosition.dx - halfWidth) / halfWidth;
-    final double yFactor = (localPosition.dy - halfHeight) / halfHeight;
-    
-    // Clamp to -1..1
-    final double clampedX = xFactor.clamp(-1.0, 1.0);
-    final double clampedY = yFactor.clamp(-1.0, 1.0);
-
-    setState(() {
-      _yRotation = clampedX * 0.15; // Rotate around Y axis based on X pos
-      _xRotation = -clampedY * 0.15; // Rotate around X axis based on Y pos
-    });
-  }
-
-  void _resetTransform() {
-    final Matrix4 current = Matrix4.identity()
-      ..setEntry(3, 2, 0.001)
-      ..rotateX(_xRotation)
-      ..rotateY(_yRotation)
-      ..scale(_isTapped ? 0.95 : 1.0);
-
-    // Rebuild the matrix tween from the current tapped rotation to identity
-    _transformAnimation = Matrix4Tween(
-      begin: current,
-      end: Matrix4.identity(),
-    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutBack));
-
-    setState(() {
-      _xRotation = 0.0;
-      _yRotation = 0.0;
-      _isTapped = false;
-    });
-    _controller.forward(from: 0.0);
-  }
-
-  bool _isNavigating = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final Matrix4 currentTransform = Matrix4.identity()
-      ..setEntry(3, 2, 0.001) // perspective
-      ..rotateX(_xRotation)
-      ..rotateY(_yRotation)
-      ..scale(_isTapped ? 0.95 : 1.0);
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final size = Size(constraints.maxWidth, constraints.maxHeight);
-        return GestureDetector(
-          onPanDown: (details) {
-            setState(() => _isTapped = true);
-            _controller.stop();
-          },
-          onPanUpdate: (details) => _onPanUpdate(details, size),
-          onPanEnd: (_) => _resetTransform(),
-          onPanCancel: () => _resetTransform(),
-          onTapUp: (_) => _resetTransform(),
-          onTap: () {
-            if (_isNavigating) return;
-            setState(() => _isNavigating = true);
-            // Slight delay so the press animation is visible
-            Future.delayed(const Duration(milliseconds: 150), () {
-              if (mounted) {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => SyllabusScreen(
-                      collegeId: widget.collegeId,
-                      department: widget.dept.name,
-                      departmentName: widget.dept.full,
-                      departmentColor: widget.dept.color,
-                    ),
-                  ),
-                ).then((_) {
-                  if (mounted) setState(() => _isNavigating = false);
-                });
-              } else {
-                _isNavigating = false;
-              }
-            });
-          },
-          child: AnimatedBuilder(
-            animation: _controller,
-            builder: (context, child) {
-              return Transform(
-                transform: _controller.isAnimating
-                    ? _transformAnimation.value
-                    : currentTransform,
-                alignment: Alignment.center,
-                child: child,
-              );
-            },
-            child: Material(
-              color: widget.cardColor,
-              borderRadius: BorderRadius.circular(12),
-              elevation: _isTapped ? 8 : 2,
-              shadowColor: widget.borderColor.withValues(alpha: 0.5),
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: widget.borderColor),
-                ),
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: widget.dept.color.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(Icons.folder_outlined,
-                          color: widget.dept.color, size: 20),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      widget.dept.name,
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: widget.textColor,
-                      ),
-                    ),
-                    Text(
-                      widget.dept.full,
-                      style: GoogleFonts.inter(
-                          fontSize: 11, color: widget.secondaryColor),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        );
-      },
     );
   }
 }

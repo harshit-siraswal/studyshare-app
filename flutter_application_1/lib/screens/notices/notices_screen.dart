@@ -9,6 +9,7 @@ import '../../services/supabase_service.dart';
 import 'department_account_screen.dart' as dept_screen;
 import '../../widgets/notice_card.dart';
 import '../../models/department_account.dart';
+import '../../models/user.dart';
 import '../../widgets/branded_loader.dart';
 import '../../services/home_widget_service.dart';
 import '../../models/notice.dart';
@@ -27,16 +28,10 @@ class NoticesScreen extends StatefulWidget {
 class _NoticesScreenState extends State<NoticesScreen>
     with SingleTickerProviderStateMixin {
   final SupabaseService _supabaseService = SupabaseService();
-  final TextEditingController _searchController = TextEditingController();
 
-  List<Map<String, dynamic>> _notices = [];
   List<Map<String, dynamic>> _filteredNotices = [];
   bool _isLoading = true;
-  String? _selectedDepartment;
   bool _isTeacherOrAdmin = false;
-
-  // Track if search field is focused
-  final FocusNode _searchFocusNode = FocusNode();
 
   late TabController _tabController;
 
@@ -137,6 +132,10 @@ class _NoticesScreenState extends State<NoticesScreen>
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      sheetAnimationStyle: const AnimationStyle(
+        duration: Duration(milliseconds: 240),
+        reverseDuration: Duration(milliseconds: 180),
+      ),
       backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -160,7 +159,9 @@ class _NoticesScreenState extends State<NoticesScreen>
             });
           }
 
-          return Padding(
+          return AnimatedPadding(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
             padding: EdgeInsets.only(
               bottom: MediaQuery.of(context).viewInsets.bottom,
             ),
@@ -268,7 +269,10 @@ class _NoticesScreenState extends State<NoticesScreen>
       final role = await _supabaseService.getCurrentUserRole();
       if (mounted) {
         setState(() {
-          _isTeacherOrAdmin = role == 'TEACHER' || role == 'ADMIN';
+          _isTeacherOrAdmin =
+              role == AppRoles.teacher ||
+              role == AppRoles.admin ||
+              role == AppRoles.moderator;
         });
       }
     } catch (e) {
@@ -338,8 +342,10 @@ class _NoticesScreenState extends State<NoticesScreen>
     setState(() {
       if (isFollowing) {
         _followedDepartments.remove(deptId);
-        _departmentFollowerCounts[deptId] =
-            math.max(0, (_departmentFollowerCounts[deptId] ?? 1) - 1);
+        _departmentFollowerCounts[deptId] = math.max(
+          0,
+          (_departmentFollowerCounts[deptId] ?? 1) - 1,
+        );
       } else {
         _followedDepartments.add(deptId);
         _departmentFollowerCounts[deptId] =
@@ -371,8 +377,10 @@ class _NoticesScreenState extends State<NoticesScreen>
                 (_departmentFollowerCounts[deptId] ?? 0) + 1;
           } else {
             _followedDepartments.remove(deptId);
-            _departmentFollowerCounts[deptId] =
-                math.max(0, (_departmentFollowerCounts[deptId] ?? 1) - 1);
+            _departmentFollowerCounts[deptId] = math.max(
+              0,
+              (_departmentFollowerCounts[deptId] ?? 1) - 1,
+            );
           }
         });
         ScaffoldMessenger.of(
@@ -406,12 +414,11 @@ class _NoticesScreenState extends State<NoticesScreen>
 
       if (mounted) {
         setState(() {
-          _notices = notices;
           _filteredNotices = filtered;
           _isLoading = false;
         });
       }
-      
+
       // Sync the latest unfiltered notices to the home screen widget
       final List<Notice> noticeObjs = [];
       int failCount = 0;
@@ -424,12 +431,16 @@ class _NoticesScreenState extends State<NoticesScreen>
         }
       }
       if (failCount > 0) {
-        debugPrint('Widget sync: $failCount notice(s) skipped due to parse errors');
+        debugPrint(
+          'Widget sync: $failCount notice(s) skipped due to parse errors',
+        );
       }
-      unawaited(HomeWidgetService.instance.syncNotices(noticeObjs).catchError((e) {
-        debugPrint('HomeWidget sync failed: $e');
-        return false;
-      }));
+      unawaited(
+        HomeWidgetService.instance.syncNotices(noticeObjs).catchError((e) {
+          debugPrint('HomeWidget sync failed: $e');
+          return false;
+        }),
+      );
     } catch (e) {
       debugPrint('Error loading notices: $e');
       if (mounted) setState(() => _isLoading = false);
@@ -563,14 +574,20 @@ class _NoticesScreenState extends State<NoticesScreen>
                         ? _buildEmptyState(isDark)
                         : AnimationLimiter(
                             child: ListView.builder(
-                              padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
+                              padding: const EdgeInsets.fromLTRB(
+                                16,
+                                16,
+                                16,
+                                120,
+                              ),
                               itemCount: _filteredNotices.length,
                               itemBuilder: (context, index) {
                                 final notice = _filteredNotices[index];
                                 // Attempt to map to department, fallback to General
                                 // Depending on notice schema, it might have 'department' key
                                 final deptId =
-                                    notice['department'] as String? ?? 'general';
+                                    notice['department'] as String? ??
+                                    'general';
                                 final account = _departmentAccounts.firstWhere(
                                   (a) => a.id == deptId,
                                   orElse: () => _departmentAccounts.first,
@@ -583,7 +600,9 @@ class _NoticesScreenState extends State<NoticesScreen>
                                     verticalOffset: 20.0,
                                     child: FadeInAnimation(
                                       child: Padding(
-                                        padding: const EdgeInsets.only(bottom: 16),
+                                        padding: const EdgeInsets.only(
+                                          bottom: 16,
+                                        ),
                                         child: NoticeCard(
                                           notice: notice,
                                           account: account,
@@ -624,7 +643,11 @@ class _NoticesScreenState extends State<NoticesScreen>
           ? FloatingActionButton(
               onPressed: () => _showPostNoticeDialog(isDark),
               backgroundColor: AppTheme.primary,
-              child: const Icon(Icons.add_rounded, color: Colors.white, size: 28),
+              child: const Icon(
+                Icons.add_rounded,
+                color: Colors.white,
+                size: 28,
+              ),
             )
           : null,
     );
@@ -645,145 +668,145 @@ class _NoticesScreenState extends State<NoticesScreen>
         horizontalOffset: 20.0,
         child: FadeInAnimation(
           child: InkWell(
-        onTap: () async {
-          // Navigate to department account page and refresh on return
-          await Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => dept_screen.DepartmentAccountScreen(
-                account: DepartmentAccount(
-                  id: account.id,
-                  name: account.name,
-                  handle: account.handle,
-                  avatarLetter: account.avatarLetter,
-                  color: account.color,
+            onTap: () async {
+              // Navigate to department account page and refresh on return
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => dept_screen.DepartmentAccountScreen(
+                    account: DepartmentAccount(
+                      id: account.id,
+                      name: account.name,
+                      handle: account.handle,
+                      avatarLetter: account.avatarLetter,
+                      color: account.color,
+                    ),
+                    collegeId: widget.collegeId,
+                  ),
                 ),
-                collegeId: widget.collegeId,
+              );
+              _loadFollowedDepartments(); // Refresh state on return
+            },
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                children: [
+                  // Avatar
+                  Container(
+                    width: 52,
+                    height: 52,
+                    decoration: BoxDecoration(
+                      color: account.color,
+                      borderRadius: BorderRadius.circular(26),
+                    ),
+                    child: Center(
+                      child: Text(
+                        account.avatarLetter,
+                        style: GoogleFonts.inter(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: account.avatarLetter.length > 1 ? 16 : 20,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+
+                  // Info
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                account.name,
+                                style: GoogleFonts.inter(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 15,
+                                  color: isDark
+                                      ? AppTheme.darkTextPrimary
+                                      : AppTheme.lightTextPrimary,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Icon(
+                              Icons.verified_rounded,
+                              size: 16,
+                              color: AppTheme.primary,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            Text(
+                              account.handle,
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                color: isDark
+                                    ? AppTheme.darkTextMuted
+                                    : AppTheme.lightTextMuted,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Icon(
+                              Icons.people_outline_rounded,
+                              size: 14,
+                              color: isDark
+                                  ? AppTheme.darkTextMuted
+                                  : AppTheme.lightTextMuted,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              '$followerCount followers',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                color: isDark
+                                    ? AppTheme.darkTextMuted
+                                    : AppTheme.lightTextMuted,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Follow button
+                  GestureDetector(
+                    onTap: () => _toggleDepartmentFollow(account.id),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isFollowing ? Colors.transparent : account.color,
+                        border: isFollowing
+                            ? Border.all(color: account.color, width: 1.5)
+                            : null,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        isFollowing ? 'Following' : 'Follow',
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: isFollowing ? account.color : Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-          );
-          _loadFollowedDepartments(); // Refresh state on return
-        },
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
-            children: [
-              // Avatar
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: account.color,
-                  borderRadius: BorderRadius.circular(26),
-                ),
-                child: Center(
-                  child: Text(
-                    account.avatarLetter,
-                    style: GoogleFonts.inter(
-                      color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      fontSize: account.avatarLetter.length > 1 ? 16 : 20,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-
-              // Info
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            account.name,
-                            style: GoogleFonts.inter(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 15,
-                              color: isDark
-                                  ? AppTheme.darkTextPrimary
-                                  : AppTheme.lightTextPrimary,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
-                        Icon(
-                          Icons.verified_rounded,
-                          size: 16,
-                          color: AppTheme.primary,
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    Row(
-                      children: [
-                        Text(
-                          account.handle,
-                          style: GoogleFonts.inter(
-                            fontSize: 13,
-                            color: isDark
-                                ? AppTheme.darkTextMuted
-                                : AppTheme.lightTextMuted,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Icon(
-                          Icons.people_outline_rounded,
-                          size: 14,
-                          color: isDark
-                              ? AppTheme.darkTextMuted
-                              : AppTheme.lightTextMuted,
-                        ),
-                        const SizedBox(width: 2),
-                        Text(
-                          '$followerCount followers',
-                          style: GoogleFonts.inter(
-                            fontSize: 12,
-                            color: isDark
-                                ? AppTheme.darkTextMuted
-                                : AppTheme.lightTextMuted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-
-              // Follow button
-              GestureDetector(
-                onTap: () => _toggleDepartmentFollow(account.id),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
-                  decoration: BoxDecoration(
-                    color: isFollowing ? Colors.transparent : account.color,
-                    border: isFollowing
-                        ? Border.all(color: account.color, width: 1.5)
-                        : null,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(
-                    isFollowing ? 'Following' : 'Follow',
-                    style: GoogleFonts.inter(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: isFollowing ? account.color : Colors.white,
-                    ),
-                  ),
-                ),
-              ),
-            ],
           ),
         ),
       ),
-      ),
-    ),
     );
   }
 
@@ -940,146 +963,198 @@ class _NoticesScreenState extends State<NoticesScreen>
     return 'Failed to update follow status.';
   }
 
-  void _showPostNoticeDialog(bool isDark) {
+  Future<void> _showPostNoticeDialog(bool isDark) async {
+    final parentCtx = context;
     final titleCtrl = TextEditingController();
     final contentCtrl = TextEditingController();
     final imageUrlCtrl = TextEditingController();
     String selectedDept = 'general';
 
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-          title: Row(
-            children: [
-              Icon(Icons.campaign_rounded, color: AppTheme.primary),
-              const SizedBox(width: 8),
-              Text(
-                'Post Notice',
-                style: GoogleFonts.inter(
-                  fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : Colors.black,
+    try {
+      await showDialog(
+        context: parentCtx,
+        builder: (dialogCtx) => StatefulBuilder(
+          builder: (stateCtx, setDialogState) => AlertDialog(
+            backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+            title: Row(
+              children: [
+                Icon(Icons.campaign_rounded, color: AppTheme.primary),
+                const SizedBox(width: 8),
+                Text(
+                  'Post Notice',
+                  style: GoogleFonts.inter(
+                    fontWeight: FontWeight.bold,
+                    color: isDark ? Colors.white : Colors.black,
+                  ),
+                ),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: titleCtrl,
+                    decoration: InputDecoration(
+                      labelText: 'Title',
+                      labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    style: GoogleFonts.inter(
+                      color: isDark ? Colors.white : Colors.black,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: contentCtrl,
+                    maxLines: 4,
+                    decoration: InputDecoration(
+                      labelText: 'Content',
+                      alignLabelWithHint: true,
+                      labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    style: GoogleFonts.inter(
+                      color: isDark ? Colors.white : Colors.black,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: selectedDept,
+                    decoration: InputDecoration(
+                      labelText: 'Department',
+                      labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    dropdownColor: isDark
+                        ? const Color(0xFF2C2C2E)
+                        : Colors.white,
+                    style: GoogleFonts.inter(
+                      color: isDark ? Colors.white : Colors.black,
+                      fontSize: 14,
+                    ),
+                    items: _departmentAccounts.map((dept) {
+                      return DropdownMenuItem(
+                        value: dept.id,
+                        child: Text(dept.name),
+                      );
+                    }).toList(),
+                    onChanged: (val) {
+                      if (val != null) setDialogState(() => selectedDept = val);
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: imageUrlCtrl,
+                    decoration: InputDecoration(
+                      labelText: 'Image URL (optional)',
+                      hintText: 'https://example.com/image.png',
+                      labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
+                      hintStyle: GoogleFonts.inter(
+                        color: AppTheme.textMuted.withValues(alpha: 0.5),
+                      ),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    style: GoogleFonts.inter(
+                      color: isDark ? Colors.white : Colors.black,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogCtx),
+                child: Text(
+                  'Cancel',
+                  style: GoogleFonts.inter(color: AppTheme.textMuted),
+                ),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                ),
+                onPressed: () async {
+                  if (titleCtrl.text.isEmpty || contentCtrl.text.isEmpty) {
+                    ScaffoldMessenger.of(parentCtx).showSnackBar(
+                      const SnackBar(
+                        content: Text('Please fill title and content'),
+                      ),
+                    );
+                    return;
+                  }
+                  final imageUrl = imageUrlCtrl.text.trim();
+                  if (imageUrl.isNotEmpty) {
+                    final uri = Uri.tryParse(imageUrl);
+                    if (uri == null ||
+                        !uri.isAbsolute ||
+                        !(uri.scheme == 'http' || uri.scheme == 'https')) {
+                      ScaffoldMessenger.of(parentCtx).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Please enter a valid image URL (http/https)',
+                          ),
+                        ),
+                      );
+                      return;
+                    }
+                  }
+                  try {
+                    await _supabaseService.addNotice(
+                      collegeId: widget.collegeId,
+                      title: titleCtrl.text.trim(),
+                      content: contentCtrl.text.trim(),
+                      department: selectedDept,
+                      imageUrl: imageUrlCtrl.text.trim().isNotEmpty
+                          ? imageUrlCtrl.text.trim()
+                          : null,
+                    );
+                    if (mounted) {
+                      Navigator.pop(dialogCtx);
+                      ScaffoldMessenger.of(parentCtx).showSnackBar(
+                        const SnackBar(
+                          content: Text('Notice posted successfully!'),
+                        ),
+                      );
+                      _loadNotices();
+                    }
+                  } catch (e) {
+                    debugPrint('Post notice failed: $e');
+                    if (mounted) {
+                      ScaffoldMessenger.of(parentCtx).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Failed to post notice. Please try again.',
+                          ),
+                        ),
+                      );
+                    }
+                  }
+                },
+                child: Text(
+                  'Post',
+                  style: GoogleFonts.inter(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ],
           ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: titleCtrl,
-                  decoration: InputDecoration(
-                    labelText: 'Title',
-                    labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  style: GoogleFonts.inter(color: isDark ? Colors.white : Colors.black),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: contentCtrl,
-                  maxLines: 4,
-                  decoration: InputDecoration(
-                    labelText: 'Content',
-                    alignLabelWithHint: true,
-                    labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  style: GoogleFonts.inter(color: isDark ? Colors.white : Colors.black),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  value: selectedDept,
-                  decoration: InputDecoration(
-                    labelText: 'Department',
-                    labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  dropdownColor: isDark ? const Color(0xFF2C2C2E) : Colors.white,
-                  style: GoogleFonts.inter(
-                    color: isDark ? Colors.white : Colors.black,
-                    fontSize: 14,
-                  ),
-                  items: _departmentAccounts.map((dept) {
-                    return DropdownMenuItem(
-                      value: dept.id,
-                      child: Text(dept.name),
-                    );
-                  }).toList(),
-                  onChanged: (val) {
-                    if (val != null) setDialogState(() => selectedDept = val);
-                  },
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: imageUrlCtrl,
-                  decoration: InputDecoration(
-                    labelText: 'Image URL (optional)',
-                    hintText: 'https://example.com/image.png',
-                    labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
-                    hintStyle: GoogleFonts.inter(color: AppTheme.textMuted.withValues(alpha: 0.5)),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  style: GoogleFonts.inter(color: isDark ? Colors.white : Colors.black),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text('Cancel', style: GoogleFonts.inter(color: AppTheme.textMuted)),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primary),
-              onPressed: () async {
-                if (titleCtrl.text.isEmpty || contentCtrl.text.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Please fill title and content')),
-                  );
-                  return;
-                }
-                final imageUrl = imageUrlCtrl.text.trim();
-                if (imageUrl.isNotEmpty) {
-                  final uri = Uri.tryParse(imageUrl);
-                  if (uri == null || !uri.isAbsolute || !(uri.scheme == 'http' || uri.scheme == 'https')) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Please enter a valid image URL (http/https)')),
-                    );
-                    return;
-                  }
-                }
-                try {
-                  await _supabaseService.addNotice(
-                    collegeId: widget.collegeId,
-                    title: titleCtrl.text.trim(),
-                    content: contentCtrl.text.trim(),
-                    department: selectedDept,
-                    imageUrl: imageUrlCtrl.text.trim().isNotEmpty ? imageUrlCtrl.text.trim() : null,
-                  );
-                  if (mounted) {
-                    Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Notice posted successfully!')),
-                    );
-                    _loadNotices();
-                  }
-                } catch (e) {
-                  debugPrint('Post notice failed: $e');
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Failed to post notice. Please try again.')),
-                    );
-                  }
-                }
-              },
-              child: Text('Post', style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w600)),
-            ),
-          ],
         ),
-      ),
-    );
+      );
+    } finally {
+      titleCtrl.dispose();
+      contentCtrl.dispose();
+      imageUrlCtrl.dispose();
+    }
   }
 }

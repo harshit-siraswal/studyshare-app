@@ -17,6 +17,7 @@ class Resource {
   final String uploadedByEmail;
   final String? uploadedByName;
   final String collegeId;
+  final String status; // pending, approved, rejected
   final bool isApproved;
   final bool isTeacherUpload;
   final DateTime createdAt;
@@ -38,12 +39,18 @@ class Resource {
     required this.uploadedByEmail,
     this.uploadedByName,
     required this.collegeId,
+    this.status = 'approved',
     this.isApproved = true,
     this.isTeacherUpload = false,
     required this.createdAt,
   });
 
   factory Resource.fromJson(Map<String, dynamic> json) {
+    final rawStatus = (json['status'] ?? '').toString().trim().toLowerCase();
+    final resolvedStatus = rawStatus.isNotEmpty
+        ? rawStatus
+        : (json['is_approved'] == true ? 'approved' : 'pending');
+
     return Resource(
       id: json['id'] ?? '',
       title: json['title'] ?? '',
@@ -55,14 +62,19 @@ class Resource {
       subject: json['subject'],
       chapter: json['chapter'],
       topic: json['topic'],
-      description: json['description'] ?? json['content'], // Map content to description for flexibility
+      description:
+          json['description'] ??
+          json['content'], // Map content to description for flexibility
       upvotes: json['upvotes'] ?? 0,
       downvotes: json['downvotes'] ?? 0,
       uploadedByEmail: json['uploaded_by_email'] ?? '',
       uploadedByName: json['uploaded_by_name'],
       collegeId: json['college_id'] ?? '',
-      isApproved: json['status'] == 'approved' || json['is_approved'] == true,
-      isTeacherUpload: json['uploader_role'] == 'TEACHER' || json['is_teacher_upload'] == true,
+      status: resolvedStatus,
+      isApproved: resolvedStatus == 'approved' || json['is_approved'] == true,
+      isTeacherUpload:
+          json['uploader_role'] == 'TEACHER' ||
+          json['is_teacher_upload'] == true,
       createdAt: _parseCreatedAt(json),
     );
   }
@@ -71,7 +83,9 @@ class Resource {
     final raw = json['created_at'];
     final parsed = DateTime.tryParse(raw?.toString() ?? '');
     if (parsed == null) {
-      debugPrint('Resource Warning: Invalid created_at "$raw" for ID ${json['id']}. Fallback to epoch.');
+      debugPrint(
+        'Resource Warning: Invalid created_at "$raw" for ID ${json['id']}. Fallback to epoch.',
+      );
       return DateTime.utc(1970, 1, 1);
     }
     return parsed;
@@ -96,9 +110,9 @@ class Resource {
       'uploaded_by_email': uploadedByEmail,
       'uploaded_by_name': uploadedByName,
       'college_id': collegeId,
+      'status': status,
       'is_approved': isApproved,
       'is_teacher_upload': isTeacherUpload,
-      'status': isApproved ? 'approved' : 'pending',
       'created_at': createdAt.toIso8601String(),
     };
   }
@@ -112,11 +126,11 @@ class Resource {
   /// Check if resource is a video
   bool get isVideo {
     final url = fileUrl.toLowerCase();
-    return url.endsWith('.mp4') || 
-           url.endsWith('.mov') || 
-           url.endsWith('.webm') ||
-           url.contains('youtube.com') ||
-           url.contains('youtu.be');
+    return url.endsWith('.mp4') ||
+        url.endsWith('.mov') ||
+        url.endsWith('.webm') ||
+        url.contains('youtube.com') ||
+        url.contains('youtu.be');
   }
 
   /// Get resource type icon name
@@ -136,7 +150,7 @@ class Resource {
   String get formattedDate {
     final now = DateTime.now();
     final difference = now.difference(createdAt);
-    
+
     if (difference.inDays == 0) {
       if (difference.inHours == 0) {
         if (difference.inMinutes <= 0) {
