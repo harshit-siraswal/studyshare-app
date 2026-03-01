@@ -3,17 +3,37 @@
 
 class AppConfig {
   static const String _defaultApiUrl = 'https://api.studyshare.in';
+  static const String _defaultSupabaseUrl =
+      'https://iayuwsvguwfqjgjsvjiy.supabase.co';
+  static const String _defaultSupabaseAnonKey =
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlheXV3c3ZndXdmcWpnanN2aml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYwNTE5MTEsImV4cCI6MjA4MTYyNzkxMX0.EQhiq-yv9QLBNL_kmT5P59AZPykQkEZwbNbilxquYOA';
+  // Secrets must be injected at build time via --dart-define.
+  static const String _defaultGiphyApiKey = '';
+  static const String _defaultRemoveBgApiKey = '';
 
   // Supabase Configuration
-  static const String supabaseUrl = String.fromEnvironment(
+  static const String _supabaseUrlFromEnv = String.fromEnvironment(
     'SUPABASE_URL',
-    defaultValue: 'https://iayuwsvguwfqjgjsvjiy.supabase.co',
+    defaultValue: _defaultSupabaseUrl,
   );
-  static const String supabaseAnonKey = String.fromEnvironment(
+  static const String _supabaseAnonKeyFromEnv = String.fromEnvironment(
     'SUPABASE_ANON_KEY',
-    defaultValue:
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlheXV3c3ZndXdmcWpnanN2aml5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYwNTE5MTEsImV4cCI6MjA4MTYyNzkxMX0.EQhiq-yv9QLBNL_kmT5P59AZPykQkEZwbNbilxquYOA',
+    defaultValue: _defaultSupabaseAnonKey,
   );
+  static String get supabaseUrl {
+    final trimmed = _supabaseUrlFromEnv.trim();
+    if (trimmed.isEmpty || trimmed == 'https://your-project.supabase.co') {
+      return _defaultSupabaseUrl;
+    }
+    return trimmed;
+  }
+  static String get supabaseAnonKey {
+    final trimmed = _supabaseAnonKeyFromEnv.trim();
+    if (trimmed.isEmpty || trimmed == 'your-anon-key') {
+      return _defaultSupabaseAnonKey;
+    }
+    return trimmed;
+  }
 
   // Cloudinary Configuration
   static const String cloudinaryCloudName = 'dvttcyf7u';
@@ -85,12 +105,13 @@ class AppConfig {
   // Giphy API Key (Get from Giphy Developers Dashboard: developers.giphy.com)
   static const String giphyApiKey = String.fromEnvironment(
     'GIPHY_API_KEY',
-    defaultValue: '',
+    defaultValue: _defaultGiphyApiKey,
   );
 
   /// remove.bg API key for sticker background removal.
   static const String removeBgApiKey = String.fromEnvironment(
     'REMOVE_BG_API_KEY',
+    defaultValue: _defaultRemoveBgApiKey,
   );
 
   static String get removeBgApiKeyOrThrow {
@@ -115,11 +136,20 @@ class AppConfig {
     final warnings = <String>[];
 
     // Critical: Supabase
-    if (supabaseUrl.isEmpty ||
-        supabaseUrl == 'https://your-project.supabase.co') {
+    if (_supabaseUrlFromEnv.trim() == 'https://your-project.supabase.co') {
+      warnings.add(
+        'SUPABASE_URL contains placeholder value; using fallback configuration.',
+      );
+    }
+    if (_supabaseAnonKeyFromEnv.trim() == 'your-anon-key') {
+      warnings.add(
+        'SUPABASE_ANON_KEY contains placeholder value; using fallback configuration.',
+      );
+    }
+    if (supabaseUrl.isEmpty) {
       errors.add('Supabase URL is not configured');
     }
-    if (supabaseAnonKey.isEmpty || supabaseAnonKey == 'your-anon-key') {
+    if (supabaseAnonKey.isEmpty) {
       errors.add('Supabase Anon Key is not configured');
     }
 
@@ -145,7 +175,9 @@ class AppConfig {
 
     // Razorpay Check
     if (razorpayKeyId.isEmpty) {
-      warnings.add('RAZORPAY_KEY_ID not set - Payment features will be disabled');
+      warnings.add(
+        'RAZORPAY_KEY_ID not set - Payment features will be disabled',
+      );
     }
 
     return ValidationResult(errors, warnings);

@@ -12,6 +12,7 @@ import 'dart:convert';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'dart:io' show Platform;
+import 'dart:collection';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -54,6 +55,40 @@ String? _getCollegeIdFromPrefs(SharedPreferences prefs) {
     debugPrint('Error decoding selectedCollege JSON: $e');
   }
   return prefs.getString('selectedCollegeId');
+}
+
+final Queue<String> _pendingDeepLinks = Queue<String>();
+bool _isProcessingPendingDeepLinks = false;
+bool _deepLinkProcessingScheduled = false;
+
+void queueDeepLink(String actionUrl) {
+  if (actionUrl.isEmpty) return;
+  if (_pendingDeepLinks.contains(actionUrl)) return;
+  _pendingDeepLinks.addLast(actionUrl);
+  debugPrint('Queued deep link for later navigation: $actionUrl');
+  if (appNavigatorKey.currentState != null) {
+    unawaited(processPendingDeepLinks());
+  }
+}
+
+Future<void> processPendingDeepLinks() async {
+  if (_isProcessingPendingDeepLinks || _pendingDeepLinks.isEmpty) return;
+  final navigatorState = appNavigatorKey.currentState;
+  if (navigatorState == null) return;
+
+  _isProcessingPendingDeepLinks = true;
+  try {
+    while (_pendingDeepLinks.isNotEmpty) {
+      final deepLink = _pendingDeepLinks.removeFirst();
+      try {
+        await navigatorState.pushNamed(deepLink);
+      } catch (e) {
+        debugPrint('Failed to process queued deep link "$deepLink": $e');
+      }
+    }
+  } finally {
+    _isProcessingPendingDeepLinks = false;
+  }
 }
 
 /// Request necessary app permissions
@@ -118,8 +153,8 @@ void main() async {
       // Use debugPrint for logged output (print may be stripped or swallowed)
       debugPrint('CRITICAL CONFIG ERROR: $error');
     }
-    throw Exception(
-      'App Configuration Failed: ${configResult.errors.join(", ")}',
+    debugPrint(
+      'Continuing startup with fallback/default configuration values.',
     );
   }
 
@@ -165,6 +200,7 @@ class _AppRootState extends State<AppRoot> {
   StreamSubscription? _authStateSubscription;
   bool _firebaseInitialized = false;
   String? _lastRegisteredFcmToken;
+  static const String _fcmOwnerEmailKey = 'fcm_token_owner_email';
 
   ThemeMode get _bootThemeMode {
     final savedTheme = _prefs?.getString('theme_mode');
@@ -188,17 +224,79 @@ class _AppRootState extends State<AppRoot> {
     _authStateSubscription?.cancel();
     _authStateSubscription = _authService.authStateChanges.listen((user) async {
       if (user == null) {
-        _lastRegisteredFcmToken = null;
+        await _handleSignedOutFcmState();
         return;
       }
-      await _syncStoredFcmToken();
+      final normalizedEmail = user.email?.trim().toLowerCase();
+      if (normalizedEmail == null || normalizedEmail.isEmpty) {
+        debugPrint('Skipping FCM sync: signed-in user has no email.');
+        return;
+      }
+      await _syncStoredFcmToken(currentEmail: normalizedEmail);
     });
   }
 
-  Future<void> _syncStoredFcmToken() async {
+  Future<void> _syncStoredFcmToken({String? currentEmail}) async {
     final token = _pushService.fcmToken ?? await _pushService.getSavedToken();
     if (token == null || token.isEmpty) return;
+    await _ensureFcmTokenOwnership(token, currentEmail: currentEmail);
+  }
+
+  Future<void> _handleSignedOutFcmState() async {
+    final prefs = await SharedPreferences.getInstance();
+    final hadRegisteredOwner =
+        (prefs.getString(_fcmOwnerEmailKey)?.trim().isNotEmpty ?? false);
+
+    if (kIsWeb) {
+      _lastRegisteredFcmToken = null;
+      await prefs.remove(_fcmOwnerEmailKey);
+      return;
+    }
+
+    final token = _pushService.fcmToken ?? await _pushService.getSavedToken();
+    if (hadRegisteredOwner && token != null && token.isNotEmpty) {
+      await _unregisterFcmToken(token, reason: 'logout');
+    }
+
+    _lastRegisteredFcmToken = null;
+    await prefs.remove(_fcmOwnerEmailKey);
+  }
+
+  Future<void> _ensureFcmTokenOwnership(
+    String token, {
+    String? currentEmail,
+  }) async {
+    final normalizedEmail = (currentEmail ?? _authService.currentUser?.email)
+        ?.trim()
+        .toLowerCase();
+    if (normalizedEmail == null || normalizedEmail.isEmpty) {
+      debugPrint('Skipping FCM registration: no authenticated email.');
+      return;
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    final lastOwner = prefs.getString(_fcmOwnerEmailKey)?.trim().toLowerCase();
+    if (lastOwner != null &&
+        lastOwner.isNotEmpty &&
+        lastOwner != normalizedEmail) {
+      await _unregisterFcmToken(token, reason: 'account_switch');
+      _lastRegisteredFcmToken = null;
+    }
+
     await _registerFcmTokenIfAuthenticated(token);
+    await prefs.setString(_fcmOwnerEmailKey, normalizedEmail);
+  }
+
+  Future<void> _unregisterFcmToken(
+    String token, {
+    required String reason,
+  }) async {
+    try {
+      await _backendApi.deleteFcmToken(token);
+      debugPrint('FCM token unregistered from backend ($reason).');
+    } catch (e) {
+      debugPrint('Failed to unregister FCM token ($reason): $e');
+    }
   }
 
   Future<void> _registerFcmTokenIfAuthenticated(String token) async {
@@ -214,6 +312,11 @@ class _AppRootState extends State<AppRoot> {
       final platform = Platform.isIOS ? 'ios' : 'android';
       await _backendApi.registerFcmToken(token: token, platform: platform);
       _lastRegisteredFcmToken = token;
+      final email = _authService.currentUser?.email?.trim().toLowerCase();
+      if (email != null && email.isNotEmpty) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_fcmOwnerEmailKey, email);
+      }
       debugPrint('FCM token registered with backend');
     } catch (e) {
       debugPrint('Failed to register FCM token: $e');
@@ -262,6 +365,12 @@ class _AppRootState extends State<AppRoot> {
 
       if (connectivityResult.contains(ConnectivityResult.none)) {
         if (mounted) setState(() => _appState = AppState.noConnection);
+        return;
+      }
+
+      final hasPermissions = await _requestPermissions();
+      if (!hasPermissions) {
+        if (mounted) setState(() => _appState = AppState.permissionError);
         return;
       }
 
@@ -333,9 +442,6 @@ class _AppRootState extends State<AppRoot> {
   }
 
   Future<void> _continueStartup() async {
-    // We defer _requestPermissions() so it doesn't block the UI thread during startup.
-    // It will be called lazily later when needed by specific features.
-
     // Bind auth-aware FCM sync now that Supabase is ready
     if (_firebaseInitialized) {
       _bindAuthAwareFcmSync();
@@ -351,7 +457,7 @@ class _AppRootState extends State<AppRoot> {
 
         await _pushService.initialize(
           onTokenRefresh: (token) async {
-            await _registerFcmTokenIfAuthenticated(token);
+            await _ensureFcmTokenOwnership(token);
           },
           onMessageReceived: (message) {
             debugPrint('Foreground message: ${message.notification?.title}');
@@ -369,7 +475,16 @@ class _AppRootState extends State<AppRoot> {
                 if (actionUrl.startsWith('/')) {
                   // Internal navigation using global navigator key
                   debugPrint('Internal navigation to $actionUrl requested');
-                  await appNavigatorKey.currentState?.pushNamed(actionUrl);
+                  final navigatorState = appNavigatorKey.currentState;
+                  if (navigatorState == null) {
+                    debugPrint(
+                      'Navigator not mounted. Skipping deep link now: '
+                      '$actionUrl',
+                    );
+                    queueDeepLink(actionUrl);
+                  } else {
+                    await navigatorState.pushNamed(actionUrl);
+                  }
                 } else {
                   // External navigation
                   final uri = Uri.parse(actionUrl);
@@ -538,7 +653,7 @@ class StudySpaceApp extends StatelessWidget {
                 GlobalWidgetsLocalizations.delegate,
                 GlobalCupertinoLocalizations.delegate,
               ],
-              supportedLocales: const [Locale('en')],
+              supportedLocales: AppLocalizations.supportedLocales,
               navigatorKey: appNavigatorKey,
               theme: lightTheme,
               darkTheme: darkTheme,
@@ -572,10 +687,13 @@ class StudySpaceApp extends StatelessWidget {
                         builder: (context) {
                           WidgetsBinding.instance.addPostFrameCallback((_) {
                             if (context.mounted) {
+                              final l10n = AppLocalizations.of(context);
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
+                                SnackBar(
                                   content: Text(
-                                    'Please select a college before opening deep links.',
+                                    l10n?.selectCollegeBeforeDeepLink ??
+                                        'Please select a college before '
+                                            'opening deep links.',
                                   ),
                                 ),
                               );
@@ -592,12 +710,20 @@ class StudySpaceApp extends StatelessWidget {
                 }
                 return null;
               },
-              builder: (context, child) => RepaintBoundary(
-                key: appBoundaryKey,
-                child: GlobalTimerOverlay(
-                  child: child ?? const SizedBox.shrink(),
-                ),
-              ),
+              builder: (context, child) {
+                if (!_deepLinkProcessingScheduled) {
+                  _deepLinkProcessingScheduled = true;
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    processPendingDeepLinks();
+                  });
+                }
+                return RepaintBoundary(
+                  key: appBoundaryKey,
+                  child: GlobalTimerOverlay(
+                    child: child ?? const SizedBox.shrink(),
+                  ),
+                );
+              },
             );
           },
         );
@@ -720,6 +846,12 @@ class _AppRouterState extends State<AppRouter> {
 
     try {
       final banResult = await _authService.checkBanStatus(email, collegeId);
+      if (banResult?['banCheckSkipped'] == true) {
+        debugPrint(
+          'Ban check skipped for $email in college $collegeId; allowing access in limited verification mode.',
+        );
+        return const _AuthGateResult.allowed();
+      }
       if (banResult?['isBanned'] == true) {
         final reason =
             (banResult?['reason'] ??
@@ -924,12 +1056,19 @@ class _NoConnectionScreenState extends State<NoConnectionScreen> {
           );
         }
       }
-    } catch (e) {
+    } catch (e, stack) {
+      debugPrint('Connection check failed: $e\n$stack');
       if (mounted) {
         setState(() => _isRetrying = false);
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Connection check failed: $e')));
+        final l10n = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              l10n?.connectionCheckFailed ??
+                  'Connection check failed. Please try again.',
+            ),
+          ),
+        );
       }
     }
   }
@@ -1062,6 +1201,18 @@ class _NoticeDeepLinkLoaderState extends State<NoticeDeepLinkLoader> {
     } catch (e, stack) {
       debugPrint('NoticeDeepLinkLoader error: $e\n$stack');
       if (mounted) {
+        final l10n = AppLocalizations.of(context);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              l10n?.noticeLoadFailed ??
+                  'Unable to open that notice right now. Please try again.',
+            ),
+            duration: const Duration(milliseconds: 1200),
+          ),
+        );
+        await Future.delayed(const Duration(milliseconds: 1200));
+        if (!mounted) return;
         if (Navigator.canPop(context)) {
           Navigator.pop(context);
         } else {
