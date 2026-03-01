@@ -21,6 +21,7 @@ class _SavedPostsScreenState extends State<SavedPostsScreen> {
 
   List<Map<String, dynamic>> _savedPosts = [];
   bool _isLoading = true;
+  String? _errorMessage;
 
   @override
   void initState() {
@@ -29,8 +30,20 @@ class _SavedPostsScreenState extends State<SavedPostsScreen> {
   }
 
   Future<void> _loadSavedPosts() async {
-    final email = widget.userEmail;
-    if (email.isEmpty) return;
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
+
+    final email = widget.userEmail.trim().isNotEmpty
+        ? widget.userEmail.trim()
+        : (_authService.userEmail ?? '').trim();
+    if (email.isEmpty) {
+      if (mounted) setState(() => _isLoading = false);
+      return;
+    }
 
     try {
       final posts = await _supabaseService.getSavedPosts(email);
@@ -38,10 +51,17 @@ class _SavedPostsScreenState extends State<SavedPostsScreen> {
         setState(() {
           _savedPosts = posts;
           _isLoading = false;
+          _errorMessage = null;
         });
       }
     } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
+      debugPrint('SavedPostsScreen._loadSavedPosts error: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Failed to load saved posts. Please try again.';
+        });
+      }
     }
   }
 
@@ -71,6 +91,30 @@ class _SavedPostsScreenState extends State<SavedPostsScreen> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
+          : _errorMessage != null
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _errorMessage!,
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        color: isDark ? Colors.white70 : Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    ElevatedButton(
+                      onPressed: _loadSavedPosts,
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              ),
+            )
           : _savedPosts.isEmpty
           ? Center(
               child: Column(
@@ -104,9 +148,15 @@ class _SavedPostsScreenState extends State<SavedPostsScreen> {
   }
 
   Widget _buildSavedPostCard(Map<String, dynamic> post, bool isDark) {
-    final content = post['content'] ?? '';
-    final authorName = post['author_name'] ?? 'Unknown';
-    final createdRaw = post['_saved_at'] ?? post['created_at'] ?? '';
+    final content = (post['content'] ?? '').toString();
+    final authorName = (post['author_name'] ?? post['authorName'] ?? 'Unknown')
+        .toString();
+    final createdRaw =
+        post['_saved_at'] ??
+        post['savedAt'] ??
+        post['created_at'] ??
+        post['postedAt'] ??
+        '';
     final createdAt =
         DateTime.tryParse(createdRaw.toString()) ?? DateTime.now();
     final timeAgo = _formatTimeAgo(createdAt);
@@ -122,22 +172,40 @@ class _SavedPostsScreenState extends State<SavedPostsScreen> {
 
     return GestureDetector(
       onTap: () {
+        final postId =
+            (post['id'] ?? post['message_id'] ?? post['messageId'] ?? '')
+                .toString()
+                .trim();
+        if (postId.isEmpty) return;
+
         // We need collegeDomain for PostDetailScreen.
         // We can try to infer it or just pass empty if not actively used for view.
         // Assuming user is logged in, we can use their domain or fetch the college.
         // For simplicity, passing a placeholder or extracting from user email if available.
-        final userEmail = _authService.userEmail ?? '';
-        final domain = userEmail.split('@').last;
+        final userEmail = widget.userEmail.trim().isNotEmpty
+            ? widget.userEmail.trim()
+            : (_authService.userEmail ?? '');
+        final domain = userEmail.isNotEmpty && userEmail.contains('@')
+            ? userEmail.split('@').last
+            : '';
+        final roomId =
+            (post['_saved_room_id'] ?? post['room_id'] ?? post['roomId'] ?? '')
+                .toString()
+                .trim();
+        final normalizedPost = <String, dynamic>{
+          ...post,
+          'id': postId,
+          'room_id': roomId,
+        };
 
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (_) => PostDetailScreen(
-              post: post,
+              post: normalizedPost,
               userEmail: userEmail,
               collegeDomain: domain,
-              roomId: (post['_saved_room_id'] ?? post['room_id'] ?? '')
-                  .toString(),
+              roomId: roomId,
               isRoomAdmin: false,
             ),
           ),

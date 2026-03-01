@@ -24,7 +24,7 @@ import '../services/summary_pdf_service.dart';
 import '../services/supabase_service.dart';
 import '../controllers/ai_chat_animation_controller.dart';
 import '../widgets/ai_chat_message_bubble.dart';
-import '../widgets/branded_loader.dart';
+import '../widgets/kinetic_dots_loader.dart';
 import '../widgets/onboarding_overlay.dart';
 import 'ai_question_paper_quiz_screen.dart';
 import 'viewer/pdf_viewer_screen.dart';
@@ -1493,10 +1493,19 @@ class _AIChatScreenState extends State<AIChatScreen>
     required String branch,
     required String inferredSubject,
     required int contextResourcesCount,
+    bool strictAntiPlaceholder = false,
   }) {
     final subjectLine = inferredSubject.trim().isEmpty
         ? 'Infer from attached notes and PYQs'
         : inferredSubject.trim();
+    final qualityGate = strictAntiPlaceholder
+        ? '''
+Additional quality gate (must pass):
+- Do not use placeholder values such as "Question text", "A option", or "Subject Name".
+- Return at least 12 unique subject-relevant questions.
+- Ensure options are distinct and answers match one of the options.
+'''
+        : '';
     return '''
 Generate a university-style question paper quiz.
 User request: "$userPrompt"
@@ -1512,28 +1521,92 @@ Requirements:
 4) Include one correct answer.
 5) Include concise explanation.
 6) For each question include source mapping in "source" using title/section/pages.
+$qualityGate
 
-Return STRICT JSON only (no markdown):
+Return STRICT JSON only (no markdown). Schema:
 {
-  "title": "Question Paper",
-  "subject": "Subject Name",
-  "instructions": ["instruction 1", "instruction 2"],
+  "title": "<specific paper title>",
+  "subject": "<exact subject name>",
+  "instructions": ["<instruction 1>", "<instruction 2>"],
   "questions": [
     {
-      "question": "Question text",
-      "options": ["A option", "B option", "C option", "D option"],
-      "answer": "A",
-      "explanation": "Short reason",
+      "question": "<question statement>",
+      "options": ["<option A>", "<option B>", "<option C>", "<option D>"],
+      "answer": "<A|B|C|D>",
+      "explanation": "<short reason>",
       "source": {
-        "title": "Document title",
-        "section": "Chapter or topic",
-        "pages": "12-14",
-        "note": "Any supporting reference"
+        "title": "<document title>",
+        "section": "<chapter or topic>",
+        "pages": "<page range>",
+        "note": "<supporting note>"
       }
     }
   ]
 }
 ''';
+  }
+
+  String _normalizeTemplateToken(String value) {
+    return value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
+  }
+
+  bool _isTemplateToken(String value) {
+    final token = _normalizeTemplateToken(value);
+    if (token.isEmpty) return true;
+    const templateTokens = <String>{
+      'question text',
+      'subject name',
+      'a option',
+      'b option',
+      'c option',
+      'd option',
+      'option a',
+      'option b',
+      'option c',
+      'option d',
+      'question statement',
+      'specific paper title',
+      'exact subject name',
+    };
+    return templateTokens.contains(token);
+  }
+
+  bool _isPlaceholderQuestion({
+    required String question,
+    required List<String> options,
+  }) {
+    if (_isTemplateToken(question)) return true;
+    if (options.isEmpty) return true;
+    var templateOptionCount = 0;
+    for (final option in options) {
+      if (_isTemplateToken(option)) {
+        templateOptionCount++;
+      }
+    }
+    return templateOptionCount >= 2;
+  }
+
+  bool _isLowQualityQuestionPaper(AiQuestionPaper paper) {
+    if (paper.questions.length < 5) return true;
+    if (_isTemplateToken(paper.subject) || _isTemplateToken(paper.title)) {
+      return true;
+    }
+
+    var placeholderCount = 0;
+    final normalizedQuestions = <String>{};
+    for (final q in paper.questions) {
+      if (_isPlaceholderQuestion(question: q.question, options: q.options)) {
+        placeholderCount++;
+      }
+      normalizedQuestions.add(_normalizeTemplateToken(q.question));
+    }
+
+    if (placeholderCount > 0) return true;
+    final duplicateRatio =
+        1 -
+        (normalizedQuestions.length / paper.questions.length.clamp(1, 9999));
+    if (duplicateRatio > 0.35) return true;
+    return false;
   }
 
   AiQuestionPaper? _parseQuestionPaper({
@@ -1571,6 +1644,9 @@ Return STRICT JSON only (no markdown):
             .where((opt) => opt.isNotEmpty)
             .toList();
         if (questionText.isEmpty || options.length < 2) continue;
+        if (_isPlaceholderQuestion(question: questionText, options: options)) {
+          continue;
+        }
 
         final sourceRaw = raw['source'];
         final source = sourceRaw is Map
@@ -1600,6 +1676,9 @@ Return STRICT JSON only (no markdown):
     if (questions.isEmpty) {
       questions.addAll(_parsePlainTextMcqs(rawResponse));
     }
+    questions.removeWhere(
+      (q) => _isPlaceholderQuestion(question: q.question, options: q.options),
+    );
     if (questions.isEmpty) return null;
     if (subject.isEmpty) subject = 'General';
 
@@ -1659,56 +1738,73 @@ Return STRICT JSON only (no markdown):
         ...attachmentPayload,
         ...contextAttachments,
       ];
-      final prompt = _buildQuestionPaperPrompt(
-        userPrompt: userPrompt,
-        semester: config.semester,
-        branch: config.branch,
-        inferredSubject: inferredSubject,
-        contextResourcesCount: contextAttachments.length,
-      );
-
-      final response = await _api.queryRag(
-        question: prompt,
-        collegeId: widget.collegeId,
-        fileId: widget.resourceContext?.fileId,
-        allowWeb: false,
-        useOcr: true,
-        forceOcr: true,
-        ocrProvider: 'google_vision',
-        attachments: mergedAttachments,
-        history: history,
-        filters: contextFilters,
-      );
-      final answer = _extractRagAnswer(response);
-      final paper = _parseQuestionPaper(
-        rawResponse: answer,
-        semester: config.semester,
-        branch: config.branch,
-        fallbackSubject: inferredSubject,
-        contextResourceCount: contextAttachments.length,
-      );
+      var lastAnswer = '';
+      AiQuestionPaper? paper;
+      for (var attempt = 0; attempt < 2 && paper == null; attempt++) {
+        final strictMode = attempt == 1;
+        final prompt = _buildQuestionPaperPrompt(
+          userPrompt: userPrompt,
+          semester: config.semester,
+          branch: config.branch,
+          inferredSubject: inferredSubject,
+          contextResourcesCount: contextAttachments.length,
+          strictAntiPlaceholder: strictMode,
+        );
+        final response = await _api.queryRag(
+          question: prompt,
+          collegeId: widget.collegeId,
+          fileId: widget.resourceContext?.fileId,
+          allowWeb: strictMode || contextAttachments.isEmpty,
+          useOcr: true,
+          forceOcr: true,
+          ocrProvider: 'google_vision',
+          attachments: mergedAttachments,
+          history: history,
+          filters: contextFilters,
+        );
+        final answer = _extractRagAnswer(response);
+        lastAnswer = answer;
+        final candidate = _parseQuestionPaper(
+          rawResponse: answer,
+          semester: config.semester,
+          branch: config.branch,
+          fallbackSubject: inferredSubject,
+          contextResourceCount: contextAttachments.length,
+        );
+        if (candidate == null) continue;
+        if (_isLowQualityQuestionPaper(candidate)) {
+          debugPrint(
+            'Discarded low-quality question paper response '
+            '(attempt=${attempt + 1}).',
+          );
+          continue;
+        }
+        paper = candidate;
+      }
 
       if (paper == null) {
         setState(() {
           _messages.add(
             AIChatMessage(
               isUser: false,
-              content: answer.trim().isEmpty
-                  ? 'Failed to generate question paper from attachments.'
-                  : answer,
+              content: lastAnswer.trim().isEmpty
+                  ? 'Failed to generate a valid question paper. Try again '
+                        'with more specific subject details or add notes.'
+                  : lastAnswer,
             ),
           );
         });
         await _persistCurrentSession();
         return;
       }
+      final generatedPaper = paper;
 
       setState(() {
         _messages.add(
           AIChatMessage(
             isUser: false,
-            content: _buildQuestionPaperSummary(paper),
-            quizActionPaper: paper,
+            content: _buildQuestionPaperSummary(generatedPaper),
+            quizActionPaper: generatedPaper,
           ),
         );
       });
@@ -1991,10 +2087,39 @@ Return STRICT JSON only (no markdown):
             _enqueueTypedChunk(aiMessage, '\n\nError: ${chunk['message']}');
           } else if (type == 'done') {
             // Done
+          } else {
+            final textChunk =
+                chunk['text']?.toString() ??
+                chunk['answer']?.toString() ??
+                chunk['response']?.toString() ??
+                '';
+            if (textChunk.trim().isNotEmpty) {
+              receivedContent = true;
+              _enqueueTypedChunk(aiMessage, textChunk);
+            }
+            final sourcesRaw = (chunk['sources'] as List?) ?? const [];
+            if (sourcesRaw.isNotEmpty) {
+              final sources = sourcesRaw
+                  .whereType<Map>()
+                  .map((s) => RagSource.fromJson(Map<String, dynamic>.from(s)))
+                  .toList();
+              if (sources.isNotEmpty) {
+                setState(() {
+                  aiMessage.sources = sources;
+                  aiMessage.noLocal = chunk['no_local'] == true;
+                });
+              }
+            }
           }
         } catch (e, st) {
-          debugPrint('Chunk parse error: $e\nStack: $st');
-          malformedChunkCount++;
+          final fallbackText = chunkStr.trim();
+          if (fallbackText.isNotEmpty) {
+            receivedContent = true;
+            _enqueueTypedChunk(aiMessage, fallbackText);
+          } else {
+            debugPrint('Chunk parse error: $e\nStack: $st');
+            malformedChunkCount++;
+          }
         }
       }
 
@@ -2935,10 +3060,9 @@ Return STRICT JSON only (no markdown):
                                 borderRadius: typingBorderRadius,
                                 boxShadow: [typingShadow],
                               ),
-                              child: const BrandedLoader(
+                              child: const KineticDotsLoader(
                                 compact: true,
-                                showQuotes: false,
-                                message: 'Thinking...',
+                                label: 'Thinking...',
                               ),
                             ),
                           );

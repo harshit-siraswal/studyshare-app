@@ -1605,8 +1605,62 @@ class SupabaseService {
     }
   }
 
+  Map<String, dynamic> _normalizeSavedPostFromBackend(
+    Map<String, dynamic> raw,
+  ) {
+    final messageId = (raw['messageId'] ?? raw['message_id'] ?? '')
+        .toString()
+        .trim();
+    final fallbackId = (raw['id'] ?? '').toString().trim();
+    final effectiveMessageId = messageId.isNotEmpty ? messageId : fallbackId;
+    final roomId = (raw['roomId'] ?? raw['room_id'] ?? '').toString().trim();
+    final savedAt = raw['savedAt'] ?? raw['saved_at'] ?? raw['created_at'];
+    final postedAt = raw['postedAt'] ?? raw['posted_at'] ?? raw['created_at'];
+    final content = (raw['content'] ?? raw['message'] ?? '').toString();
+    final authorName = (raw['authorName'] ?? raw['author_name'] ?? 'Unknown')
+        .toString();
+    final authorEmail = (raw['authorEmail'] ?? raw['author_email'])?.toString();
+    final imageUrl = (raw['imageUrl'] ?? raw['image_url'])?.toString();
+    final upvotesRaw = raw['upvotes'] ?? raw['up_votes'];
+    final downvotesRaw = raw['downvotes'] ?? raw['down_votes'];
+    final commentCountRaw = raw['commentCount'] ?? raw['comment_count'];
+
+    return {
+      'id': effectiveMessageId,
+      'message_id': effectiveMessageId,
+      'content': content,
+      'image_url': imageUrl,
+      'author_name': authorName,
+      'author_email': authorEmail,
+      'created_at': postedAt,
+      'upvotes': upvotesRaw is num ? upvotesRaw.toInt() : 0,
+      'downvotes': downvotesRaw is num ? downvotesRaw.toInt() : 0,
+      'comment_count': commentCountRaw is num ? commentCountRaw.toInt() : 0,
+      'room_id': roomId,
+      'room_name': raw['roomName'] ?? raw['room_name'],
+      '_saved_at': savedAt,
+      '_saved_room_id': roomId,
+      '_saved_post_id': fallbackId.isNotEmpty ? fallbackId : null,
+    };
+  }
+
+  Future<List<Map<String, dynamic>>> _getSavedPostsFromBackend() async {
+    final saved = await _api.getSavedPosts();
+    return saved
+        .map(_normalizeSavedPostFromBackend)
+        .where((row) => (row['id']?.toString().trim().isNotEmpty ?? false))
+        .toList();
+  }
+
   /// Check if a post is saved
   Future<bool> isPostSaved(String postId, String userEmail) async {
+    try {
+      final savedPosts = await _getSavedPostsFromBackend();
+      return savedPosts.any((row) => row['id']?.toString() == postId);
+    } catch (_) {
+      // Fallback to direct Supabase read for compatibility.
+    }
+
     try {
       final response = await _client
           .from('saved_posts')
@@ -1659,6 +1713,17 @@ class SupabaseService {
   /// Get all saved post IDs for a user (Batch Optimization)
   Future<Set<String>> getSavedPostIds(String userEmail) async {
     try {
+      final savedPosts = await _getSavedPostsFromBackend();
+      return savedPosts
+          .map((row) => row['id']?.toString())
+          .where((id) => id != null && id.isNotEmpty)
+          .cast<String>()
+          .toSet();
+    } catch (_) {
+      // Fallback to direct Supabase read for compatibility.
+    }
+
+    try {
       final normalizedEmail = _normalizeEmail(userEmail);
       final response = await _client
           .from('saved_posts')
@@ -1691,6 +1756,16 @@ class SupabaseService {
 
   /// Get all saved posts for a user
   Future<List<Map<String, dynamic>>> getSavedPosts(String userEmail) async {
+    try {
+      final backendPosts = await _getSavedPostsFromBackend();
+      if (backendPosts.isNotEmpty) {
+        return backendPosts;
+      }
+      // If backend returns empty, continue with direct Supabase lookup as fallback.
+    } catch (_) {
+      // Continue with direct Supabase fallback.
+    }
+
     try {
       final normalizedEmail = _normalizeEmail(userEmail);
       final savedRows = await _client
@@ -2284,7 +2359,8 @@ class SupabaseService {
           .eq('email', normalizedEmail)
           .maybeSingle();
       if (userRes != null) {
-        final profileFollows = userRes['followed_departments'] as List<dynamic>? ?? [];
+        final profileFollows =
+            userRes['followed_departments'] as List<dynamic>? ?? [];
         for (final id in profileFollows) {
           if (id != null) finalSet.add(id.toString());
         }
