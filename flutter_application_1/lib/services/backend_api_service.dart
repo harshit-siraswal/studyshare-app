@@ -1,4 +1,4 @@
-﻿import 'dart:convert';
+import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
@@ -10,15 +10,25 @@ import '../config/app_config.dart';
 /// This avoids client-side Supabase inserts that fail under RLS with anon key.
 class BackendApiService {
   BackendApiService({FirebaseAuth? firebaseAuth})
-    : _auth = firebaseAuth ?? FirebaseAuth.instance;
+    : _injectedAuth = firebaseAuth;
 
-  final FirebaseAuth _auth;
+  final FirebaseAuth? _injectedAuth;
+
+  FirebaseAuth? get _auth {
+    if (_injectedAuth != null) return _injectedAuth;
+    try {
+      return FirebaseAuth.instance;
+    } catch (e) {
+      debugPrint('[BackendApi] FirebaseAuth unavailable during startup: $e');
+      return null;
+    }
+  }
 
   String get _baseUrl =>
       AppConfig.apiUrl; // e.g. https://studyspace-backend.onrender.com
 
   Future<String?> _getIdToken() async {
-    final user = _auth.currentUser;
+    final user = _auth?.currentUser;
     if (user == null) return null;
     try {
       return await user.getIdToken();
@@ -227,11 +237,7 @@ class BackendApiService {
     Map<String, dynamic> input, {
     required BuildContext context,
   }) async {
-    return _requestJson(
-      '/api/resources',
-      method: 'POST',
-      body: input,
-    );
+    return _requestJson('/api/resources', method: 'POST', body: input);
   }
 
   Future<Map<String, dynamic>> castVote({
@@ -349,10 +355,7 @@ class BackendApiService {
     required String noticeId,
     required BuildContext context,
   }) async {
-    return _requestJson(
-      '${_noticePath(noticeId)}/like',
-      method: 'POST',
-    );
+    return _requestJson('${_noticePath(noticeId)}/like', method: 'POST');
   }
 
   Future<Map<String, dynamic>> getNoticeLikes(String noticeId) async {
@@ -510,9 +513,9 @@ class BackendApiService {
   }
 
   Future<void> markNotificationRead(
-    Object id,
-    {BuildContext? contextForRecaptcha}
-  ) async {
+    Object id, {
+    BuildContext? contextForRecaptcha,
+  }) async {
     await _requestJson(
       '/api/notifications/${Uri.encodeComponent(id.toString())}/read',
       method: 'POST',
@@ -522,16 +525,13 @@ class BackendApiService {
   Future<void> markAllNotificationsRead({
     BuildContext? contextForRecaptcha,
   }) async {
-    await _requestJson(
-      '/api/notifications/read-all',
-      method: 'POST',
-    );
+    await _requestJson('/api/notifications/read-all', method: 'POST');
   }
 
   Future<void> deleteNotification(
-    Object id,
-    {BuildContext? contextForRecaptcha}
-  ) async {
+    Object id, {
+    BuildContext? contextForRecaptcha,
+  }) async {
     await _requestJson(
       '/api/notifications/${Uri.encodeComponent(id.toString())}',
       method: 'DELETE',
@@ -572,9 +572,8 @@ class BackendApiService {
       String message = 'Failed to update resource status';
       try {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
-        message = data['message']?.toString() ??
-            data['error']?.toString() ??
-            message;
+        message =
+            data['message']?.toString() ?? data['error']?.toString() ?? message;
       } catch (_) {
         if (res.body.trim().isNotEmpty) {
           message = res.body;
@@ -941,4 +940,3 @@ class BackendApiService {
     );
   }
 }
-

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shimmer/shimmer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -1401,7 +1402,9 @@ class _AIChatScreenState extends State<AIChatScreen>
     final merged = <_ChatAttachment>[..._stickyAttachments];
 
     for (final attachment in usedAttachments) {
-      final existingIndex = merged.indexWhere((item) => item.url == attachment.url);
+      final existingIndex = merged.indexWhere(
+        (item) => item.url == attachment.url,
+      );
       if (existingIndex != -1) {
         merged[existingIndex] = attachment;
       } else {
@@ -2192,6 +2195,14 @@ Return STRICT JSON only (no markdown):
     final textColor = msg.isUser
         ? Colors.white
         : (isDark ? Colors.white : Colors.black);
+    final isStreamingAssistantMessage =
+        !msg.isUser && _isLoading && index == _messages.length - 1;
+    final messageTextStyle = GoogleFonts.inter(
+      fontSize: isCompact ? 13.5 : 14,
+      height: 1.46,
+      color: textColor,
+      letterSpacing: 0.05,
+    );
 
     final messageBody = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2262,15 +2273,14 @@ Return STRICT JSON only (no markdown):
             ],
           ),
         if (!msg.isUser) const SizedBox(height: 8),
-        Text(
-          msg.content,
-          style: GoogleFonts.inter(
-            fontSize: isCompact ? 13.5 : 14,
-            height: 1.46,
-            color: textColor,
-            letterSpacing: 0.05,
-          ),
-        ),
+        if (isStreamingAssistantMessage)
+          Shimmer.fromColors(
+            baseColor: isDark ? Colors.white54 : Colors.black54,
+            highlightColor: isDark ? Colors.white : Colors.black87,
+            child: Text(msg.content, style: messageTextStyle),
+          )
+        else
+          Text(msg.content, style: messageTextStyle),
         if (!msg.isUser && msg.sources.isNotEmpty) ...[
           const SizedBox(height: 12),
           Text(
@@ -3044,7 +3054,8 @@ Return STRICT JSON only (no markdown):
                               ),
                             ),
                           ),
-                        if (_attachments.isEmpty && _stickyAttachments.isNotEmpty)
+                        if (_attachments.isEmpty &&
+                            _stickyAttachments.isNotEmpty)
                           Align(
                             alignment: Alignment.centerLeft,
                             child: Padding(
@@ -3060,7 +3071,9 @@ Return STRICT JSON only (no markdown):
                                       : Colors.black.withValues(alpha: 0.04),
                                   borderRadius: BorderRadius.circular(10),
                                   border: Border.all(
-                                    color: isDark ? Colors.white12 : Colors.black12,
+                                    color: isDark
+                                        ? Colors.white12
+                                        : Colors.black12,
                                   ),
                                 ),
                                 child: Row(
@@ -3077,7 +3090,9 @@ Return STRICT JSON only (no markdown):
                                       style: GoogleFonts.inter(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w600,
-                                        color: isDark ? Colors.white70 : Colors.black87,
+                                        color: isDark
+                                            ? Colors.white70
+                                            : Colors.black87,
                                       ),
                                     ),
                                     const SizedBox(width: 6),
@@ -3090,7 +3105,9 @@ Return STRICT JSON only (no markdown):
                                       child: Icon(
                                         Icons.close_rounded,
                                         size: 14,
-                                        color: isDark ? Colors.white54 : Colors.black45,
+                                        color: isDark
+                                            ? Colors.white54
+                                            : Colors.black45,
                                       ),
                                     ),
                                   ],

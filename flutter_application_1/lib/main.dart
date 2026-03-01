@@ -199,6 +199,7 @@ class _AppRootState extends State<AppRoot> {
   final AuthService _authService = AuthService();
   StreamSubscription? _authStateSubscription;
   bool _firebaseInitialized = false;
+  String? _initializationErrorMessage;
   String? _lastRegisteredFcmToken;
   static const String _fcmOwnerEmailKey = 'fcm_token_owner_email';
 
@@ -336,7 +337,10 @@ class _AppRootState extends State<AppRoot> {
 
   Future<void> initApp() async {
     if (!mounted) return;
-    setState(() => _appState = AppState.loading);
+    setState(() {
+      _appState = AppState.loading;
+      _initializationErrorMessage = null;
+    });
 
     try {
       late bool bootstrapped;
@@ -401,6 +405,9 @@ class _AppRootState extends State<AppRoot> {
             debugPrint('Firebase initialized successfully');
           } catch (e) {
             debugPrint('Firebase initialization error: $e');
+            _initializationErrorMessage =
+                'Firebase initialization failed. '
+                'Please verify Firebase config and restart.';
           }
         }(),
         // 3. Hive
@@ -432,9 +439,18 @@ class _AppRootState extends State<AppRoot> {
         }(),
       ]);
 
+      if (!_firebaseInitialized) {
+        _initializationErrorMessage ??=
+            'Firebase could not be initialized. '
+            'Please verify Firebase setup and try again.';
+        if (mounted) setState(() => _appState = AppState.initializationError);
+        return;
+      }
+
       await _continueStartup();
     } catch (e, st) {
       debugPrint('FATAL initApp error: $e\n$st');
+      _initializationErrorMessage = e.toString();
       if (mounted) {
         setState(() => _appState = AppState.initializationError);
       }
@@ -578,9 +594,10 @@ class _AppRootState extends State<AppRoot> {
                   style: TextStyle(fontSize: 18),
                 ),
                 const SizedBox(height: 8),
-                const Text(
-                  'An unexpected error occurred. Please restart the app.',
-                  style: TextStyle(color: Colors.grey, fontSize: 14),
+                Text(
+                  _initializationErrorMessage ??
+                      'An unexpected error occurred. Please restart the app.',
+                  style: const TextStyle(color: Colors.grey, fontSize: 14),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 24),
