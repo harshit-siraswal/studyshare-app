@@ -88,6 +88,8 @@ class AiStudyToolsSheet extends StatefulWidget {
 class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     with SingleTickerProviderStateMixin {
   final BackendApiService _api = BackendApiService();
+  static const Color _studioBlue = Color(0xFF2563EB);
+  static const Color _studioBlueDark = Color(0xFF1D4ED8);
 
   late TabController _tabController;
   bool _isLoading = false;
@@ -101,16 +103,16 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   List<QuizQuestion>? _quiz;
   List<Flashcard>? _flashcards;
 
-  bool _useOcr = false;
+  bool _useOcr = true;
   bool _forceOcr = false;
-  String _ocrProvider = 'google';
+  String _ocrProvider = 'google_vision';
   bool _showAnswers = false;
   final Map<int, String> _selectedAnswers = {};
   final Set<int> _flippedCardIndexes = <int>{};
 
   final Map<String, bool> _cachedMap = {};
   final Map<String, bool> _savedLocallyMap = {};
-  
+
   bool _isFullscreen = false;
 
   bool get _supportsOcr => widget.resourceType != 'video';
@@ -119,12 +121,12 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
   String _ocrProviderLabelFor(String provider) {
     switch (provider) {
-      case 'google':
-        return 'Google';
+      case 'google_vision':
+        return 'Google Vision';
       case 'sarvam':
         return 'Sarvam';
       default:
-        return 'Google';
+        return 'Google Vision';
     }
   }
 
@@ -132,7 +134,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   void initState() {
     super.initState();
     _ocrProviderController.text = _ocrProviderLabelFor(_ocrProvider);
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) return;
       if (mounted) setState(() {});
@@ -214,6 +216,8 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         return 'quiz';
       case 2:
         return 'flashcards';
+      case 3:
+        return 'chat';
       default:
         return 'summary';
     }
@@ -378,7 +382,8 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         summary: summary,
       );
       if (!mounted) return;
-      final box = _pdfButtonKey.currentContext?.findRenderObject() as RenderBox?;
+      final box =
+          _pdfButtonKey.currentContext?.findRenderObject() as RenderBox?;
       final sharePositionOrigin = (box != null && box.hasSize)
           ? box.localToGlobal(Offset.zero) & box.size
           : const Rect.fromLTWH(0, 0, 1, 1);
@@ -445,10 +450,10 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
       margin: const EdgeInsets.fromLTRB(16, 10, 16, 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkCard : const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(16),
+        color: isDark ? Colors.white.withValues(alpha: 0.03) : Colors.white.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: isDark ? AppTheme.darkBorder : const Color(0xFFE2E8F0),
+          color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.05),
         ),
       ),
       child: Column(
@@ -516,7 +521,10 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                     ),
                   ),
                   dropdownMenuEntries: const [
-                    DropdownMenuEntry(value: 'google', label: 'Google'),
+                    DropdownMenuEntry(
+                      value: 'google_vision',
+                      label: 'Google Vision',
+                    ),
                     DropdownMenuEntry(value: 'sarvam', label: 'Sarvam'),
                   ],
                   onSelected: (String? val) {
@@ -654,17 +662,17 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
           margin: const EdgeInsets.only(bottom: 12),
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: isDark ? AppTheme.darkCard : Colors.white,
+            color: isDark ? const Color(0xFF111A2A) : Colors.white,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: isDark ? AppTheme.darkBorder : const Color(0xFFE2E8F0),
+              color: isDark ? const Color(0xFF24324A) : const Color(0xFFD7E5FF),
             ),
             boxShadow: [
               if (!isDark)
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.03),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
+                  color: _studioBlue.withValues(alpha: 0.08),
+                  blurRadius: 18,
+                  offset: const Offset(0, 8),
                 ),
             ],
           ),
@@ -723,7 +731,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                     ? AppTheme.success.withValues(alpha: 0.16)
                     : isWrong
                     ? AppTheme.error.withValues(alpha: 0.16)
-                    : (isDark ? Colors.white10 : const Color(0xFFF8FAFC));
+                    : (isDark
+                          ? const Color(0xFF1A263B)
+                          : const Color(0xFFF3F8FF));
 
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 10),
@@ -859,18 +869,16 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
               borderRadius: BorderRadius.circular(18),
               gradient: LinearGradient(
                 colors: flipped
-                    ? [const Color(0xFF0EA5E9), const Color(0xFF2563EB)]
-                    : [const Color(0xFFF59E0B), const Color(0xFFEAB308)],
+                    ? [const Color(0xFF0EA5E9), _studioBlue]
+                    : [const Color(0xFF60A5FA), _studioBlueDark],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               boxShadow: [
                 BoxShadow(
-                  color:
-                      (flipped
-                              ? const Color(0xFF2563EB)
-                              : const Color(0xFFF59E0B))
-                          .withValues(alpha: 0.28),
+                  color: (flipped ? _studioBlue : _studioBlueDark).withValues(
+                    alpha: 0.28,
+                  ),
                   blurRadius: 16,
                   offset: const Offset(0, 8),
                 ),
@@ -943,6 +951,100 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     );
   }
 
+  Widget _buildChatTab(bool isDark) {
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: isDark ? Colors.white.withValues(alpha: 0.03) : Colors.white.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.05),
+          ),
+          boxShadow: [
+            if (!isDark)
+              BoxShadow(
+                color: _studioBlue.withValues(alpha: 0.08),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
+              ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: _studioBlue.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.chat_bubble_outline_rounded, size: 36, color: _studioBlue),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Study Chat',
+              style: GoogleFonts.inter(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : const Color(0xFF0F172A),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Ask questions, clarify doubts, and interact with an AI tutor trained specifically on this document.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                height: 1.5,
+                color: isDark ? Colors.white70 : const Color(0xFF475569),
+              ),
+            ),
+            const SizedBox(height: 28),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  if (widget.resourceId.isEmpty) return;
+                  final ctx = ResourceContext(
+                    fileId: widget.resourceId,
+                    title: widget.resourceTitle,
+                    subject: widget.subject,
+                    semester: widget.semester,
+                    branch: widget.branch,
+                  );
+                  final nav = Navigator.of(context);
+                  nav.pop();
+                  nav.push(
+                    MaterialPageRoute(
+                      builder: (_) => AIChatScreen(
+                        collegeId: widget.collegeId ?? '',
+                        collegeName: widget.collegeName ?? '',
+                        resourceContext: ctx,
+                      ),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.rocket_launch_rounded),
+                label: const Text('Start Chatting'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _studioBlue,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  elevation: 0,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildEmptyState({
     required bool isDark,
     required IconData icon,
@@ -954,10 +1056,10 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         margin: const EdgeInsets.all(20),
         padding: const EdgeInsets.all(22),
         decoration: BoxDecoration(
-          color: isDark ? AppTheme.darkCard : const Color(0xFFF8FAFC),
+          color: isDark ? const Color(0xFF111A2A) : const Color(0xFFF3F8FF),
           borderRadius: BorderRadius.circular(18),
           border: Border.all(
-            color: isDark ? AppTheme.darkBorder : const Color(0xFFE2E8F0),
+            color: isDark ? const Color(0xFF24324A) : const Color(0xFFD7E5FF),
           ),
         ),
         child: Column(
@@ -1045,87 +1147,142 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     final isSavedLocally = _savedLocallyMap[_activeType] == true;
 
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      curve: Curves.fastOutSlowIn,
-      height: _isFullscreen ? MediaQuery.of(context).size.height : MediaQuery.of(context).size.height * 0.88,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+      height: _isFullscreen
+          ? MediaQuery.of(context).size.height
+          : MediaQuery.of(context).size.height * 0.88,
       decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkSurface : Colors.white,
-        borderRadius: _isFullscreen ? BorderRadius.zero : const BorderRadius.vertical(top: Radius.circular(26)),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: isDark
+              ? [const Color(0xFF0A1120).withValues(alpha: 0.85), const Color(0xFF040810).withValues(alpha: 0.95)]
+              : [const Color(0xFFFFFFFF).withValues(alpha: 0.9), const Color(0xFFF0F5FF).withValues(alpha: 0.95)],
+        ),
+        borderRadius: _isFullscreen
+            ? BorderRadius.zero
+            : const BorderRadius.vertical(top: Radius.circular(32)),
+        border: Border(
+          top: BorderSide(
+            color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.white,
+            width: 1.5,
+          ),
+        ),
       ),
       child: Column(
         children: [
-          if (_isFullscreen) SizedBox(height: MediaQuery.of(context).padding.top),
-          const SizedBox(height: 10),
+          if (_isFullscreen)
+            SizedBox(height: MediaQuery.of(context).padding.top),
+          const SizedBox(height: 12),
           Container(
-            width: 42,
+            width: 46,
             height: 4,
             decoration: BoxDecoration(
-              color: isDark ? Colors.white24 : Colors.black12,
+              color: isDark
+                  ? Colors.white24
+                  : _studioBlue.withValues(alpha: 0.28),
               borderRadius: BorderRadius.circular(2),
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 10, 2),
-            child: Row(
-              children: [
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(
-                    Icons.auto_awesome_rounded,
-                    color: AppTheme.primary,
-                    size: 18,
-                  ),
+            padding: const EdgeInsets.fromLTRB(16, 14, 10, 4),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [_studioBlue, _studioBlueDark],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'AI Study Tools',
-                        style: GoogleFonts.inter(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: isDark ? Colors.white : const Color(0xFF0F172A),
-                        ),
+                borderRadius: BorderRadius.circular(18),
+                boxShadow: [
+                  BoxShadow(
+                    color: _studioBlue.withValues(alpha: 0.24),
+                    blurRadius: 24,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(7),
+                      child: Image.asset(
+                        'assets/images/ai_logo.png',
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Semantics(
+                            label: 'AI Studio logo unavailable',
+                            child: const Center(
+                              child: Icon(
+                                Icons.auto_awesome_rounded,
+                                color: Colors.white,
+                                size: 18,
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        widget.resourceTitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.inter(
-                          fontSize: 11,
-                          color: isDark ? Colors.white60 : const Color(0xFF64748B),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'AI Studio',
+                          style: GoogleFonts.inter(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: -0.2,
+                            color: Colors.white,
+                          ),
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 2),
+                        Text(
+                          widget.resourceTitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.inter(
+                            fontSize: 11.5,
+                            letterSpacing: 0.05,
+                            color: Colors.white.withValues(alpha: 0.9),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                IconButton(
-                  onPressed: () {
-                    setState(() {
-                      _isFullscreen = !_isFullscreen;
-                    });
-                  },
-                  icon: Icon(
-                    _isFullscreen ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
-                    color: isDark ? Colors.white70 : const Color(0xFF334155),
+                  IconButton(
+                    onPressed: () {
+                      setState(() {
+                        _isFullscreen = !_isFullscreen;
+                      });
+                    },
+                    icon: Icon(
+                      _isFullscreen
+                          ? Icons.fullscreen_exit_rounded
+                          : Icons.fullscreen_rounded,
+                      color: Colors.white.withValues(alpha: 0.92),
+                    ),
                   ),
-                ),
-                IconButton(
-                  onPressed: () => Navigator.pop(context),
-                  icon: Icon(
-                    Icons.close_rounded,
-                    color: isDark ? Colors.white70 : const Color(0xFF334155),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: Icon(
+                      Icons.close_rounded,
+                      color: Colors.white.withValues(alpha: 0.92),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           if (_error != null)
@@ -1166,26 +1323,49 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Container(
               decoration: BoxDecoration(
-                color: isDark ? AppTheme.darkCard : const Color(0xFFF8FAFC),
+                color: isDark
+                    ? const Color(0xFF111A2A)
+                    : const Color(0xFFF2F7FF),
                 borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: isDark
+                      ? const Color(0xFF24324A)
+                      : const Color(0xFFD5E4FF),
+                ),
               ),
               child: TabBar(
                 controller: _tabController,
-                labelColor: AppTheme.primary,
-                unselectedLabelColor: isDark ? Colors.white70 : Colors.black54,
+                labelColor: _studioBlueDark,
+                unselectedLabelColor: isDark
+                    ? Colors.white70
+                    : const Color(0xFF5B6D8D),
                 indicator: BoxDecoration(
-                  color: AppTheme.primary.withValues(alpha: 0.12),
+                  color: isDark ? Colors.white : const Color(0xFFE6F0FF),
                   borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: isDark
+                        ? Colors.white12
+                        : _studioBlue.withValues(alpha: 0.28),
+                  ),
+                  boxShadow: [
+                    if (!isDark)
+                      BoxShadow(
+                        color: _studioBlue.withValues(alpha: 0.14),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                  ],
                 ),
                 dividerColor: Colors.transparent,
                 labelStyle: GoogleFonts.inter(
                   fontWeight: FontWeight.w700,
-                  fontSize: 12,
+                  fontSize: 12.5,
                 ),
                 tabs: const [
                   Tab(text: 'Summary'),
                   Tab(text: 'Quiz'),
                   Tab(text: 'Cards'),
+                  Tab(text: 'Chat'),
                 ],
               ),
             ),
@@ -1216,6 +1396,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                   ],
                 ),
                 _buildFlashcardsTab(isDark),
+                _buildChatTab(isDark),
               ],
             ),
           ),
@@ -1227,149 +1408,120 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   children: [
-                    if (_cachedMap[_activeType] == true)
-                      Container(
-                        margin: const EdgeInsets.only(right: 8),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppTheme.success.withValues(alpha: 0.16),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          'Server cache',
-                          style: GoogleFonts.inter(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.success,
-                          ),
-                        ),
-                      ),
-                    if (isSavedLocally)
-                      Container(
-                        margin: const EdgeInsets.only(right: 12),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primary.withValues(alpha: 0.16),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          'Saved on device',
-                          style: GoogleFonts.inter(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.primary,
-                          ),
-                        ),
-                      ),
-                    if (!hasOutput)
-                      ElevatedButton.icon(
-                        onPressed: _isLoading
-                            ? null
-                            : () => _generate(_activeType, regenerate: false),
-                        icon: const Icon(Icons.auto_awesome),
-                        label: const Text('Generate'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primary,
-                          foregroundColor: Colors.white,
+                    if (_activeType != 'chat') ...[
+                      if (_cachedMap[_activeType] == true)
+                        Container(
+                          margin: const EdgeInsets.only(right: 8),
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
+                            horizontal: 8,
+                            vertical: 4,
                           ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withValues(alpha: 0.16),
+                            borderRadius: BorderRadius.circular(12),
                           ),
-                        ),
-                      )
-                    else ...[
-                      if (!isSavedLocally)
-                        OutlinedButton.icon(
-                          onPressed: _isSaving ? null : _saveActiveOutput,
-                          icon: _isSaving
-                              ? const SizedBox(
-                                  width: 14,
-                                  height: 14,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.save_outlined, size: 16),
-                          label: const Text('Save'),
-                        ),
-                      if (!isSavedLocally) const SizedBox(width: 6),
-                      if (_activeType == 'summary')
-                        IconButton(
-                          key: _pdfButtonKey,
-                          tooltip: 'Download PDF',
-                          onPressed: _isDownloadingSummary ? null : _downloadSummaryPdf,
-                          icon: _isDownloadingSummary
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.picture_as_pdf_outlined),
-                        ),
-                      if (_activeType == 'summary') const SizedBox(width: 6),
-                      ElevatedButton.icon(
-                        onPressed: _isLoading
-                            ? null
-                            : () => _generate(_activeType, regenerate: true),
-                        icon: const Icon(Icons.refresh_rounded),
-                        label: const Text('Regenerate'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primary,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 12,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(width: 8),
-                    OutlinedButton.icon(
-                      onPressed: () {
-                        if (widget.resourceId.isEmpty) return;
-                        final ctx = ResourceContext(
-                          fileId: widget.resourceId,
-                          title: widget.resourceTitle,
-                          subject: widget.subject,
-                          semester: widget.semester,
-                          branch: widget.branch,
-                        );
-                        final nav = Navigator.of(context);
-                        nav.pop();
-                        nav.push(
-                          MaterialPageRoute(
-                            builder: (_) => AIChatScreen(
-                              collegeId: widget.collegeId ?? '',
-                              collegeName: widget.collegeName ?? '',
-                              resourceContext: ctx,
+                          child: Text(
+                            'Server cache',
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.primary,
                             ),
                           ),
-                        );
-                      },
-                      icon: const Icon(Icons.chat_outlined, size: 16),
-                      label: const Text('Study Chat'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppTheme.primary,
-                        side: const BorderSide(color: AppTheme.primary),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 12,
                         ),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
+                      if (isSavedLocally)
+                        Container(
+                          margin: const EdgeInsets.only(right: 12),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary.withValues(alpha: 0.16),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            'Saved on device',
+                            style: GoogleFonts.inter(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.primary,
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
+                      if (!hasOutput)
+                        ElevatedButton.icon(
+                          onPressed: _isLoading
+                              ? null
+                              : () => _generate(_activeType, regenerate: false),
+                          icon: const Icon(Icons.auto_awesome),
+                          label: const Text('Generate'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _studioBlue,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        )
+                      else ...[
+                        if (!isSavedLocally)
+                          OutlinedButton.icon(
+                            onPressed: _isSaving ? null : _saveActiveOutput,
+                            icon: _isSaving
+                                ? const SizedBox(
+                                    width: 14,
+                                    height: 14,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.save_outlined, size: 16),
+                            label: const Text('Save'),
+                          ),
+                        if (!isSavedLocally) const SizedBox(width: 6),
+                        if (_activeType == 'summary')
+                          IconButton(
+                            key: _pdfButtonKey,
+                            tooltip: 'Download PDF',
+                            onPressed: _isDownloadingSummary
+                                ? null
+                                : _downloadSummaryPdf,
+                            icon: _isDownloadingSummary
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.picture_as_pdf_outlined),
+                          ),
+                        if (_activeType == 'summary') const SizedBox(width: 6),
+                        ElevatedButton.icon(
+                          onPressed: _isLoading
+                              ? null
+                              : () => _generate(_activeType, regenerate: true),
+                          icon: const Icon(Icons.refresh_rounded),
+                          label: const Text('Regenerate'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _studioBlue,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ],
                 ),
               ),

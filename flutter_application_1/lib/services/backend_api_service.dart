@@ -182,6 +182,7 @@ class BackendApiService {
 
   Future<void> deleteChatComment({
     required String commentId,
+    BuildContext? context,
   }) async {
     await _requestJson(
       '/api/chat/comments/${Uri.encodeComponent(commentId)}',
@@ -385,6 +386,7 @@ class BackendApiService {
     String? college,
     String? branch,
     String? semester,
+    String? adminKey,
     required BuildContext context,
   }) async {
     return _requestJson(
@@ -398,6 +400,7 @@ class BackendApiService {
         'college': ?college,
         'branch': ?branch,
         'semester': ?semester,
+        'admin_key': ?adminKey,
       },
     );
   }
@@ -508,6 +511,7 @@ class BackendApiService {
 
   Future<void> markNotificationRead(
     Object id,
+    {BuildContext? contextForRecaptcha}
   ) async {
     await _requestJson(
       '/api/notifications/${Uri.encodeComponent(id.toString())}/read',
@@ -515,7 +519,9 @@ class BackendApiService {
     );
   }
 
-  Future<void> markAllNotificationsRead() async {
+  Future<void> markAllNotificationsRead({
+    BuildContext? contextForRecaptcha,
+  }) async {
     await _requestJson(
       '/api/notifications/read-all',
       method: 'POST',
@@ -524,11 +530,58 @@ class BackendApiService {
 
   Future<void> deleteNotification(
     Object id,
+    {BuildContext? contextForRecaptcha}
   ) async {
     await _requestJson(
       '/api/notifications/${Uri.encodeComponent(id.toString())}',
       method: 'DELETE',
     );
+  }
+
+  Future<int> getUnreadNotificationCount() async {
+    final notifications = await getNotifications(limit: 200, offset: 0);
+    return notifications.where((notification) {
+      final isReadRaw = notification.containsKey('is_read')
+          ? notification['is_read']
+          : notification['isRead'];
+      if (isReadRaw is bool) return !isReadRaw;
+      return isReadRaw?.toString().toLowerCase() != 'true';
+    }).length;
+  }
+
+  Future<void> updateResourceStatus({
+    required String resourceId,
+    required String status,
+    required String adminKey,
+    required BuildContext context,
+  }) async {
+    final uri = Uri.parse(
+      '$_baseUrl/api/admin/resources/${Uri.encodeComponent(resourceId)}/status',
+    );
+    final res = await http.patch(
+      uri,
+      headers: {
+        'Content-Type': 'application/json',
+        // Admin endpoints authenticate via bearer admin key/hash.
+        'Authorization': 'Bearer $adminKey',
+      },
+      body: jsonEncode({'status': status}),
+    );
+
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      String message = 'Failed to update resource status';
+      try {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        message = data['message']?.toString() ??
+            data['error']?.toString() ??
+            message;
+      } catch (_) {
+        if (res.body.trim().isNotEmpty) {
+          message = res.body;
+        }
+      }
+      throw Exception(message);
+    }
   }
 
   // ----------------------------

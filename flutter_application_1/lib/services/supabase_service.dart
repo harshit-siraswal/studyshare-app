@@ -4,11 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/college.dart';
 import '../models/resource.dart';
 import 'backend_api_service.dart';
-import 'subscription_service.dart';
 import '../models/department_account.dart';
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-import '../config/app_config.dart';
 
 class RoomLimitException implements Exception {
   final String message;
@@ -41,12 +37,10 @@ class SupabaseService {
     final supabaseEmail = _normalizeEmail(currentUserEmail);
     if (supabaseEmail.isNotEmpty) return supabaseEmail;
     final firebaseEmail = _normalizeEmail(
-      _firebaseAuth.currentUser?.email,
+      firebase_auth.FirebaseAuth.instance.currentUser?.email,
     );
     return firebaseEmail;
   }
-
-  firebase_auth.FirebaseAuth get _firebaseAuth => firebase_auth.FirebaseAuth.instance;
 
   String _normalizeEmail(String? email) => email?.trim().toLowerCase() ?? '';
 
@@ -317,30 +311,6 @@ class SupabaseService {
       return (response as List).map((json) => Resource.fromJson(json)).toList();
     } catch (e) {
       debugPrint('Error fetching resources: $e');
-      rethrow;
-    }
-  }
-
-  /// Get pending resources for a teacher to moderate
-  Future<List<Resource>> getPendingResourcesForTeacher({
-    required String collegeId,
-    required String branch,
-    int limit = 20,
-    int offset = 0,
-  }) async {
-    try {
-      final response = await _client
-          .from('resources')
-          .select()
-          .eq('college_id', collegeId)
-          .eq('status', 'pending')
-          .eq('branch', branch)
-          .order('created_at', ascending: true) // oldest first for pending queue
-          .range(offset, offset + limit - 1);
-
-      return (response as List).map((json) => Resource.fromJson(json)).toList();
-    } catch (e) {
-      debugPrint('Error fetching pending resources for teacher: $e');
       rethrow;
     }
   }
@@ -712,6 +682,55 @@ class SupabaseService {
       await _api.markNotificationRead(notificationId, contextForRecaptcha: ctx);
     } catch (e) {
       debugPrint('Error marking notification read: $e');
+    }
+  }
+
+  Future<String> getCurrentUserRole() async {
+    try {
+      final profile = await _api.getProfile();
+      final role = (profile['profile'] as Map?)?['role'] ?? profile['role'];
+      if (role == null) return 'READ_ONLY';
+      return role.toString().toUpperCase();
+    } catch (e) {
+      debugPrint('Error resolving current user role: $e');
+      return 'READ_ONLY';
+    }
+  }
+
+  Future<void> addNotice({
+    required String collegeId,
+    required String title,
+    required String content,
+    String department = 'general',
+    String? imageUrl,
+  }) async {
+    final email = _normalizeEmail(currentUserEmail);
+    if (email.isEmpty) {
+      throw Exception('Please sign in to post notices');
+    }
+
+    final userInfo = await getUserInfo(email);
+    final displayName =
+        userInfo?['display_name']?.toString().trim().isNotEmpty == true
+        ? userInfo!['display_name'].toString().trim()
+        : email.split('@').first;
+
+    final payload = <String, dynamic>{
+      'college_id': collegeId,
+      'title': title,
+      'content': content,
+      'department': department,
+      'created_by': email,
+      'created_by_name': displayName,
+      if (imageUrl != null && imageUrl.isNotEmpty) 'image_url': imageUrl,
+      if (imageUrl != null && imageUrl.isNotEmpty) 'file_url': imageUrl,
+    };
+
+    try {
+      await _client.from('notices').insert(payload);
+    } catch (e) {
+      debugPrint('Error posting notice: $e');
+      rethrow;
     }
   }
 
@@ -1505,35 +1524,6 @@ class SupabaseService {
         parentId: parentId,
         context: ctx,
       );
-
-      if (parentId != null) {
-        try {
-          final parentComment = await _client
-              .from('chat_comments')
-              .select('user_email')
-              .eq('id', parentId)
-              .maybeSingle();
-
-          if (parentComment != null && parentComment['user_email'] != null) {
-            final targetEmail = parentComment['user_email'] as String;
-            if (targetEmail != userEmail) {
-              final url = Uri.parse('${AppConfig.apiBaseUrls.first}/api/user-push-notification');
-              final truncatedContent = content.length > 50 ? '${content.substring(0, 47)}...' : content;
-              await http.post(
-                url,
-                headers: {'Content-Type': 'application/json'},
-                body: jsonEncode({
-                  'targetEmail': targetEmail,
-                  'title': 'New Reply',
-                  'message': '$userName replied: "$truncatedContent"'
-                }),
-              );
-            }
-          }
-        } catch (e) {
-          debugPrint('Notice: Failed to send reply push notification: $e');
-        }
-      }
     } catch (e) {
       debugPrint('Error adding comment: $e');
       rethrow;
@@ -1573,8 +1563,25 @@ class SupabaseService {
 
   // ============ SAVED POSTS ============
 
+  Future<String> _resolveRoomIdForMessage(String messageId) async {
+    final msg = await _client
+        .from('room_messages')
+        .select('room_id')
+        .eq('id', messageId)
+        .single();
+    final roomId = msg['room_id']?.toString();
+    if (roomId == null || roomId.isEmpty) {
+      throw Exception('Unable to resolve room for message');
+    }
+    return roomId;
+  }
+
   /// Save a post
-  Future<void> savePost(String postId, String userEmail) async {
+  Future<void> savePost(
+    String postId,
+    String userEmail, {
+    String? roomId,
+  }) async {
     try {
       final ctx = _ctx;
       if (ctx == null) throw Exception('Security context not initialized');
@@ -1585,16 +1592,11 @@ class SupabaseService {
       // but toggleSavePost takes both.
       // Workaround: We find the room_id for this message first.
 
-      final msg = await _client
-          .from('room_messages')
-          .select('room_id')
-          .eq('id', postId)
-          .single();
-      final roomId = msg['room_id'];
+      final resolvedRoomId = roomId ?? await _resolveRoomIdForMessage(postId);
 
       await _api.toggleSaveChatMessage(
         messageId: postId,
-        roomId: roomId,
+        roomId: resolvedRoomId,
         context: ctx,
       );
     } catch (e) {
@@ -1630,23 +1632,22 @@ class SupabaseService {
   }
 
   /// Unsave a post
-  Future<void> unsavePost(String postId, String userEmail) async {
+  Future<void> unsavePost(
+    String postId,
+    String userEmail, {
+    String? roomId,
+  }) async {
     try {
       final ctx = _ctx;
       if (ctx == null) throw Exception('Security context not initialized');
 
       // Same logic as savePost - backend toggles it.
       // But we need room_id.
-      final msg = await _client
-          .from('room_messages')
-          .select('room_id')
-          .eq('id', postId)
-          .single();
-      final roomId = msg['room_id'];
+      final resolvedRoomId = roomId ?? await _resolveRoomIdForMessage(postId);
 
       await _api.toggleSaveChatMessage(
         messageId: postId,
-        roomId: roomId,
+        roomId: resolvedRoomId,
         context: ctx,
       );
     } catch (e) {
@@ -1848,6 +1849,79 @@ class SupabaseService {
         return [];
       }
       debugPrint('Error fetching syllabus with `department`: $departmentError');
+      return [];
+    }
+  }
+
+  Future<void> uploadSyllabus({
+    required String collegeId,
+    required String department,
+    required String semester,
+    required String subject,
+    required String title,
+    required String fileUrl,
+    String? description,
+  }) async {
+    final payload = <String, dynamic>{
+      'college_id': collegeId,
+      'branch': department,
+      'semester': semester,
+      'subject': subject,
+      'title': title,
+      'description': description,
+      'pdf_url': fileUrl,
+      'file_url': fileUrl,
+      'url': fileUrl,
+      'created_by': _normalizeEmail(currentUserEmail),
+    };
+
+    try {
+      await _client.from('syllabus').insert(payload);
+      return;
+    } catch (primaryError) {
+      // Legacy schema fallback that uses `department` and may not have `pdf_url`.
+      final fallback = <String, dynamic>{
+        'college_id': collegeId,
+        'department': department,
+        'semester': semester,
+        'subject': subject,
+        'title': title,
+        'description': description,
+        'file_url': fileUrl,
+        'url': fileUrl,
+        'created_by': _normalizeEmail(currentUserEmail),
+      };
+      try {
+        await _client.from('syllabus').insert(fallback);
+        return;
+      } catch (fallbackError) {
+        debugPrint('Error uploading syllabus: $primaryError | $fallbackError');
+        rethrow;
+      }
+    }
+  }
+
+  Future<List<Resource>> getPendingResourcesForTeacher({
+    required String collegeId,
+    String? branch,
+  }) async {
+    try {
+      var query = _client
+          .from('resources')
+          .select()
+          .eq('college_id', collegeId)
+          .eq('status', 'pending');
+
+      if (branch != null && branch.trim().isNotEmpty) {
+        query = query.eq('branch', branch.trim());
+      }
+
+      final response = await query.order('created_at', ascending: false);
+      return (response as List)
+          .map((json) => Resource.fromJson(json as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      debugPrint('Error fetching pending resources: $e');
       return [];
     }
   }
@@ -2595,67 +2669,5 @@ class SupabaseService {
       return countVal;
     }
     return 0;
-  }
-
-  // ============ TEACHER ROLE ============
-
-  /// Get the current user's role from the users table
-  Future<String> getCurrentUserRole() async {
-    final email = _currentSessionEmail();
-    if (email.isEmpty) return 'READ_ONLY';
-
-    try {
-      final row = await _client
-          .from('users')
-          .select('role')
-          .eq('email', email)
-          .maybeSingle();
-      return row?['role']?.toString() ?? 'READ_ONLY';
-    } catch (e) {
-      debugPrint('Error fetching user role: $e');
-      return 'READ_ONLY';
-    }
-  }
-
-  /// Upload a syllabus document (Teacher / Admin only)
-  Future<void> uploadSyllabus({
-    required String collegeId,
-    required String department,
-    required String semester,
-    required String subject,
-    required String title,
-    required String fileUrl,
-  }) async {
-    final email = _currentSessionEmail();
-    await _client.from('syllabus').insert({
-      'college_id': collegeId,
-      'branch': department,
-      'semester': semester,
-      'subject': subject,
-      'title': title,
-      'url': fileUrl,
-      'uploaded_by_email': email,
-      'created_at': DateTime.now().toUtc().toIso8601String(),
-    });
-  }
-
-  /// Add a notice (Teacher / Admin only)
-  Future<void> addNotice({
-    required String collegeId,
-    required String title,
-    required String content,
-    String? department,
-    String? imageUrl,
-  }) async {
-    final email = _currentSessionEmail();
-    await _client.from('notices').insert({
-      'college_id': collegeId,
-      'title': title,
-      'content': content,
-      'department': department ?? 'general',
-      'image_url': imageUrl,
-      'posted_by_email': email,
-      'created_at': DateTime.now().toUtc().toIso8601String(),
-    });
   }
 }
