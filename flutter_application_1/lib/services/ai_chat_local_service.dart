@@ -8,6 +8,8 @@ class LocalAiChatMessage {
   final List<Map<String, dynamic>> sources;
   final bool cached;
   final bool noLocal;
+  final String? actionType;
+  final Map<String, dynamic>? actionPayload;
   final String createdAt;
 
   const LocalAiChatMessage({
@@ -16,11 +18,38 @@ class LocalAiChatMessage {
     required this.sources,
     required this.cached,
     required this.noLocal,
+    this.actionType,
+    this.actionPayload,
     required this.createdAt,
   });
 
   factory LocalAiChatMessage.fromJson(Map<String, dynamic> json) {
     final rawSources = json['sources'];
+    final rawActionType = json['action_type']?.toString();
+    final rawActionPayload = json['action_payload'];
+    Map<String, dynamic>? normalizedActionPayload;
+    if (rawActionPayload is Map) {
+      final mapped = Map<String, dynamic>.from(rawActionPayload);
+      if (mapped.isNotEmpty) {
+        normalizedActionPayload = mapped;
+      }
+    } else if (rawActionPayload is String) {
+      final trimmed = rawActionPayload.trim();
+      if (trimmed.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(trimmed);
+          if (decoded is Map) {
+            final mapped = Map<String, dynamic>.from(decoded);
+            if (mapped.isNotEmpty) {
+              normalizedActionPayload = mapped;
+            }
+          }
+        } catch (_) {
+          // Ignore malformed legacy payloads and treat as missing.
+        }
+      }
+    }
+
     return LocalAiChatMessage(
       isUser: json['is_user'] == true,
       content: json['content']?.toString() ?? '',
@@ -32,6 +61,10 @@ class LocalAiChatMessage {
           : const [],
       cached: json['cached'] == true,
       noLocal: json['no_local'] == true,
+      actionType: rawActionType == null || rawActionType.trim().isEmpty
+          ? null
+          : rawActionType.trim(),
+      actionPayload: normalizedActionPayload,
       createdAt:
           json['created_at']?.toString() ?? DateTime.now().toIso8601String(),
     );
@@ -44,6 +77,10 @@ class LocalAiChatMessage {
       'sources': sources,
       'cached': cached,
       'no_local': noLocal,
+      if (actionType != null && actionType!.isNotEmpty)
+        'action_type': actionType,
+      if (actionPayload != null && actionPayload!.isNotEmpty)
+        'action_payload': actionPayload,
       'created_at': createdAt,
     };
   }
@@ -54,16 +91,19 @@ class LocalAiChatSession {
   final String title;
   final String updatedAt;
   final List<LocalAiChatMessage> messages;
+  final List<Map<String, dynamic>> contextAttachments;
 
   const LocalAiChatSession({
     required this.id,
     required this.title,
     required this.updatedAt,
     required this.messages,
+    this.contextAttachments = const [],
   });
 
   factory LocalAiChatSession.fromJson(Map<String, dynamic> json) {
     final rawMessages = json['messages'];
+    final rawContextAttachments = json['context_attachments'];
     return LocalAiChatSession(
       id: json['id']?.toString() ?? '',
       title: json['title']?.toString() ?? 'New chat',
@@ -79,6 +119,12 @@ class LocalAiChatSession {
                 )
                 .toList()
           : const [],
+      contextAttachments: rawContextAttachments is List
+          ? rawContextAttachments
+                .whereType<Map>()
+                .map((entry) => Map<String, dynamic>.from(entry))
+                .toList()
+          : const [],
     );
   }
 
@@ -88,6 +134,8 @@ class LocalAiChatSession {
       'title': title,
       'updated_at': updatedAt,
       'messages': messages.map((message) => message.toJson()).toList(),
+      if (contextAttachments.isNotEmpty)
+        'context_attachments': contextAttachments,
     };
   }
 }

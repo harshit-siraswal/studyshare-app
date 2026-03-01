@@ -1,9 +1,7 @@
-import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
+﻿import 'dart:convert';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:flutter/material.dart';
 import '../config/app_config.dart';
 
 /// Backend API client (same pattern as Studyspace/src/lib/api.ts).
@@ -12,14 +10,12 @@ import '../config/app_config.dart';
 /// This avoids client-side Supabase inserts that fail under RLS with anon key.
 class BackendApiService {
   BackendApiService({FirebaseAuth? firebaseAuth})
-    : _firebaseAuthInstance = firebaseAuth;
+    : _auth = firebaseAuth ?? FirebaseAuth.instance;
 
-  FirebaseAuth get _auth => _firebaseAuthInstance ?? FirebaseAuth.instance;
-  final FirebaseAuth? _firebaseAuthInstance;
+  final FirebaseAuth _auth;
 
-  static const Duration _requestTimeout = Duration(seconds: 30);
-
-  List<String> get _baseUrls => AppConfig.apiBaseUrls;
+  String get _baseUrl =>
+      AppConfig.apiUrl; // e.g. https://studyspace-backend.onrender.com
 
   Future<String?> _getIdToken() async {
     final user = _auth.currentUser;
@@ -36,163 +32,62 @@ class BackendApiService {
     String path, {
     String method = 'GET',
     Map<String, dynamic>? body,
-    Map<String, String>? customHeaders,
   }) async {
     final token = await _getIdToken();
+    final uri = Uri.parse('$_baseUrl$path');
+
     final headers = <String, String>{
       'Content-Type': 'application/json',
       if (token != null) 'Authorization': 'Bearer $token',
     };
-    if (customHeaders != null) {
-      headers.addAll(customHeaders);
-    }
 
     Map<String, dynamic>? effectiveBody = body == null
         ? null
         : Map<String, dynamic>.from(body);
 
-    Object? lastError;
-    final baseUrls = _baseUrls;
-
-    for (var i = 0; i < baseUrls.length; i++) {
-      final baseUrl = baseUrls[i];
-      final uri = Uri.parse('$baseUrl$path');
-      final hasNextBaseUrl = i < baseUrls.length - 1;
-
-      try {
-        final res = await _sendRequest(
-          uri: uri,
-          method: method,
-          headers: headers,
-          body: effectiveBody,
-        ).timeout(_requestTimeout);
-
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          return _decodeJsonBody(res);
-        }
-
-        final msg = _responseErrorMessage(res);
-        if (hasNextBaseUrl && _shouldTryNextHost(res.statusCode)) {
-          debugPrint(
-            '[BackendApi] $method $uri failed (${res.statusCode}), '
-            'trying next host. Reason: $msg',
-          );
-          continue;
-        }
-        throw Exception(msg);
-      } on TimeoutException catch (e) {
-        lastError = e;
-        if (hasNextBaseUrl) {
-          debugPrint(
-            '[BackendApi] timeout for $method $uri, trying next host.',
-          );
-          continue;
-        }
-        throw Exception('Backend request timed out for $uri');
-      } on SocketException catch (e) {
-        lastError = e;
-        if (hasNextBaseUrl) {
-          debugPrint(
-            '[BackendApi] network error for $method $uri, '
-            'trying next host: $e',
-          );
-          continue;
-        }
-        throw Exception('Network error while reaching backend: $e');
-      } on http.ClientException catch (e) {
-        lastError = e;
-        if (hasNextBaseUrl) {
-          debugPrint(
-            '[BackendApi] client error for $method $uri, '
-            'trying next host: $e',
-          );
-          continue;
-        }
-        throw Exception('HTTP client error while reaching backend: $e');
-      }
-    }
-
-    if (lastError != null) {
-      throw Exception('Unable to reach backend: $lastError');
-    }
-    throw Exception('Backend request failed before any response was received');
-  }
-
-  bool _shouldTryNextHost(int statusCode) {
-    return statusCode >= 500;
-  }
-
-  Future<http.Response> _sendRequest({
-    required Uri uri,
-    required String method,
-    required Map<String, String> headers,
-    required Map<String, dynamic>? body,
-  }) {
+    late http.Response res;
     switch (method.toUpperCase()) {
-      case 'GET':
-        return http.get(uri, headers: headers);
       case 'POST':
-        return http.post(
+        res = await http.post(
           uri,
           headers: headers,
-          body: jsonEncode(body ?? <String, dynamic>{}),
+          body: jsonEncode(effectiveBody ?? {}),
         );
+        break;
       case 'PUT':
-        return http.put(
+        res = await http.put(
           uri,
           headers: headers,
-          body: jsonEncode(body ?? <String, dynamic>{}),
+          body: jsonEncode(effectiveBody ?? {}),
         );
-      case 'PATCH':
-        return http.patch(
-          uri,
-          headers: headers,
-          body: jsonEncode(body ?? <String, dynamic>{}),
-        );
+        break;
       case 'DELETE':
-        if (body != null) {
-          return http.delete(uri, headers: headers, body: jsonEncode(body));
-        }
-        return http.delete(uri, headers: headers);
+        res = await http.delete(
+          uri,
+          headers: headers,
+          body: jsonEncode(effectiveBody ?? {}),
+        );
+        break;
       default:
-        throw UnsupportedError('Unsupported HTTP method: $method');
-    }
-  }
-
-  Map<String, dynamic> _decodeJsonBody(http.Response res) {
-    final trimmed = res.body.trim();
-    if (trimmed.isEmpty) {
-      return <String, dynamic>{};
+        res = await http.get(uri, headers: headers);
+        break;
     }
 
-    final dynamic decoded;
+    Map<String, dynamic> data;
     try {
-      decoded = jsonDecode(trimmed);
-    } on FormatException catch (e) {
-      throw Exception('Invalid JSON response (${res.statusCode}): $e');
-    }
-    if (decoded is Map<String, dynamic>) {
-      return decoded;
-    }
-    if (decoded is Map) {
-      return Map<String, dynamic>.from(decoded);
-    }
-    if (decoded is List) {
-      return <String, dynamic>{'data': decoded};
-    }
-
-    throw Exception('Invalid API response (${res.statusCode}): ${res.body}');
-  }
-
-  String _responseErrorMessage(http.Response res) {
-    try {
-      final data = _decodeJsonBody(res);
-      return data['message']?.toString() ??
-          data['error']?.toString() ??
-          'API request failed (${res.statusCode})';
+      data = jsonDecode(res.body) as Map<String, dynamic>;
     } catch (_) {
-      return 'API request failed (${res.statusCode}): ${res.body}';
+      throw Exception('API error (${res.statusCode}): ${res.body}');
     }
+
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      final msg =
+          data['message']?.toString() ??
+          data['error']?.toString() ??
+          'API request failed';
+      throw Exception(msg);
+    }
+    return data;
   }
 
   // ----------------------------
@@ -213,11 +108,11 @@ class BackendApiService {
       method: 'POST',
       body: {
         'name': name,
-        if (description != null) 'description': description,
+        'description': ?description,
         'isPrivate': isPrivate,
         'collegeId': collegeId,
-        if (durationInDays != null) 'durationInDays': durationInDays,
-        if (tags != null) 'tags': tags,
+        'durationInDays': ?durationInDays,
+        'tags': ?tags,
       },
     );
   }
@@ -246,8 +141,8 @@ class BackendApiService {
       body: {
         'roomId': roomId,
         'content': content,
-        if (imageUrl != null) 'imageUrl': imageUrl,
-        if (authorName != null) 'authorName': authorName,
+        'imageUrl': ?imageUrl,
+        'authorName': ?authorName,
       },
     );
   }
@@ -287,7 +182,6 @@ class BackendApiService {
 
   Future<void> deleteChatComment({
     required String commentId,
-    BuildContext? context,
   }) async {
     await _requestJson(
       '/api/chat/comments/${Uri.encodeComponent(commentId)}',
@@ -308,8 +202,8 @@ class BackendApiService {
       body: {
         'messageId': messageId,
         'content': content,
-        if (authorName != null) 'authorName': authorName,
-        if (parentId != null) 'parentId': parentId,
+        'authorName': ?authorName,
+        'parentId': ?parentId,
       },
     );
   }
@@ -332,7 +226,11 @@ class BackendApiService {
     Map<String, dynamic> input, {
     required BuildContext context,
   }) async {
-    return _requestJson('/api/resources', method: 'POST', body: input);
+    return _requestJson(
+      '/api/resources',
+      method: 'POST',
+      body: input,
+    );
   }
 
   Future<Map<String, dynamic>> castVote({
@@ -431,7 +329,7 @@ class BackendApiService {
     return _requestJson(
       '${_noticePath(noticeId)}/comments',
       method: 'POST',
-      body: {'content': content, if (parentId != null) 'parentId': parentId},
+      body: {'content': content, 'parentId': ?parentId},
     );
   }
 
@@ -450,7 +348,10 @@ class BackendApiService {
     required String noticeId,
     required BuildContext context,
   }) async {
-    return _requestJson('${_noticePath(noticeId)}/like', method: 'POST');
+    return _requestJson(
+      '${_noticePath(noticeId)}/like',
+      method: 'POST',
+    );
   }
 
   Future<Map<String, dynamic>> getNoticeLikes(String noticeId) async {
@@ -478,54 +379,26 @@ class BackendApiService {
 
   Future<Map<String, dynamic>> updateProfile({
     String? displayName,
+    String? username,
     String? bio,
     String? profilePhotoUrl,
-    String? collegeId,
-    String? semester,
+    String? college,
     String? branch,
-    String? adminKey,
+    String? semester,
     required BuildContext context,
   }) async {
-    final payload = <String, dynamic>{};
-    if (displayName != null) payload['display_name'] = displayName;
-    if (bio != null) payload['bio'] = bio;
-    if (profilePhotoUrl != null) payload['profile_photo_url'] = profilePhotoUrl;
-    if (collegeId != null) payload['college_id'] = collegeId;
-    if (semester != null) payload['semester'] = semester;
-    if (branch != null) payload['branch'] = branch;
-
-    final customHeaders = <String, String>{};
-    if (adminKey != null && adminKey.isNotEmpty) {
-      customHeaders['X-Admin-Key'] = adminKey;
-    }
-
     return _requestJson(
       '/api/users/profile',
       method: 'PUT',
-      body: payload,
-      customHeaders: customHeaders.isEmpty ? null : customHeaders,
-    );
-  }
-
-  Future<Map<String, dynamic>> updateResourceStatus({
-    required String resourceId,
-    required String status,
-    required String adminKey,
-    required BuildContext context,
-  }) async {
-    const allowedStatuses = {'approved', 'rejected', 'pending'};
-    final normalizedStatus = status.toLowerCase();
-    if (!allowedStatuses.contains(normalizedStatus)) {
-      throw ArgumentError(
-        'Invalid status: $status. Must be one of $allowedStatuses',
-      );
-    }
-
-    return _requestJson(
-      '/api/admin/resources/${Uri.encodeComponent(resourceId)}/status',
-      method: 'PATCH',
-      body: {'status': normalizedStatus},
-      customHeaders: {'X-Admin-Key': adminKey},
+      body: {
+        'display_name': ?displayName,
+        'username': ?username,
+        'bio': ?bio,
+        'profile_photo_url': ?profilePhotoUrl,
+        'college': ?college,
+        'branch': ?branch,
+        'semester': ?semester,
+      },
     );
   }
 
@@ -569,7 +442,7 @@ class BackendApiService {
     return _requestJson(
       '/api/chat/join',
       method: 'POST',
-      body: {'joinCode': code, 'userEmail': userEmail, 'collegeId': collegeId},
+      body: {'code': code, 'userEmail': userEmail, 'collegeId': collegeId},
     );
   }
 
@@ -634,25 +507,24 @@ class BackendApiService {
   }
 
   Future<void> markNotificationRead(
-    Object id, {
-    BuildContext? contextForRecaptcha,
-  }) async {
+    Object id,
+  ) async {
     await _requestJson(
       '/api/notifications/${Uri.encodeComponent(id.toString())}/read',
       method: 'POST',
     );
   }
 
-  Future<void> markAllNotificationsRead({
-    BuildContext? contextForRecaptcha,
-  }) async {
-    await _requestJson('/api/notifications/read-all', method: 'POST');
+  Future<void> markAllNotificationsRead() async {
+    await _requestJson(
+      '/api/notifications/read-all',
+      method: 'POST',
+    );
   }
 
   Future<void> deleteNotification(
-    Object id, {
-    BuildContext? contextForRecaptcha,
-  }) async {
+    Object id,
+  ) async {
     await _requestJson(
       '/api/notifications/${Uri.encodeComponent(id.toString())}',
       method: 'DELETE',
@@ -751,13 +623,13 @@ class BackendApiService {
       method: 'POST',
       body: {
         'file_id': fileId,
-        if (collegeId != null) 'college_id': collegeId,
-        if (useOcr != null) 'use_ocr': useOcr,
-        if (forceOcr != null) 'force_ocr': forceOcr,
-        if (ocrProvider != null) 'ocr_provider': ocrProvider,
-        if (force != null) 'force': force,
-        if (includeSource != null) 'include_source': includeSource,
-        if (videoUrl != null) 'video_url': videoUrl,
+        'college_id': ?collegeId,
+        'use_ocr': ?useOcr,
+        'force_ocr': ?forceOcr,
+        'ocr_provider': ?ocrProvider,
+        'force': ?force,
+        'include_source': ?includeSource,
+        'video_url': ?videoUrl,
       },
     );
   }
@@ -777,13 +649,13 @@ class BackendApiService {
       method: 'POST',
       body: {
         'file_id': fileId,
-        if (collegeId != null) 'college_id': collegeId,
-        if (useOcr != null) 'use_ocr': useOcr,
-        if (forceOcr != null) 'force_ocr': forceOcr,
-        if (ocrProvider != null) 'ocr_provider': ocrProvider,
-        if (force != null) 'force': force,
-        if (includeSource != null) 'include_source': includeSource,
-        if (videoUrl != null) 'video_url': videoUrl,
+        'college_id': ?collegeId,
+        'use_ocr': ?useOcr,
+        'force_ocr': ?forceOcr,
+        'ocr_provider': ?ocrProvider,
+        'force': ?force,
+        'include_source': ?includeSource,
+        'video_url': ?videoUrl,
       },
     );
   }
@@ -803,13 +675,13 @@ class BackendApiService {
       method: 'POST',
       body: {
         'file_id': fileId,
-        if (collegeId != null) 'college_id': collegeId,
-        if (useOcr != null) 'use_ocr': useOcr,
-        if (forceOcr != null) 'force_ocr': forceOcr,
-        if (ocrProvider != null) 'ocr_provider': ocrProvider,
-        if (force != null) 'force': force,
-        if (includeSource != null) 'include_source': includeSource,
-        if (videoUrl != null) 'video_url': videoUrl,
+        'college_id': ?collegeId,
+        'use_ocr': ?useOcr,
+        'force_ocr': ?forceOcr,
+        'ocr_provider': ?ocrProvider,
+        'force': ?force,
+        'include_source': ?includeSource,
+        'video_url': ?videoUrl,
       },
     );
   }
@@ -828,10 +700,10 @@ class BackendApiService {
       body: {
         'file_id': fileId,
         'query': query,
-        if (collegeId != null) 'college_id': collegeId,
-        if (useOcr != null) 'use_ocr': useOcr,
-        if (forceOcr != null) 'force_ocr': forceOcr,
-        if (ocrProvider != null) 'ocr_provider': ocrProvider,
+        'college_id': ?collegeId,
+        'use_ocr': ?useOcr,
+        'force_ocr': ?forceOcr,
+        'ocr_provider': ?ocrProvider,
       },
     );
   }
@@ -839,21 +711,33 @@ class BackendApiService {
   Future<Map<String, dynamic>> queryRag({
     required String question,
     String? collegeId,
-    String? fileId,
     int? topK,
     double? minScore,
     bool? allowWeb,
+    String? fileId,
+    bool? useOcr,
+    bool? forceOcr,
+    String? ocrProvider,
+    List<Map<String, dynamic>>? attachments,
+    List<Map<String, String>>? history,
+    Map<String, dynamic>? filters,
   }) async {
     return _requestJson(
       '/api/rag/query',
       method: 'POST',
       body: {
         'question': question,
-        if (collegeId != null) 'college_id': collegeId,
-        if (fileId != null) 'file_id': fileId,
-        if (topK != null) 'top_k': topK,
-        if (minScore != null) 'min_score': minScore,
-        if (allowWeb != null) 'allow_web': allowWeb,
+        'college_id': ?collegeId,
+        'top_k': ?topK,
+        'min_score': ?minScore,
+        'allow_web': ?allowWeb,
+        'file_id': ?fileId,
+        'use_ocr': ?useOcr,
+        'force_ocr': ?forceOcr,
+        'ocr_provider': ?ocrProvider,
+        'attachments': ?attachments,
+        'history': ?history,
+        'filters': ?filters,
       },
     );
   }
@@ -861,71 +745,69 @@ class BackendApiService {
   Stream<String> queryRagStream({
     required String question,
     String? collegeId,
-    String? fileId,
     int? topK,
     double? minScore,
     bool? allowWeb,
+    String? fileId,
+    bool? useOcr,
+    bool? forceOcr,
+    String? ocrProvider,
+    List<Map<String, dynamic>>? attachments,
+    List<Map<String, String>>? history,
+    Map<String, dynamic>? filters,
   }) async* {
     final token = await _getIdToken();
-    final bodyStr = jsonEncode({
-      'question': question,
-      if (collegeId != null) 'college_id': collegeId,
-      if (fileId != null) 'file_id': fileId,
-      if (topK != null) 'top_k': topK,
-      if (minScore != null) 'min_score': minScore,
-      if (allowWeb != null) 'allow_web': allowWeb,
-    });
+    final uri = Uri.parse('$_baseUrl/api/rag/query/stream');
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+      'Accept': 'text/event-stream',
+      if (token != null) 'Authorization': 'Bearer $token',
+    };
 
-    Object? lastError;
-    final baseUrls = _baseUrls;
-
-    for (var i = 0; i < baseUrls.length; i++) {
-      final baseUrl = baseUrls[i];
-      final uri = Uri.parse('$baseUrl/api/rag/query/stream');
-      final request = http.Request('POST', uri);
-      request.headers.addAll({
-        'Content-Type': 'application/json',
-        if (token != null) 'Authorization': 'Bearer $token',
+    final request = http.Request('POST', uri)
+      ..headers.addAll(headers)
+      ..body = jsonEncode({
+        'question': question,
+        'college_id': ?collegeId,
+        'top_k': ?topK,
+        'min_score': ?minScore,
+        'allow_web': ?allowWeb,
+        'file_id': ?fileId,
+        'use_ocr': ?useOcr,
+        'force_ocr': ?forceOcr,
+        'ocr_provider': ?ocrProvider,
+        'attachments': ?attachments,
+        'history': ?history,
+        'filters': ?filters,
       });
-      request.body = bodyStr;
 
-      final client = http.Client();
+    final response = await request.send();
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final body = await response.stream.bytesToString();
       try {
-        final response = await client.send(request).timeout(_requestTimeout);
-        if (response.statusCode >= 400) {
-          final errorResponse = await response.stream.bytesToString();
-          String errMsg;
-          try {
-            final errorJson = jsonDecode(errorResponse);
-            errMsg = errorJson['error'] ?? 'API error: ${response.statusCode}';
-          } on FormatException {
-            errMsg = 'API error: ${response.statusCode}';
-          }
-          throw Exception(errMsg);
-        }
-
-        final stream = response.stream
-            .transform(utf8.decoder)
-            .transform(const LineSplitter());
-        await for (var line in stream) {
-          if (line.startsWith('data: ')) {
-            yield line.substring(6);
-          }
-        }
-        return;
-      } catch (e) {
-        lastError = e;
-        if (i < baseUrls.length - 1) {
-          debugPrint(
-            '[BackendApi] queryRagStream failed on $baseUrl, trying next...',
-          );
-          continue;
-        }
-      } finally {
-        client.close();
+        final data = jsonDecode(body) as Map<String, dynamic>;
+        final message =
+            data['message']?.toString() ??
+            data['error']?.toString() ??
+            'RAG stream request failed';
+        throw Exception(message);
+      } catch (_) {
+        throw Exception(
+          'RAG stream request failed (${response.statusCode}): $body',
+        );
       }
     }
-    throw lastError ?? Exception('Failed to connect to any backend URL');
+
+    final lineStream = response.stream
+        .transform(utf8.decoder)
+        .transform(const LineSplitter());
+
+    await for (final line in lineStream) {
+      if (!line.startsWith('data:')) continue;
+      final payload = line.substring(5).trim();
+      if (payload.isEmpty) continue;
+      yield payload;
+    }
   }
   // ----------------------------
   // Push Notifications (FCM)
@@ -1006,3 +888,4 @@ class BackendApiService {
     );
   }
 }
+
