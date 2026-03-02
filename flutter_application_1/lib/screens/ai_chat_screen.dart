@@ -1336,6 +1336,7 @@ class _AIChatScreenState extends State<AIChatScreen>
             'Identify the exact academic subject from attached notes. '
             'Return strict JSON only: {"subject":"<subject name>"}',
         collegeId: widget.collegeId,
+        sessionId: _activeSessionId,
         fileId: widget.resourceContext?.fileId,
         allowWeb: false,
         useOcr: true,
@@ -1752,6 +1753,7 @@ Return STRICT JSON only (no markdown). Schema:
         final response = await _api.queryRag(
           question: prompt,
           collegeId: widget.collegeId,
+          sessionId: _activeSessionId,
           fileId: widget.resourceContext?.fileId,
           allowWeb: strictMode || contextAttachments.isEmpty,
           useOcr: true,
@@ -1860,6 +1862,7 @@ Return STRICT JSON only (no markdown). Schema:
       final response = await _api.queryRag(
         question: prompt,
         collegeId: widget.collegeId,
+        sessionId: _activeSessionId,
         fileId: widget.resourceContext?.fileId,
         allowWeb: false,
         useOcr: true,
@@ -2047,6 +2050,7 @@ Return STRICT JSON only (no markdown). Schema:
       final stream = _api.queryRagStream(
         question: sendPrompt,
         collegeId: widget.collegeId,
+        sessionId: _activeSessionId,
         fileId: widget.resourceContext?.fileId,
         allowWeb: true,
         useOcr: shouldForceVisionOcr,

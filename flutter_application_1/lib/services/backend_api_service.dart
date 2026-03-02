@@ -824,6 +824,7 @@ class BackendApiService {
   Future<Map<String, dynamic>> queryRag({
     required String question,
     String? collegeId,
+    String? sessionId,
     int? topK,
     double? minScore,
     bool? allowWeb,
@@ -841,6 +842,7 @@ class BackendApiService {
       body: {
         'question': question,
         'college_id': ?collegeId,
+        'session_id': ?sessionId,
         'top_k': ?topK,
         'min_score': ?minScore,
         'allow_web': ?allowWeb,
@@ -866,6 +868,7 @@ class BackendApiService {
   Stream<String> _queryRagAsSyntheticStream({
     required String question,
     String? collegeId,
+    String? sessionId,
     int? topK,
     double? minScore,
     bool? allowWeb,
@@ -880,6 +883,7 @@ class BackendApiService {
     final response = await queryRag(
       question: question,
       collegeId: collegeId,
+      sessionId: sessionId,
       topK: topK,
       minScore: minScore,
       allowWeb: allowWeb,
@@ -929,6 +933,7 @@ class BackendApiService {
   Stream<String> queryRagStream({
     required String question,
     String? collegeId,
+    String? sessionId,
     int? topK,
     double? minScore,
     bool? allowWeb,
@@ -944,6 +949,7 @@ class BackendApiService {
       yield* _queryRagAsSyntheticStream(
         question: question,
         collegeId: collegeId,
+        sessionId: sessionId,
         topK: topK,
         minScore: minScore,
         allowWeb: allowWeb,
@@ -971,6 +977,7 @@ class BackendApiService {
       ..body = jsonEncode({
         'question': question,
         'college_id': ?collegeId,
+        'session_id': ?sessionId,
         'top_k': ?topK,
         'min_score': ?minScore,
         'allow_web': ?allowWeb,
@@ -995,6 +1002,7 @@ class BackendApiService {
         yield* _queryRagAsSyntheticStream(
           question: question,
           collegeId: collegeId,
+          sessionId: sessionId,
           topK: topK,
           minScore: minScore,
           allowWeb: allowWeb,
