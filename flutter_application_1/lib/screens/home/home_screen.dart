@@ -22,6 +22,8 @@ import '../../services/supabase_service.dart';
 import '../../services/incoming_share_service.dart';
 import '../../services/sticker_service.dart';
 import '../../widgets/success_overlay.dart';
+import '../../widgets/post_notice_dialog.dart';
+import '../../models/user.dart';
 
 class HomeScreen extends StatefulWidget {
   final String collegeId;
@@ -53,6 +55,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final StickerService _stickerService = StickerService();
   int _currentIndex = 0;
   bool _showHelpOverlay = false;
+  bool _canPostNotices = false;
   StreamSubscription<IncomingSharePayload>? _shareSubscription;
   bool _isHandlingIncomingShare = false;
 
@@ -71,6 +74,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       if (mounted) _supabaseService.attachContext(context);
     });
     _checkHelpOverlay();
+    _loadComposerAccess();
     _initializeIncomingShareHandling();
   }
 
@@ -115,6 +119,23 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   void _onNavTapped(int index) {
     setState(() => _currentIndex = index);
+  }
+
+  Future<void> _loadComposerAccess() async {
+    try {
+      final role = await _supabaseService.getCurrentUserRole();
+      if (!mounted) return;
+      setState(() {
+        _canPostNotices =
+            role == AppRoles.teacher ||
+            role == AppRoles.admin ||
+            role == AppRoles.moderator;
+      });
+    } catch (e) {
+      debugPrint('Failed to resolve composer access: $e');
+      if (!mounted) return;
+      setState(() => _canPostNotices = false);
+    }
   }
 
   Future<void> _showUpload({PlatformFile? prefilledFile}) async {
@@ -523,8 +544,39 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  IconData _getFabIcon() =>
-      _currentIndex == 1 ? Icons.search_rounded : Icons.add_rounded;
+  IconData _getFabIcon() => _canPostNotices
+      ? Icons.add_rounded
+      : (_currentIndex == 1 ? Icons.search_rounded : Icons.add_rounded);
+
+  Future<void> _handleFabTap() async {
+    if (_canPostNotices) {
+      final posted = await showPostNoticeDialog(
+        context: context,
+        collegeId: widget.collegeId,
+      );
+      if (!mounted) return;
+      if (posted) {
+        setState(() => _currentIndex = 2);
+      }
+      return;
+    }
+
+    if (_currentIndex != 1) {
+      await _showUpload();
+      return;
+    }
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DiscoverRoomsScreen(
+          collegeId: widget.collegeId,
+          collegeDomain: widget.collegeDomain,
+          userEmail: _effectiveUserEmail,
+        ),
+      ),
+    );
+  }
 
   Widget _buildAnimatedFab(
     BuildContext context,
@@ -551,24 +603,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       child: Hero(
         tag: 'fab_main', // Static tag
         child: GestureDetector(
-          onTap: () {
+          onTap: () async {
             HapticFeedback.mediumImpact();
-            // Handle actions based on index
-            if (_currentIndex != 1) {
-              _showUpload();
-            } else if (_currentIndex == 1) {
-              // Rooms: Create/Discover
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => DiscoverRoomsScreen(
-                    collegeId: widget.collegeId,
-                    collegeDomain: widget.collegeDomain,
-                    userEmail: _effectiveUserEmail,
-                  ),
-                ),
-              );
-            }
+            await _handleFabTap();
           },
           child: Container(
             width: 56,

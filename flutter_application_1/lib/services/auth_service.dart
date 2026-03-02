@@ -1,18 +1,28 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
+import 'backend_api_service.dart';
+import 'push_notification_service.dart';
 
 class AuthService {
   firebase_auth.FirebaseAuth get _auth => firebase_auth.FirebaseAuth.instance;
+
   // Only create GoogleSignIn for mobile platforms
   GoogleSignIn? _googleSignIn;
   SupabaseClient get _supabase => Supabase.instance.client;
+  final BackendApiService _backendApi;
+  final PushNotificationService _pushService;
 
-  AuthService() {
+  AuthService({
+    BackendApiService? backendApi,
+    PushNotificationService? pushService,
+  }) : _backendApi = backendApi ?? BackendApiService(),
+       _pushService = pushService ?? PushNotificationService() {
     // Only initialize GoogleSignIn on mobile (not web)
     if (!kIsWeb) {
       _googleSignIn = GoogleSignIn(
@@ -43,6 +53,91 @@ class AuthService {
 
   // Get photo URL
   String? get photoUrl => currentUser?.photoURL;
+  int _banCheckFailureCount = 0;
+  DateTime? _lastBanCheckFailureAt;
+  DateTime? _lastBanCheckAlertAt;
+  bool _banCheckAlertSent = false;
+  static const Duration _banCheckRetryWindow = Duration(seconds: 30);
+  static const Duration _banCheckAlertCooldown = Duration(minutes: 5);
+  static const int _banCheckAlertThreshold = 3;
+
+  String _maskEmail(String email) {
+    final trimmed = email.trim().toLowerCase();
+    final atIndex = trimmed.indexOf('@');
+    if (atIndex <= 0 || atIndex >= trimmed.length - 1) {
+      return '[redacted_email]';
+    }
+    final local = trimmed.substring(0, atIndex);
+    final domain = trimmed.substring(atIndex + 1);
+    final first = local[0];
+    final maskedLocal = '$first***';
+    return '$maskedLocal@$domain';
+  }
+
+  void incrementBanCheckFailure() {
+    _banCheckFailureCount += 1;
+    _lastBanCheckFailureAt = DateTime.now();
+    developer.log(
+      'metric=ban_check_failure count=$_banCheckFailureCount',
+      name: 'auth.metrics',
+      level: 900,
+    );
+    final now = DateTime.now();
+    final canSendAlert =
+        !_banCheckAlertSent ||
+        _lastBanCheckAlertAt == null ||
+        now.difference(_lastBanCheckAlertAt!) >= _banCheckAlertCooldown;
+    if (_banCheckFailureCount >= _banCheckAlertThreshold && canSendAlert) {
+      sendBanCheckFailureAlert();
+      _banCheckAlertSent = true;
+      _lastBanCheckAlertAt = now;
+    }
+  }
+
+  bool shouldAllowBanCheckRetry() {
+    final lastFailure = _lastBanCheckFailureAt;
+    if (lastFailure == null) return true;
+    return DateTime.now().difference(lastFailure) > _banCheckRetryWindow;
+  }
+
+  void sendBanCheckFailureAlert() {
+    developer.log(
+      'alert=ban_check_failures_exceeded threshold=$_banCheckAlertThreshold '
+      'current=$_banCheckFailureCount',
+      name: 'auth.alerts',
+      level: 1000,
+    );
+  }
+
+  void _resetBanCheckFailureState() {
+    _banCheckFailureCount = 0;
+    _lastBanCheckFailureAt = null;
+    _lastBanCheckAlertAt = null;
+    _banCheckAlertSent = false;
+  }
+
+  void _emitBanCheckSkippedEvent({
+    required String reason,
+    required String normalizedEmail,
+    String? normalizedCollegeId,
+    Object? error,
+    StackTrace? stackTrace,
+  }) {
+    final maskedEmail = _maskEmail(normalizedEmail);
+    developer.log(
+      'ban_check_skipped reason=$reason email=$maskedEmail '
+      'collegeId=${normalizedCollegeId ?? 'global'}',
+      name: 'auth.ban_check',
+      level: 900,
+      error: error,
+      stackTrace: stackTrace,
+    );
+    developer.log(
+      'metric=ban_check_skipped reason=$reason',
+      name: 'auth.metrics',
+      level: 900,
+    );
+  }
 
   /// Sign in with Google
   Future<firebase_auth.UserCredential?> signInWithGoogle() async {
@@ -60,7 +155,8 @@ class AuthService {
           });
         }
 
-        return userCredential;      }
+        return userCredential;
+      }
 
       if (_googleSignIn == null) {
         debugPrint('GoogleSignIn not initialized (web platform?)');
@@ -176,6 +272,29 @@ class AuthService {
   /// Sign out - FIXED: Skip GoogleSignIn on web
   Future<void> signOut() async {
     try {
+      SharedPreferences? prefs;
+      if (!kIsWeb) {
+        final token =
+            _pushService.fcmToken ?? await _pushService.getSavedToken();
+        if (token != null && token.isNotEmpty) {
+          try {
+            await _backendApi.deleteFcmToken(token);
+            debugPrint('FCM token unregistered before sign out.');
+          } catch (e) {
+            debugPrint('Failed to unregister FCM token before sign out: $e');
+          }
+        }
+      }
+      try {
+        prefs ??= await SharedPreferences.getInstance();
+        await prefs.remove('fcm_token_owner_email');
+        await prefs.remove('premium_until');
+        await prefs.remove('premium_tier');
+        await prefs.remove('premium_email');
+      } catch (e) {
+        debugPrint('Failed to clear sign-out caches: $e');
+      }
+
       // Only sign out of GoogleSignIn on mobile
       if (!kIsWeb && _googleSignIn != null) {
         try {
@@ -186,14 +305,6 @@ class AuthService {
       }
       // Always sign out of Firebase
       await _auth.signOut();
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.remove('premium_until');
-        await prefs.remove('premium_tier');
-        await prefs.remove('premium_email');
-      } catch (e) {
-        debugPrint('Failed to clear premium cache: $e');
-      }
     } catch (e) {
       debugPrint('Error signing out: $e');
       rethrow;
@@ -205,16 +316,24 @@ class AuthService {
     String email,
     String? collegeId,
   ) async {
-    try {
-      final normalizedEmail = email.trim().toLowerCase();
-      final normalizedCollegeId =
-          collegeId != null && collegeId.trim().isNotEmpty
-          ? collegeId.trim()
-          : null;
+    final normalizedEmail = email.trim().toLowerCase();
+    final normalizedCollegeId = collegeId != null && collegeId.trim().isNotEmpty
+        ? collegeId.trim()
+        : null;
 
+    if (!shouldAllowBanCheckRetry()) {
+      _emitBanCheckSkippedEvent(
+        reason: 'retry_throttled',
+        normalizedEmail: normalizedEmail,
+        normalizedCollegeId: normalizedCollegeId,
+      );
+      return {'isBanned': false, 'reason': null, 'banCheckSkipped': true};
+    }
+
+    try {
       bool schemaQueryable = false;
 
-      Future<Map<String, dynamic>?> findBan({
+      Future<Map<String, dynamic>> findBan({
         required String column,
         required String normalizedEmail,
         String? scopedCollegeId,
@@ -231,19 +350,19 @@ class AuthService {
             query = query.eq('college_id', scopedCollegeId);
           }
 
-          final row = await query.maybeSingle();
-          schemaQueryable = true;
-          return row;
+          final mappedRow = await query.maybeSingle();
+          return {'row': mappedRow, 'schemaQueryable': true};
         } on PostgrestException catch (e) {
           final message = '${e.message} ${e.details ?? ''} ${e.hint ?? ''}'
               .toLowerCase();
-          final missingColumn = e.code == '42703' ||
+          final missingColumn =
+              e.code == '42703' ||
               e.code == 'PGRST204' ||
               (message.contains('column') &&
                   message.contains(column.toLowerCase()) &&
                   message.contains('does not exist'));
           if (missingColumn) {
-            return null;
+            return {'row': null, 'schemaQueryable': false};
           }
           rethrow;
         }
@@ -252,11 +371,15 @@ class AuthService {
       final banColumns = ['email', 'user_email'];
 
       for (final column in banColumns) {
-        final globalBan = await findBan(
+        final globalResult = await findBan(
           column: column,
           normalizedEmail: normalizedEmail,
         );
+        schemaQueryable =
+            schemaQueryable || (globalResult['schemaQueryable'] == true);
+        final globalBan = globalResult['row'] as Map<String, dynamic>?;
         if (globalBan != null) {
+          _resetBanCheckFailureState();
           return {
             'isBanned': true,
             'reason': globalBan['reason'] ?? 'You have been banned.',
@@ -267,12 +390,16 @@ class AuthService {
 
       if (normalizedCollegeId != null) {
         for (final column in banColumns) {
-          final collegeBan = await findBan(
+          final collegeResult = await findBan(
             column: column,
             normalizedEmail: normalizedEmail,
             scopedCollegeId: normalizedCollegeId,
           );
+          schemaQueryable =
+              schemaQueryable || (collegeResult['schemaQueryable'] == true);
+          final collegeBan = collegeResult['row'] as Map<String, dynamic>?;
           if (collegeBan != null) {
+            _resetBanCheckFailureState();
             return {
               'isBanned': true,
               'reason':
@@ -285,15 +412,39 @@ class AuthService {
       }
 
       if (!schemaQueryable) {
-        throw Exception(
-          'banned_users schema is missing expected email columns',
+        developer.log(
+          'banned_users schema not queryable for ban checks.',
+          name: 'auth.ban_check',
+          level: 1000,
         );
+        incrementBanCheckFailure();
+        _emitBanCheckSkippedEvent(
+          reason: 'schema_not_queryable',
+          normalizedEmail: normalizedEmail,
+          normalizedCollegeId: normalizedCollegeId,
+        );
+        return {'isBanned': false, 'reason': null, 'banCheckSkipped': true};
       }
 
-      return {'isBanned': false, 'reason': null};
-    } catch (e) {
-      debugPrint('Error checking ban status: $e');
-      rethrow; // Fail-closed: propagate DB errors so caller can handle them
+      _resetBanCheckFailureState();
+      return {'isBanned': false, 'reason': null, 'banCheckSkipped': false};
+    } catch (e, st) {
+      developer.log(
+        'ban status check failed',
+        name: 'auth.ban_check',
+        level: 1000,
+        error: e,
+        stackTrace: st,
+      );
+      incrementBanCheckFailure();
+      _emitBanCheckSkippedEvent(
+        reason: 'exception',
+        normalizedEmail: normalizedEmail,
+        normalizedCollegeId: normalizedCollegeId,
+        error: e,
+        stackTrace: st,
+      );
+      return {'isBanned': false, 'reason': null, 'banCheckSkipped': true};
     }
   }
 
@@ -338,7 +489,7 @@ class AuthService {
               'updated_at': now,
             })
             .timeout(const Duration(seconds: 5));
-        debugPrint('User saved to database: $email');
+        debugPrint('User saved to database.');
       } else {
         // Update existing user
         await _supabase
@@ -350,7 +501,7 @@ class AuthService {
             })
             .eq('email', email)
             .timeout(const Duration(seconds: 5));
-        debugPrint('User updated in database: $email');
+        debugPrint('User updated in database.');
       }
     } on TimeoutException {
       debugPrint('Database save timeout - user sign-in will proceed');

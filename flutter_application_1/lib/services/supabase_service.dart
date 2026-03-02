@@ -809,18 +809,42 @@ class SupabaseService {
     }
   }
 
-  Future<String> getCurrentUserRole() async {
-    try {
-      final payload = await _api.getProfile();
-      final profile =
-          (payload['profile'] as Map?)?.cast<String, dynamic>() ??
-          payload.cast<String, dynamic>();
-      if (profile.isEmpty) return AppRoles.readOnly;
-      return _resolveEffectiveRole(profile);
-    } catch (e) {
-      debugPrint('Error resolving current user role: $e');
-      return AppRoles.readOnly;
+  Future<Map<String, dynamic>> getCurrentUserProfile({
+    int maxAttempts = 3,
+  }) async {
+    Object? lastError;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        final payload = await _api.getProfile();
+        final profile =
+            (payload['profile'] as Map?)?.cast<String, dynamic>() ??
+            payload.cast<String, dynamic>();
+        if (profile.isNotEmpty) {
+          return profile;
+        }
+        lastError = Exception('Empty profile payload');
+      } catch (e) {
+        lastError = e;
+      }
+
+      if (attempt < maxAttempts) {
+        await Future.delayed(Duration(milliseconds: 250 * attempt));
+      }
     }
+
+    if (lastError != null) {
+      debugPrint(
+        'Error resolving current user profile after $maxAttempts attempts: '
+        '$lastError',
+      );
+    }
+    return {};
+  }
+
+  Future<String> getCurrentUserRole() async {
+    final profile = await getCurrentUserProfile();
+    if (profile.isEmpty) return AppRoles.readOnly;
+    return _resolveEffectiveRole(profile);
   }
 
   Future<void> addNotice({

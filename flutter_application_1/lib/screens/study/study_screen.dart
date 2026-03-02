@@ -188,8 +188,7 @@ class _StudyScreenState extends State<StudyScreen>
 
   Future<void> _loadUserProfile() async {
     try {
-      final data = await _apiService.getProfile();
-      final profile = (data['profile'] as Map?)?.cast<String, dynamic>() ?? {};
+      final profile = await _supabaseService.getCurrentUserProfile();
       if (profile.isEmpty) return;
       final role = _resolveProfileRole(profile);
       final semester = profile['semester']?.toString();
@@ -699,6 +698,9 @@ class _StudyScreenState extends State<StudyScreen>
             : (isTeacher && isRejected
                   ? () => _moderateResource(resource.id, 'pending')
                   : null);
+        final VoidCallback? onDelete = isTeacher
+            ? () => _deleteResource(resource)
+            : null;
 
         return Padding(
           padding: const EdgeInsets.only(bottom: 10),
@@ -709,6 +711,7 @@ class _StudyScreenState extends State<StudyScreen>
             onApprove: onApprove,
             onRetract: onRetract,
             onReject: onReject,
+            onDelete: onDelete,
           ),
         );
       },
@@ -757,6 +760,67 @@ class _StudyScreenState extends State<StudyScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Failed to moderate resource. Please try again.'),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isModerating = false);
+    }
+  }
+
+  Future<void> _deleteResource(Resource resource) async {
+    if (_isModerating) return;
+    if (_userAdminKey == null || _userAdminKey!.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Missing Admin Key. Update your profile.'),
+        ),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete Resource?'),
+        content: Text(
+          'This will permanently delete "${resource.title}" from StudySpace.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _isModerating = true);
+    try {
+      await _apiService.deleteResourceAsAdmin(
+        resourceId: resource.id,
+        adminKey: _userAdminKey!,
+        context: context,
+      );
+
+      if (!mounted) return;
+      await _loadFollowingFeed();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Resource deleted successfully')),
+      );
+    } catch (e) {
+      debugPrint('Error deleting resource: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to delete resource. Please try again.'),
         ),
       );
     } finally {

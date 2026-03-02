@@ -78,6 +78,7 @@ class _StickerPickerState extends State<StickerPicker>
     });
 
     try {
+      await _stickerService.warmUpCapabilities();
       await _stickerService.purgeLegacyPacks();
       final stickers = await _stickerService.getLocalStickers();
       final installedPacks = await _stickerService.getInstalledPackIds();
@@ -879,9 +880,11 @@ class _StickerPickerState extends State<StickerPicker>
               suffixIcon: _giphySearchController.text.isEmpty
                   ? null
                   : IconButton(
-                      icon: Icon(Icons.close_rounded,
-                          size: 16,
-                          color: isDark ? Colors.white54 : Colors.black54),
+                      icon: Icon(
+                        Icons.close_rounded,
+                        size: 16,
+                        color: isDark ? Colors.white54 : Colors.black54,
+                      ),
                       onPressed: () {
                         _giphySearchController.clear();
                         _loadGiphy();
@@ -903,79 +906,81 @@ class _StickerPickerState extends State<StickerPicker>
           child: _giphyLoading
               ? const Center(child: CircularProgressIndicator())
               : _giphyStickers.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.gif_box_outlined,
-                              size: 48, color: mutedColor),
-                          const SizedBox(height: 8),
-                          Text('No stickers found',
-                              style: GoogleFonts.inter(color: mutedColor)),
-                          const SizedBox(height: 4),
-                          TextButton(
-                            onPressed: _loadGiphy,
-                            child: const Text('Load Trending'),
-                          ),
-                        ],
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.gif_box_outlined, size: 48, color: mutedColor),
+                      const SizedBox(height: 8),
+                      Text(
+                        'No stickers found',
+                        style: GoogleFonts.inter(color: mutedColor),
                       ),
-                    )
-                  : GridView.builder(
-                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
-                      gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 4,
-                        mainAxisSpacing: 8,
-                        crossAxisSpacing: 8,
-                        childAspectRatio: 1,
+                      const SizedBox(height: 4),
+                      TextButton(
+                        onPressed: _loadGiphy,
+                        child: const Text('Load Trending'),
                       ),
-                      itemCount: _giphyStickers.length,
-                      itemBuilder: (context, idx) {
-                        final item = _giphyStickers[idx];
-                        final isSaving = _giphySavingId == item.id;
-                        return GestureDetector(
-                          onTap: () => _saveAndSendGiphy(item),
-                          child: Tooltip(
-                            message: item.title,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                    color: AppTheme.getBorderColor(context)),
-                                color: isDark ? Colors.white10 : Colors.white,
-                              ),
-                              clipBehavior: Clip.antiAlias,
-                              child: isSaving
-                                  ? const Center(
-                                      child: CircularProgressIndicator(
-                                          strokeWidth: 2),
-                                    )
-                                  : CachedNetworkImage(
-                                      imageUrl: item.previewUrl,
-                                      fit: BoxFit.cover,
-                                      placeholder: (_, __) => Container(
-                                        color: isDark
-                                            ? Colors.white10
-                                            : const Color(0xFFF0F0F0),
-                                      ),
-                                      errorWidget: (_, __, ___) => const Icon(
-                                          Icons.broken_image,
-                                          size: 24),
-                                    ),
+                    ],
+                  ),
+                )
+              : GridView.builder(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 4,
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                    childAspectRatio: 1,
+                  ),
+                  itemCount: _giphyStickers.length,
+                  itemBuilder: (context, idx) {
+                    final item = _giphyStickers[idx];
+                    final isSaving = _giphySavingId == item.id;
+                    return GestureDetector(
+                      onTap: () => _saveAndSendGiphy(item),
+                      child: Tooltip(
+                        message: item.title,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppTheme.getBorderColor(context),
                             ),
+                            color: isDark ? Colors.white10 : Colors.white,
                           ),
-                        );
-                      },
-                    ),
+                          clipBehavior: Clip.antiAlias,
+                          child: isSaving
+                              ? const Center(
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : CachedNetworkImage(
+                                  imageUrl: item.previewUrl,
+                                  fit: BoxFit.cover,
+                                  placeholder: (_, __) => Container(
+                                    color: isDark
+                                        ? Colors.white10
+                                        : const Color(0xFFF0F0F0),
+                                  ),
+                                  errorWidget: (_, __, ___) =>
+                                      const Icon(Icons.broken_image, size: 24),
+                                ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
         ),
         Padding(
           padding: const EdgeInsets.only(bottom: 6, top: 2),
           child: Text(
             'Powered by GIPHY',
             style: GoogleFonts.inter(
-                fontSize: 10,
-                color: mutedColor,
-                fontStyle: FontStyle.italic),
+              fontSize: 10,
+              color: mutedColor,
+              fontStyle: FontStyle.italic,
+            ),
           ),
         ),
       ],

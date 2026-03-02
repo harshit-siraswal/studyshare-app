@@ -28,14 +28,48 @@ class BackendApiService {
   String get _baseUrl =>
       AppConfig.apiUrl; // e.g. https://studyspace-backend.onrender.com
 
-  Future<String?> _getIdToken() async {
-    final user = _auth?.currentUser;
-    if (user == null) return null;
+  Future<String?> _getIdToken({bool forceRefresh = false}) async {
+    final auth = _auth;
+    if (auth == null) return null;
+
+    User? user = auth.currentUser;
+    if (user == null) {
+      try {
+        user = await auth
+            .authStateChanges()
+            .where((u) => u != null)
+            .cast<User>()
+            .first
+            .timeout(const Duration(seconds: 2));
+      } catch (_) {
+        return null;
+      }
+    }
+
     try {
-      return await user.getIdToken();
+      return await user.getIdToken(forceRefresh);
     } catch (e) {
       debugPrint('[BackendApi] token error: $e');
       return null;
+    }
+  }
+
+  Future<http.Response> _sendRequest(
+    String method,
+    Uri uri,
+    Map<String, String> headers,
+    Map<String, dynamic>? body,
+  ) {
+    final encodedBody = jsonEncode(body ?? {});
+    switch (method.toUpperCase()) {
+      case 'POST':
+        return http.post(uri, headers: headers, body: encodedBody);
+      case 'PUT':
+        return http.put(uri, headers: headers, body: encodedBody);
+      case 'DELETE':
+        return http.delete(uri, headers: headers, body: encodedBody);
+      default:
+        return http.get(uri, headers: headers);
     }
   }
 
@@ -44,10 +78,10 @@ class BackendApiService {
     String method = 'GET',
     Map<String, dynamic>? body,
   }) async {
-    final token = await _getIdToken();
+    String? token = await _getIdToken();
     final uri = Uri.parse('$_baseUrl$path');
 
-    final headers = <String, String>{
+    var headers = <String, String>{
       'Content-Type': 'application/json',
       if (token != null) 'Authorization': 'Bearer $token',
     };
@@ -56,32 +90,22 @@ class BackendApiService {
         ? null
         : Map<String, dynamic>.from(body);
 
-    late http.Response res;
-    switch (method.toUpperCase()) {
-      case 'POST':
-        res = await http.post(
-          uri,
-          headers: headers,
-          body: jsonEncode(effectiveBody ?? {}),
-        );
-        break;
-      case 'PUT':
-        res = await http.put(
-          uri,
-          headers: headers,
-          body: jsonEncode(effectiveBody ?? {}),
-        );
-        break;
-      case 'DELETE':
-        res = await http.delete(
-          uri,
-          headers: headers,
-          body: jsonEncode(effectiveBody ?? {}),
-        );
-        break;
-      default:
-        res = await http.get(uri, headers: headers);
-        break;
+    var res = await _sendRequest(method, uri, headers, effectiveBody);
+
+    if (res.statusCode == 401 || res.statusCode == 403) {
+      final refreshedToken = await _getIdToken(forceRefresh: true);
+      final shouldRetry =
+          refreshedToken != null &&
+          refreshedToken.isNotEmpty &&
+          refreshedToken != token;
+      if (shouldRetry) {
+        token = refreshedToken;
+        headers = <String, String>{
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        };
+        res = await _sendRequest(method, uri, headers, effectiveBody);
+      }
     }
 
     Map<String, dynamic> data;
@@ -571,6 +595,37 @@ class BackendApiService {
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
       String message = 'Failed to update resource status';
+      try {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        message =
+            data['message']?.toString() ?? data['error']?.toString() ?? message;
+      } catch (_) {
+        if (res.body.trim().isNotEmpty) {
+          message = res.body;
+        }
+      }
+      throw Exception(message);
+    }
+  }
+
+  Future<void> deleteResourceAsAdmin({
+    required String resourceId,
+    required String adminKey,
+    required BuildContext context,
+  }) async {
+    final uri = Uri.parse(
+      '$_baseUrl/api/admin/resources/${Uri.encodeComponent(resourceId)}',
+    );
+    final res = await http.delete(
+      uri,
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer $adminKey',
+      },
+    );
+
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      String message = 'Failed to delete resource';
       try {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
         message =

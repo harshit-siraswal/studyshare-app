@@ -42,16 +42,12 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   final BackendApiService _backendApiService = BackendApiService();
   final TextEditingController _commentController = TextEditingController();
   final FocusNode _commentFocusNode = FocusNode();
-  
+
   static const int kMaxStickerSizeBytes = 5 * 1024 * 1024;
 
   // Reply state
   String? _replyToId;
   String? _replyToName;
-
-  // ... (rest of vars)
-
-  // ... (rest of methods)
   List<Map<String, dynamic>> _comments = [];
   bool _isLoading = true;
   bool _isSaved = false;
@@ -71,7 +67,12 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     '🔥',
   ];
 
-  Widget _buildCommentContent(String content, bool isDark, Color textColor, String commentId) {
+  Widget _buildCommentContent(
+    String content,
+    bool isDark,
+    Color textColor,
+    String commentId,
+  ) {
     final stickerUrl = StickerCommentCodec.extractUrl(content);
     if (stickerUrl != null) {
       return GestureDetector(
@@ -138,9 +139,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             }
           } catch (e) {
             if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Error opening link: $e')),
-              );
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text('Error opening link: $e')));
             }
           }
         }
@@ -195,8 +196,15 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           _isLoading = false;
         });
       }
-    } catch (e) {
-      if (mounted) setState(() => _isLoading = false);
+    } catch (e, stackTrace) {
+      debugPrint('PostDetailScreen._loadData error: $e\n$stackTrace');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to load post details. Please try again.'),
+        ),
+      );
+      setState(() => _isLoading = false);
     }
   }
 
@@ -206,11 +214,13 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         await _supabaseService.unsavePost(
           widget.post['id'].toString(),
           widget.userEmail,
+          roomId: widget.roomId,
         );
       } else {
         await _supabaseService.savePost(
           widget.post['id'].toString(),
           widget.userEmail,
+          roomId: widget.roomId,
         );
       }
 
@@ -704,14 +714,18 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     CircleAvatar(
                       radius: 18,
                       backgroundColor: AppTheme.primary.withValues(alpha: 0.2),
-                      backgroundImage: post['author_photo_url'] != null ? NetworkImage(post['author_photo_url']) : null,
-                      child: post['author_photo_url'] == null ? Text(
-                        authorName[0].toUpperCase(),
-                        style: GoogleFonts.inter(
-                          fontWeight: FontWeight.bold,
-                          color: AppTheme.primary,
-                        ),
-                      ) : null,
+                      backgroundImage: post['author_photo_url'] != null
+                          ? NetworkImage(post['author_photo_url'])
+                          : null,
+                      child: post['author_photo_url'] == null
+                          ? Text(
+                              authorName[0].toUpperCase(),
+                              style: GoogleFonts.inter(
+                                fontWeight: FontWeight.bold,
+                                color: AppTheme.primary,
+                              ),
+                            )
+                          : null,
                     ),
                     const SizedBox(width: 10),
                     Column(
@@ -727,7 +741,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               ),
                             ),
                             const SizedBox(width: 4),
-                            UserBadge(email: post['author_email'] ?? '', size: 14),
+                            UserBadge(
+                              email: post['author_email'] ?? '',
+                              size: 14,
+                            ),
                           ],
                         ),
                         Text(
@@ -954,6 +971,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 'User')
             .toString();
     final authorEmail = (comment['author_email'] ?? '').toString();
+    final hasAuthorPhoto =
+        comment['author_photo_url']?.toString().trim().isNotEmpty ?? false;
     final content = (comment['content'] ?? '').toString();
     final createdAt = comment['created_at'] != null
         ? DateTime.parse(comment['created_at'])
@@ -1033,18 +1052,22 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     },
                     child: CircleAvatar(
                       radius: 18,
-                      backgroundColor:
-                          AppTheme.secondary, // Or random color/image
-                      child: Text(
-                        authorName.isNotEmpty
-                            ? authorName[0].toUpperCase()
-                            : '?',
-                        style: GoogleFonts.inter(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
+                      backgroundColor: AppTheme.secondary,
+                      backgroundImage: hasAuthorPhoto
+                          ? NetworkImage(comment['author_photo_url'].toString())
+                          : null,
+                      child: hasAuthorPhoto
+                          ? null
+                          : Text(
+                              authorName.isNotEmpty
+                                  ? authorName[0].toUpperCase()
+                                  : '?',
+                              style: GoogleFonts.inter(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1067,7 +1090,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                         builder: (context) => UserProfileScreen(
                                           userEmail: authorEmail,
                                           userName: authorName,
-                                          userPhotoUrl: comment['author_photo_url'],
+                                          userPhotoUrl:
+                                              comment['author_photo_url'],
                                         ),
                                       ),
                                     );
@@ -1077,13 +1101,15 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                     style: GoogleFonts.inter(
                                       fontWeight: FontWeight.w700,
                                       fontSize: 14,
-                                      color: isDark ? Colors.white : Colors.black,
+                                      color: isDark
+                                          ? Colors.white
+                                          : Colors.black,
                                     ),
                                   ),
                                 ),
                                 const SizedBox(width: 4),
                                 UserBadge(email: authorEmail, size: 14),
-                              ]
+                              ],
                             ),
                             const SizedBox(width: 8),
                             Text(
@@ -1102,7 +1128,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               ),
                               onSelected: (value) {
                                 if (value == 'report') {
-                                  _showReportDialog(context, commentId, isComment: true);
+                                  _showReportDialog(
+                                    context,
+                                    commentId,
+                                    isComment: true,
+                                  );
                                 }
                               },
                               itemBuilder: (context) => [
@@ -1117,8 +1147,12 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         const SizedBox(height: 4),
 
                         // Comment Body
-                        // Comment Body
-                        _buildCommentContent(content, isDark, textColor, commentId),
+                        _buildCommentContent(
+                          content,
+                          isDark,
+                          textColor,
+                          commentId,
+                        ),
 
                         const SizedBox(height: 8),
 
@@ -1262,7 +1296,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     try {
       final length = await stickerFile.length();
       if (length > kMaxStickerSizeBytes) {
-         throw Exception('Sticker is too large (max 5MB).');
+        throw Exception('Sticker is too large (max 5MB).');
       }
       final bytes = await stickerFile.readAsBytes();
       final filename = 'sticker_${DateTime.now().millisecondsSinceEpoch}.png';
@@ -1325,127 +1359,142 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     return '${dateTime.day}/${dateTime.month}';
   }
 
-  Future<void> _showReportDialog(BuildContext context, String targetId, {bool isComment = false}) async {
+  Future<void> _showReportDialog(
+    BuildContext context,
+    String targetId, {
+    bool isComment = false,
+  }) async {
     final TextEditingController reasonController = TextEditingController();
     final itemType = isComment ? 'comment' : 'post';
-    
+
     try {
       await showDialog(
         context: context,
-      builder: (dialogCtx) => AlertDialog(
-        backgroundColor: Theme.of(context).dialogBackgroundColor,
-        title: Text(
-          'Report ${itemType == 'comment' ? 'Comment' : 'Post'}',
-          style: GoogleFonts.inter(
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Why are you reporting this $itemType?',
-              style: GoogleFonts.inter(color: Colors.white70),
+        builder: (dialogCtx) => AlertDialog(
+          backgroundColor:
+              Theme.of(dialogCtx).dialogTheme.backgroundColor ??
+              Theme.of(dialogCtx).colorScheme.surface,
+          title: Text(
+            'Report ${itemType == 'comment' ? 'Comment' : 'Post'}',
+            style: GoogleFonts.inter(
+              fontWeight: FontWeight.bold,
+              color: Theme.of(dialogCtx).colorScheme.onSurface,
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: reasonController,
-              style: GoogleFonts.inter(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: 'Enter reason...',
-                hintStyle: GoogleFonts.inter(color: Colors.white38),
-                filled: true,
-                fillColor: Colors.black26,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
-                  borderSide: BorderSide.none,
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Why are you reporting this $itemType?',
+                style: GoogleFonts.inter(
+                  color: Theme.of(
+                    dialogCtx,
+                  ).textTheme.bodyMedium?.color?.withValues(alpha: 0.8),
                 ),
               ),
-              maxLines: 3,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogCtx),
-            child: Text(
-              'Cancel',
-              style: GoogleFonts.inter(color: Colors.white60),
-            ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: reasonController,
+                style: GoogleFonts.inter(
+                  color: Theme.of(dialogCtx).colorScheme.onSurface,
+                ),
+                decoration: InputDecoration(
+                  hintText: 'Enter reason...',
+                  hintStyle: GoogleFonts.inter(
+                    color: Theme.of(
+                      dialogCtx,
+                    ).textTheme.bodySmall?.color?.withValues(alpha: 0.6),
+                  ),
+                  filled: true,
+                  fillColor: Theme.of(
+                    dialogCtx,
+                  ).colorScheme.surfaceContainerHigh,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+                maxLines: 3,
+              ),
+            ],
           ),
-          ElevatedButton(
-            onPressed: () async {
-              final reason = reasonController.text.trim();
-              if (reason.isEmpty) return;
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogCtx),
+              child: Text(
+                'Cancel',
+                style: GoogleFonts.inter(
+                  color: Theme.of(dialogCtx).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final reason = reasonController.text.trim();
+                if (reason.isEmpty) return;
+                final messenger =
+                    ScaffoldMessenger.maybeOf(dialogCtx) ??
+                    ScaffoldMessenger.maybeOf(context);
 
-              // Deny unauthenticated reports
-              if (_authService.currentUser == null) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("You must be signed in to report.")),
+                // Deny unauthenticated reports
+                if (_authService.currentUser == null) {
+                  messenger?.showSnackBar(
+                    const SnackBar(
+                      content: Text("You must be signed in to report."),
+                    ),
                   );
+                  return;
                 }
-                return;
-              }
-              final reporterId = _authService.currentUser!.uid;
+                final reporterId = _authService.currentUser!.uid;
 
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                messenger?.showSnackBar(
                   const SnackBar(content: Text("Submitting report...")),
                 );
-              }
 
-              // Call Backend API
-              try {
-                if (isComment) {
-                  await _backendApiService.reportComment(
-                    targetId,
-                    reason,
-                    reporterId,
-                  );
-                } else {
-                  await _backendApiService.reportPost(
-                    targetId,
-                    reason,
-                    reporterId,
-                  );
-                }
+                // Call Backend API
+                try {
+                  if (isComment) {
+                    await _backendApiService.reportComment(
+                      targetId,
+                      reason,
+                      reporterId,
+                    );
+                  } else {
+                    await _backendApiService.reportPost(
+                      targetId,
+                      reason,
+                      reporterId,
+                    );
+                  }
 
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  messenger?.showSnackBar(
                     const SnackBar(
                       content: Text("Report submitted successfully."),
                     ),
                   );
-                }
-              } catch (e) {
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text("Report failed: $e"),
-                    ),
+                } catch (e) {
+                  messenger?.showSnackBar(
+                    SnackBar(content: Text("Report failed: $e")),
                   );
+                } finally {
+                  if (mounted && dialogCtx.mounted) {
+                    Navigator.pop(dialogCtx); // Close dialog
+                  }
                 }
-              } finally {
-                if (mounted && dialogCtx.mounted) {
-                  Navigator.pop(dialogCtx); // Close dialog
-                }
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.redAccent,
-              foregroundColor: Colors.white,
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.redAccent,
+                foregroundColor: Colors.white,
+              ),
+              child: Text(
+                'Report',
+                style: GoogleFonts.inter(fontWeight: FontWeight.bold),
+              ),
             ),
-            child: Text(
-              'Report',
-              style: GoogleFonts.inter(fontWeight: FontWeight.bold),
-            ),
-          ),
-        ],
-      ),
-    );
+          ],
+        ),
+      );
     } finally {
       reasonController.dispose();
     }

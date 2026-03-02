@@ -55,38 +55,41 @@ if (Test-Path "$badgerDir\build.gradle") {
 
 $buildArgs = @("build", "apk", "--release", "--verbose")
 
-if ($env:API_URL) {
-    Write-Host "Using API_URL from environment (set)" -ForegroundColor Cyan
-    $buildArgs += "--dart-define=API_URL=$($env:API_URL)"
-}
-
-if ($env:API_FALLBACK_URLS) {
-    Write-Host "Using API_FALLBACK_URLS from environment" -ForegroundColor Cyan
-    $buildArgs += "--dart-define=API_FALLBACK_URLS=$($env:API_FALLBACK_URLS)"
-}
-
-# REMOVE_BG_API_KEY - environment var overrides hardcoded key
-if ($env:REMOVE_BG_API_KEY) {
-    $removeBgKey = $env:REMOVE_BG_API_KEY
-    Write-Host "Using REMOVE_BG_API_KEY from environment" -ForegroundColor Cyan
-    $buildArgs += "--dart-define=REMOVE_BG_API_KEY=$removeBgKey"
+$envFile = Join-Path $PSScriptRoot ".env"
+if (Test-Path $envFile) {
+    Write-Host "Using --dart-define-from-file=.env" -ForegroundColor Cyan
+    $buildArgs += "--dart-define-from-file=.env"
 }
 else {
-    $removeBgKey = "D53uXgDqrEyuxCXHXQWFZ7n4"
-    Write-Host "Using fallback REMOVE_BG_API_KEY; background removal features will remain enabled" -ForegroundColor Yellow
-    $buildArgs += "--dart-define=REMOVE_BG_API_KEY=$removeBgKey"
+    Write-Host ".env not found. Falling back to process environment variables only." -ForegroundColor Yellow
 }
 
-# GIPHY_API_KEY - environment var overrides hardcoded key
-if ($env:GIPHY_API_KEY) {
-    $giphyKey = $env:GIPHY_API_KEY
-    Write-Host "Using GIPHY_API_KEY from environment" -ForegroundColor Cyan
-    $buildArgs += "--dart-define=GIPHY_API_KEY=$giphyKey"
+# Explicit environment variables override values coming from .env.
+$defineKeys = @(
+    "API_URL",
+    "API_FALLBACK_URLS",
+    "SUPABASE_URL",
+    "SUPABASE_ANON_KEY",
+    "GIPHY_API_KEY",
+    "REMOVE_BG_API_KEY",
+    "RAZORPAY_KEY_ID",
+    "GOOGLE_SERVER_CLIENT_ID"
+)
+
+foreach ($key in $defineKeys) {
+    $value = [Environment]::GetEnvironmentVariable($key)
+    if ($null -ne $value -and $value -ne "") {
+        Write-Host "Using $key from environment override" -ForegroundColor Cyan
+        $buildArgs += "--dart-define=$key=$value"
+    }
 }
-else {
-    $giphyKey = "E2CYfJbrw5NGA8aUUN2d8nDn4Q6PoH77"
-    Write-Host "Using fallback GIPHY API key; GIPHY features will remain enabled" -ForegroundColor Yellow
-    $buildArgs += "--dart-define=GIPHY_API_KEY=$giphyKey"
+
+if (-not $env:GIPHY_API_KEY -and -not (Test-Path $envFile)) {
+    Write-Host "GIPHY_API_KEY not supplied. GIF features will be disabled." -ForegroundColor Yellow
+}
+
+if (-not $env:REMOVE_BG_API_KEY -and -not (Test-Path $envFile)) {
+    Write-Host "REMOVE_BG_API_KEY not supplied. Background removal will fail at runtime." -ForegroundColor Yellow
 }
 
 # Build APK

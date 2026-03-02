@@ -24,7 +24,6 @@ import '../services/summary_pdf_service.dart';
 import '../services/supabase_service.dart';
 import '../controllers/ai_chat_animation_controller.dart';
 import '../widgets/ai_chat_message_bubble.dart';
-import '../widgets/kinetic_dots_loader.dart';
 import '../widgets/onboarding_overlay.dart';
 import 'ai_question_paper_quiz_screen.dart';
 import 'viewer/pdf_viewer_screen.dart';
@@ -2322,6 +2321,8 @@ Return STRICT JSON only (no markdown). Schema:
         : (isDark ? Colors.white : Colors.black);
     final isStreamingAssistantMessage =
         !msg.isUser && _isLoading && index == _messages.length - 1;
+    final isStreamingPlaceholder =
+        isStreamingAssistantMessage && msg.content.trim().isEmpty;
     final messageTextStyle = GoogleFonts.inter(
       fontSize: isCompact ? 13.5 : 14,
       height: 1.46,
@@ -2399,10 +2400,57 @@ Return STRICT JSON only (no markdown). Schema:
           ),
         if (!msg.isUser) const SizedBox(height: 8),
         if (isStreamingAssistantMessage)
-          Shimmer.fromColors(
-            baseColor: isDark ? Colors.white54 : Colors.black54,
-            highlightColor: isDark ? Colors.white : Colors.black87,
-            child: Text(msg.content, style: messageTextStyle),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Shimmer.fromColors(
+                baseColor: isDark ? Colors.white54 : Colors.black54,
+                highlightColor: isDark ? Colors.white : Colors.black87,
+                child: Text(
+                  isStreamingPlaceholder
+                      ? 'Thinking through your notes...'
+                      : msg.content,
+                  style: messageTextStyle,
+                ),
+              ),
+              if (isStreamingPlaceholder) ...[
+                const SizedBox(height: 8),
+                Shimmer.fromColors(
+                  baseColor: isDark
+                      ? Colors.white.withValues(alpha: 0.12)
+                      : Colors.black.withValues(alpha: 0.08),
+                  highlightColor: isDark
+                      ? Colors.white.withValues(alpha: 0.24)
+                      : Colors.black.withValues(alpha: 0.16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        height: 8,
+                        width: 170,
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.white24
+                              : Colors.black.withValues(alpha: 0.16),
+                          borderRadius: BorderRadius.circular(99),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Container(
+                        height: 8,
+                        width: 138,
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.white24
+                              : Colors.black.withValues(alpha: 0.16),
+                          borderRadius: BorderRadius.circular(99),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
           )
         else
           Text(msg.content, style: messageTextStyle),
@@ -2787,20 +2835,6 @@ Return STRICT JSON only (no markdown). Schema:
       vertical: isSmallPhone ? 8 : 10,
     );
     final inputMaxHeight = isSmallPhone ? 126.0 : 152.0;
-    final typingWidth = (screenWidth * 0.31).clamp(102.0, 146.0).toDouble();
-    final typingPadding = EdgeInsets.all(isSmallPhone ? 10 : 12);
-    final typingMargin = EdgeInsets.symmetric(vertical: isSmallPhone ? 4 : 6);
-    final typingBorderRadius = BorderRadius.only(
-      topLeft: Radius.circular(isSmallPhone ? 18 : 20),
-      topRight: Radius.circular(isSmallPhone ? 18 : 20),
-      bottomLeft: Radius.circular(4),
-      bottomRight: Radius.circular(isSmallPhone ? 18 : 20),
-    );
-    final typingShadow = BoxShadow(
-      color: Colors.black.withValues(alpha: 0.05),
-      blurRadius: 5,
-      offset: const Offset(0, 2),
-    );
     final attachmentNameStyle = GoogleFonts.inter(
       fontSize: isSmallPhone ? 10 : (isCompact ? 10.5 : 11),
       color: isDark ? Colors.white70 : Colors.black87,
@@ -3044,30 +3078,8 @@ Return STRICT JSON only (no markdown). Schema:
                   : ListView.builder(
                       controller: _scrollController,
                       padding: listPadding,
-                      itemCount: _messages.length + (_isLoading ? 1 : 0),
+                      itemCount: _messages.length,
                       itemBuilder: (context, index) {
-                        if (index == _messages.length) {
-                          return Align(
-                            alignment: Alignment.centerLeft,
-                            child: Container(
-                              width: typingWidth,
-                              margin: typingMargin,
-                              padding: typingPadding,
-                              decoration: BoxDecoration(
-                                color: isDark
-                                    ? const Color(0xFF1C1C1E)
-                                    : const Color(0xFFE9E9EB),
-                                borderRadius: typingBorderRadius,
-                                boxShadow: [typingShadow],
-                              ),
-                              child: const KineticDotsLoader(
-                                compact: true,
-                                label: 'Thinking...',
-                              ),
-                            ),
-                          );
-                        }
-
                         final m = _messages[index];
                         return Align(
                           alignment: m.isUser

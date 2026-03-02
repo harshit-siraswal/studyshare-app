@@ -605,7 +605,7 @@ class _NotificationScreenState extends State<NotificationScreen>
                 fit: BoxFit.cover,
                 width: 48,
                 height: 48,
-                errorBuilder: (_, __, ___) => Text(
+                errorBuilder: (context, error, stackTrace) => Text(
                   n.actorName?.isNotEmpty == true
                       ? n.actorName![0].toUpperCase()
                       : '?',

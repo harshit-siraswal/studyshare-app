@@ -9,8 +9,6 @@ import '../../services/subscription_service.dart';
 import 'chatroom_screen.dart';
 import 'discover_rooms_screen.dart';
 
-
-
 class ChatroomListScreen extends StatefulWidget {
   final String collegeId;
   final String collegeDomain;
@@ -28,12 +26,15 @@ class ChatroomListScreen extends StatefulWidget {
 }
 
 class _ChatroomListScreenState extends State<ChatroomListScreen> {
+  // Bottom bar reserve = nav bar (~96) + safe-area/inset (~24) + visual gap (~28).
+  static const double _bottomNavSpacing = 148.0;
+
   final SupabaseService _supabaseService = SupabaseService();
   final TextEditingController _searchController = TextEditingController();
-  
+
   final FocusNode _searchFocusNode = FocusNode();
   bool _isSearchFocused = false;
-  
+
   List<Map<String, dynamic>> _rooms = [];
   List<Map<String, dynamic>> _filteredRooms = [];
   Set<String> _joinedRoomIds = {};
@@ -61,7 +62,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
       _isSearchFocused = _searchFocusNode.hasFocus;
     });
   }
-  
+
   @override
   void dispose() {
     _searchFocusNode.removeListener(_onSearchFocusChange);
@@ -77,9 +78,11 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
         widget.collegeId,
       );
       final joinedIds = await _supabaseService.getUserRoomIds(widget.userEmail);
-      
+
       // Filter to show only joined rooms
-      final joinedRooms = rooms.where((r) => joinedIds.contains(r['id'].toString())).toList();
+      final joinedRooms = rooms
+          .where((r) => joinedIds.contains(r['id'].toString()))
+          .toList();
 
       if (mounted) {
         setState(() {
@@ -106,17 +109,17 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
   @override
   Widget build(BuildContext context) {
     // Force dark mode look if user wants strict adherence to the dark UI image
-    // But respecting theme toggle is better practice. 
+    // But respecting theme toggle is better practice.
     // Given "strict adherence", I will follow the image style which is Dark.
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     // Minimalist Design Colors (Image 1)
     // Bg: Black
     // Card: Dark Grey ~#1C1C1E
-    
+
     final bgColor = isDark ? Colors.black : const Color(0xFFF2F2F7);
     final cardColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
-    
+
     return Scaffold(
       backgroundColor: bgColor,
       resizeToAvoidBottomInset: false, // Fix bottom actions/nav from jumping up
@@ -135,16 +138,16 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                 child: _isLoading
                     ? _buildLoadingSkeleton(isDark)
                     : _filteredRooms.isEmpty
-                        ? _buildEmptyState(isDark)
-                        : _buildRoomList(isDark, cardColor),
+                    ? _buildEmptyState(isDark)
+                    : _buildRoomList(isDark, cardColor),
               ),
             ),
           ],
         ),
       ),
       // Image 1 shows + button in header range, not as FAB
-      // But if scrolling list, FAB is standard. 
-      // Image 1 has + button at TOP RIGHT next to search bar. 
+      // But if scrolling list, FAB is standard.
+      // Image 1 has + button at TOP RIGHT next to search bar.
       // So I will implement that and remove FAB.
     );
   }
@@ -160,30 +163,41 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
               focusNode: _searchFocusNode,
               onChanged: _filterRooms,
               style: GoogleFonts.inter(
-                 color: isDark ? Colors.white : Colors.black,
-                 fontSize: 16,
+                color: isDark ? Colors.white : Colors.black,
+                fontSize: 16,
               ),
               decoration: InputDecoration(
                 hintText: 'Search rooms...',
                 hintStyle: GoogleFonts.inter(
-                  color: isDark ? const Color(0xFF8E8E93) : Colors.grey.shade400,
+                  color: isDark
+                      ? const Color(0xFF8E8E93)
+                      : Colors.grey.shade400,
                   fontSize: 16,
                 ),
-                prefixIcon: Icon(Icons.search, color: isDark ? Colors.grey : Colors.black54),
+                prefixIcon: Icon(
+                  Icons.search,
+                  color: isDark ? Colors.grey : Colors.black54,
+                ),
                 // Show clear button when focused
-                suffixIcon: _isSearchFocused 
+                suffixIcon: _isSearchFocused
                     ? IconButton(
-                        icon: Icon(Icons.close, color: isDark ? Colors.grey : Colors.black54),
+                        icon: Icon(
+                          Icons.close,
+                          color: isDark ? Colors.grey : Colors.black54,
+                        ),
                         onPressed: () {
                           _searchController.clear();
                           _filterRooms('');
                           _searchFocusNode.unfocus();
                         },
-                      ) 
+                      )
                     : null,
                 filled: true,
                 fillColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-                contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 20),
+                contentPadding: const EdgeInsets.symmetric(
+                  vertical: 0,
+                  horizontal: 20,
+                ),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(30),
                   borderSide: BorderSide.none,
@@ -194,7 +208,9 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(30),
-                  borderSide: isDark ? const BorderSide(color: Colors.white24) : const BorderSide(color: Colors.black12),
+                  borderSide: isDark
+                      ? const BorderSide(color: Colors.white24)
+                      : const BorderSide(color: Colors.black12),
                 ),
               ),
             ),
@@ -212,7 +228,8 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                     await Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => SavedPostsScreen(userEmail: widget.userEmail),
+                        builder: (_) =>
+                            SavedPostsScreen(userEmail: widget.userEmail),
                       ),
                     );
                     _loadRooms();
@@ -231,16 +248,21 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
             ),
             const SizedBox(width: 12),
             // Add Button
-            GestureDetector(
-              onTap: _navigateToDiscoverRooms,
-              child: Container(
-                width: 48, 
-                height: 48,
-                decoration: BoxDecoration(
-                  color: isDark ? Colors.white : Colors.black, 
-                  borderRadius: BorderRadius.circular(30),
+            Material(
+              color: isDark ? Colors.white : Colors.black,
+              borderRadius: BorderRadius.circular(30),
+              clipBehavior: Clip.antiAlias,
+              child: InkWell(
+                onTap: _navigateToDiscoverRooms,
+                borderRadius: BorderRadius.circular(30),
+                child: SizedBox(
+                  width: 48,
+                  height: 48,
+                  child: Icon(
+                    Icons.add_rounded,
+                    color: isDark ? Colors.black : Colors.white,
+                  ),
                 ),
-                child: Icon(Icons.add_rounded, color: isDark ? Colors.black : Colors.white),
               ),
             ),
           ],
@@ -250,8 +272,15 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
   }
 
   Widget _buildRoomList(bool isDark, Color cardColor) {
+    final extraBottomPadding =
+        MediaQuery.of(context).padding.bottom + _bottomNavSpacing;
     return ListView.separated(
-      padding: const EdgeInsets.only(left: 20, right: 20, top: 0, bottom: 100), // Added bottom padding for floating nav
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 0,
+        bottom: extraBottomPadding,
+      ),
       itemCount: _filteredRooms.length,
       separatorBuilder: (context, index) => const SizedBox(height: 16),
       itemBuilder: (context, index) {
@@ -261,9 +290,13 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
     );
   }
 
-  Widget _buildRoomCard(Map<String, dynamic> room, bool isDark, Color cardColor) {
+  Widget _buildRoomCard(
+    Map<String, dynamic> room,
+    bool isDark,
+    Color cardColor,
+  ) {
     final memberCount = room['member_count'] ?? 0;
-    
+
     // "Last activity: 2m ago" - dummy for now or based on updated_at
     final updatedAt = room['updated_at'] ?? room['created_at'];
     final timeStr = updatedAt != null ? _formatTimeAgo(updatedAt) : 'Recently';
@@ -288,17 +321,22 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                 room['name'] ?? 'Untitled',
                 style: GoogleFonts.inter(
                   fontSize: 18,
-                  fontWeight: FontWeight.w500, // Medium weight as per image look
+                  fontWeight:
+                      FontWeight.w500, // Medium weight as per image look
                   color: isDark ? Colors.white : Colors.black,
                   letterSpacing: -0.5,
                 ),
               ),
               const SizedBox(height: 12),
-              
+
               // Member Row
               Row(
                 children: [
-                  Icon(Icons.group_outlined, size: 18, color: const Color(0xFF8E8E93)),
+                  Icon(
+                    Icons.group_outlined,
+                    size: 18,
+                    color: const Color(0xFF8E8E93),
+                  ),
                   const SizedBox(width: 8),
                   Text(
                     '$memberCount Members', // Formatting K? e.g. 4.2K
@@ -310,11 +348,15 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                 ],
               ),
               const SizedBox(height: 8),
-              
+
               // Activity Row
               Row(
                 children: [
-                  Icon(Icons.access_time_rounded, size: 18, color: const Color(0xFF8E8E93)),
+                  Icon(
+                    Icons.access_time_rounded,
+                    size: 18,
+                    color: const Color(0xFF8E8E93),
+                  ),
                   const SizedBox(width: 8),
                   Text(
                     'Last activity: $timeStr',
@@ -325,7 +367,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                   ),
                 ],
               ),
-              
+
               // If private, maybe an icon? Image 1 doesn't explicitly show private lock but it's good UX.
               // I will add a small lock icon top right if private, subtle.
             ],
@@ -338,19 +380,21 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
   // ... helper methods ...
 
   void _handleRoomTap(Map<String, dynamic> room) {
-     if (_isReadOnly) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Read-only access')));
+    if (_isReadOnly) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Read-only access')));
       return;
     }
 
     final isPrivate = room['is_private'] == true;
     final isMember = _joinedRoomIds.contains(room['id']?.toString());
-    
+
     if (isPrivate && !isMember) {
       _showJoinRoomDialog();
       return;
     }
-    
+
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -379,7 +423,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
   }
 
   // Simplify Dialogs for brevity in this rewrite, keeping styles consistent
-  
+
   void _showCreateOrJoinDialog() {
     // Standard bottom sheet selector
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -388,30 +432,48 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
       backgroundColor: Colors.transparent,
       builder: (context) => Container(
         padding: const EdgeInsets.all(24),
-         decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          ),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
               leading: Container(
                 padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: Colors.blue.withValues(alpha: 0.2), shape: BoxShape.circle),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withValues(alpha: 0.2),
+                  shape: BoxShape.circle,
+                ),
                 child: const Icon(Icons.add, color: Colors.blue),
               ),
-              title: Text('Create Room', style: TextStyle(color: isDark ? Colors.white : Colors.black)),
-              onTap: () { Navigator.pop(context); _showCreateRoomDialog(); },
+              title: Text(
+                'Create Room',
+                style: TextStyle(color: isDark ? Colors.white : Colors.black),
+              ),
+              onTap: () async {
+                Navigator.pop(context);
+                await _showCreateRoomDialog();
+              },
             ),
-             ListTile(
+            ListTile(
               leading: Container(
                 padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: Colors.green.withValues(alpha: 0.2), shape: BoxShape.circle),
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.2),
+                  shape: BoxShape.circle,
+                ),
                 child: const Icon(Icons.login, color: Colors.green),
               ),
-              title: Text('Join Room', style: TextStyle(color: isDark ? Colors.white : Colors.black)),
-              onTap: () { Navigator.pop(context); _showJoinRoomDialog(); },
+              title: Text(
+                'Join Room',
+                style: TextStyle(color: isDark ? Colors.white : Colors.black),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _showJoinRoomDialog();
+              },
             ),
           ],
         ),
@@ -419,177 +481,263 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
     );
   }
 
-  void _showJoinRoomDialog() {
-     if (_isReadOnly) {
-       ScaffoldMessenger.of(context).showSnackBar(
-         const SnackBar(content: Text('Read-only access. Use your college email to join rooms.')),
-       );
-       return;
-     }
-     // Implementation same as before but minimal style
-     final isDark = Theme.of(context).brightness == Brightness.dark;
-     final codeController = TextEditingController();
-     
-     showDialog(
-       context: context,
-       builder: (context) => AlertDialog(
-         backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-         title: Text('Join Room', style: TextStyle(color: isDark ? Colors.white : Colors.black)),
-         content: TextField(
-           controller: codeController,
-           style: TextStyle(color: isDark ? Colors.white : Colors.black),
-           decoration: InputDecoration(
-             hintText: 'Enter Code',
-             filled: true,
-             fillColor: isDark ? Colors.black45 : Colors.grey.shade100,
-             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-           ),
-         ),
-         actions: [
-           TextButton(onPressed: ()=>Navigator.pop(context), child: const Text('Cancel')),
-           TextButton(
-             onPressed: () async {
-                // Join logic
-                     if(codeController.text.isNotEmpty) {
-                         try {
-                             await BackendApiService().joinChatRoom(codeController.text.trim(), widget.userEmail, widget.collegeId);
-                             if(mounted) { Navigator.pop(context); _loadRooms(); }
-                         } catch(e) {
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Failed to join room: $e')),
-                            );
-                          }
-                         }
-                     }
-                 }, 
-                 child: const Text('Join'),
-           ),
-         ],
-       ),
-     );
-  }
-  
-  void _showCreateRoomDialog() async {
-      if (_isReadOnly) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Read-only access. Use your college email to create rooms.')),
-        );
-        return;
-      }
-      // Minimal implementation
-      final isDark = Theme.of(context).brightness == Brightness.dark;
-      final nameCtrl = TextEditingController();
-      bool isPrivate = false;
-      bool isPermanent = false;
-      
-      // Check premium status
-      final subService = SubscriptionService();
-      final isPremium = await subService.isPremium();
-      
-      if (!mounted) return;
-
-      showDialog(
-       context: context,
-       builder: (context) => StatefulBuilder(
-         builder: (context, setDialogState) => AlertDialog(
-           backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-           title: Text('Create Room', style: TextStyle(color: isDark ? Colors.white : Colors.black)),
-           content: Column(
-             mainAxisSize: MainAxisSize.min,
-             children: [
-               TextField(
-                 controller: nameCtrl,
-                 style: TextStyle(color: isDark ? Colors.white : Colors.black),
-                 decoration: InputDecoration(
-                   hintText: 'Room Name', 
-                   filled: true, 
-                   fillColor: isDark ? Colors.black45 : Colors.grey.shade100, 
-                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)
-                 ),
-               ),
-               SwitchListTile(
-                 title: Text('Private', style: TextStyle(color: isDark ? Colors.white : Colors.black)),
-                 value: isPrivate,
-                 onChanged: (v) => setDialogState(() => isPrivate = v),
-                 activeThumbColor: isDark ? Colors.white : Colors.black,
-               ),
-               SwitchListTile(
-                 title: Row(
-                   children: [
-                     Text('Permanent Room', style: TextStyle(color: isDark ? Colors.white : Colors.black)),
-                     if (!isPremium) ...[
-                       const SizedBox(width: 8),
-                       Container(
-                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                         decoration: BoxDecoration(color: Colors.amber, borderRadius: BorderRadius.circular(4)),
-                         child: const Text('PRO', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.black)),
-                       )
-                     ]
-                   ],
-                 ),
-                 subtitle: Text(
-                   isPremium ? 'Room will not expire' : 'Upgrade to create permanent rooms (7 days expiry for free)',
-                   style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.grey),
-                 ),
-                 value: isPermanent,
-                 onChanged: isPremium 
-                    ? (v) => setDialogState(() => isPermanent = v)
-                    : null, // Disabled for free users
-                 activeThumbColor: isDark ? Colors.white : Colors.black,
-               ),
-             ],
-           ),
-           actions: [
-              TextButton(onPressed: ()=>Navigator.pop(context), child: const Text('Cancel')),
-              TextButton(
-                 onPressed: () async {
-                    if(nameCtrl.text.isNotEmpty) {
-                        try {
-                           // Duration
-                           final duration = isPermanent ? SupabaseService.kUnlimitedDuration : SupabaseService.kDefaultExpiryDays;
-                           await _supabaseService.createChatRoom(
-                             name: nameCtrl.text, 
-                             description: '', 
-                             isPrivate: isPrivate, 
-                             userEmail: widget.userEmail, 
-                             collegeId: widget.collegeId,
-                             durationInDays: duration,
-                           );
-                           if(mounted) { Navigator.pop(context); _loadRooms(); }
-                        } catch (e) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Failed to create room. Please try again.')),
-                          );
-                          // Log the actual error for debugging
-                          debugPrint('Create room error: $e');
-                        }
-                    }
-                 },
-                 child: const Text('Create'),
-              )
-           ],
-         ),
-       ),
+  Future<void> _showJoinRoomDialog() async {
+    if (_isReadOnly) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Read-only access. Use your college email to join rooms.',
+          ),
+        ),
       );
+      return;
+    }
+    // Implementation same as before but minimal style
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final codeController = TextEditingController();
+    try {
+      await showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+          title: Text(
+            'Join Room',
+            style: TextStyle(color: isDark ? Colors.white : Colors.black),
+          ),
+          content: TextField(
+            controller: codeController,
+            style: TextStyle(color: isDark ? Colors.white : Colors.black),
+            decoration: InputDecoration(
+              hintText: 'Enter Code',
+              filled: true,
+              fillColor: isDark ? Colors.black45 : Colors.grey.shade100,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () async {
+                // Join logic
+                if (codeController.text.isNotEmpty) {
+                  try {
+                    await BackendApiService().joinChatRoom(
+                      codeController.text.trim(),
+                      widget.userEmail,
+                      widget.collegeId,
+                    );
+                    if (mounted) {
+                      Navigator.pop(context);
+                      _loadRooms();
+                    }
+                  } catch (e) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('Failed to join room: $e')),
+                      );
+                    }
+                  }
+                }
+              },
+              child: const Text('Join'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      codeController.dispose();
+    }
+  }
+
+  Future<void> _showCreateRoomDialog() async {
+    if (_isReadOnly) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Read-only access. Use your college email to create rooms.',
+          ),
+        ),
+      );
+      return;
+    }
+    // Minimal implementation
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final nameCtrl = TextEditingController();
+    bool isPrivate = false;
+    bool isPermanent = false;
+
+    // Check premium status
+    final subService = SubscriptionService();
+    final isPremium = await subService.isPremium();
+
+    if (!mounted) return;
+
+    try {
+      await showDialog(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+            title: Text(
+              'Create Room',
+              style: TextStyle(color: isDark ? Colors.white : Colors.black),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  style: TextStyle(color: isDark ? Colors.white : Colors.black),
+                  decoration: InputDecoration(
+                    hintText: 'Room Name',
+                    filled: true,
+                    fillColor: isDark ? Colors.black45 : Colors.grey.shade100,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+                SwitchListTile(
+                  title: Text(
+                    'Private',
+                    style: TextStyle(
+                      color: isDark ? Colors.white : Colors.black,
+                    ),
+                  ),
+                  value: isPrivate,
+                  onChanged: (v) => setDialogState(() => isPrivate = v),
+                  activeThumbColor: isDark ? Colors.white : Colors.black,
+                ),
+                SwitchListTile(
+                  title: Row(
+                    children: [
+                      Text(
+                        'Permanent Room',
+                        style: TextStyle(
+                          color: isDark ? Colors.white : Colors.black,
+                        ),
+                      ),
+                      if (!isPremium) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 6,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.amber,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text(
+                            'PRO',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.black,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  subtitle: Text(
+                    isPremium
+                        ? 'Room will not expire'
+                        : 'Upgrade to create permanent rooms (7 days expiry for free)',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDark ? Colors.white54 : Colors.grey,
+                    ),
+                  ),
+                  value: isPermanent,
+                  onChanged: isPremium
+                      ? (v) => setDialogState(() => isPermanent = v)
+                      : null, // Disabled for free users
+                  activeThumbColor: isDark ? Colors.white : Colors.black,
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+              TextButton(
+                onPressed: () async {
+                  if (nameCtrl.text.isNotEmpty) {
+                    try {
+                      // Duration
+                      final duration = isPermanent
+                          ? SupabaseService.kUnlimitedDuration
+                          : SupabaseService.kDefaultExpiryDays;
+                      await _supabaseService.createChatRoom(
+                        name: nameCtrl.text,
+                        description: '',
+                        isPrivate: isPrivate,
+                        userEmail: widget.userEmail,
+                        collegeId: widget.collegeId,
+                        durationInDays: duration,
+                      );
+                      if (mounted) {
+                        Navigator.pop(context);
+                        _loadRooms();
+                      }
+                    } catch (e) {
+                      if (!mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Failed to create room. Please try again.',
+                          ),
+                        ),
+                      );
+                      // Log the actual error for debugging
+                      debugPrint('Create room error: $e');
+                    }
+                  }
+                },
+                child: const Text('Create'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      nameCtrl.dispose();
+    }
   }
 
   Widget _buildLoadingSkeleton(bool isDark) {
+    final extraBottomPadding =
+        MediaQuery.of(context).padding.bottom + _bottomNavSpacing;
     return ListView.separated(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: EdgeInsets.fromLTRB(20, 0, 20, extraBottomPadding),
       itemCount: 5,
       separatorBuilder: (_, __) => const SizedBox(height: 16),
       itemBuilder: (_, __) => Shimmer.fromColors(
-          baseColor: isDark ? const Color(0xFF2C2C2E) : Colors.grey.shade300,
-          highlightColor: isDark ? const Color(0xFF3A3A3C) : Colors.grey.shade100,
-          child: Container(height: 100, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24))),
+        baseColor: isDark ? const Color(0xFF2C2C2E) : Colors.grey.shade300,
+        highlightColor: isDark ? const Color(0xFF3A3A3C) : Colors.grey.shade100,
+        child: Container(
+          height: 100,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+          ),
+        ),
       ),
     );
   }
 
   Future<void> _navigateToDiscoverRooms() async {
     await Navigator.push(
-      context, 
+      context,
       MaterialPageRoute(
         builder: (_) => DiscoverRoomsScreen(
           collegeId: widget.collegeId,
@@ -602,28 +750,36 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
   }
 
   Widget _buildEmptyState(bool isDark) {
+    final extraBottomPadding =
+        MediaQuery.of(context).padding.bottom + _bottomNavSpacing;
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 64),
+      padding: EdgeInsets.fromLTRB(32, 64, 32, extraBottomPadding),
       children: [
         Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.chat_bubble_outline_rounded, size: 64, color: isDark ? Colors.white24 : Colors.grey.shade300),
+              Icon(
+                Icons.chat_bubble_outline_rounded,
+                size: 64,
+                color: isDark ? Colors.white24 : Colors.grey.shade300,
+              ),
               const SizedBox(height: 16),
               Text(
-                'No rooms joined yet', 
+                'No rooms joined yet',
                 style: GoogleFonts.inter(
                   fontSize: 18,
                   fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white : Colors.black
-                )
+                  color: isDark ? Colors.white : Colors.black,
+                ),
               ),
               const SizedBox(height: 8),
               Text(
                 'Join a room to start chatting!',
-                style: GoogleFonts.inter(color: isDark ? Colors.white54 : Colors.grey),
+                style: GoogleFonts.inter(
+                  color: isDark ? Colors.white54 : Colors.grey,
+                ),
               ),
               const SizedBox(height: 24),
               ElevatedButton.icon(
@@ -633,10 +789,15 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: isDark ? Colors.white : Colors.black,
                   foregroundColor: isDark ? Colors.black : Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
+                  ),
                 ),
-              )
+              ),
             ],
           ),
         ),

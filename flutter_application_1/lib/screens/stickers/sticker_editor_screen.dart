@@ -46,6 +46,7 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
   void initState() {
     super.initState();
     _workingFile = widget.sourceFile;
+    _warmCapabilities();
   }
 
   @override
@@ -71,6 +72,12 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
     } finally {
       if (mounted) setState(() => _isRemovingBg = false);
     }
+  }
+
+  Future<void> _warmCapabilities() async {
+    await _stickerService.warmUpCapabilities();
+    if (!mounted) return;
+    setState(() {});
   }
 
   Future<void> _saveSticker() async {
@@ -187,7 +194,10 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
                     Image(
                       image: FileImage(_workingFile),
                       fit: BoxFit.contain,
-                      key: ValueKey(_workingFile.path + _workingFile.lastModifiedSync().toString()),
+                      key: ValueKey(
+                        _workingFile.path +
+                            _workingFile.lastModifiedSync().toString(),
+                      ),
                     ),
                     if (overlayText.isNotEmpty)
                       Align(

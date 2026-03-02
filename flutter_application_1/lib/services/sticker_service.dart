@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_cropper/image_cropper.dart';
@@ -17,8 +18,8 @@ import '../config/app_config.dart';
 class GiphyStickerItem {
   final String id;
   final String title;
-  final String previewUrl;   // fixed_width_small gif / downsampled
-  final String originalUrl;  // original mp4 or gif url to save
+  final String previewUrl; // fixed_width_small gif / downsampled
+  final String originalUrl; // original mp4 or gif url to save
 
   const GiphyStickerItem({
     required this.id,
@@ -36,8 +37,10 @@ class GiphyStickerItem {
     return GiphyStickerItem(
       id: j['id']?.toString() ?? '',
       title: j['title']?.toString() ?? 'Sticker',
-      previewUrl: (small['url'] ?? downsized['url'] ?? original['url'] ?? '').toString(),
-      originalUrl: (original['url'] ?? downsized['url'] ?? small['url'] ?? '').toString(),
+      previewUrl: (small['url'] ?? downsized['url'] ?? original['url'] ?? '')
+          .toString(),
+      originalUrl: (original['url'] ?? downsized['url'] ?? small['url'] ?? '')
+          .toString(),
     );
   }
 }
@@ -56,8 +59,13 @@ class GiphyStickerCategory {
   factory GiphyStickerCategory.fromJson(Map<String, dynamic> j) {
     return GiphyStickerCategory(
       name: j['name']?.toString() ?? 'Unknown',
-      encodedSearchTerm: j['name_encoded']?.toString() ?? j['name']?.toString() ?? '',
-      previewGifUrl: ((j['gif'] as Map<String, dynamic>?)?['images'] as Map<String, dynamic>?)?['fixed_width_small']?['url']?.toString() ?? '',
+      encodedSearchTerm:
+          j['name_encoded']?.toString() ?? j['name']?.toString() ?? '',
+      previewGifUrl:
+          ((j['gif'] as Map<String, dynamic>?)?['images']
+                  as Map<String, dynamic>?)?['fixed_width_small']?['url']
+              ?.toString() ??
+          '',
     );
   }
 }
@@ -108,6 +116,10 @@ class StickerService {
     {'size': '4k', 'format': 'png'},
     {'size': 'auto', 'format': 'png'},
   ];
+  static Future<void>? _capabilityFetchFuture;
+  static bool _remoteCapabilitiesLoaded = false;
+  static bool _remoteGiphyEnabled = false;
+  static bool _remoteRemoveBgEnabled = false;
 
   static const List<StickerPack> availablePacks = [
     StickerPack(
@@ -165,8 +177,88 @@ class StickerService {
   static const String _giphyBase = 'https://api.giphy.com/v1';
 
   String get _giphyKey => AppConfig.giphyApiKey;
+  String get _removeBgKey => AppConfig.removeBgApiKey;
 
-  bool get hasGiphy => _giphyKey.isNotEmpty;
+  bool get hasGiphy => _giphyKey.isNotEmpty || _remoteGiphyEnabled;
+
+  /// Returns true when background removal is available.
+  bool get canRemoveBackground =>
+      _removeBgKey.isNotEmpty || _remoteRemoveBgEnabled;
+
+  Future<void> warmUpCapabilities() async {
+    await _ensureCapabilities();
+  }
+
+  Future<String?> _getIdToken() async {
+    try {
+      final user = firebase_auth.FirebaseAuth.instance.currentUser;
+      if (user == null) return null;
+      return await user.getIdToken();
+    } catch (e) {
+      debugPrint('Failed to get Firebase token for sticker APIs: $e');
+      return null;
+    }
+  }
+
+  Uri _backendUri(String path, [Map<String, String>? queryParameters]) {
+    final normalizedBase = AppConfig.apiUrl.replaceAll(RegExp(r'/+$'), '');
+    return Uri.parse(
+      '$normalizedBase$path',
+    ).replace(queryParameters: queryParameters);
+  }
+
+  Future<void> _ensureCapabilities() async {
+    if (_giphyKey.isNotEmpty && _removeBgKey.isNotEmpty) {
+      _remoteCapabilitiesLoaded = true;
+      _remoteGiphyEnabled = true;
+      _remoteRemoveBgEnabled = true;
+      return;
+    }
+
+    if (_remoteCapabilitiesLoaded) return;
+    if (_capabilityFetchFuture != null) {
+      await _capabilityFetchFuture;
+      return;
+    }
+
+    _capabilityFetchFuture = _fetchCapabilitiesFromBackend();
+    try {
+      await _capabilityFetchFuture;
+    } finally {
+      _capabilityFetchFuture = null;
+    }
+  }
+
+  Future<void> _fetchCapabilitiesFromBackend() async {
+    try {
+      final token = await _getIdToken();
+      final response = await http
+          .get(
+            _backendUri('/api/stickers/config'),
+            headers: {
+              'Content-Type': 'application/json',
+              if (token != null && token.isNotEmpty)
+                'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 12));
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final parsed = jsonDecode(response.body) as Map<String, dynamic>;
+        _remoteGiphyEnabled = parsed['giphyEnabled'] == true;
+        _remoteRemoveBgEnabled = parsed['removeBgEnabled'] == true;
+      } else {
+        _remoteGiphyEnabled = false;
+        _remoteRemoveBgEnabled = false;
+      }
+    } catch (e) {
+      debugPrint('Sticker capability check failed: $e');
+      _remoteGiphyEnabled = false;
+      _remoteRemoveBgEnabled = false;
+    } finally {
+      _remoteCapabilitiesLoaded = true;
+    }
+  }
 
   /// Fetch trending stickers or search results from Giphy.
   Future<List<GiphyStickerItem>> fetchGiphyStickers({
@@ -175,19 +267,53 @@ class StickerService {
     int offset = 0,
     String rating = 'g',
   }) async {
-    if (_giphyKey.isEmpty) return [];
-    final endpoint = query != null && query.trim().isNotEmpty
-        ? '$_giphyBase/stickers/search'
-        : '$_giphyBase/stickers/trending';
-    final uri = Uri.parse(endpoint).replace(queryParameters: {
-      'api_key': _giphyKey,
-      'limit': limit.toString(),
-      'offset': offset.toString(),
-      'rating': rating,
-      if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
-    });
+    final trimmedQuery = query?.trim();
+    final hasDirectKey = _giphyKey.isNotEmpty;
+
+    Uri uri;
+    Map<String, String>? headers;
+
+    if (hasDirectKey) {
+      final endpoint = trimmedQuery != null && trimmedQuery.isNotEmpty
+          ? '$_giphyBase/stickers/search'
+          : '$_giphyBase/stickers/trending';
+      uri = Uri.parse(endpoint).replace(
+        queryParameters: {
+          'api_key': _giphyKey,
+          'limit': limit.toString(),
+          'offset': offset.toString(),
+          'rating': rating,
+          if (trimmedQuery != null && trimmedQuery.isNotEmpty)
+            'q': trimmedQuery,
+        },
+      );
+      headers = null;
+    } else {
+      await _ensureCapabilities();
+      if (!_remoteGiphyEnabled) return [];
+      final token = await _getIdToken();
+      uri = _backendUri(
+        trimmedQuery != null && trimmedQuery.isNotEmpty
+            ? '/api/stickers/giphy/search'
+            : '/api/stickers/giphy/trending',
+        {
+          'limit': limit.toString(),
+          'offset': offset.toString(),
+          'rating': rating,
+          if (trimmedQuery != null && trimmedQuery.isNotEmpty)
+            'q': trimmedQuery,
+        },
+      );
+      headers = {
+        'Content-Type': 'application/json',
+        if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+      };
+    }
+
     try {
-      final res = await http.get(uri).timeout(const Duration(seconds: 15));
+      final res = await http
+          .get(uri, headers: headers)
+          .timeout(const Duration(seconds: 15));
       if (res.statusCode != 200) return [];
       final decoded = jsonDecode(res.body) as Map<String, dynamic>?;
       final data = (decoded?['data'] as List?) ?? [];
@@ -203,10 +329,15 @@ class StickerService {
 
   /// Fetch sticker categories from Giphy.
   Future<List<GiphyStickerCategory>> fetchGiphyCategories() async {
-    if (_giphyKey.isEmpty) return [];
-    final uri = Uri.parse('$_giphyBase/stickers/categories').replace(
-      queryParameters: {'api_key': _giphyKey},
-    );
+    if (_giphyKey.isEmpty) {
+      await _ensureCapabilities();
+      if (!_remoteGiphyEnabled) return [];
+      // Categories endpoint is optional in proxy mode for now.
+      return [];
+    }
+    final uri = Uri.parse(
+      '$_giphyBase/stickers/categories',
+    ).replace(queryParameters: {'api_key': _giphyKey});
     try {
       final res = await http.get(uri).timeout(const Duration(seconds: 15));
       if (res.statusCode != 200) return [];
@@ -225,12 +356,16 @@ class StickerService {
   /// Download a Giphy sticker and save it to the local sticker directory.
   Future<File?> saveGiphySticker(GiphyStickerItem sticker) async {
     try {
-      final res = await http.get(Uri.parse(sticker.originalUrl))
+      final res = await http
+          .get(Uri.parse(sticker.originalUrl))
           .timeout(const Duration(seconds: 30));
       if (res.statusCode != 200) return null;
       final dir = await getStickerDirectory();
-      final ext = sticker.originalUrl.contains('.webp') ? '.webp'
-          : sticker.originalUrl.contains('.gif') ? '.gif' : '.gif';
+      final ext = sticker.originalUrl.contains('.webp')
+          ? '.webp'
+          : sticker.originalUrl.contains('.gif')
+          ? '.gif'
+          : '.gif';
       final filename = 'giphy_${sticker.id}$ext';
       final file = File(path.join(dir.path, filename));
       if (await file.exists()) return file; // already saved
@@ -241,9 +376,6 @@ class StickerService {
       return null;
     }
   }
-
-  /// Returns true when background removal is available.
-  bool get canRemoveBackground => AppConfig.removeBgApiKey.isNotEmpty;
 
   Future<Directory> getStickerDirectory() async {
     final appDocDir = await getApplicationDocumentsDirectory();
@@ -369,8 +501,11 @@ class StickerService {
 
   /// Removes the background from an image using remove.bg.
   Future<File?> removeBackground(File sourceFile) async {
-    final apiKey = AppConfig.removeBgApiKey;
-    if (apiKey.isEmpty) {
+    if (_removeBgKey.isEmpty) {
+      await _ensureCapabilities();
+      if (_remoteRemoveBgEnabled) {
+        return _removeBackgroundViaBackend(sourceFile);
+      }
       throw Exception('REMOVE_BG_API_KEY not set');
     }
 
@@ -401,7 +536,7 @@ class StickerService {
             data: formData,
             options: Options(
               responseType: ResponseType.bytes,
-              headers: {'X-Api-Key': apiKey},
+              headers: {'X-Api-Key': _removeBgKey},
             ),
           );
 
@@ -434,6 +569,49 @@ class StickerService {
       throw Exception(_readableRemoveBgError(lastError));
     }
     return null;
+  }
+
+  Future<File?> _removeBackgroundViaBackend(File sourceFile) async {
+    final token = await _getIdToken();
+    final request = http.MultipartRequest(
+      'POST',
+      _backendUri('/api/stickers/remove-bg'),
+    );
+
+    if (token != null && token.isNotEmpty) {
+      request.headers['Authorization'] = 'Bearer $token';
+    }
+
+    request.fields['size'] = 'auto';
+    request.fields['format'] = 'png';
+    request.files.add(
+      await http.MultipartFile.fromPath('image', sourceFile.path),
+    );
+
+    final response = await request.send().timeout(const Duration(seconds: 50));
+    final bytes = await response.stream.toBytes();
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final errorBody = utf8.decode(bytes, allowMalformed: true).trim();
+      throw Exception(
+        errorBody.isNotEmpty
+            ? 'Background removal failed: $errorBody'
+            : 'Background removal failed (${response.statusCode})',
+      );
+    }
+
+    if (bytes.isEmpty) {
+      throw Exception('Background removal failed: empty output');
+    }
+
+    final tempDir = await getTemporaryDirectory();
+    final outputPath = path.join(
+      tempDir.path,
+      'mss_removebg_${DateTime.now().millisecondsSinceEpoch}.png',
+    );
+    final outputFile = File(outputPath);
+    await outputFile.writeAsBytes(bytes, flush: true);
+    return outputFile;
   }
 
   bool _shouldRetryRemoveBg(Object error) {

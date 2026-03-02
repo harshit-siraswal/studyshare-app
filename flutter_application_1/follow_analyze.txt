@@ -1,6 +1,0 @@
-Analyzing follow_button.dart...                                 
-
-   info - Statements in an if should be enclosed in a block - lib\widgets\follow_button.dart:52:20 - curly_braces_in_flow_control_structures
-warning - The operand can't be 'null', so the condition is always 'true' - lib\widgets\follow_button.dart:174:28 - unnecessary_null_comparison
-
-2 issues found. (ran in 10.8s)

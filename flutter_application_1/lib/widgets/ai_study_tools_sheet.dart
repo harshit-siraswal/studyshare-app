@@ -3,7 +3,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../config/theme.dart';
+import '../models/ai_question_paper.dart';
 import '../screens/ai_chat_screen.dart';
+import '../screens/ai_question_paper_quiz_screen.dart';
 import '../services/ai_output_local_service.dart';
 import '../services/backend_api_service.dart';
 import '../services/summary_pdf_service.dart';
@@ -117,8 +119,6 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
   bool get _supportsOcr => widget.resourceType != 'video';
 
-  final TextEditingController _ocrProviderController = TextEditingController();
-
   String _ocrProviderLabelFor(String provider) {
     switch (provider) {
       case 'google_vision':
@@ -133,7 +133,6 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   @override
   void initState() {
     super.initState();
-    _ocrProviderController.text = _ocrProviderLabelFor(_ocrProvider);
     _tabController = TabController(length: 4, vsync: this);
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) return;
@@ -144,7 +143,6 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
   @override
   void dispose() {
-    _ocrProviderController.dispose();
     _tabController.dispose();
     super.dispose();
   }
@@ -247,6 +245,67 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
       default:
         return null;
     }
+  }
+
+  String _labelForType(String type) {
+    switch (type) {
+      case 'quiz':
+        return 'Quiz';
+      case 'flashcards':
+        return 'Cards';
+      case 'chat':
+        return 'Chat';
+      default:
+        return 'Summary';
+    }
+  }
+
+  int get _readyOutputCount {
+    var count = 0;
+    if (_summary != null && _summary!.trim().isNotEmpty) count++;
+    if (_quiz != null && _quiz!.isNotEmpty) count++;
+    if (_flashcards != null && _flashcards!.isNotEmpty) count++;
+    return count;
+  }
+
+  Widget _buildHeaderChip({
+    required bool isDark,
+    required IconData icon,
+    required String label,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.08)
+            : Colors.white.withValues(alpha: 0.78),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.14)
+              : Colors.black.withValues(alpha: 0.06),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 14,
+            color: isDark ? Colors.white70 : const Color(0xFF1E293B),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: isDark ? Colors.white70 : const Color(0xFF1E293B),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _generate(String type, {required bool regenerate}) async {
@@ -404,143 +463,670 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     }
   }
 
-  Widget _buildOptionChip({
-    required String label,
-    required bool selected,
-    required ValueChanged<bool> onSelected,
-    required bool isDark,
-  }) {
-    return FilterChip(
-      label: Text(
-        label,
-        style: GoogleFonts.inter(
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          color: selected
-              ? Colors.white
-              : (isDark ? Colors.white70 : Colors.black87),
+  int _resolveQuizAnswerIndex(QuizQuestion question) {
+    final options = question.options;
+    if (options.isEmpty) return 0;
+
+    final raw = question.correct.trim();
+    if (raw.isEmpty) return 0;
+
+    final letterMatch = RegExp(r'^[A-Za-z]$').firstMatch(raw);
+    if (letterMatch != null) {
+      final index = raw.toUpperCase().codeUnitAt(0) - 65;
+      if (index >= 0 && index < options.length) return index;
+    }
+
+    final numeric = int.tryParse(raw);
+    if (numeric != null && numeric >= 1 && numeric <= options.length) {
+      return numeric - 1;
+    }
+
+    final normalized = raw.toLowerCase();
+    for (var i = 0; i < options.length; i++) {
+      if (options[i].trim().toLowerCase() == normalized) {
+        return i;
+      }
+    }
+
+    return 0;
+  }
+
+  AiQuestionPaper? _buildQuestionPaperFromStudioQuiz() {
+    final quiz = _quiz;
+    if (quiz == null || quiz.isEmpty) return null;
+
+    final questions = <AiQuestionPaperQuestion>[];
+    for (final item in quiz) {
+      final text = item.question.trim();
+      final options = item.options
+          .map((option) => option.trim())
+          .where((option) => option.isNotEmpty)
+          .toList();
+      if (text.isEmpty || options.length < 2) {
+        continue;
+      }
+
+      questions.add(
+        AiQuestionPaperQuestion(
+          question: text,
+          options: options,
+          correctIndex: _resolveQuizAnswerIndex(
+            item,
+          ).clamp(0, options.length - 1),
+          explanation: '',
+          source: AiQuestionPaperSource(
+            title: widget.resourceTitle,
+            section: 'AI Studio Quiz',
+            pages: '',
+            note: 'Generated from selected resource',
+          ),
+        ),
+      );
+    }
+
+    if (questions.isEmpty) return null;
+
+    final subject = (widget.subject ?? '').trim();
+    final semester = (widget.semester ?? '').trim();
+    final branch = (widget.branch ?? '').trim();
+    final resolvedSubject = subject.isEmpty ? 'General' : subject;
+
+    return AiQuestionPaper(
+      title: '$resolvedSubject Quiz',
+      subject: resolvedSubject,
+      semester: semester,
+      branch: branch,
+      instructions: const [
+        'Answer all questions.',
+        'Choose the best option for each question.',
+        'Each question carries equal marks.',
+      ],
+      questions: questions,
+      generatedAt: DateTime.now(),
+      pyqCount: 1,
+    );
+  }
+
+  Future<void> _startStudioQuiz() async {
+    final paper = _buildQuestionPaperFromStudioQuiz();
+    if (paper == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No valid quiz questions available yet.')),
+      );
+      return;
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AiQuestionPaperQuizScreen(paper: paper),
+      ),
+    );
+  }
+
+  Widget _buildStartQuizCard(bool isDark) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0E1E37) : const Color(0xFFEAF2FF),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark ? const Color(0xFF29456C) : const Color(0xFFC6DBFF),
         ),
       ),
-      selected: selected,
-      onSelected: onSelected,
-      selectedColor: AppTheme.primary,
-      backgroundColor: isDark
-          ? Colors.white10
-          : Colors.black.withValues(alpha: 0.05),
-      showCheckmark: false,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(
-          color: selected
-              ? Colors.transparent
-              : (isDark
-                    ? Colors.white12
-                    : Colors.black.withValues(alpha: 0.06)),
+      child: Row(
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.emoji_events_rounded,
+              color: AppTheme.primary,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Attempt Full Quiz',
+                  style: GoogleFonts.inter(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Start quiz mode with submit and score screen.',
+                  style: GoogleFonts.inter(
+                    fontSize: 11.5,
+                    color: isDark ? Colors.white70 : const Color(0xFF334155),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          ElevatedButton.icon(
+            onPressed: _startStudioQuiz,
+            icon: const Icon(Icons.play_arrow_rounded, size: 18),
+            label: const Text('Start Quiz'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _studioBlue,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildControlsPanel(bool isDark) {
+    if (!_supportsOcr) {
+      return const SizedBox.shrink();
+    }
+
+    return InkWell(
+      onTap: () => _showExtractionSettingsSheet(isDark),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.05)
+              : Colors.white.withValues(alpha: 0.75),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.08)
+                : Colors.black.withValues(alpha: 0.06),
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.tune_rounded,
+              size: 16,
+              color: isDark ? Colors.white70 : const Color(0xFF334155),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                _useOcr
+                    ? 'OCR on • ${_ocrProviderLabelFor(_ocrProvider)}'
+                    : 'OCR off',
+                style: GoogleFonts.inter(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                ),
+              ),
+            ),
+            Icon(
+              Icons.settings_rounded,
+              size: 16,
+              color: isDark ? Colors.white70 : const Color(0xFF334155),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildControls(bool isDark) {
-    if (!_supportsOcr) {
-      return const SizedBox.shrink();
-    }
+  Future<void> _showExtractionSettingsSheet(bool isDark) async {
+    if (!_supportsOcr) return;
 
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.white.withValues(alpha: 0.03) : Colors.white.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.05),
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF121A2B) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 18),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          'Extraction Settings',
+                          style: GoogleFonts.inter(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                            color: isDark
+                                ? Colors.white
+                                : const Color(0xFF0F172A),
+                          ),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded),
+                          onPressed: () => Navigator.pop(sheetContext),
+                          tooltip: 'Close',
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      value: _useOcr,
+                      onChanged: (val) {
+                        setState(() {
+                          _useOcr = val;
+                          if (!val) _forceOcr = false;
+                        });
+                        setSheetState(() {});
+                      },
+                      activeThumbColor: _studioBlue,
+                      activeTrackColor: _studioBlue.withValues(alpha: 0.35),
+                      title: Text(
+                        'Use OCR',
+                        style: GoogleFonts.inter(
+                          fontWeight: FontWeight.w700,
+                          color: isDark
+                              ? Colors.white
+                              : const Color(0xFF0F172A),
+                        ),
+                      ),
+                      subtitle: Text(
+                        'Enable OCR fallback for scanned/low-text pages.',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: isDark
+                              ? Colors.white70
+                              : const Color(0xFF475569),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Provider',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: isDark
+                            ? Colors.white70
+                            : const Color(0xFF334155),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      width: double.infinity,
+                      child: SegmentedButton<String>(
+                        segments: const [
+                          ButtonSegment<String>(
+                            value: 'google_vision',
+                            label: Text('Google'),
+                            icon: Icon(Icons.visibility_rounded, size: 16),
+                          ),
+                          ButtonSegment<String>(
+                            value: 'sarvam',
+                            label: Text('Sarvam'),
+                            icon: Icon(Icons.bolt_rounded, size: 16),
+                          ),
+                        ],
+                        selected: {_ocrProvider},
+                        onSelectionChanged: _useOcr
+                            ? (next) {
+                                if (next.isEmpty) return;
+                                setState(() => _ocrProvider = next.first);
+                                setSheetState(() {});
+                              }
+                            : null,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildStudioHeader(bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(10, 8, 4, 8),
+        decoration: BoxDecoration(
+          color: isDark
+              ? const Color(0xFF0D1728).withValues(alpha: 0.92)
+              : const Color(0xFFF4F8FF),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.08)
+                : const Color(0xFFD8E5FF),
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.12)
+                    : Colors.white,
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(6),
+                child: Image.asset(
+                  'assets/images/ai_logo.png',
+                  fit: BoxFit.contain,
+                  errorBuilder: (context, error, stackTrace) => Icon(
+                    Icons.auto_awesome_rounded,
+                    color: isDark ? Colors.white : const Color(0xFF1E3A8A),
+                    size: 15,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'AI Studio',
+                    style: GoogleFonts.inter(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w800,
+                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                    ),
+                  ),
+                  Text(
+                    widget.resourceTitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      color: isDark ? Colors.white70 : const Color(0xFF475569),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            _buildHeaderChip(
+              isDark: isDark,
+              icon: Icons.checklist_rounded,
+              label: '$_readyOutputCount/3',
+            ),
+            IconButton(
+              onPressed: () => setState(() => _isFullscreen = !_isFullscreen),
+              icon: Icon(
+                _isFullscreen
+                    ? Icons.fullscreen_exit_rounded
+                    : Icons.fullscreen_rounded,
+                size: 19,
+              ),
+              color: isDark ? Colors.white70 : const Color(0xFF1E3A8A),
+              visualDensity: VisualDensity.compact,
+              tooltip: _isFullscreen ? 'Exit full screen' : 'Full screen',
+            ),
+            IconButton(
+              onPressed: () => Navigator.pop(context),
+              icon: const Icon(Icons.close_rounded, size: 19),
+              color: isDark ? Colors.white70 : const Color(0xFF1E293B),
+              visualDensity: VisualDensity.compact,
+              tooltip: 'Close',
+            ),
+          ],
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Extraction Mode',
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: isDark ? Colors.white : const Color(0xFF0F172A),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              _buildOptionChip(
-                label: 'Use OCR',
-                selected: _useOcr,
-                onSelected: (val) {
-                  setState(() {
-                    _useOcr = val;
-                    if (!val) _forceOcr = false;
-                  });
-                },
-                isDark: isDark,
-              ),
-              const Spacer(),
-              Text(
-                'Provider:',
-                style: GoogleFonts.inter(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white70 : Colors.black87,
-                ),
-              ),
-              const SizedBox(width: 8),
-              SizedBox(
-                height: 32,
-                child: DropdownMenu<String>(
-                  controller: _ocrProviderController,
-                  width: 100,
-                  initialSelection: _ocrProvider,
-                  enabled: _useOcr,
-                  enableSearch: false,
-                  requestFocusOnTap: false,
-                  textStyle: GoogleFonts.inter(
-                    fontSize: 11,
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
-                  inputDecorationTheme: InputDecorationTheme(
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
+    );
+  }
+
+  Widget _buildCompactActionBar({
+    required bool isDark,
+    required bool hasOutput,
+    required bool isSavedLocally,
+    required String activeLabel,
+  }) {
+    final chips = <Widget>[];
+    if (_activeType != 'chat') {
+      if (_cachedMap[_activeType] == true) {
+        chips.add(_buildStatusChip('Server cache'));
+      }
+      if (isSavedLocally) {
+        chips.add(_buildStatusChip('Saved on device'));
+      }
+    }
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (chips.isNotEmpty)
+              Wrap(spacing: 6, runSpacing: 4, children: chips),
+            if (chips.isNotEmpty) const SizedBox(height: 6),
+            if (_activeType != 'chat')
+              Row(
+                children: [
+                  if (hasOutput && !isSavedLocally)
+                    _buildActionIconButton(
+                      icon: _isSaving
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.save_outlined, size: 18),
+                      tooltip: 'Save',
+                      onPressed: _isSaving ? null : _saveActiveOutput,
                     ),
-                    filled: true,
-                    fillColor: isDark ? AppTheme.darkSurface : Colors.white,
-                  ),
-                  menuStyle: MenuStyle(
-                    backgroundColor: WidgetStatePropertyAll<Color>(
-                      isDark ? AppTheme.darkSurface : Colors.white,
+                  if (hasOutput && !isSavedLocally) const SizedBox(width: 6),
+                  if (hasOutput && _activeType == 'quiz') ...[
+                    _buildActionIconButton(
+                      icon: Icon(
+                        _showAnswers
+                            ? Icons.visibility_off_outlined
+                            : Icons.visibility_outlined,
+                        size: 18,
+                      ),
+                      tooltip: _showAnswers ? 'Hide answers' : 'Show answers',
+                      onPressed: () {
+                        setState(() => _showAnswers = !_showAnswers);
+                      },
                     ),
-                  ),
-                  dropdownMenuEntries: const [
-                    DropdownMenuEntry(
-                      value: 'google_vision',
-                      label: 'Google Vision',
-                    ),
-                    DropdownMenuEntry(value: 'sarvam', label: 'Sarvam'),
+                    const SizedBox(width: 6),
                   ],
-                  onSelected: (String? val) {
-                    if (val != null) {
-                      setState(() {
-                        _ocrProvider = val;
-                      });
-                    }
-                  },
-                ),
+                  if (hasOutput && _activeType == 'summary') ...[
+                    _buildActionIconButton(
+                      buttonKey: _pdfButtonKey,
+                      icon: _isDownloadingSummary
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.picture_as_pdf_outlined, size: 18),
+                      tooltip: 'Download PDF',
+                      onPressed: _isDownloadingSummary
+                          ? null
+                          : _downloadSummaryPdf,
+                    ),
+                    const SizedBox(width: 6),
+                  ],
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: _isLoading
+                          ? null
+                          : () => _generate(_activeType, regenerate: hasOutput),
+                      icon: Icon(
+                        hasOutput
+                            ? Icons.refresh_rounded
+                            : Icons.auto_awesome_rounded,
+                        size: 18,
+                      ),
+                      label: Text(
+                        hasOutput
+                            ? 'Regenerate $activeLabel'
+                            : 'Generate $activeLabel',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _studioBlue,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 11,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        textStyle: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ],
+          ],
+        ),
       ),
     );
+  }
+
+  Widget _buildActionIconButton({
+    Key? buttonKey,
+    required Widget icon,
+    required String tooltip,
+    required VoidCallback? onPressed,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: OutlinedButton(
+        key: buttonKey,
+        onPressed: onPressed,
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(38, 38),
+          padding: EdgeInsets.zero,
+          visualDensity: VisualDensity.compact,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(11),
+          ),
+        ),
+        child: icon,
+      ),
+    );
+  }
+
+  Widget _buildStatusChip(String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: AppTheme.primary.withValues(alpha: 0.16),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.inter(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: AppTheme.primary,
+        ),
+      ),
+    );
+  }
+
+  String _summaryPlain(String input) {
+    return input.replaceAll('**', '').trim();
+  }
+
+  TextSpan _summaryTextSpan({
+    required String text,
+    required Color color,
+    required double fontSize,
+    FontWeight baseWeight = FontWeight.w500,
+  }) {
+    final regex = RegExp(r'(\*\*[^*]+\*\*)');
+    final matches = regex.allMatches(text);
+    if (matches.isEmpty) {
+      return TextSpan(
+        text: _summaryPlain(text),
+        style: GoogleFonts.inter(
+          fontSize: fontSize,
+          height: 1.55,
+          color: color,
+          fontWeight: baseWeight,
+        ),
+      );
+    }
+
+    final spans = <InlineSpan>[];
+    var last = 0;
+    for (final match in matches) {
+      if (match.start > last) {
+        spans.add(
+          TextSpan(
+            text: text.substring(last, match.start),
+            style: GoogleFonts.inter(
+              fontSize: fontSize,
+              height: 1.55,
+              color: color,
+              fontWeight: baseWeight,
+            ),
+          ),
+        );
+      }
+      final chunk = match.group(0) ?? '';
+      spans.add(
+        TextSpan(
+          text: _summaryPlain(chunk),
+          style: GoogleFonts.inter(
+            fontSize: fontSize,
+            height: 1.55,
+            color: color,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      );
+      last = match.end;
+    }
+    if (last < text.length) {
+      spans.add(
+        TextSpan(
+          text: text.substring(last),
+          style: GoogleFonts.inter(
+            fontSize: fontSize,
+            height: 1.55,
+            color: color,
+            fontWeight: baseWeight,
+          ),
+        ),
+      );
+    }
+    return TextSpan(children: spans);
   }
 
   Widget _buildSummaryTab(bool isDark) {
@@ -564,72 +1150,105 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     }
 
     final blocks = _parseSummary(_summary!);
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      itemCount: blocks.length,
-      separatorBuilder: (context, index) => const SizedBox(height: 10),
-      itemBuilder: (context, index) {
-        final block = blocks[index];
-        switch (block.kind) {
-          case _SummaryBlockKind.heading:
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  block.text,
-                  style: GoogleFonts.inter(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w800,
-                    color: isDark ? Colors.white : const Color(0xFF0F172A),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Container(
-                  height: 2,
-                  width: 90,
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                ),
-              ],
-            );
-          case _SummaryBlockKind.bullet:
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  margin: const EdgeInsets.only(top: 6, right: 10),
-                  width: 6,
-                  height: 6,
-                  decoration: const BoxDecoration(
-                    color: AppTheme.primary,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                Expanded(
-                  child: SelectableText(
-                    block.text,
-                    style: GoogleFonts.inter(
-                      fontSize: 14,
-                      height: 1.5,
-                      color: isDark ? Colors.white70 : const Color(0xFF334155),
+    final headingIndexes = <int>[
+      for (var i = 0; i < blocks.length; i++)
+        if (blocks[i].kind == _SummaryBlockKind.heading) i,
+    ];
+    final firstHeadingIndex = headingIndexes.isEmpty
+        ? -1
+        : headingIndexes.first;
+
+    return Stack(
+      children: [
+        ListView.separated(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 20),
+          itemCount: blocks.length,
+          separatorBuilder: (context, index) => const SizedBox(height: 10),
+          itemBuilder: (context, index) {
+            final block = blocks[index];
+            switch (block.kind) {
+              case _SummaryBlockKind.heading:
+                final isMainHeading = index == firstHeadingIndex;
+                final headingText = _summaryPlain(block.text);
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      headingText,
+                      style: GoogleFonts.inter(
+                        fontSize: isMainHeading ? 22 : 18,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: isMainHeading ? -0.4 : -0.2,
+                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                      ),
                     ),
+                    const SizedBox(height: 6),
+                    Container(
+                      height: isMainHeading ? 3 : 2,
+                      width: isMainHeading ? 110 : 90,
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary,
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                    ),
+                  ],
+                );
+              case _SummaryBlockKind.bullet:
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      margin: const EdgeInsets.only(top: 8, right: 10),
+                      width: 7,
+                      height: 7,
+                      decoration: const BoxDecoration(
+                        color: AppTheme.primary,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    Expanded(
+                      child: SelectableText.rich(
+                        _summaryTextSpan(
+                          text: block.text,
+                          fontSize: 14.5,
+                          color: isDark
+                              ? Colors.white70
+                              : const Color(0xFF334155),
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              case _SummaryBlockKind.paragraph:
+                return SelectableText.rich(
+                  _summaryTextSpan(
+                    text: block.text,
+                    fontSize: 14.5,
+                    color: isDark ? Colors.white70 : const Color(0xFF334155),
                   ),
+                );
+            }
+          },
+        ),
+        Positioned(
+          right: 18,
+          bottom: 14,
+          child: IgnorePointer(
+            child: Opacity(
+              opacity: isDark ? 0.07 : 0.09,
+              child: Text(
+                'studyshare',
+                style: GoogleFonts.inter(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.8,
+                  color: isDark ? Colors.white : const Color(0xFF1E3A8A),
                 ),
-              ],
-            );
-          case _SummaryBlockKind.paragraph:
-            return SelectableText(
-              block.text,
-              style: GoogleFonts.inter(
-                fontSize: 14,
-                height: 1.6,
-                color: isDark ? Colors.white70 : const Color(0xFF334155),
               ),
-            );
-        }
-      },
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -655,9 +1274,13 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-      itemCount: _quiz!.length,
+      itemCount: _quiz!.length + 1,
       itemBuilder: (context, idx) {
-        final q = _quiz![idx];
+        if (idx == 0) {
+          return _buildStartQuizCard(isDark);
+        }
+
+        final q = _quiz![idx - 1];
         return Container(
           margin: const EdgeInsets.only(bottom: 12),
           padding: const EdgeInsets.all(14),
@@ -691,7 +1314,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
-                      'Q${idx + 1}',
+                      'Q$idx',
                       style: GoogleFonts.inter(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
@@ -957,10 +1580,14 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         margin: const EdgeInsets.all(20),
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: isDark ? Colors.white.withValues(alpha: 0.03) : Colors.white.withValues(alpha: 0.6),
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.03)
+              : Colors.white.withValues(alpha: 0.6),
           borderRadius: BorderRadius.circular(24),
           border: Border.all(
-            color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.05),
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.08)
+                : Colors.black.withValues(alpha: 0.05),
           ),
           boxShadow: [
             if (!isDark)
@@ -980,7 +1607,11 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                 color: _studioBlue.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.chat_bubble_outline_rounded, size: 36, color: _studioBlue),
+              child: const Icon(
+                Icons.chat_bubble_outline_rounded,
+                size: 36,
+                color: _studioBlue,
+              ),
             ),
             const SizedBox(height: 20),
             Text(
@@ -1098,13 +1729,13 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
       final trimmedRaw = rawLine.trim();
       if (trimmedRaw.isEmpty) continue;
 
-      final isBullet = RegExp(r'^[-*]\s+').hasMatch(trimmedRaw);
+      final isBullet = RegExp(r'^([-*•]|\d+[.)])\s+').hasMatch(trimmedRaw);
 
       var line = trimmedRaw
           .replaceFirst(RegExp(r'^#+\s*'), '')
-          .replaceFirst(RegExp(r'^[-*]+\s*'), '')
-          .replaceAll('**', '');
+          .replaceFirst(RegExp(r'^([-*•]|\d+[.)])\s*'), '');
       final plain = line.replaceAll(RegExp(r'[:\-\s]+$'), '').trim();
+      final plainForDetection = plain.replaceAll('**', '');
       final words = plain
           .split(RegExp(r'\s+'))
           .where((w) => w.isNotEmpty)
@@ -1112,7 +1743,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
       final looksLikeHeading =
           trimmedRaw.startsWith('#') ||
           (!isBullet && trimmedRaw.endsWith(':')) ||
-          (!isBullet && words <= 7 && RegExp(r'^[A-Z]').hasMatch(plain));
+          (!isBullet &&
+              words <= 7 &&
+              RegExp(r'^[A-Z]').hasMatch(plainForDetection));
 
       if (looksLikeHeading) {
         blocks.add(_SummaryBlock(kind: _SummaryBlockKind.heading, text: plain));
@@ -1145,8 +1778,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final hasOutput = _hasOutput(_activeType);
     final isSavedLocally = _savedLocallyMap[_activeType] == true;
+    final activeLabel = _labelForType(_activeType);
 
-    return AnimatedContainer(
+    final sheetContent = AnimatedContainer(
       duration: const Duration(milliseconds: 260),
       curve: Curves.easeOutCubic,
       height: _isFullscreen
@@ -1157,8 +1791,14 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: isDark
-              ? [const Color(0xFF0A1120).withValues(alpha: 0.85), const Color(0xFF040810).withValues(alpha: 0.95)]
-              : [const Color(0xFFFFFFFF).withValues(alpha: 0.9), const Color(0xFFF0F5FF).withValues(alpha: 0.95)],
+              ? [
+                  const Color(0xFF0A1120).withValues(alpha: 0.85),
+                  const Color(0xFF040810).withValues(alpha: 0.95),
+                ]
+              : [
+                  const Color(0xFFFFFFFF).withValues(alpha: 0.9),
+                  const Color(0xFFF0F5FF).withValues(alpha: 0.95),
+                ],
         ),
         borderRadius: _isFullscreen
             ? BorderRadius.zero
@@ -1174,120 +1814,21 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         children: [
           if (_isFullscreen)
             SizedBox(height: MediaQuery.of(context).padding.top),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           Container(
-            width: 46,
+            width: 42,
             height: 4,
             decoration: BoxDecoration(
               color: isDark
                   ? Colors.white24
-                  : _studioBlue.withValues(alpha: 0.28),
+                  : _studioBlue.withValues(alpha: 0.26),
               borderRadius: BorderRadius.circular(2),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 10, 4),
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [_studioBlue, _studioBlueDark],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(18),
-                boxShadow: [
-                  BoxShadow(
-                    color: _studioBlue.withValues(alpha: 0.24),
-                    blurRadius: 24,
-                    offset: const Offset(0, 10),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.18),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(7),
-                      child: Image.asset(
-                        'assets/images/ai_logo.png',
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Semantics(
-                            label: 'AI Studio logo unavailable',
-                            child: const Center(
-                              child: Icon(
-                                Icons.auto_awesome_rounded,
-                                color: Colors.white,
-                                size: 18,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'AI Studio',
-                          style: GoogleFonts.inter(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: -0.2,
-                            color: Colors.white,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          widget.resourceTitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.inter(
-                            fontSize: 11.5,
-                            letterSpacing: 0.05,
-                            color: Colors.white.withValues(alpha: 0.9),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () {
-                      setState(() {
-                        _isFullscreen = !_isFullscreen;
-                      });
-                    },
-                    icon: Icon(
-                      _isFullscreen
-                          ? Icons.fullscreen_exit_rounded
-                          : Icons.fullscreen_rounded,
-                      color: Colors.white.withValues(alpha: 0.92),
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.pop(context),
-                    icon: Icon(
-                      Icons.close_rounded,
-                      color: Colors.white.withValues(alpha: 0.92),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          _buildStudioHeader(isDark),
           if (_error != null)
             Padding(
-              padding: const EdgeInsets.fromLTRB(18, 10, 18, 0),
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
               child: Container(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,
@@ -1318,15 +1859,16 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                 ),
               ),
             ),
-          _buildControls(isDark),
+          _buildControlsPanel(isDark),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
             child: Container(
+              height: 44,
               decoration: BoxDecoration(
                 color: isDark
                     ? const Color(0xFF111A2A)
                     : const Color(0xFFF2F7FF),
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: isDark
                       ? const Color(0xFF24324A)
@@ -1335,37 +1877,37 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
               ),
               child: TabBar(
                 controller: _tabController,
-                labelColor: _studioBlueDark,
+                labelColor: isDark ? Colors.white : _studioBlueDark,
                 unselectedLabelColor: isDark
                     ? Colors.white70
                     : const Color(0xFF5B6D8D),
                 indicator: BoxDecoration(
-                  color: isDark ? Colors.white : const Color(0xFFE6F0FF),
-                  borderRadius: BorderRadius.circular(12),
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.12)
+                      : const Color(0xFFE6F0FF),
+                  borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                     color: isDark
-                        ? Colors.white12
+                        ? Colors.white.withValues(alpha: 0.18)
                         : _studioBlue.withValues(alpha: 0.28),
                   ),
-                  boxShadow: [
-                    if (!isDark)
-                      BoxShadow(
-                        color: _studioBlue.withValues(alpha: 0.14),
-                        blurRadius: 8,
-                        offset: const Offset(0, 2),
-                      ),
-                  ],
                 ),
                 dividerColor: Colors.transparent,
                 labelStyle: GoogleFonts.inter(
                   fontWeight: FontWeight.w700,
-                  fontSize: 12.5,
+                  fontSize: 11,
                 ),
                 tabs: const [
-                  Tab(text: 'Summary'),
-                  Tab(text: 'Quiz'),
-                  Tab(text: 'Cards'),
-                  Tab(text: 'Chat'),
+                  Tab(
+                    icon: Icon(Icons.summarize_rounded, size: 14),
+                    text: 'Summary',
+                  ),
+                  Tab(icon: Icon(Icons.quiz_rounded, size: 14), text: 'Quiz'),
+                  Tab(icon: Icon(Icons.style_rounded, size: 14), text: 'Cards'),
+                  Tab(
+                    icon: Icon(Icons.chat_bubble_rounded, size: 14),
+                    text: 'Chat',
+                  ),
                 ],
               ),
             ),
@@ -1375,161 +1917,23 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
               controller: _tabController,
               children: [
                 _buildSummaryTab(isDark),
-                Column(
-                  children: [
-                    SwitchListTile(
-                      value: _showAnswers,
-                      onChanged: (val) => setState(() => _showAnswers = val),
-                      title: Text(
-                        'Show answers',
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      dense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                      ),
-                    ),
-                    Expanded(child: _buildQuizTab(isDark)),
-                  ],
-                ),
+                _buildQuizTab(isDark),
                 _buildFlashcardsTab(isDark),
                 _buildChatTab(isDark),
               ],
             ),
           ),
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    if (_activeType != 'chat') ...[
-                      if (_cachedMap[_activeType] == true)
-                        Container(
-                          margin: const EdgeInsets.only(right: 8),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primary.withValues(alpha: 0.16),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            'Server cache',
-                            style: GoogleFonts.inter(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: AppTheme.primary,
-                            ),
-                          ),
-                        ),
-                      if (isSavedLocally)
-                        Container(
-                          margin: const EdgeInsets.only(right: 12),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primary.withValues(alpha: 0.16),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            'Saved on device',
-                            style: GoogleFonts.inter(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w700,
-                              color: AppTheme.primary,
-                            ),
-                          ),
-                        ),
-                      if (!hasOutput)
-                        ElevatedButton.icon(
-                          onPressed: _isLoading
-                              ? null
-                              : () => _generate(_activeType, regenerate: false),
-                          icon: const Icon(Icons.auto_awesome),
-                          label: const Text('Generate'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: _studioBlue,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 12,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                        )
-                      else ...[
-                        if (!isSavedLocally)
-                          OutlinedButton.icon(
-                            onPressed: _isSaving ? null : _saveActiveOutput,
-                            icon: _isSaving
-                                ? const SizedBox(
-                                    width: 14,
-                                    height: 14,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Icon(Icons.save_outlined, size: 16),
-                            label: const Text('Save'),
-                          ),
-                        if (!isSavedLocally) const SizedBox(width: 6),
-                        if (_activeType == 'summary')
-                          IconButton(
-                            key: _pdfButtonKey,
-                            tooltip: 'Download PDF',
-                            onPressed: _isDownloadingSummary
-                                ? null
-                                : _downloadSummaryPdf,
-                            icon: _isDownloadingSummary
-                                ? const SizedBox(
-                                    width: 16,
-                                    height: 16,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                    ),
-                                  )
-                                : const Icon(Icons.picture_as_pdf_outlined),
-                          ),
-                        if (_activeType == 'summary') const SizedBox(width: 6),
-                        ElevatedButton.icon(
-                          onPressed: _isLoading
-                              ? null
-                              : () => _generate(_activeType, regenerate: true),
-                          icon: const Icon(Icons.refresh_rounded),
-                          label: const Text('Regenerate'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: _studioBlue,
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 12,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ],
-                ),
-              ),
-            ),
+          _buildCompactActionBar(
+            isDark: isDark,
+            hasOutput: hasOutput,
+            isSavedLocally: isSavedLocally,
+            activeLabel: activeLabel,
           ),
         ],
       ),
     );
+
+    return sheetContent;
   }
 }
 

@@ -64,3 +64,9 @@ debug_output*.txt
 
 # Misc generated files
 fetch_lotties.js
+
+# Local environment secrets (use --dart-define-from-file=.env)
+.env
+.env.local
+.env.production
+!.env.example

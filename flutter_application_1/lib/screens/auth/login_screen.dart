@@ -36,6 +36,7 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _obscurePassword = true;
   bool _showEmailVerification = false;
   bool _isResendingVerification = false;
+  bool _isVerifyingEmail = false;
 
   @override
   void initState() {
@@ -148,8 +149,10 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
     try {
       await _authService.sendPasswordResetEmail(email);
+      if (!mounted) return;
       _showSuccess('Password reset email sent! Check your inbox.');
     } catch (e) {
+      if (!mounted) return;
       _showError(_authService.getErrorMessage(e));
     } finally {
       if (mounted) {
@@ -173,6 +176,14 @@ class _LoginScreenState extends State<LoginScreen> {
         email,
         widget.collegeId,
       );
+      if (banResult?['banCheckSkipped'] == true) {
+        if (mounted) {
+          _showSuccess(
+            'Limited verification mode: some security checks are temporarily unavailable.',
+          );
+        }
+        return true;
+      }
       if (banResult?['isBanned'] == true) {
         final reason =
             (banResult?['reason'] ??
@@ -361,7 +372,10 @@ class _LoginScreenState extends State<LoginScreen> {
                         if (value == null || value.isEmpty) {
                           return 'Please enter your email';
                         }
-                        if (!value.contains('@')) {
+                        final emailPattern = RegExp(
+                          r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$',
+                        );
+                        if (!emailPattern.hasMatch(value.trim())) {
                           return 'Please enter a valid email';
                         }
                         return null;
@@ -720,12 +734,31 @@ class _LoginScreenState extends State<LoginScreen> {
                 width: double.infinity,
                 height: 56,
                 child: ElevatedButton(
-                  onPressed: () async {
-                    await _authService.reloadUser();
-                    if (_authService.isEmailVerified) {
-                      // Handled by stream
-                    }
-                  },
+                  onPressed: _isVerifyingEmail
+                      ? null
+                      : () async {
+                          setState(() => _isVerifyingEmail = true);
+                          try {
+                            await _authService.reloadUser();
+                            if (!mounted) return;
+                            final isVerified = _authService.isEmailVerified;
+                            if (isVerified) {
+                              _showSuccess('Email verified successfully.');
+                              setState(() => _showEmailVerification = false);
+                            } else {
+                              _showError(
+                                'Email is not verified yet. Please open the verification link and try again.',
+                              );
+                            }
+                          } catch (e) {
+                            if (!mounted) return;
+                            _showError(_authService.getErrorMessage(e));
+                          } finally {
+                            if (mounted) {
+                              setState(() => _isVerifyingEmail = false);
+                            }
+                          }
+                        },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: wiseGreen,
                     foregroundColor: Colors.black,
@@ -734,13 +767,24 @@ class _LoginScreenState extends State<LoginScreen> {
                       borderRadius: BorderRadius.circular(28),
                     ),
                   ),
-                  child: Text(
-                    'I verified my email',
-                    style: GoogleFonts.inter(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                  child: _isVerifyingEmail
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.black,
+                            ),
+                          ),
+                        )
+                      : Text(
+                          'I verified my email',
+                          style: GoogleFonts.inter(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                 ),
               ),
               const SizedBox(height: 16),

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_linkify/flutter_linkify.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -114,15 +113,7 @@ class _NoticeCardState extends State<NoticeCard> {
         ? rawCount
         : int.tryParse(rawCount?.toString() ?? '');
 
-    return Hero(
-      tag: 'notice_card_${widget.notice['id']}',
-      flightShuttleBuilder: (flightContext, animation, flightDirection, fromHeroContext, toHeroContext) {
-        return Material(
-          color: Colors.transparent,
-          child: toHeroContext.widget,
-        );
-      },
-      child: Container(
+    return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
         color: cardColor,
@@ -399,7 +390,6 @@ class _NoticeCardState extends State<NoticeCard> {
           ),
         ),
       ),
-      ),
     );
   }
 
@@ -555,9 +545,8 @@ class _NoticeCardState extends State<NoticeCard> {
         ], text: 'Check out this notice on MyStudySpace!');
       } finally {
         // Delay deletion to avoid Android race condition
-        const shareCleanupDelay = Duration(seconds: 8);
-        Future.delayed(shareCleanupDelay, () async {
-          try { await file.delete(); } catch (_) {}
+        Future.delayed(const Duration(seconds: 2), () {
+          try { file.deleteSync(); } catch (_) {}
         });
       }
     } catch (e) {

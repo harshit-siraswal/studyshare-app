@@ -3,7 +3,6 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../config/theme.dart';
 import '../../services/auth_service.dart';
 import '../../services/supabase_service.dart';
-import '../../services/backend_api_service.dart';
 import '../../providers/theme_provider.dart';
 import '../../models/resource.dart';
 import '../../widgets/resource_card.dart';
@@ -43,7 +42,6 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final AuthService _authService = AuthService();
   final SupabaseService _supabaseService = SupabaseService();
-  final BackendApiService _api = BackendApiService();
   final SubscriptionService _subscriptionService = SubscriptionService();
 
   bool _profileLoading = true;
@@ -79,8 +77,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Future<void> _loadProfile() async {
     try {
-      final data = await _api.getProfile();
-      final profile = (data['profile'] as Map?)?.cast<String, dynamic>() ?? {};
+      final profile = await _supabaseService.getCurrentUserProfile();
       if (!mounted) return;
       setState(() {
         _profileDisplayName = profile['display_name']?.toString();

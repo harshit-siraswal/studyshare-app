@@ -17,7 +17,7 @@ class CollegeSelectionScreen extends StatefulWidget {
 class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
   final SupabaseService _supabaseService = SupabaseService();
   final TextEditingController _searchController = TextEditingController();
-  
+
   List<College> _colleges = [];
   List<College> _filteredColleges = [];
   bool _isLoading = true;
@@ -44,12 +44,15 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
           _colleges = colleges;
           _filteredColleges = colleges;
           _isLoading = false;
+          _error = colleges.isEmpty
+              ? 'No colleges are available right now. You can still continue with manual setup.'
+              : '';
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _error = 'Failed to load colleges. Please try again.';
+          _error = 'Failed to load colleges. Please retry or use manual setup.';
           _isLoading = false;
         });
       }
@@ -76,7 +79,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Scaffold(
       backgroundColor: isDark ? AppTheme.darkBackground : AppTheme.lightSurface,
       body: SafeArea(
@@ -147,13 +150,17 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                       color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+                        color: isDark
+                            ? AppTheme.darkBorder
+                            : AppTheme.lightBorder,
                       ),
                     ),
                     child: TextField(
                       controller: _searchController,
                       style: GoogleFonts.inter(
-                        color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
+                        color: isDark
+                            ? AppTheme.textLight
+                            : AppTheme.textPrimary,
                       ),
                       decoration: InputDecoration(
                         hintText: 'Search for your college...',
@@ -175,28 +182,45 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
             ),
 
             // College list
-            Expanded(
-              child: _buildCollegeList(isDark),
-            ),
+            Expanded(child: _buildCollegeList(isDark)),
 
             // Request new college button
             Padding(
               padding: const EdgeInsets.all(24),
-              child: TextButton.icon(
-                onPressed: () {
-                  _showRequestCollegeDialog(isDark);
-                },
-                icon: const Icon(
-                  Icons.add_circle_outline_rounded,
-                  color: AppTheme.primary,
-                ),
-                label: Text(
-                  "Can't find your college? Request to add it",
-                  style: GoogleFonts.inter(
-                    color: AppTheme.primary,
-                    fontWeight: FontWeight.w500,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextButton.icon(
+                    onPressed: _showManualCollegeDialog,
+                    icon: const Icon(
+                      Icons.edit_rounded,
+                      color: AppTheme.primary,
+                    ),
+                    label: Text(
+                      'Use manual college setup',
+                      style: GoogleFonts.inter(
+                        color: AppTheme.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
-                ),
+                  TextButton.icon(
+                    onPressed: () {
+                      _showRequestCollegeDialog(isDark);
+                    },
+                    icon: const Icon(
+                      Icons.add_circle_outline_rounded,
+                      color: AppTheme.primary,
+                    ),
+                    label: Text(
+                      "Can't find your college? Request to add it",
+                      style: GoogleFonts.inter(
+                        color: AppTheme.primary,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -237,6 +261,11 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
               },
               child: const Text('Retry'),
             ),
+            const SizedBox(height: 10),
+            OutlinedButton(
+              onPressed: _showManualCollegeDialog,
+              child: const Text('Use manual setup'),
+            ),
           ],
         ),
       );
@@ -255,10 +284,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
             const SizedBox(height: 16),
             Text(
               'No colleges found',
-              style: GoogleFonts.inter(
-                fontSize: 18,
-                color: AppTheme.textMuted,
-              ),
+              style: GoogleFonts.inter(fontSize: 18, color: AppTheme.textMuted),
             ),
             const SizedBox(height: 8),
             Text(
@@ -266,6 +292,11 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
               style: GoogleFonts.inter(
                 color: AppTheme.textMuted.withValues(alpha: 0.7),
               ),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton(
+              onPressed: _showManualCollegeDialog,
+              child: const Text('Use manual setup'),
             ),
           ],
         ),
@@ -285,7 +316,8 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
   Widget _buildCollegeCard(College college, bool isDark, int index) {
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
-      duration: Duration(milliseconds: 200 + (index.clamp(0, 10) * 50)),      curve: Curves.easeOut,
+      duration: Duration(milliseconds: 200 + (index.clamp(0, 10) * 50)),
+      curve: Curves.easeOut,
       builder: (context, value, child) {
         return Transform.translate(
           offset: Offset(0, 20 * (1 - value)),
@@ -330,7 +362,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                     ),
                   ),
                   const SizedBox(width: 16),
-                  
+
                   // College info
                   Expanded(
                     child: Column(
@@ -341,7 +373,9 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                           style: GoogleFonts.inter(
                             fontSize: 15,
                             fontWeight: FontWeight.w600,
-                            color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
+                            color: isDark
+                                ? AppTheme.textLight
+                                : AppTheme.textPrimary,
                           ),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
@@ -421,10 +455,12 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
       builder: (context) {
         return Padding(
           padding: EdgeInsets.only(
-            left: 24, 
-            right: 24, 
-            top: 24, 
-            bottom: MediaQuery.of(context).viewInsets.bottom + 24 // Handle keyboard
+            left: 24,
+            right: 24,
+            top: 24,
+            bottom:
+                MediaQuery.of(context).viewInsets.bottom +
+                24, // Handle keyboard
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -444,54 +480,16 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                 style: GoogleFonts.inter(color: AppTheme.textMuted),
               ),
               const SizedBox(height: 24),
-              TextField(
+              _buildStyledTextField(
                 controller: nameController,
-                style: GoogleFonts.inter(
-                  color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
-                ),
-                decoration: InputDecoration(
-                  hintText: 'College Name',
-                  hintStyle: GoogleFonts.inter(color: AppTheme.textMuted),
-                  filled: true,
-                  fillColor: isDark ? AppTheme.darkCard : AppTheme.lightSurface,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(
-                      color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
-                    ),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(
-                      color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
-                    ),
-                  ),
-                ),
+                hintText: 'College Name',
+                isDark: isDark,
               ),
               const SizedBox(height: 16),
-              TextField(
+              _buildStyledTextField(
                 controller: domainController,
-                style: GoogleFonts.inter(
-                  color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
-                ),
-                decoration: InputDecoration(
-                  hintText: 'College Email Domain (e.g., college.edu)',
-                  hintStyle: GoogleFonts.inter(color: AppTheme.textMuted),
-                  filled: true,
-                  fillColor: isDark ? AppTheme.darkCard : AppTheme.lightSurface,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(
-                      color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
-                    ),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(
-                      color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
-                    ),
-                  ),
-                ),
+                hintText: 'College Email Domain (e.g., college.edu)',
+                isDark: isDark,
               ),
               const SizedBox(height: 24),
               SizedBox(
@@ -499,21 +497,37 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                 child: ElevatedButton(
                   onPressed: () {
                     final name = nameController.text.trim();
-                    final domain = domainController.text.trim();
-                    
-                    Navigator.pop(context);
-                    
-                    if (name.isNotEmpty && domain.isNotEmpty) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Request submitted for $name! We\'ll review it soon.'),
-                            backgroundColor: AppTheme.success,
-                          ),
-                        );
+                    final domain = domainController.text.trim().toLowerCase();
+                    if (name.isEmpty || domain.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Please enter college name and domain'),
+                        ),
+                      );
+                      return;
                     }
+                    if (!_isValidDomain(domain)) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Please enter a valid college domain (e.g., kiet.edu)',
+                          ),
+                        ),
+                      );
+                      return;
+                    }
+
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text(
+                          'College request submission is coming soon. Please contact support for now.',
+                        ),
+                      ),
+                    );
+                    Navigator.pop(context);
                   },
                   child: Text(
-                    'Submit Request',
+                    'Request Coming Soon',
                     style: GoogleFonts.inter(fontWeight: FontWeight.w600),
                   ),
                 ),
@@ -527,5 +541,153 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
     // Dispose controllers after sheet is closed
     nameController.dispose();
     domainController.dispose();
+  }
+
+  Future<void> _showManualCollegeDialog() async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final nameController = TextEditingController();
+    final domainController = TextEditingController();
+
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: EdgeInsets.only(
+            left: 24,
+            right: 24,
+            top: 24,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Manual College Setup',
+                style: GoogleFonts.inter(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Enter your college details to continue if listing is unavailable.',
+                style: GoogleFonts.inter(color: AppTheme.textMuted),
+              ),
+              const SizedBox(height: 18),
+              _buildStyledTextField(
+                controller: nameController,
+                hintText: 'College Name',
+                isDark: isDark,
+              ),
+              const SizedBox(height: 14),
+              _buildStyledTextField(
+                controller: domainController,
+                hintText: 'College Domain (e.g., kiet.edu)',
+                isDark: isDark,
+              ),
+              const SizedBox(height: 20),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    final name = nameController.text.trim();
+                    final domain = domainController.text
+                        .trim()
+                        .toLowerCase()
+                        .replaceAll('@', '');
+                    if (name.isEmpty || domain.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Please enter college name and domain'),
+                        ),
+                      );
+                      return;
+                    }
+                    if (!_isValidDomain(domain)) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Please enter a valid college domain (e.g., kiet.edu)',
+                          ),
+                        ),
+                      );
+                      return;
+                    }
+
+                    final generatedId =
+                        'local-${domain.replaceAll('.', '-')}-${DateTime.now().millisecondsSinceEpoch}';
+                    Navigator.pop(context);
+                    _selectCollege(
+                      College(
+                        id: generatedId,
+                        name: name,
+                        domain: domain,
+                        isActive: true,
+                      ),
+                    );
+                  },
+                  child: Text(
+                    'Continue',
+                    style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    nameController.dispose();
+    domainController.dispose();
+  }
+
+  Widget _buildStyledTextField({
+    required TextEditingController controller,
+    required String hintText,
+    required bool isDark,
+  }) {
+    return TextField(
+      controller: controller,
+      style: GoogleFonts.inter(
+        color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
+      ),
+      decoration: InputDecoration(
+        hintText: hintText,
+        hintStyle: GoogleFonts.inter(color: AppTheme.textMuted),
+        filled: true,
+        fillColor: isDark ? AppTheme.darkCard : AppTheme.lightSurface,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+          ),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: AppTheme.primary, width: 1.4),
+        ),
+      ),
+    );
+  }
+
+  bool _isValidDomain(String domain) {
+    final pattern = RegExp(
+      r'^(?!\.)(?!.*\.\.)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$',
+    );
+    return pattern.hasMatch(domain);
   }
 }

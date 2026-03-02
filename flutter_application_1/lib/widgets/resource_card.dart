@@ -19,6 +19,7 @@ class ResourceCard extends StatefulWidget {
   final VoidCallback? onApprove;
   final VoidCallback? onRetract;
   final VoidCallback? onReject;
+  final VoidCallback? onDelete;
   final VoidCallback? onVoteChanged;
 
   const ResourceCard({
@@ -29,6 +30,7 @@ class ResourceCard extends StatefulWidget {
     this.onApprove,
     this.onRetract,
     this.onReject,
+    this.onDelete,
     this.onVoteChanged,
   });
 
@@ -541,48 +543,114 @@ class _ResourceCardState extends State<ResourceCard> {
                     ),
                     if (widget.showModerationControls) ...[
                       const SizedBox(height: 10),
-                      Row(
+                      Column(
                         children: [
-                          if (widget.onReject != null) ...[
-                            Expanded(
+                          Row(
+                            children: [
+                              if (widget.onReject != null) ...[
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: widget.onReject,
+                                    icon: const Icon(
+                                      Icons.close_rounded,
+                                      size: 14,
+                                    ),
+                                    label: const Text(
+                                      'Reject',
+                                      style: TextStyle(fontSize: 11),
+                                    ),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: AppTheme.error,
+                                      minimumSize: const Size(0, 36),
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 6,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                              if (widget.onReject != null &&
+                                  (widget.onRetract != null ||
+                                      widget.onApprove != null))
+                                const SizedBox(width: 8),
+                              if (widget.onRetract != null) ...[
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: widget.onRetract,
+                                    icon: const Icon(
+                                      Icons.undo_rounded,
+                                      size: 14,
+                                    ),
+                                    label: const Text(
+                                      'Retract',
+                                      style: TextStyle(fontSize: 11),
+                                    ),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: AppTheme.warning,
+                                      minimumSize: const Size(0, 36),
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 6,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                              if (widget.onRetract != null &&
+                                  widget.onApprove != null)
+                                const SizedBox(width: 8),
+                              if (widget.onApprove != null) ...[
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    onPressed: widget.onApprove,
+                                    icon: const Icon(
+                                      Icons.check_rounded,
+                                      size: 14,
+                                    ),
+                                    label: const Text(
+                                      'Approve',
+                                      style: TextStyle(fontSize: 11),
+                                    ),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: AppTheme.success,
+                                      foregroundColor: Colors.white,
+                                      minimumSize: const Size(0, 36),
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 6,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                          if (widget.onDelete != null) ...[
+                            const SizedBox(height: 8),
+                            SizedBox(
+                              width: double.infinity,
                               child: OutlinedButton.icon(
-                                onPressed: widget.onReject,
-                                icon: const Icon(Icons.close_rounded, size: 16),
-                                label: const Text('Reject'),
+                                onPressed: widget.onDelete,
+                                icon: const Icon(
+                                  Icons.delete_forever_rounded,
+                                  size: 14,
+                                ),
+                                label: const Text(
+                                  'Delete',
+                                  style: TextStyle(fontSize: 11),
+                                ),
                                 style: OutlinedButton.styleFrom(
                                   foregroundColor: AppTheme.error,
-                                ),
-                              ),
-                            ),
-                          ],
-                          if (widget.onReject != null &&
-                              (widget.onRetract != null ||
-                                  widget.onApprove != null))
-                            const SizedBox(width: 10),
-                          if (widget.onRetract != null) ...[
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: widget.onRetract,
-                                icon: const Icon(Icons.undo_rounded, size: 16),
-                                label: const Text('Retract'),
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: AppTheme.warning,
-                                ),
-                              ),
-                            ),
-                          ],
-                          if (widget.onRetract != null &&
-                              widget.onApprove != null)
-                            const SizedBox(width: 10),
-                          if (widget.onApprove != null) ...[
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                onPressed: widget.onApprove,
-                                icon: const Icon(Icons.check_rounded, size: 16),
-                                label: const Text('Approve'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: AppTheme.success,
-                                  foregroundColor: Colors.white,
+                                  minimumSize: const Size(0, 36),
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 6,
+                                  ),
                                 ),
                               ),
                             ),

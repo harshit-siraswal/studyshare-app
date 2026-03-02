@@ -44,13 +44,15 @@ class SubscriptionService {
       await _clearPremiumCache(prefs);
     }
     final localPremiumUntilStr = prefs.getString('premium_until');
-    
+
     if (localPremiumUntilStr != null) {
       try {
         final localUntil = DateTime.parse(localPremiumUntilStr);
-        final localUntilUtc = localUntil.isUtc ? localUntil : localUntil.toUtc();
+        final localUntilUtc = localUntil.isUtc
+            ? localUntil
+            : localUntil.toUtc();
         if (localUntilUtc.isAfter(DateTime.now().toUtc())) {
-          return true; 
+          return true;
         }
       } catch (e) {
         debugPrint('Failed to parse cached premium_until: $e');
@@ -72,19 +74,21 @@ class SubscriptionService {
           .from('users')
           .select('subscription_end_date, subscription_tier')
           .eq('email', email)
-          .maybeSingle(); 
-      
+          .maybeSingle();
+
       bool isPaidPremium = false;
       String? paidTier;
       String? premiumUntilStr;
-      
+
       if (res != null) {
         premiumUntilStr = res['subscription_end_date'];
         paidTier = res['subscription_tier'] as String?;
         if (premiumUntilStr != null) {
           final premiumUntil = DateTime.parse(premiumUntilStr);
           final now = DateTime.now();
-          final premiumUntilUtc = premiumUntil.isUtc ? premiumUntil : premiumUntil.toUtc();
+          final premiumUntilUtc = premiumUntil.isUtc
+              ? premiumUntil
+              : premiumUntil.toUtc();
           final nowUtc = now.isUtc ? now : now.toUtc();
           isPaidPremium = premiumUntilUtc.isAfter(nowUtc);
         }
@@ -99,15 +103,21 @@ class SubscriptionService {
               .eq('uploaded_by_email', email)
               .eq('status', 'approved')
               .count(CountOption.exact);
-          
+
           final uploadCount = response.count;
 
           if (uploadCount >= 10) {
-             final prefs = await SharedPreferences.getInstance();
-             await prefs.setString('premium_email', email);
-             await prefs.setString('premium_tier', 'pro');
-             await prefs.setString('premium_until', DateTime.now().add(const Duration(days: 30)).toUtc().toIso8601String());
-             return true; 
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('premium_email', email);
+            await prefs.setString('premium_tier', 'pro');
+            await prefs.setString(
+              'premium_until',
+              DateTime.now()
+                  .add(const Duration(days: 30))
+                  .toUtc()
+                  .toIso8601String(),
+            );
+            return true;
           }
         } catch (e) {
           debugPrint('Failed to check upload count for auto-premium: $e');
@@ -121,10 +131,10 @@ class SubscriptionService {
         await prefs.setString('premium_tier', paidTier);
       }
       await prefs.setString('premium_email', email);
-      
+
       // Sync expiry to local cache
       await prefs.setString('premium_until', premiumUntilStr!);
-      
+
       return true;
     } catch (e) {
       debugPrint('Check Premium Critical Error: $e');
@@ -137,17 +147,22 @@ class SubscriptionService {
     // Ensure we have latest data
     final isPrem = await isPremium();
     if (!isPrem) return false;
-    
+
     // Check local cache
     final prefs = await SharedPreferences.getInstance();
     final tier = prefs.getString('premium_tier');
-    
+
     return tier == 'max';
   }
 
   /// Starts the payment flow
   /// [planId]: 'monthly' (₹49) or 'quarterly' (₹149)
-  Future<bool> buyPremium(BuildContext context, String email, String phone, {required String planId}) async {
+  Future<bool> buyPremium(
+    BuildContext context,
+    String email,
+    String phone, {
+    required String planId,
+  }) async {
     if (_paymentCompleter != null && !_paymentCompleter!.isCompleted) {
       debugPrint('Payment already in progress');
       return _paymentCompleter!.future;
@@ -155,11 +170,11 @@ class SubscriptionService {
 
     _paymentCompleter = Completer<bool>();
     _pendingPlanId = planId;
-    
+
     // Explicit Amount Logic
     int amount;
     String description;
-    
+
     if (planId == 'quarterly') {
       amount = 14900; // ₹149.00
       description = '3 Months Subscription';
@@ -173,47 +188,48 @@ class SubscriptionService {
     try {
       // 2. Create Order on Backend
       final orderData = await _api.createPaymentOrder(
-        amount: amount, 
+        amount: amount,
         planId: planId,
         context: context.mounted ? context : null,
       );
-      
+
       if (orderData['error'] != null) {
         throw Exception(orderData['error']);
       }
 
       final orderId = orderData['id'];
-      
-      final authorizedAmount = orderData['amount'] ?? amount; 
-      
+
+      final authorizedAmount = orderData['amount'] ?? amount;
+
       if (authorizedAmount != amount) {
-        debugPrint('ERROR: Backend returned different amount: $authorizedAmount vs expected $amount');
+        debugPrint(
+          'ERROR: Backend returned different amount: $authorizedAmount vs expected $amount',
+        );
         throw Exception('Price mismatch. Please try again or contact support.');
       }
-      
+
       // 3. Open Checkout
       var options = {
         'key': AppConfig.razorpayKeyId,
-        'amount': authorizedAmount, 
+        'amount': authorizedAmount,
         'name': 'MyStudySpace Premium',
         'description': description,
         'order_id': orderId,
-        'prefill': {
-          'contact': phone,
-          'email': email,
-        },
+        'prefill': {'contact': phone, 'email': email},
         'external': {
-          'wallets': ['paytm']
-        }
+          'wallets': ['paytm'],
+        },
       };
-      
+
       _razorpay.open(options);
       return _paymentCompleter!.future;
     } catch (e) {
       debugPrint('Payment Init Error: $e');
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to initiate payment. Please try again.')),
+          const SnackBar(
+            content: Text('Failed to initiate payment. Please try again.'),
+          ),
         );
       }
       _resetPaymentState();
@@ -223,7 +239,9 @@ class SubscriptionService {
   }
 
   void _handlePaymentSuccess(PaymentSuccessResponse response) async {
-    if (response.orderId == null || response.paymentId == null || response.signature == null) {
+    if (response.orderId == null ||
+        response.paymentId == null ||
+        response.signature == null) {
       debugPrint('Payment response missing required fields');
       _resetPaymentState();
       _paymentCompleter?.complete(false);
@@ -232,25 +250,29 @@ class SubscriptionService {
 
     try {
       debugPrint('Payment Success Callback: ${response.paymentId}');
-      
+
       // 4. Verify on Backend
       final result = await _api.verifyPayment(
         orderId: response.orderId!,
         paymentId: response.paymentId!,
         signature: response.signature!,
       );
-      
+
       // 5. Update Local Cache IMMEDIATELY from intent (Optimistic Update)
       // Executed ONLY after successful verification as requested.
-      
+
       final prefs = await SharedPreferences.getInstance();
-      
+
       // Set Plan
       String newTier = 'pro';
       if (_pendingPlanId != null) {
-         newTier = (_pendingPlanId == 'quarterly' || _pendingPlanId == 'max') ? 'max' : 'pro';
+        newTier = (_pendingPlanId == 'quarterly' || _pendingPlanId == 'max')
+            ? 'max'
+            : 'pro';
       } else if (result.containsKey('plan')) {
-         newTier = (result['plan'] == 'quarterly' || result['plan'] == 'max') ? 'max' : 'pro';
+        newTier = (result['plan'] == 'quarterly' || result['plan'] == 'max')
+            ? 'max'
+            : 'pro';
       }
       await prefs.setString('premium_tier', newTier);
 
@@ -261,11 +283,10 @@ class SubscriptionService {
 
       // Calculate new expiry date locally to allow immediate access
       final now = DateTime.now().toUtc();
-      final newExpiry = (newTier == 'max') 
+      final newExpiry = (newTier == 'max')
           ? now.add(const Duration(days: 90))
           : now.add(const Duration(days: 30));
-          
-      
+
       await prefs.setString('premium_until', newExpiry.toIso8601String());
       debugPrint('Success: Subscription activated locally until $newExpiry');
 
@@ -293,6 +314,6 @@ class SubscriptionService {
   void _handleExternalWallet(ExternalWalletResponse response) {
     debugPrint('External Wallet: ${response.walletName}');
     _resetPaymentState();
-    _paymentCompleter?.complete(false); 
+    _paymentCompleter?.complete(false);
   }
 }

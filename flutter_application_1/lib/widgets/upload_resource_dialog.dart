@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:lottie/lottie.dart';
 import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
+import 'dart:typed_data';
 import 'dart:io';
 import '../config/theme.dart';
 import '../services/supabase_service.dart';
@@ -11,7 +12,6 @@ import '../services/backend_api_service.dart';
 import 'package:http/http.dart' as http;
 import 'success_overlay.dart';
 import '../utils/contribution_badge.dart';
-import '../models/user.dart';
 
 class UploadResourceDialog extends StatefulWidget {
   final String collegeId;
@@ -132,6 +132,11 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
       "Cybersecurity",
     ],
   };
+  static const Set<String> _teacherSourceRoles = {
+    'admin',
+    'moderator',
+    'teacher',
+  };
 
   List<String> get availableSubjects => subjects[_branch] ?? [];
 
@@ -245,10 +250,11 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
         return _showError('Enter video URL');
       }
       final uri = Uri.tryParse(_videoUrl);
-      if (uri == null || 
-          !uri.hasScheme || 
-          !uri.hasAuthority || 
-          (uri.scheme.toLowerCase() != 'http' && uri.scheme.toLowerCase() != 'https')) {
+      if (uri == null ||
+          !uri.hasScheme ||
+          !uri.hasAuthority ||
+          (uri.scheme.toLowerCase() != 'http' &&
+              uri.scheme.toLowerCase() != 'https')) {
         return _showError('Enter a valid HTTP/HTTPS video URL');
       }
     }
@@ -292,20 +298,26 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
         setState(() => _uploadProgress = 0.4);
         try {
           final file = _selectedFile!;
-          
+
           List<int>? bytes;
           if (kIsWeb) {
             if (file.bytes != null) {
-               bytes = file.bytes!;
+              bytes = file.bytes!;
             } else if (file.readStream != null) {
-               bytes = await file.readStream!.expand((x) => x).toList();
+              final buffer = BytesBuilder(copy: false);
+              await for (final chunk in file.readStream!) {
+                buffer.add(chunk);
+              }
+              bytes = buffer.takeBytes();
             }
           } else if (file.path != null) {
             bytes = await File(file.path!).readAsBytes();
           }
 
           if (bytes == null || bytes.isEmpty) {
-            throw Exception('File bytes are empty or could not be read. Please try again.');
+            throw Exception(
+              'File bytes are empty or could not be read. Please try again.',
+            );
           }
 
           final presign = await backendApi.getResourceUploadUrl(
@@ -350,14 +362,10 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
       try {
         final userInfo = await supabaseService.getUserInfo(widget.userEmail);
         if (userInfo != null) {
-          final role = (userInfo['role'])?.toString().toUpperCase();
-          final allowedRoles = {
-            AppRoles.admin.toUpperCase(),
-            AppRoles.moderator.toUpperCase(),
-            AppRoles.collegeUser.toUpperCase(),
-            AppRoles.teacher.toUpperCase(),
-          };
-          if (allowedRoles.contains(role)) {
+          final role = userInfo['role']?.toString().toLowerCase();
+          final adminKey = userInfo['admin_key']?.toString().trim() ?? '';
+          if (adminKey.isNotEmpty ||
+              (role != null && _teacherSourceRoles.contains(role))) {
             uploaderSource = 'teacher';
           }
         }
@@ -366,25 +374,22 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
       }
 
       // Create resource in Supabase via Backend API
-      await backendApi.createResource(
-        {
-          'college_id': widget.collegeId,
-          'title': _title.trim(),
-          'type': _typeIndex == 1 ? 'video' : _resourceType,
-          'semester': _semester,
-          'branch': _branch,
-          'subject': _subject,
-          'source': uploaderSource,
-          'file_url': filePath ?? _videoUrl,
-          'description': _description.trim(),
-          'chapter': _chapter.trim().isEmpty ? null : _chapter.trim(),
-          'topic': _topic.trim().isEmpty ? null : _topic.trim(),
-          'uploaded_by_name': authService.displayName ?? 'Anonymous',
-          'uploaded_by_email': widget.userEmail,
-          'status': 'pending',
-        },
-        context: context,
-      );
+      await backendApi.createResource({
+        'college_id': widget.collegeId,
+        'title': _title.trim(),
+        'type': _typeIndex == 1 ? 'video' : _resourceType,
+        'semester': _semester,
+        'branch': _branch,
+        'subject': _subject,
+        'source': uploaderSource,
+        'file_url': filePath ?? _videoUrl,
+        'description': _description.trim(),
+        'chapter': _chapter.trim().isEmpty ? null : _chapter.trim(),
+        'topic': _topic.trim().isEmpty ? null : _topic.trim(),
+        'uploaded_by_name': authService.displayName ?? 'Anonymous',
+        'uploaded_by_email': widget.userEmail,
+        'status': 'pending',
+      }, context: context);
 
       int? contributionCount;
       ContributionBadge? contributionBadge;
@@ -418,8 +423,10 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
         late OverlayEntry overlayEntry;
         OverlayEntry? confettiEntry;
         bool isRemoved = false;
-        
-        bool isPremiumUnlock = contributionCount == 10 || (badgeUnlocked && contributionBadge?.id == 'pro');
+
+        bool isPremiumUnlock =
+            contributionCount == 10 ||
+            (badgeUnlocked && contributionBadge?.id == 'pro');
 
         if (isPremiumUnlock) {
           confettiEntry = OverlayEntry(
@@ -454,17 +461,17 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                 : const Duration(milliseconds: 3000),
             onDismiss: () {
               if (!isRemoved) {
-                 isRemoved = true;
-                 overlayEntry.remove();
-                 confettiEntry?.remove();
-                 onComplete?.call();
+                isRemoved = true;
+                overlayEntry.remove();
+                confettiEntry?.remove();
+                onComplete?.call();
               }
             },
           ),
         );
-        
+
         if (confettiEntry != null) {
-          overlayState.insert(confettiEntry!);
+          overlayState.insert(confettiEntry);
         }
         overlayState.insert(overlayEntry);
       }

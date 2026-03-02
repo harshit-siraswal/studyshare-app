@@ -6,6 +6,7 @@ import '../../config/theme.dart';
 import '../../models/resource.dart';
 import '../../services/supabase_service.dart';
 import '../../services/download_service.dart';
+import '../../services/subscription_service.dart';
 import '../../widgets/resource_card.dart';
 
 class ResourceSearchScreen extends StatefulWidget {
@@ -24,6 +25,8 @@ class ResourceSearchScreen extends StatefulWidget {
 
 class _ResourceSearchScreenState extends State<ResourceSearchScreen> {
   final SupabaseService _supabaseService = SupabaseService();
+  final DownloadService _downloadService = DownloadService();
+  final SubscriptionService _subscriptionService = SubscriptionService();
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _focusNode = FocusNode();
 
@@ -130,20 +133,66 @@ class _ResourceSearchScreenState extends State<ResourceSearchScreen> {
     try {
       // Handle Downloads separately: fetch from local storage, not API
       if (_selectedType == 'Downloads') {
-        final downloadService = DownloadService();
-        var localResults = downloadService.getAllDownloadedResources();
-        
+        final hasPremiumAccess = await _subscriptionService.isPremium();
+        var localResults = _downloadService.getAllDownloadedResourcesForUser(
+          widget.userEmail,
+          hasPremiumAccess: hasPremiumAccess,
+        );
+
         // Apply local filtering if search query is provided
         if (_searchController.text.isNotEmpty) {
           final query = _searchController.text.toLowerCase();
           localResults = localResults
-              .where((resource) =>
-                  resource.title.toLowerCase().contains(query) ||
-                  (resource.description?.toLowerCase().contains(query) ?? false))
+              .where(
+                (resource) =>
+                    resource.title.toLowerCase().contains(query) ||
+                    (resource.description?.toLowerCase().contains(query) ??
+                        false),
+              )
               .toList();
           _addRecentSearch(_searchController.text);
         }
-        
+
+        if (_selectedSemester != null) {
+          final selectedSemester = _selectedSemester!.toLowerCase();
+          localResults = localResults
+              .where(
+                (resource) =>
+                    (resource.semester ?? '').toLowerCase() == selectedSemester,
+              )
+              .toList();
+        }
+        if (_selectedBranch != null) {
+          final selectedBranch = _selectedBranch!.toLowerCase();
+          localResults = localResults
+              .where(
+                (resource) =>
+                    (resource.branch ?? '').toLowerCase() == selectedBranch,
+              )
+              .toList();
+        }
+        if (_selectedSubject != null) {
+          final selectedSubject = _selectedSubject!.toLowerCase();
+          localResults = localResults
+              .where(
+                (resource) =>
+                    (resource.subject ?? '').toLowerCase() == selectedSubject,
+              )
+              .toList();
+        }
+
+        final localSort = _mapSortOption(_selectedSort);
+        if (localSort == 'upvotes') {
+          localResults.sort((a, b) => b.upvotes.compareTo(a.upvotes));
+        } else if (localSort == 'teacher') {
+          localResults.sort((a, b) {
+            if (a.isTeacherUpload == b.isTeacherUpload) return 0;
+            return a.isTeacherUpload ? -1 : 1;
+          });
+        } else {
+          localResults.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        }
+
         if (!mounted) return;
         setState(() {
           _searchResults = localResults;
@@ -911,7 +960,10 @@ class _ResourceSearchScreenState extends State<ResourceSearchScreen> {
   String? _mapResourceType(String uiType) {
     if (uiType == 'All') return null;
     if (uiType == 'Videos') return 'video';
-    if (uiType == 'Downloads') return null; // Downloads are local-only; no API type exists
+    if (uiType == 'Downloads') {
+      // Downloads are local-only; no API type exists.
+      return null;
+    }
     return uiType.toLowerCase();
   }
 

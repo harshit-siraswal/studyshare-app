@@ -360,12 +360,12 @@ class _AppSplashAnimationState extends State<AppSplashAnimation>
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final backgroundColor = isDark
-        ? const Color(0xFF06120D)
-        : const Color(0xFFEAF7EF);
-    final titleColor = isDark ? Colors.white : const Color(0xFF1A5B3B);
+        ? const Color(0xFF071428)
+        : const Color(0xFFEAF2FF);
+    final titleColor = isDark ? Colors.white : AppTheme.primaryDark;
     final subtitleColor = isDark
         ? Colors.white70
-        : const Color(0xFF2A6F4D).withValues(alpha: 0.9);
+        : AppTheme.primary.withValues(alpha: 0.9);
 
     return Container(
       width: double.infinity,
@@ -416,9 +416,7 @@ class _AppSplashAnimationState extends State<AppSplashAnimation>
 
   Widget _buildLogoOrb(bool isDark) {
     const orbSize = 212.0;
-    const brandGreen = Color(0xFF2EA867);
-    const brandGreenLight = Color(0xFF57C884);
-    final glowColor = isDark ? brandGreenLight : brandGreen;
+    final glowColor = isDark ? AppTheme.primaryLight : AppTheme.primary;
 
     return AnimatedBuilder(
       animation: _orbAnimations,
@@ -426,8 +424,10 @@ class _AppSplashAnimationState extends State<AppSplashAnimation>
         final pulse =
             0.97 + 0.03 * math.sin(_pulseController.value * 2 * math.pi);
         final shimmer =
-            (0.5 + 0.5 * math.sin(_pulseController.value * 2 * math.pi))
-                .clamp(0.0, 1.0);
+            (0.5 + 0.5 * math.sin(_pulseController.value * 2 * math.pi)).clamp(
+              0.0,
+              1.0,
+            );
         return Transform.scale(
           scale: pulse,
           child: SizedBox(
@@ -444,7 +444,7 @@ class _AppSplashAnimationState extends State<AppSplashAnimation>
                     gradient: const LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
-                      colors: [brandGreenLight, brandGreen],
+                      colors: [AppTheme.primaryLight, AppTheme.primary],
                     ),
                     boxShadow: [
                       BoxShadow(
@@ -486,7 +486,7 @@ class _AppSplashAnimationState extends State<AppSplashAnimation>
         border: Border.all(
           color: isDark
               ? Colors.white.withValues(alpha: 0.12)
-              : const Color(0xFF53B97D).withValues(alpha: 0.24),
+              : AppTheme.primaryLight.withValues(alpha: 0.24),
         ),
       ),
       child: Row(
@@ -497,7 +497,7 @@ class _AppSplashAnimationState extends State<AppSplashAnimation>
             height: 16,
             child: CircularProgressIndicator(
               strokeWidth: 2,
-              color: isDark ? Colors.white : const Color(0xFF2EA867),
+              color: isDark ? Colors.white : AppTheme.primary,
             ),
           ),
           const SizedBox(width: 10),
@@ -506,7 +506,7 @@ class _AppSplashAnimationState extends State<AppSplashAnimation>
             style: GoogleFonts.inter(
               fontSize: 13,
               fontWeight: FontWeight.w600,
-              color: isDark ? Colors.white70 : const Color(0xFF235A3D),
+              color: isDark ? Colors.white70 : AppTheme.primaryDark,
             ),
           ),
         ],

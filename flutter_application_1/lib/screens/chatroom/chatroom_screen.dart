@@ -165,7 +165,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
 
       if (mounted && requestId == _loadRequestId) {
         final bool prevFABVisible = !_isMember && !_isLoading && !_isReadOnly;
-        
+
         setState(() {
           _posts = posts;
           _roomInfo = info;
@@ -173,7 +173,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
           _isMember = memberCheckIds.contains(widget.roomId);
           _isLoading = false;
         });
-        
+
         final bool newFABVisible = !_isMember && !_isLoading && !_isReadOnly;
         if (!prevFABVisible && newFABVisible) {
           _fabAnimationController.reset();
@@ -199,23 +199,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       );
       return;
     }
+    final messenger = ScaffoldMessenger.of(context);
     setState(() => _isLoading = true);
     try {
       await _backendApiService.joinChatRoomById(widget.roomId);
-
-      if (mounted) {
-        await _loadRoomData();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Joined room successfully!')),
-        );
-      }
+      if (!mounted) return;
+      await _loadRoomData();
+      if (!mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Joined room successfully!')),
+      );
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Error joining room: $e')));
-        setState(() => _isLoading = false);
-      }
+      if (!mounted) return;
+      messenger.showSnackBar(SnackBar(content: Text('Error joining room: $e')));
+      setState(() => _isLoading = false);
     }
   }
 
@@ -247,7 +244,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
 
   String _getAnonymizedUserId() {
     // Create a deterministic non-PII identifier from email hash
-    final bytes = utf8.encode(widget.userEmail + "_room_salt_${widget.roomId}");
+    final bytes = utf8.encode("${widget.userEmail}_room_salt_${widget.roomId}");
     final digest = sha256.convert(bytes);
     return 'user_${digest.toString().substring(0, 12)}';
   }
@@ -423,9 +420,17 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       });
 
       if (currentlySaved) {
-        await _supabaseService.unsavePost(postId, widget.userEmail);
+        await _supabaseService.unsavePost(
+          postId,
+          widget.userEmail,
+          roomId: widget.roomId,
+        );
       } else {
-        await _supabaseService.savePost(postId, widget.userEmail);
+        await _supabaseService.savePost(
+          postId,
+          widget.userEmail,
+          roomId: widget.roomId,
+        );
       }
 
       // Show feedback
@@ -623,7 +628,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
           ? AnimatedBuilder(
               animation: _fabAnimationController,
               builder: (context, child) {
-                final value = Curves.elasticOut.transform(_fabAnimationController.value.clamp(0.0, 1.0));
+                final value = Curves.elasticOut.transform(
+                  _fabAnimationController.value.clamp(0.0, 1.0),
+                );
                 return Transform.translate(
                   offset: Offset(0, 50 * (1 - value)),
                   child: Opacity(
@@ -641,7 +648,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                         borderRadius: BorderRadius.circular(28),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF4A90E2).withValues(alpha: 0.3),
+                            color: const Color(
+                              0xFF4A90E2,
+                            ).withValues(alpha: 0.3),
                             blurRadius: 12,
                             offset: const Offset(0, 6),
                           ),
@@ -711,17 +720,18 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       itemCount: displayPosts.length,
       itemBuilder: (context, index) {
         final post = displayPosts[index];
+        final stablePostKey = ValueKey(
+          post['id']?.toString() ?? post['postId']?.toString() ?? 'post_$index',
+        );
         return TweenAnimationBuilder<double>(
+          key: stablePostKey,
           tween: Tween(begin: 0.0, end: 1.0),
           duration: Duration(milliseconds: 400 + (index * 50).clamp(0, 400)),
           curve: Curves.easeOutCubic,
           builder: (context, value, child) {
             return Transform.translate(
               offset: Offset(0, 30 * (1 - value)),
-              child: Opacity(
-                opacity: value,
-                child: child,
-              ),
+              child: Opacity(opacity: value, child: child),
             );
           },
           child: _buildPostCard(post, isDark),
@@ -736,8 +746,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(
-            Icons.chat_bubble_outline, 
-            size: 48, 
+            Icons.chat_bubble_outline,
+            size: 48,
             color: isDark ? Colors.white24 : Colors.black26,
           ),
           const SizedBox(height: 16),
@@ -806,7 +816,23 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
             Builder(
               builder: (context) {
                 final String? photoUrl = post['author_photo_url']?.toString();
-                final bool hasPhoto = photoUrl != null && photoUrl.trim().isNotEmpty;
+                final bool hasPhoto =
+                    photoUrl != null && photoUrl.trim().isNotEmpty;
+                Widget buildAvatarPlaceholder() {
+                  return CircleAvatar(
+                    radius: 18,
+                    backgroundColor: const Color(0xFF1D4ED8),
+                    child: Text(
+                      authorInitial,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  );
+                }
+
                 return GestureDetector(
                   onTap: () {
                     Navigator.push(
@@ -820,26 +846,36 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                       ),
                     );
                   },
-                  child: CircleAvatar(
-                    radius: 18,
-                    backgroundColor: const Color(0xFF1D4ED8),
-                    backgroundImage: hasPhoto
-                        ? NetworkImage(photoUrl)
-                        : null,
-                    onBackgroundImageError: hasPhoto
-                        ? (e, st) => debugPrint('Avatar image load failed for $photoUrl: $e')
-                        : null,
-                    child: hasPhoto ? null : Text(
-                      authorInitial,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                      ),
+                  child: ClipOval(
+                    child: SizedBox(
+                      width: 36,
+                      height: 36,
+                      child: hasPhoto
+                          ? Image.network(
+                              photoUrl,
+                              fit: BoxFit.cover,
+                              cacheWidth: 72,
+                              cacheHeight: 72,
+                              loadingBuilder:
+                                  (context, child, loadingProgress) {
+                                    if (loadingProgress == null) {
+                                      return child;
+                                    }
+                                    return buildAvatarPlaceholder();
+                                  },
+                              errorBuilder: (context, error, stackTrace) {
+                                debugPrint(
+                                  'Avatar image load failed for $photoUrl: '
+                                  '$error',
+                                );
+                                return buildAvatarPlaceholder();
+                              },
+                            )
+                          : buildAvatarPlaceholder(),
                     ),
                   ),
                 );
-              }
+              },
             ),
             const SizedBox(width: 10),
             Expanded(
@@ -1190,7 +1226,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                 final reporterId = currentUser?.uid;
                 if (reporterId == null) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Please sign in to report posts.')),
+                    const SnackBar(
+                      content: Text('Please sign in to report posts.'),
+                    ),
                   );
                   return;
                 }
@@ -1201,14 +1239,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
 
                 await _backendApiService.reportPost(postId, reason, reporterId);
 
-                if (!mounted) return;
+                if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                     content: Text('Report submitted successfully.'),
                   ),
                 );
               } catch (e) {
-                if (!mounted) return;
+                if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(content: Text('Failed to submit report: $e')),
                 );
@@ -1732,32 +1770,29 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                       );
 
                       if (confirm == true) {
+                        if (!dialogCtx.mounted) return;
+                        if (!mounted) return;
+                        final roomNavigator = Navigator.of(context);
+                        final dialogNavigator = Navigator.of(dialogCtx);
+                        final messenger = ScaffoldMessenger.of(context);
                         try {
                           await _backendApiService.leaveChatRoom(
                             roomId: widget.roomId,
                             context: dialogCtx,
                           );
-                          if (dialogCtx.mounted) {
-                            Navigator.pop(dialogCtx); // Close dialog
-                            Navigator.pop(
-                              context,
-                            ); // Close room screen (using outer context)
-                          }
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Left room successfully'),
-                              ),
-                            );
-                          }
+                          if (!dialogCtx.mounted || !mounted) return;
+                          dialogNavigator.pop(); // Close dialog
+                          roomNavigator.pop(); // Close room screen
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text('Left room successfully'),
+                            ),
+                          );
                         } catch (e) {
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Failed to leave room: $e'),
-                              ),
-                            );
-                          }
+                          if (!mounted) return;
+                          messenger.showSnackBar(
+                            SnackBar(content: Text('Failed to leave room: $e')),
+                          );
                         }
                       }
                     },
@@ -1811,27 +1846,28 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                       );
 
                       if (confirm == true) {
+                        if (!dialogCtx.mounted) return;
+                        if (!mounted) return;
+                        final roomNavigator = Navigator.of(context);
+                        final dialogNavigator = Navigator.of(dialogCtx);
+                        final messenger = ScaffoldMessenger.of(context);
                         try {
                           await _supabaseService.deleteRoom(widget.roomId);
-                          if (dialogCtx.mounted) {
-                            Navigator.pop(dialogCtx); // Close dialog
-                            Navigator.pop(context); // Close room screen
-                          }
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Room deleted successfully'),
-                              ),
-                            );
-                          }
+                          if (!dialogCtx.mounted || !mounted) return;
+                          dialogNavigator.pop(); // Close dialog
+                          roomNavigator.pop(); // Close room screen
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text('Room deleted successfully'),
+                            ),
+                          );
                         } catch (e) {
-                          if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Failed to delete room: $e'),
-                              ),
-                            );
-                          }
+                          if (!mounted) return;
+                          messenger.showSnackBar(
+                            SnackBar(
+                              content: Text('Failed to delete room: $e'),
+                            ),
+                          );
                         }
                       }
                     },
@@ -2106,7 +2142,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                                                 });
                                               }
                                               await _loadRoomData(silent: true);
-                                              if (mounted) {
+                                              if (context.mounted) {
                                                 ScaffoldMessenger.of(
                                                   context,
                                                 ).showSnackBar(
@@ -2123,7 +2159,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                                                   () => isUpdatingRole = false,
                                                 );
                                               }
-                                              if (mounted) {
+                                              if (context.mounted) {
                                                 ScaffoldMessenger.of(
                                                   context,
                                                 ).showSnackBar(
@@ -2200,7 +2236,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                                                     userEmail: email,
                                                   );
 
-                                              if (mounted) {
+                                              if (context.mounted) {
                                                 ScaffoldMessenger.of(
                                                   context,
                                                 ).showSnackBar(
@@ -2221,7 +2257,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                                                 });
                                               }
                                             } catch (e) {
-                                              if (mounted) {
+                                              if (context.mounted) {
                                                 ScaffoldMessenger.of(
                                                   context,
                                                 ).showSnackBar(

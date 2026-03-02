@@ -292,7 +292,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               children: [
                 Expanded(
                   child: DropdownButtonFormField<String>(
-                    value: _selectedSemester,
+                    initialValue: _selectedSemester,
                     decoration: InputDecoration(
                       labelText: 'Semester',
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -309,7 +309,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     ? const Center(child: CircularProgressIndicator())
                     : DropdownButtonFormField<String>(
                         isExpanded: true,
-                        value: _selectedBranch,
+                        initialValue: _selectedBranch,
                         decoration: InputDecoration(
                           labelText: 'Branch',
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),

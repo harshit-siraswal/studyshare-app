@@ -1,8 +1,0 @@
-﻿
-  error - Expected to 
-find ']' - lib\screens\
-profile\profile_screen.
-dart:553:15 - 
-expected_token
-
-
