@@ -19,9 +19,38 @@ enum FollowStatus { notFollowing, pending, following }
 class SupabaseService {
   static const int kUnlimitedDuration = -1;
   static const int kDefaultExpiryDays = 7;
+  static const Duration _profileCacheTtl = Duration(seconds: 45);
+  static const Duration _resourcesCacheTtl = Duration(seconds: 20);
+  static const Duration _filterValuesCacheTtl = Duration(minutes: 5);
+  static const int _maxResourceListCacheEntries = 24;
+  static const int _maxFilterValuesCacheEntries = 24;
 
   SupabaseClient get _client => Supabase.instance.client;
   final BackendApiService _api = BackendApiService();
+  static Map<String, dynamic>? _cachedCurrentUserProfile;
+  static String? _cachedCurrentUserProfileEmail;
+  static DateTime? _cachedCurrentUserProfileAt;
+  static Future<Map<String, dynamic>>? _currentUserProfileFetchFuture;
+  static final Map<String, ({DateTime cachedAt, List<Resource> data})>
+  _resourceListCache = <String, ({DateTime cachedAt, List<Resource> data})>{};
+  static final Map<String, Future<List<Resource>>> _resourceListInFlight =
+      <String, Future<List<Resource>>>{};
+  static final Map<String, ({DateTime cachedAt, List<String> data})>
+  _uniqueValuesCache = <String, ({DateTime cachedAt, List<String> data})>{};
+  static final Map<String, bool> _bookmarkStateCache = <String, bool>{};
+  static final Map<String, ({int? userVote, int upvotes, int downvotes})>
+  _voteStateCache = <String, ({int? userVote, int upvotes, int downvotes})>{};
+  static ({
+    bool hasUserEmail,
+    bool hasUserId,
+    bool hasMessageId,
+    bool hasPostId,
+    bool hasRoomId,
+    bool hasCreatedAt,
+  })?
+  _savedPostsSchemaCache;
+  static DateTime? _savedPostsSchemaCachedAt;
+  static const Duration _savedPostsSchemaCacheTtl = Duration(minutes: 15);
 
   /// A BuildContext is required to run reCAPTCHA (invisible WebView) before privileged writes.
   /// Set this once from a top-level screen (e.g. HomeScreen) via [attachContext].
@@ -44,6 +73,96 @@ class SupabaseService {
   }
 
   String _normalizeEmail(String? email) => email?.trim().toLowerCase() ?? '';
+
+  String _resourceStateKey(String resourceId, {String? userEmail}) {
+    final normalizedInputEmail = _normalizeEmail(userEmail);
+    final scopedEmail = normalizedInputEmail.isNotEmpty
+        ? normalizedInputEmail
+        : _currentSessionEmail();
+    return '$scopedEmail::$resourceId';
+  }
+
+  bool _hasFreshCurrentUserProfileCacheFor(String email) {
+    if (email.isEmpty) return false;
+    final cachedAt = _cachedCurrentUserProfileAt;
+    if (cachedAt == null) return false;
+    return _cachedCurrentUserProfile != null &&
+        _cachedCurrentUserProfileEmail == email &&
+        DateTime.now().difference(cachedAt) < _profileCacheTtl;
+  }
+
+  void _cacheCurrentUserProfile(String email, Map<String, dynamic> profile) {
+    if (email.isEmpty || profile.isEmpty) return;
+    _cachedCurrentUserProfile = Map<String, dynamic>.from(profile);
+    _cachedCurrentUserProfileEmail = email;
+    _cachedCurrentUserProfileAt = DateTime.now();
+  }
+
+  void invalidateCurrentUserProfileCache() {
+    _cachedCurrentUserProfile = null;
+    _cachedCurrentUserProfileEmail = null;
+    _cachedCurrentUserProfileAt = null;
+  }
+
+  void invalidateResourceListCache() {
+    _resourceListCache.clear();
+    _resourceListInFlight.clear();
+  }
+
+  String _resourceListCacheKey({
+    required String collegeId,
+    String? semester,
+    String? branch,
+    String? subject,
+    String? type,
+    String? searchQuery,
+    String? sortBy,
+    required int limit,
+    required int offset,
+  }) {
+    final normalizedSearch = searchQuery?.trim().toLowerCase() ?? '';
+    return [
+      collegeId.trim(),
+      semester?.trim().toLowerCase() ?? '',
+      branch?.trim().toLowerCase() ?? '',
+      subject?.trim().toLowerCase() ?? '',
+      type?.trim().toLowerCase() ?? '',
+      normalizedSearch,
+      sortBy?.trim().toLowerCase() ?? '',
+      limit.toString(),
+      offset.toString(),
+    ].join('|');
+  }
+
+  String _uniqueValuesCacheKey({
+    required String column,
+    required String collegeId,
+    String? branch,
+  }) {
+    return [
+      column.trim().toLowerCase(),
+      collegeId.trim(),
+      branch?.trim().toLowerCase() ?? '',
+    ].join('|');
+  }
+
+  void _pruneResourceListCacheIfNeeded() {
+    while (_resourceListCache.length > _maxResourceListCacheEntries) {
+      final oldest = _resourceListCache.entries.reduce(
+        (a, b) => a.value.cachedAt.isBefore(b.value.cachedAt) ? a : b,
+      );
+      _resourceListCache.remove(oldest.key);
+    }
+  }
+
+  void _pruneUniqueValuesCacheIfNeeded() {
+    while (_uniqueValuesCache.length > _maxFilterValuesCacheEntries) {
+      final oldest = _uniqueValuesCache.entries.reduce(
+        (a, b) => a.value.cachedAt.isBefore(b.value.cachedAt) ? a : b,
+      );
+      _uniqueValuesCache.remove(oldest.key);
+    }
+  }
 
   String _normalizeRoleValue(String? role) {
     final raw = role?.trim().toUpperCase() ?? '';
@@ -138,6 +257,79 @@ class SupabaseService {
     return message.contains('row-level security') ||
         message.contains('violates row-level security policy') ||
         message.contains('42501');
+  }
+
+  bool _isAdminUploadAuthError(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('unauthorized') ||
+        message.contains('forbidden') ||
+        message.contains('invalid admin') ||
+        message.contains('admin key') ||
+        message.contains('expired') ||
+        message.contains('401') ||
+        message.contains('403');
+  }
+
+  bool _isAdminUploadTransientError(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('socketexception') ||
+        message.contains('failed host lookup') ||
+        message.contains('timed out') ||
+        message.contains('timeout') ||
+        message.contains('connection reset') ||
+        message.contains('connection refused') ||
+        message.contains('network') ||
+        message.contains('429') ||
+        message.contains('503');
+  }
+
+  bool _isAdminUploadServerError(Object error) {
+    // Intentionally excludes transient errors to avoid overlapping classification.
+    final message = error.toString().toLowerCase();
+    final has5xxCode = RegExp(r'\b5\d\d\b').hasMatch(message);
+    return !_isAdminUploadTransientError(error) &&
+        (has5xxCode ||
+            message.contains('internal server error') ||
+            message.contains('service unavailable'));
+  }
+
+  Future<({int? userVote, int upvotes, int downvotes})> getResourceVoteStatus(
+    String resourceId,
+  ) async {
+    final key = _resourceStateKey(resourceId);
+    final cached = _voteStateCache[key];
+    if (cached != null) {
+      return cached;
+    }
+
+    try {
+      final data = await _api.getVoteStatus(resourceId);
+      final rawVote = data['userVote'];
+      int? userVote;
+      if (rawVote is String) {
+        if (rawVote == 'upvote') {
+          userVote = 1;
+        } else if (rawVote == 'downvote') {
+          userVote = -1;
+        }
+      } else if (rawVote is num) {
+        userVote = rawVote.toInt();
+      }
+
+      final upvotesRaw = data['upvotes'] ?? data['up_votes'] ?? 0;
+      final downvotesRaw = data['downvotes'] ?? data['down_votes'] ?? 0;
+
+      final resolved = (
+        userVote: userVote,
+        upvotes: upvotesRaw is num ? upvotesRaw.toInt() : 0,
+        downvotes: downvotesRaw is num ? downvotesRaw.toInt() : 0,
+      );
+      _voteStateCache[key] = resolved;
+      return resolved;
+    } catch (e) {
+      debugPrint('Error fetching resource vote status: $e');
+      return (userVote: null, upvotes: 0, downvotes: 0);
+    }
   }
 
   Map<String, dynamic> _normalizeSocialUser(Map<String, dynamic> raw) {
@@ -297,53 +489,110 @@ class SupabaseService {
     int limit = 20,
     int offset = 0,
   }) async {
+    final normalizedSemester = semester?.trim();
+    final normalizedBranch = branch?.trim();
+    final normalizedSubject = subject?.trim();
+    final normalizedType = type?.trim();
+    final normalizedSearch = searchQuery?.trim() ?? '';
+    final cacheKey = _resourceListCacheKey(
+      collegeId: collegeId,
+      semester: normalizedSemester,
+      branch: normalizedBranch,
+      subject: normalizedSubject,
+      type: normalizedType,
+      searchQuery: normalizedSearch,
+      sortBy: sortBy,
+      limit: limit,
+      offset: offset,
+    );
+    final shouldUseCache = offset == 0 && normalizedSearch.isEmpty;
+
+    if (shouldUseCache) {
+      final cached = _resourceListCache[cacheKey];
+      if (cached != null &&
+          DateTime.now().difference(cached.cachedAt) < _resourcesCacheTtl) {
+        return List<Resource>.from(cached.data);
+      }
+
+      final pending = _resourceListInFlight[cacheKey];
+      if (pending != null) {
+        return List<Resource>.from(await pending);
+      }
+    }
+
+    final fetchFuture = () async {
+      try {
+        debugPrint(
+          'SupabaseService.getResources: collegeId=$collegeId, semester=$normalizedSemester, branch=$normalizedBranch, type=$normalizedType',
+        );
+
+        var query = _client
+            .from('resources')
+            .select()
+            .eq('college_id', collegeId)
+            .eq('status', 'approved');
+
+        if (normalizedSemester != null && normalizedSemester.isNotEmpty) {
+          query = query.eq('semester', normalizedSemester);
+        }
+        if (normalizedBranch != null && normalizedBranch.isNotEmpty) {
+          query = query.ilike('branch', '%$normalizedBranch%');
+        }
+        if (normalizedSubject != null && normalizedSubject.isNotEmpty) {
+          query = query.ilike('subject', '%$normalizedSubject%');
+        }
+        if (normalizedType != null && normalizedType.isNotEmpty) {
+          query = query.ilike('type', normalizedType);
+        }
+        if (normalizedSearch.isNotEmpty) {
+          query = query.ilike('title', '%$normalizedSearch%');
+        }
+
+        final orderedQuery = sortBy == 'upvotes'
+            ? query
+                  .order('upvotes', ascending: false)
+                  .order('created_at', ascending: false)
+            : sortBy == 'teacher'
+            ? query
+                  .order('uploaded_by_name', ascending: true)
+                  .order('created_at', ascending: false)
+            : query.order('created_at', ascending: false);
+
+        final response = await orderedQuery.range(offset, offset + limit - 1);
+        final rows = (response as List)
+            .whereType<Map>()
+            .map((json) => Resource.fromJson(Map<String, dynamic>.from(json)))
+            .toList();
+
+        debugPrint(
+          'SupabaseService.getResources: returned ${rows.length} resources',
+        );
+
+        if (shouldUseCache) {
+          _resourceListCache[cacheKey] = (
+            cachedAt: DateTime.now(),
+            data: List<Resource>.unmodifiable(rows),
+          );
+          _pruneResourceListCacheIfNeeded();
+        }
+
+        return rows;
+      } catch (e) {
+        debugPrint('Error fetching resources: $e');
+        rethrow;
+      }
+    }();
+
+    if (shouldUseCache) {
+      _resourceListInFlight[cacheKey] = fetchFuture;
+    }
+
     try {
-      debugPrint(
-        'SupabaseService.getResources: collegeId=$collegeId, semester=$semester, branch=$branch, type=$type',
-      );
-
-      var query = _client
-          .from('resources')
-          .select()
-          .eq('college_id', collegeId)
-          .eq('status', 'approved');
-
-      if (semester != null && semester.isNotEmpty) {
-        query = query.eq('semester', semester);
+      return List<Resource>.from(await fetchFuture);
+    } finally {
+      if (shouldUseCache) {
+        _resourceListInFlight.remove(cacheKey);
       }
-      if (branch != null && branch.isNotEmpty) {
-        query = query.eq('branch', branch);
-      }
-      if (subject != null && subject.isNotEmpty) {
-        query = query.eq('subject', subject);
-      }
-      if (type != null && type.isNotEmpty) {
-        query = query.eq('type', type);
-      }
-      if (searchQuery != null && searchQuery.isNotEmpty) {
-        query = query.ilike('title', '%$searchQuery%');
-      }
-
-      final orderedQuery = sortBy == 'upvotes'
-          ? query
-                .order('upvotes', ascending: false)
-                .order('created_at', ascending: false)
-          : sortBy == 'teacher'
-          ? query
-                .order('uploaded_by_name', ascending: true)
-                .order('created_at', ascending: false)
-          : query.order('created_at', ascending: false);
-
-      final response = await orderedQuery.range(offset, offset + limit - 1);
-
-      debugPrint(
-        'SupabaseService.getResources: returned ${(response as List).length} resources',
-      );
-
-      return (response as List).map((json) => Resource.fromJson(json)).toList();
-    } catch (e) {
-      debugPrint('Error fetching resources: $e');
-      rethrow;
     }
   }
 
@@ -811,38 +1060,71 @@ class SupabaseService {
 
   Future<Map<String, dynamic>> getCurrentUserProfile({
     int maxAttempts = 3,
+    bool forceRefresh = false,
   }) async {
-    Object? lastError;
-    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        final payload = await _api.getProfile();
-        final profile =
-            (payload['profile'] as Map?)?.cast<String, dynamic>() ??
-            payload.cast<String, dynamic>();
-        if (profile.isNotEmpty) {
-          return profile;
-        }
-        lastError = Exception('Empty profile payload');
-      } catch (e) {
-        lastError = e;
-      }
-
-      if (attempt < maxAttempts) {
-        await Future.delayed(Duration(milliseconds: 250 * attempt));
-      }
-    }
-
-    if (lastError != null) {
-      debugPrint(
-        'Error resolving current user profile after $maxAttempts attempts: '
-        '$lastError',
+    if (maxAttempts <= 0) {
+      throw ArgumentError.value(
+        maxAttempts,
+        'maxAttempts',
+        'maxAttempts must be >= 1',
       );
     }
-    return {};
+    if (forceRefresh) {
+      invalidateCurrentUserProfileCache();
+    }
+    final email = _currentSessionEmail();
+    if (!forceRefresh && _hasFreshCurrentUserProfileCacheFor(email)) {
+      return Map<String, dynamic>.from(_cachedCurrentUserProfile!);
+    }
+
+    if (_currentUserProfileFetchFuture != null) {
+      return _currentUserProfileFetchFuture!;
+    }
+
+    _currentUserProfileFetchFuture = () async {
+      Object? lastError;
+      for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          final payload = await _api.getProfile();
+          final profile =
+              (payload['profile'] as Map?)?.cast<String, dynamic>() ??
+              payload.cast<String, dynamic>();
+          if (profile.isNotEmpty) {
+            _cacheCurrentUserProfile(email, profile);
+            return profile;
+          }
+          lastError = Exception('Empty profile payload');
+        } catch (e) {
+          lastError = e;
+        }
+
+        if (attempt < maxAttempts) {
+          await Future.delayed(Duration(milliseconds: 250 * attempt));
+        }
+      }
+
+      if (lastError != null) {
+        debugPrint(
+          'Error resolving current user profile after $maxAttempts attempts: '
+          '$lastError',
+        );
+      }
+      if (_cachedCurrentUserProfile != null &&
+          _cachedCurrentUserProfileEmail == email) {
+        return Map<String, dynamic>.from(_cachedCurrentUserProfile!);
+      }
+      return <String, dynamic>{};
+    }();
+
+    try {
+      return await _currentUserProfileFetchFuture!;
+    } finally {
+      _currentUserProfileFetchFuture = null;
+    }
   }
 
   Future<String> getCurrentUserRole() async {
-    final profile = await getCurrentUserProfile();
+    final profile = await getCurrentUserProfile(maxAttempts: 1);
     if (profile.isEmpty) return AppRoles.readOnly;
     return _resolveEffectiveRole(profile);
   }
@@ -854,6 +1136,19 @@ class SupabaseService {
     String department = 'general',
     String? imageUrl,
   }) async {
+    try {
+      await _api.createNotice(
+        collegeId: collegeId,
+        title: title,
+        content: content,
+        department: department,
+        imageUrl: imageUrl,
+      );
+      return;
+    } catch (e) {
+      debugPrint('Backend notice post failed, retrying via Supabase: $e');
+    }
+
     final email = _normalizeEmail(currentUserEmail);
     if (email.isEmpty) {
       throw Exception('Please sign in to post notices');
@@ -1279,6 +1574,17 @@ class SupabaseService {
     String collegeId, {
     String? branch,
   }) async {
+    final cacheKey = _uniqueValuesCacheKey(
+      column: column,
+      collegeId: collegeId,
+      branch: branch,
+    );
+    final cached = _uniqueValuesCache[cacheKey];
+    if (cached != null &&
+        DateTime.now().difference(cached.cachedAt) < _filterValuesCacheTtl) {
+      return List<String>.from(cached.data);
+    }
+
     try {
       var query = _client
           .from('resources')
@@ -1299,7 +1605,13 @@ class SupabaseService {
           .toList();
 
       values.sort();
-      return values.cast<String>();
+      final resolved = values.cast<String>();
+      _uniqueValuesCache[cacheKey] = (
+        cachedAt: DateTime.now(),
+        data: List<String>.unmodifiable(resolved),
+      );
+      _pruneUniqueValuesCacheIfNeeded();
+      return resolved;
     } catch (e) {
       debugPrint('Error fetching unique values for $column: $e');
       return [];
@@ -1323,6 +1635,11 @@ class SupabaseService {
         resourceId: resourceId,
         voteType: voteType,
         context: ctx,
+      );
+      // Vote changes can affect ordering/counts in resource feeds.
+      invalidateResourceListCache();
+      _voteStateCache.remove(
+        _resourceStateKey(resourceId, userEmail: userEmail),
       );
       // The backend handles the logic of toggling/updating and returns the new counts,
       // but here we just need to ensure the request succeeds.
@@ -1711,7 +2028,387 @@ class SupabaseService {
 
   // ============ SAVED POSTS ============
 
-  // ============ SAVED POSTS ============
+  Future<bool> _savedPostsColumnExists(String column) async {
+    try {
+      await _client.from('saved_posts').select(column).limit(1);
+      return true;
+    } catch (e) {
+      if (_isMissingColumnError(e, column)) {
+        return false;
+      }
+      rethrow;
+    }
+  }
+
+  Future<
+    ({
+      bool hasUserEmail,
+      bool hasUserId,
+      bool hasMessageId,
+      bool hasPostId,
+      bool hasRoomId,
+      bool hasCreatedAt,
+    })
+  >
+  _getSavedPostsSchema() async {
+    final cached = _savedPostsSchemaCache;
+    final cachedAt = _savedPostsSchemaCachedAt;
+    if (cached != null &&
+        cachedAt != null &&
+        DateTime.now().difference(cachedAt) < _savedPostsSchemaCacheTtl) {
+      return cached;
+    }
+
+    final checks = await Future.wait<bool>([
+      _savedPostsColumnExists('user_email'),
+      _savedPostsColumnExists('user_id'),
+      _savedPostsColumnExists('message_id'),
+      _savedPostsColumnExists('post_id'),
+      _savedPostsColumnExists('room_id'),
+      _savedPostsColumnExists('created_at'),
+    ]);
+
+    final schema = (
+      hasUserEmail: checks[0],
+      hasUserId: checks[1],
+      hasMessageId: checks[2],
+      hasPostId: checks[3],
+      hasRoomId: checks[4],
+      hasCreatedAt: checks[5],
+    );
+    _savedPostsSchemaCache = schema;
+    _savedPostsSchemaCachedAt = DateTime.now();
+    return schema;
+  }
+
+  Set<String> _resolveSavedPostUserIds() {
+    final ids = <String>{};
+    final supabaseId = (currentUserId ?? '').trim();
+    if (supabaseId.isNotEmpty) {
+      ids.add(supabaseId);
+    }
+    final firebaseId = firebase_auth.FirebaseAuth.instance.currentUser?.uid
+        .toString()
+        .trim();
+    if (firebaseId != null && firebaseId.isNotEmpty) {
+      ids.add(firebaseId);
+    }
+    return ids;
+  }
+
+  List<({String column, String value})> _savedPostUserFilters(
+    ({
+      bool hasUserEmail,
+      bool hasUserId,
+      bool hasMessageId,
+      bool hasPostId,
+      bool hasRoomId,
+      bool hasCreatedAt,
+    })
+    schema,
+    String userEmail,
+  ) {
+    final filters = <({String column, String value})>[];
+    final normalizedEmail = _normalizeEmail(userEmail);
+    if (schema.hasUserEmail && normalizedEmail.isNotEmpty) {
+      filters.add((column: 'user_email', value: normalizedEmail));
+    }
+    if (schema.hasUserId) {
+      for (final id in _resolveSavedPostUserIds()) {
+        if (id.isEmpty) continue;
+        filters.add((column: 'user_id', value: id));
+      }
+    }
+    return filters;
+  }
+
+  List<String> _savedPostMessageColumns(
+    ({
+      bool hasUserEmail,
+      bool hasUserId,
+      bool hasMessageId,
+      bool hasPostId,
+      bool hasRoomId,
+      bool hasCreatedAt,
+    })
+    schema,
+  ) {
+    final columns = <String>[];
+    if (schema.hasMessageId) columns.add('message_id');
+    if (schema.hasPostId) columns.add('post_id');
+    return columns;
+  }
+
+  Future<Set<String>> _collectSavedPostRowIdsDirect(
+    String postId,
+    String userEmail,
+  ) async {
+    final normalizedPostId = postId.trim();
+    if (normalizedPostId.isEmpty) return {};
+
+    final schema = await _getSavedPostsSchema();
+    final userFilters = _savedPostUserFilters(schema, userEmail);
+    final messageColumns = _savedPostMessageColumns(schema);
+    if (userFilters.isEmpty || messageColumns.isEmpty) {
+      return {};
+    }
+
+    final rowIds = <String>{};
+
+    for (final filter in userFilters) {
+      for (final messageColumn in messageColumns) {
+        try {
+          final rows = await _client
+              .from('saved_posts')
+              .select('id')
+              .eq(filter.column, filter.value)
+              .eq(messageColumn, normalizedPostId);
+
+          for (final row in List<Map<String, dynamic>>.from(rows)) {
+            final id = row['id']?.toString().trim() ?? '';
+            if (id.isNotEmpty) {
+              rowIds.add(id);
+            }
+          }
+        } catch (e) {
+          final ignoreMissing =
+              _isMissingColumnError(e, filter.column) ||
+              _isMissingColumnError(e, messageColumn);
+          if (!ignoreMissing) {
+            debugPrint(
+              'saved_posts direct row lookup failed for '
+              '${filter.column}/$messageColumn: $e',
+            );
+          }
+        }
+      }
+    }
+
+    return rowIds;
+  }
+
+  Future<Set<String>> _getSavedPostIdsDirect(String userEmail) async {
+    final schema = await _getSavedPostsSchema();
+    final userFilters = _savedPostUserFilters(schema, userEmail);
+    final messageColumns = _savedPostMessageColumns(schema);
+    if (userFilters.isEmpty || messageColumns.isEmpty) {
+      return {};
+    }
+
+    final ids = <String>{};
+    for (final filter in userFilters) {
+      for (final messageColumn in messageColumns) {
+        try {
+          final rows = await _client
+              .from('saved_posts')
+              .select(messageColumn)
+              .eq(filter.column, filter.value);
+
+          for (final row in List<Map<String, dynamic>>.from(rows)) {
+            final id = row[messageColumn]?.toString().trim() ?? '';
+            if (id.isNotEmpty) {
+              ids.add(id);
+            }
+          }
+        } catch (e) {
+          final ignoreMissing =
+              _isMissingColumnError(e, filter.column) ||
+              _isMissingColumnError(e, messageColumn);
+          if (!ignoreMissing) {
+            debugPrint(
+              'saved_posts direct id fetch failed for '
+              '${filter.column}/$messageColumn: $e',
+            );
+          }
+        }
+      }
+    }
+    return ids;
+  }
+
+  Future<List<Map<String, dynamic>>> _getSavedPostsDirect(
+    String userEmail,
+  ) async {
+    final schema = await _getSavedPostsSchema();
+    final userFilters = _savedPostUserFilters(schema, userEmail);
+    final messageColumns = _savedPostMessageColumns(schema);
+    if (userFilters.isEmpty || messageColumns.isEmpty) {
+      return [];
+    }
+
+    final savedByMessage = <String, Map<String, dynamic>>{};
+
+    for (final filter in userFilters) {
+      for (final messageColumn in messageColumns) {
+        final selectParts = <String>[messageColumn];
+        if (schema.hasRoomId) selectParts.add('room_id');
+        if (schema.hasCreatedAt) selectParts.add('created_at');
+
+        try {
+          final rows = schema.hasCreatedAt
+              ? await _client
+                    .from('saved_posts')
+                    .select(selectParts.join(', '))
+                    .eq(filter.column, filter.value)
+                    .order('created_at', ascending: false)
+              : await _client
+                    .from('saved_posts')
+                    .select(selectParts.join(', '))
+                    .eq(filter.column, filter.value);
+          for (final row in List<Map<String, dynamic>>.from(rows)) {
+            final messageId = row[messageColumn]?.toString().trim() ?? '';
+            if (messageId.isEmpty) continue;
+
+            final savedAt = row['created_at']?.toString();
+            final existing = savedByMessage[messageId];
+            if (existing == null) {
+              savedByMessage[messageId] = {
+                'message_id': messageId,
+                'room_id': row['room_id']?.toString(),
+                'created_at': savedAt,
+              };
+              continue;
+            }
+
+            final existingTime = DateTime.tryParse(
+              existing['created_at']?.toString() ?? '',
+            );
+            final currentTime = DateTime.tryParse(savedAt ?? '');
+            if (existingTime == null ||
+                (currentTime != null && currentTime.isAfter(existingTime))) {
+              savedByMessage[messageId] = {
+                'message_id': messageId,
+                'room_id': row['room_id']?.toString(),
+                'created_at': savedAt,
+              };
+            }
+          }
+        } catch (e) {
+          final ignoreMissing =
+              _isMissingColumnError(e, filter.column) ||
+              _isMissingColumnError(e, messageColumn);
+          if (!ignoreMissing) {
+            debugPrint(
+              'saved_posts direct list fetch failed for '
+              '${filter.column}/$messageColumn: $e',
+            );
+          }
+        }
+      }
+    }
+
+    if (savedByMessage.isEmpty) return [];
+
+    final messageIds = savedByMessage.keys.toList();
+    final messageResponse = await _client
+        .from('room_messages')
+        .select('*, comment_count:room_post_comments(count)')
+        .inFilter('id', messageIds);
+
+    final messagesById = <String, Map<String, dynamic>>{};
+    for (final row in List<Map<String, dynamic>>.from(messageResponse)) {
+      final id = row['id']?.toString();
+      if (id == null || id.isEmpty) continue;
+      row['comment_count'] = _normalizeCount(row['comment_count']);
+      messagesById[id] = row;
+    }
+
+    final savedRows = savedByMessage.values.toList()
+      ..sort((a, b) {
+        final aTime = DateTime.tryParse(a['created_at']?.toString() ?? '');
+        final bTime = DateTime.tryParse(b['created_at']?.toString() ?? '');
+        if (aTime == null && bTime == null) return 0;
+        if (aTime == null) return 1;
+        if (bTime == null) return -1;
+        return bTime.compareTo(aTime);
+      });
+
+    final ordered = <Map<String, dynamic>>[];
+    for (final saved in savedRows) {
+      final id = saved['message_id']?.toString();
+      if (id == null || id.isEmpty) continue;
+      final message = messagesById[id];
+      if (message == null) continue;
+      ordered.add({
+        ...message,
+        '_saved_at': saved['created_at'],
+        '_saved_room_id': saved['room_id']?.toString().trim().isNotEmpty == true
+            ? saved['room_id']
+            : message['room_id'],
+      });
+    }
+
+    return ordered;
+  }
+
+  Future<void> _savePostDirect(
+    String postId,
+    String userEmail, {
+    String? roomId,
+  }) async {
+    final normalizedPostId = postId.trim();
+    if (normalizedPostId.isEmpty) {
+      throw Exception('Post ID is required');
+    }
+
+    final schema = await _getSavedPostsSchema();
+    final messageColumns = _savedPostMessageColumns(schema);
+    if (messageColumns.isEmpty) {
+      throw Exception('saved_posts schema missing message identifier columns');
+    }
+
+    final existingRowIds = await _collectSavedPostRowIdsDirect(
+      normalizedPostId,
+      userEmail,
+    );
+    if (existingRowIds.isNotEmpty) {
+      return;
+    }
+
+    final payload = <String, dynamic>{messageColumns.first: normalizedPostId};
+    final normalizedEmail = _normalizeEmail(userEmail);
+    if (schema.hasUserEmail && normalizedEmail.isNotEmpty) {
+      payload['user_email'] = normalizedEmail;
+    }
+
+    if (schema.hasUserId) {
+      final resolvedIds = _resolveSavedPostUserIds();
+      if (resolvedIds.isNotEmpty) {
+        payload['user_id'] = resolvedIds.first;
+      }
+    }
+
+    if (!payload.containsKey('user_email') && !payload.containsKey('user_id')) {
+      throw Exception('Unable to resolve saved_posts user identifier');
+    }
+
+    if (schema.hasRoomId && roomId != null && roomId.trim().isNotEmpty) {
+      payload['room_id'] = roomId.trim();
+    }
+
+    try {
+      await _client.from('saved_posts').insert(payload);
+    } catch (e) {
+      if (_isDuplicateKeyError(e)) {
+        return;
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _unsavePostDirect(String postId, String userEmail) async {
+    final existingRowIds = await _collectSavedPostRowIdsDirect(
+      postId,
+      userEmail,
+    );
+    if (existingRowIds.isEmpty) {
+      return;
+    }
+    await _client
+        .from('saved_posts')
+        .delete()
+        .inFilter('id', existingRowIds.toList());
+  }
 
   Future<String> _resolveRoomIdForMessage(String messageId) async {
     final msg = await _client
@@ -1732,22 +2429,21 @@ class SupabaseService {
     String userEmail, {
     String? roomId,
   }) async {
+    final normalizedEmail = _normalizeEmail(userEmail);
+
     try {
-      final ctx = _ctx;
-      if (ctx == null) throw Exception('Security context not initialized');
+      await _savePostDirect(postId, normalizedEmail, roomId: roomId);
+      return;
+    } catch (directError) {
+      debugPrint('Direct save_post failed, trying backend: $directError');
+    }
 
-      // Assuming we need a roomId for the backend API, but the legacy method didn't take one.
-      // We might need to fetch the message detailed to get the room ID or update the UI to pass it.
-      // For now, let's assume postId/messageId is enough if we had an endpoint that just took messageId,
-      // but toggleSavePost takes both.
-      // Workaround: We find the room_id for this message first.
-
+    try {
       final resolvedRoomId = roomId ?? await _resolveRoomIdForMessage(postId);
 
       await _api.toggleSaveChatMessage(
         messageId: postId,
         roomId: resolvedRoomId,
-        context: ctx,
       );
     } catch (e) {
       debugPrint('Error saving post: $e');
@@ -1818,9 +2514,21 @@ class SupabaseService {
 
   /// Check if a post is saved
   Future<bool> isPostSaved(String postId, String userEmail) async {
+    final normalizedPostId = postId.trim();
+    if (normalizedPostId.isEmpty) return false;
+
+    try {
+      final directSavedIds = await _getSavedPostIdsDirect(userEmail);
+      if (directSavedIds.contains(normalizedPostId)) {
+        return true;
+      }
+    } catch (e) {
+      debugPrint('Direct isPostSaved lookup failed: $e');
+    }
+
     try {
       final savedPosts = await _getSavedPostsFromBackend();
-      return savedPosts.any((row) => row['id']?.toString() == postId);
+      return savedPosts.any((row) => row['id']?.toString() == normalizedPostId);
     } catch (_) {
       // Fallback to direct Supabase read for compatibility.
     }
@@ -1829,7 +2537,7 @@ class SupabaseService {
       final response = await _client
           .from('saved_posts')
           .select('id')
-          .eq('message_id', postId)
+          .eq('message_id', normalizedPostId)
           .eq('user_email', _normalizeEmail(userEmail))
           .maybeSingle();
       return response != null;
@@ -1839,7 +2547,7 @@ class SupabaseService {
         final response = await _client
             .from('saved_posts')
             .select('id')
-            .eq('post_id', postId)
+            .eq('post_id', normalizedPostId)
             .eq('user_email', _normalizeEmail(userEmail))
             .maybeSingle();
         return response != null;
@@ -1855,18 +2563,21 @@ class SupabaseService {
     String userEmail, {
     String? roomId,
   }) async {
-    try {
-      final ctx = _ctx;
-      if (ctx == null) throw Exception('Security context not initialized');
+    final normalizedEmail = _normalizeEmail(userEmail);
 
-      // Same logic as savePost - backend toggles it.
-      // But we need room_id.
+    try {
+      await _unsavePostDirect(postId, normalizedEmail);
+      return;
+    } catch (directError) {
+      debugPrint('Direct unsave_post failed, trying backend: $directError');
+    }
+
+    try {
       final resolvedRoomId = roomId ?? await _resolveRoomIdForMessage(postId);
 
       await _api.toggleSaveChatMessage(
         messageId: postId,
         roomId: resolvedRoomId,
-        context: ctx,
       );
     } catch (e) {
       debugPrint('Error unsaving post: $e');
@@ -1876,15 +2587,32 @@ class SupabaseService {
 
   /// Get all saved post IDs for a user (Batch Optimization)
   Future<Set<String>> getSavedPostIds(String userEmail) async {
+    final combinedIds = <String>{};
+    var hasAuthoritativeSource = false;
+
+    try {
+      final directIds = await _getSavedPostIdsDirect(userEmail);
+      combinedIds.addAll(directIds);
+      hasAuthoritativeSource = true;
+    } catch (e) {
+      debugPrint('Direct getSavedPostIds failed: $e');
+    }
+
     try {
       final savedPosts = await _getSavedPostsFromBackend();
-      return savedPosts
-          .map((row) => row['id']?.toString())
-          .where((id) => id != null && id.isNotEmpty)
-          .cast<String>()
-          .toSet();
+      combinedIds.addAll(
+        savedPosts
+            .map((row) => row['id']?.toString())
+            .where((id) => id != null && id.isNotEmpty)
+            .cast<String>(),
+      );
+      hasAuthoritativeSource = true;
     } catch (_) {
-      // Fallback to direct Supabase read for compatibility.
+      // Continue with legacy Supabase fallback.
+    }
+
+    if (hasAuthoritativeSource) {
+      return combinedIds;
     }
 
     try {
@@ -1920,14 +2648,53 @@ class SupabaseService {
 
   /// Get all saved posts for a user
   Future<List<Map<String, dynamic>>> getSavedPosts(String userEmail) async {
+    final merged = <String, Map<String, dynamic>>{};
+    DateTime? parseSavedAt(Map<String, dynamic> row) => DateTime.tryParse(
+      (row['_saved_at'] ?? row['savedAt'] ?? row['created_at'] ?? '')
+          .toString(),
+    );
+    void mergeRows(List<Map<String, dynamic>> rows) {
+      for (final row in rows) {
+        final id = (row['id'] ?? row['message_id'] ?? '').toString().trim();
+        if (id.isEmpty) continue;
+        final existing = merged[id];
+        if (existing == null) {
+          merged[id] = row;
+          continue;
+        }
+        final existingTime = parseSavedAt(existing);
+        final nextTime = parseSavedAt(row);
+        if (existingTime == null ||
+            (nextTime != null && nextTime.isAfter(existingTime))) {
+          merged[id] = row;
+        }
+      }
+    }
+
+    try {
+      mergeRows(await _getSavedPostsDirect(userEmail));
+    } catch (e) {
+      debugPrint('Direct getSavedPosts failed: $e');
+    }
+
     try {
       final backendPosts = await _getSavedPostsFromBackend();
-      if (backendPosts.isNotEmpty) {
-        return backendPosts;
-      }
-      // If backend returns empty, continue with direct Supabase lookup as fallback.
+      mergeRows(backendPosts);
     } catch (_) {
-      // Continue with direct Supabase fallback.
+      // Continue with legacy Supabase fallback.
+    }
+
+    if (merged.isNotEmpty) {
+      final rows = merged.values.toList()
+        ..sort((a, b) {
+          final aTime = parseSavedAt(a);
+          final bTime = parseSavedAt(b);
+          if (aTime == null && bTime == null) return 0;
+          if (aTime == null) return 1;
+          if (bTime == null) return -1;
+          return bTime.compareTo(aTime);
+        });
+      return rows;
     }
 
     try {
@@ -2101,6 +2868,82 @@ class SupabaseService {
     required String fileUrl,
     String? description,
   }) async {
+    String adminKey = '';
+    try {
+      final profile = await getCurrentUserProfile(maxAttempts: 1);
+      adminKey = profile['admin_key']?.toString().trim() ?? '';
+    } catch (profileError) {
+      debugPrint(
+        'Unable to load profile for admin syllabus upload path; '
+        'using direct insert fallback: $profileError',
+      );
+    }
+
+    if (adminKey.isNotEmpty) {
+      const maxAttempts = 2;
+      var attempt = 0;
+      while (attempt < maxAttempts) {
+        attempt++;
+        try {
+          await _api.uploadSyllabusAsAdmin(
+            adminKey: adminKey,
+            collegeId: collegeId,
+            semester: semester,
+            branch: department,
+            subject: subject,
+            title: title,
+            pdfUrl: fileUrl,
+          );
+          return;
+        } catch (adminUploadError) {
+          final isAuthError = _isAdminUploadAuthError(adminUploadError);
+          final isTransientError = _isAdminUploadTransientError(
+            adminUploadError,
+          );
+          final isServerError = _isAdminUploadServerError(adminUploadError);
+
+          if (isAuthError) {
+            debugPrint(
+              'Admin syllabus upload auth failure (invalid/expired admin key); '
+              'falling back to direct insert: $adminUploadError',
+            );
+            break;
+          }
+
+          if (isTransientError && attempt < maxAttempts) {
+            debugPrint(
+              'Transient admin syllabus upload error on attempt '
+              '$attempt/$maxAttempts; retrying: $adminUploadError',
+            );
+            await Future.delayed(const Duration(milliseconds: 600));
+            continue;
+          }
+
+          if (isTransientError) {
+            debugPrint(
+              'Transient admin syllabus upload error after retries; '
+              'falling back to direct insert: $adminUploadError',
+            );
+            break;
+          }
+
+          if (isServerError) {
+            debugPrint(
+              'Admin syllabus upload server-side error; '
+              'not falling back automatically: $adminUploadError',
+            );
+            rethrow;
+          }
+
+          debugPrint(
+            'Admin syllabus upload failed with non-fallback error; rethrowing: '
+            '$adminUploadError',
+          );
+          rethrow;
+        }
+      }
+    }
+
     final payload = <String, dynamic>{
       'college_id': collegeId,
       'branch': department,
@@ -2798,9 +3641,12 @@ class SupabaseService {
       final ctx = _ctx;
       if (ctx == null) throw Exception('Security context not initialized');
 
-      final isMarked = await _api.checkBookmark(resourceId);
+      final cacheKey = _resourceStateKey(resourceId, userEmail: userEmail);
+      final isMarked =
+          _bookmarkStateCache[cacheKey] ?? await _api.checkBookmark(resourceId);
       if (isMarked) {
         await _api.removeBookmarkByItem(itemId: resourceId, context: ctx);
+        _bookmarkStateCache[cacheKey] = false;
         return false;
       }
 
@@ -2809,6 +3655,7 @@ class SupabaseService {
         type: 'resource',
         context: ctx,
       );
+      _bookmarkStateCache[cacheKey] = true;
       return true;
     } catch (e) {
       debugPrint('Error toggling bookmark: $e');
@@ -2818,8 +3665,13 @@ class SupabaseService {
 
   /// Check if a resource is bookmarked by the user
   Future<bool> isBookmarked(String userEmail, String resourceId) async {
+    final cacheKey = _resourceStateKey(resourceId, userEmail: userEmail);
+    final cached = _bookmarkStateCache[cacheKey];
+    if (cached != null) return cached;
     try {
-      return await _api.checkBookmark(resourceId);
+      final value = await _api.checkBookmark(resourceId);
+      _bookmarkStateCache[cacheKey] = value;
+      return value;
     } catch (e) {
       debugPrint('Error checking bookmark: $e');
       return false;

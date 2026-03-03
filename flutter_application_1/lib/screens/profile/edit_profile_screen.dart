@@ -8,6 +8,7 @@ import '../../config/theme.dart';
 import '../../services/backend_api_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../data/departments_data.dart';
+import '../../data/syllabus_subjects_data.dart';
 import '../../models/user.dart';
 
 class EditProfileScreen extends StatefulWidget {
@@ -16,6 +17,7 @@ class EditProfileScreen extends StatefulWidget {
   final String? initialBio;
   final String? initialSemester;
   final String? initialBranch;
+  final String? initialSubject;
   final String role; // Need to know if they are a TEACHER
   final String? initialAdminKey;
 
@@ -26,6 +28,7 @@ class EditProfileScreen extends StatefulWidget {
     required this.initialBio,
     this.initialSemester,
     this.initialBranch,
+    this.initialSubject,
     required this.role,
     this.initialAdminKey,
   });
@@ -35,27 +38,162 @@ class EditProfileScreen extends StatefulWidget {
 }
 
 class _EditProfileScreenState extends State<EditProfileScreen> {
+  static final RegExp _aiTokenRegex = RegExp(r'\bai\b');
+  static final RegExp _mlTokenRegex = RegExp(r'\bml\b');
+  static const List<String> _semesterOptions = <String>[
+    '1',
+    '2',
+    '3',
+    '4',
+    '5',
+    '6',
+    '7',
+    '8',
+  ];
   final _api = BackendApiService();
   late final TextEditingController _nameController;
   late final TextEditingController _bioController;
   late final TextEditingController _adminKeyController;
+  late final TextEditingController _subjectController;
   String? _selectedSemester;
   String? _selectedBranch;
+  String? _selectedSubject;
+  List<String> _availableSubjects = [];
   List<DepartmentData> _departments = [];
   bool _loadingDepartments = true;
   PlatformFile? _pickedImage;
   bool _saving = false;
   bool _departmentsEmpty = false;
 
+  List<String> _uniqueNonEmptyOptions(Iterable<String> options) {
+    final seen = <String>{};
+    final values = <String>[];
+    for (final raw in options) {
+      final normalized = raw.trim();
+      if (normalized.isEmpty) continue;
+      if (seen.add(normalized)) {
+        values.add(normalized);
+      }
+    }
+    return values;
+  }
+
+  String? _safeDropdownValue(String? value, List<String> options) {
+    final normalized = value?.trim();
+    if (normalized == null || normalized.isEmpty) return null;
+    return options.contains(normalized) ? normalized : null;
+  }
+
+  String? _normalizedSelection(String? value) {
+    final trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty || trimmed.toLowerCase() == 'all') {
+      return null;
+    }
+    return trimmed;
+  }
+
+  String? _normalizedSemester(String? value) {
+    final normalized = _normalizedSelection(value);
+    if (normalized == null) return null;
+    return _semesterOptions.contains(normalized) ? normalized : null;
+  }
+
   @override
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.initialName);
     _bioController = TextEditingController(text: widget.initialBio ?? '');
-    _adminKeyController = TextEditingController(text: widget.initialAdminKey ?? '');
-    _selectedSemester = widget.initialSemester;
-    _selectedBranch = widget.initialBranch;
+    _adminKeyController = TextEditingController(
+      text: widget.initialAdminKey ?? '',
+    );
+    _selectedSemester = _normalizedSemester(widget.initialSemester);
+    _selectedBranch = _normalizedSelection(widget.initialBranch);
+    _selectedSubject = _normalizedSelection(widget.initialSubject);
+    _subjectController = TextEditingController(text: _selectedSubject ?? '');
+    _refreshSubjectOptionsForBranch(
+      _selectedBranch,
+      keepExistingSelection: true,
+    );
     _loadDepartments();
+  }
+
+  void _refreshSubjectOptionsForBranch(
+    String? branch, {
+    bool keepExistingSelection = false,
+  }) {
+    final normalizedBranch = (branch ?? '').trim().toLowerCase();
+    final branchByDepartmentName = <String, Branch>{};
+    for (final dep in _departments) {
+      final normalizedDepartmentName = dep.name.trim().toLowerCase();
+      final normalizedDepartmentFull = dep.full.trim().toLowerCase();
+      final matchedBranch = _matchBranchEnum(normalizedDepartmentName);
+      if (matchedBranch != null) {
+        branchByDepartmentName[normalizedDepartmentName] = matchedBranch;
+        branchByDepartmentName[normalizedDepartmentFull] = matchedBranch;
+      }
+    }
+    final branchEnum =
+        branchByDepartmentName[normalizedBranch] ??
+        _matchBranchEnum(normalizedBranch);
+
+    final subjects = <String>[
+      ...(branchEnum == null
+          ? const <String>[]
+          : (syllabusSubjects[branchEnum] ?? const <String>[])),
+    ].map((s) => s.trim()).where((s) => s.isNotEmpty).toSet().toList()..sort();
+
+    _availableSubjects = subjects;
+    final typedSubject = _subjectController.text.trim();
+    if (typedSubject.isNotEmpty) {
+      _selectedSubject = typedSubject;
+    } else if (!keepExistingSelection) {
+      _selectedSubject = null;
+    }
+  }
+
+  Branch? _matchBranchEnum(String normalizedBranch) {
+    final cleaned = normalizedBranch
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .trim();
+    for (final value in Branch.values) {
+      final enumName = value.name.trim().toLowerCase();
+      if (enumName == cleaned) {
+        return value;
+      }
+    }
+
+    if (cleaned.contains('computer') && cleaned.contains('science')) {
+      return Branch.cse;
+    }
+    if (cleaned.contains('electronics') && cleaned.contains('communication')) {
+      return Branch.ece;
+    }
+    if (cleaned.contains('electrical')) {
+      return Branch.eee;
+    }
+    if (cleaned.contains('mechanical')) {
+      return Branch.me;
+    }
+    if (cleaned.contains('civil')) {
+      return Branch.ce;
+    }
+    if (cleaned.contains('information') && cleaned.contains('tech')) {
+      return Branch.it;
+    }
+    if (cleaned.contains('data') && cleaned.contains('science')) {
+      return Branch.ds;
+    }
+    final hasAiToken = _aiTokenRegex.hasMatch(cleaned);
+    final hasMlToken = _mlTokenRegex.hasMatch(cleaned);
+    // Keep OR semantics here because departments may mention either AI or ML.
+    if (cleaned.contains('artificial') ||
+        cleaned.contains('machine learning') ||
+        hasAiToken ||
+        hasMlToken) {
+      return Branch.aiml;
+    }
+
+    return null;
   }
 
   Future<void> _loadDepartments() async {
@@ -67,13 +205,47 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           _departments = [];
           _departmentsEmpty = true;
           _selectedBranch = null;
+          _refreshSubjectOptionsForBranch(null);
         } else {
           _departments = deps;
           _departmentsEmpty = false;
-          // Ensure selected branch is valid, else reset
-          if (_selectedBranch != null && !deps.any((d) => d.name == _selectedBranch)) {
-            _selectedBranch = null;
+          if (_selectedBranch != null) {
+            final normalizedBranch = _selectedBranch!.trim().toLowerCase();
+            final matched = deps.firstWhere(
+              (d) =>
+                  d.name.trim().toLowerCase() == normalizedBranch ||
+                  d.full.trim().toLowerCase() == normalizedBranch,
+              orElse: () => const DepartmentData(
+                name: '',
+                full: '',
+                color: Color(0x00000000),
+              ),
+            );
+            if (matched.name.isNotEmpty) {
+              _selectedBranch = matched.name;
+            } else {
+              final inferred = _matchBranchEnum(normalizedBranch);
+              if (inferred != null) {
+                final inferredMatch = deps.firstWhere(
+                  (d) => d.name.trim().toLowerCase() == inferred.name,
+                  orElse: () => const DepartmentData(
+                    name: '',
+                    full: '',
+                    color: Color(0x00000000),
+                  ),
+                );
+                _selectedBranch = inferredMatch.name.isNotEmpty
+                    ? inferredMatch.name
+                    : null;
+              } else {
+                _selectedBranch = null;
+              }
+            }
           }
+          _refreshSubjectOptionsForBranch(
+            _selectedBranch,
+            keepExistingSelection: true,
+          );
         }
         _loadingDepartments = false;
       });
@@ -87,6 +259,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         _departments = [];
         _departmentsEmpty = true;
         _selectedBranch = null;
+        _refreshSubjectOptionsForBranch(null);
         _loadingDepartments = false;
       });
     }
@@ -97,6 +270,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _nameController.dispose();
     _bioController.dispose();
     _adminKeyController.dispose();
+    _subjectController.dispose();
     super.dispose();
   }
 
@@ -110,8 +284,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       if (file.path != null) {
         await _cropImage(file.path!);
       } else {
-         // Fallback for web or if path is null
-         setState(() => _pickedImage = file);
+        // Fallback for web or if path is null
+        setState(() => _pickedImage = file);
       }
     }
   }
@@ -122,14 +296,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         sourcePath: sourcePath,
         uiSettings: [
           AndroidUiSettings(
-              toolbarTitle: 'Edit Photo',
-              toolbarColor: AppTheme.primary,
-              toolbarWidgetColor: Colors.white,
-              initAspectRatio: CropAspectRatioPreset.original,
-              lockAspectRatio: false),
-          IOSUiSettings(
-            title: 'Edit Photo',
+            toolbarTitle: 'Edit Photo',
+            toolbarColor: AppTheme.primary,
+            toolbarWidgetColor: Colors.white,
+            initAspectRatio: CropAspectRatioPreset.original,
+            lockAspectRatio: false,
           ),
+          IOSUiSettings(title: 'Edit Photo'),
         ],
       );
 
@@ -138,20 +311,20 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         final bytes = await file.readAsBytes();
         if (!mounted) return;
         setState(() {
-            _pickedImage = PlatformFile(
-              name: p.basename(croppedFile.path),
-              size: bytes.length,
-              path: croppedFile.path,
-              bytes: bytes,
-            );
+          _pickedImage = PlatformFile(
+            name: p.basename(croppedFile.path),
+            size: bytes.length,
+            path: croppedFile.path,
+            bytes: bytes,
+          );
         });
       }
     } catch (e) {
       debugPrint('Error cropping image: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to crop image')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Failed to crop image')));
       }
     }
   }
@@ -159,20 +332,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Future<void> _save() async {
     if (_saving) return;
 
-    if (widget.role == AppRoles.teacher) {
-      if (_adminKeyController.text.trim().isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Admin Key is required for Teachers')),
-        );
-        return;
-      }
-    }
-
     final name = _nameController.text.trim();
     if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Name cannot be empty')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Name cannot be empty')));
       return;
     }
 
@@ -182,6 +346,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       if (_pickedImage != null) {
         photoUrl = await CloudinaryService.uploadFile(_pickedImage!);
       }
+      final normalizedSubject = _normalizedSelection(
+        _subjectController.text.trim(),
+      );
+      final normalizedAdminKey = _adminKeyController.text.trim();
+      final canSubmitAdminKey =
+          widget.role == AppRoles.teacher || widget.role == AppRoles.admin;
 
       if (!mounted) return;
       final res = await _api.updateProfile(
@@ -190,17 +360,22 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         profilePhotoUrl: photoUrl,
         semester: _selectedSemester,
         branch: _selectedBranch,
-        adminKey: widget.role == AppRoles.teacher ? _adminKeyController.text.trim() : null,
+        subject: normalizedSubject,
+        adminKey: canSubmitAdminKey && normalizedAdminKey.isNotEmpty
+            ? normalizedAdminKey
+            : null,
         context: context,
       );
-      
+
       if (!mounted) return;
       Navigator.pop(context, res['profile']);
     } catch (e) {
       debugPrint('Error updating profile: $e'); // Log full error
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Failed to update profile')), // Generic message
+          const SnackBar(
+            content: Text('Failed to update profile'),
+          ), // Generic message
         );
       }
     } finally {
@@ -225,19 +400,42 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bg = isDark ? Colors.black : const Color(0xFFF8FAFC);
+    final semesterValue = _safeDropdownValue(
+      _selectedSemester,
+      _semesterOptions,
+    );
+    final branchOptions = _uniqueNonEmptyOptions(
+      _departments.map((dep) => dep.name),
+    );
+    final branchValue = _safeDropdownValue(_selectedBranch, branchOptions);
+    final subjectOptions = _uniqueNonEmptyOptions(_availableSubjects);
+    final subjectValue = _safeDropdownValue(
+      _subjectController.text.trim(),
+      subjectOptions,
+    );
 
     return Scaffold(
       backgroundColor: bg,
       appBar: AppBar(
         backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
         elevation: 0,
-        title: Text('Edit Profile', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+        title: Text(
+          'Edit Profile',
+          style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+        ),
         actions: [
           TextButton(
             onPressed: _saving ? null : _save,
             child: _saving
-                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                : Text('Save', style: GoogleFonts.inter(fontWeight: FontWeight.w700)),
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Text(
+                    'Save',
+                    style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+                  ),
           ),
         ],
       ),
@@ -256,14 +454,28 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       backgroundColor: AppTheme.primary.withValues(alpha: 0.2),
                       backgroundImage: _avatarImage,
                       child: _avatarImage == null
-                          ? Text(nameInitial(_nameController.text), style: GoogleFonts.inter(fontSize: 28, fontWeight: FontWeight.bold, color: AppTheme.primary))
+                          ? Text(
+                              nameInitial(_nameController.text),
+                              style: GoogleFonts.inter(
+                                fontSize: 28,
+                                fontWeight: FontWeight.bold,
+                                color: AppTheme.primary,
+                              ),
+                            )
                           : null,
                     ),
                     Container(
                       padding: const EdgeInsets.all(8),
-                      decoration: const BoxDecoration(color: AppTheme.primary, shape: BoxShape.circle),
-                      child: const Icon(Icons.edit_rounded, color: Colors.white, size: 18),
-                    )
+                      decoration: const BoxDecoration(
+                        color: AppTheme.primary,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.edit_rounded,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -274,7 +486,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               enabled: !_saving,
               decoration: InputDecoration(
                 labelText: 'Name',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
             const SizedBox(height: 12),
@@ -284,7 +498,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               maxLines: 4,
               decoration: InputDecoration(
                 labelText: 'Bio',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
             const SizedBox(height: 16),
@@ -292,47 +508,132 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               children: [
                 Expanded(
                   child: DropdownButtonFormField<String>(
-                    initialValue: _selectedSemester,
+                    key: ValueKey('semester-${semesterValue ?? ''}'),
+                    value: semesterValue,
                     decoration: InputDecoration(
                       labelText: 'Semester',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
                     ),
-                    items: List.generate(8, (i) => (i + 1).toString())
-                        .map((sem) => DropdownMenuItem(value: sem, child: Text(sem)))
+                    items: _semesterOptions
+                        .map(
+                          (sem) =>
+                              DropdownMenuItem(value: sem, child: Text(sem)),
+                        )
                         .toList(),
-                    onChanged: _saving ? null : (val) => setState(() => _selectedSemester = val),
+                    onChanged: _saving
+                        ? null
+                        : (val) => setState(() => _selectedSemester = val),
                   ),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
-                  child: _loadingDepartments 
-                    ? const Center(child: CircularProgressIndicator())
-                    : DropdownButtonFormField<String>(
-                        isExpanded: true,
-                        initialValue: _selectedBranch,
-                        decoration: InputDecoration(
-                          labelText: 'Branch',
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  child: _loadingDepartments
+                      ? const Center(child: CircularProgressIndicator())
+                      : DropdownButtonFormField<String>(
+                          key: ValueKey(
+                            'branch-${branchOptions.join('|')}-${branchValue ?? ''}',
+                          ),
+                          isExpanded: true,
+                          value: branchValue,
+                          decoration: InputDecoration(
+                            labelText: 'Branch',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          items: _departmentsEmpty
+                              ? [
+                                  const DropdownMenuItem(
+                                    value: null,
+                                    child: Text("No departments available"),
+                                  ),
+                                ]
+                              : branchOptions
+                                    .map(
+                                      (depName) => DropdownMenuItem(
+                                        value: depName,
+                                        child: Text(depName),
+                                      ),
+                                    )
+                                    .toList(),
+                          onChanged: _saving || _departmentsEmpty
+                              ? null
+                              : (val) => setState(() {
+                                  _selectedBranch = val;
+                                  _refreshSubjectOptionsForBranch(val);
+                                }),
                         ),
-                        items: _departmentsEmpty
-                            ? [const DropdownMenuItem(value: null, child: Text("No departments available"))]
-                            : _departments
-                            .map((dep) => DropdownMenuItem(value: dep.name, child: Text(dep.name)))
-                            .toList(),
-                        onChanged: _saving || _departmentsEmpty ? null : (val) => setState(() => _selectedBranch = val),
-                      ),
                 ),
               ],
             ),
-            if (widget.role == AppRoles.teacher) ...[
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              key: ValueKey(
+                'subject-${subjectOptions.join('|')}-${subjectValue ?? ''}',
+              ),
+              value: subjectValue,
+              isExpanded: true,
+              decoration: InputDecoration(
+                labelText: 'Subject (suggested)',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              hint: Text(
+                _selectedBranch == null
+                    ? 'Select branch first'
+                    : (subjectOptions.isEmpty
+                          ? 'No subjects found'
+                          : 'Select subject'),
+              ),
+              items: subjectOptions
+                  .map(
+                    (subject) =>
+                        DropdownMenuItem(value: subject, child: Text(subject)),
+                  )
+                  .toList(),
+              onChanged:
+                  _saving || _selectedBranch == null || subjectOptions.isEmpty
+                  ? null
+                  : (value) {
+                      if (value == null) return;
+                      setState(() {
+                        _selectedSubject = value;
+                        _subjectController.text = value;
+                      });
+                    },
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _subjectController,
+              enabled: !_saving,
+              decoration: InputDecoration(
+                labelText: 'Subject',
+                hintText: 'Enter your subject',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              onChanged: (value) {
+                setState(() {
+                  _selectedSubject = _normalizedSelection(value);
+                });
+              },
+            ),
+            if (widget.role == AppRoles.teacher ||
+                widget.role == AppRoles.admin) ...[
               const SizedBox(height: 16),
               TextField(
                 controller: _adminKeyController,
                 enabled: !_saving,
                 obscureText: true,
                 decoration: InputDecoration(
-                  labelText: 'Admin Key (Required for Teachers)',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  labelText: 'Admin Key (Optional)',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   prefixIcon: const Icon(Icons.key),
                 ),
               ),
@@ -343,6 +644,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     );
   }
 
-  String nameInitial(String name) => name.isNotEmpty ? name[0].toUpperCase() : 'U';
+  String nameInitial(String name) =>
+      name.isNotEmpty ? name[0].toUpperCase() : 'U';
 }
-

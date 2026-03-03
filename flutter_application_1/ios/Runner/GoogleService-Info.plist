@@ -3,9 +3,11 @@
 <plist version="1.0">
 <dict>
 	<key>CLIENT_ID</key>
-	<string>28032445048-f12citvis77hhgnght0nemdfo46h9b8p.apps.googleusercontent.com</string>
+	<string>28032445048-sm0vvb5ndniefmtjaojpk3pt9lh0th91.apps.googleusercontent.com</string>
 	<key>REVERSED_CLIENT_ID</key>
-	<string>com.googleusercontent.apps.28032445048-f12citvis77hhgnght0nemdfo46h9b8p</string>
+	<string>com.googleusercontent.apps.28032445048-sm0vvb5ndniefmtjaojpk3pt9lh0th91</string>
+	<key>ANDROID_CLIENT_ID</key>
+	<string>28032445048-9o84eu5jq16nlqt3h439cb4onttp531d.apps.googleusercontent.com</string>
 	<key>API_KEY</key>
 	<string>AIzaSyD6bqoC-zIXlTPEbB0lV_Kc68x2vkn6XLk</string>
 	<key>GCM_SENDER_ID</key>
@@ -13,7 +15,7 @@
 	<key>PLIST_VERSION</key>
 	<string>1</string>
 	<key>BUNDLE_ID</key>
-	<string>me.mystudyspace.ios</string>
+	<string>me.studyshare.ios</string>
 	<key>PROJECT_ID</key>
 	<string>studyspace-kiet</string>
 	<key>STORAGE_BUCKET</key>
@@ -29,6 +31,6 @@
 	<key>IS_SIGNIN_ENABLED</key>
 	<true></true>
 	<key>GOOGLE_APP_ID</key>
-	<string>1:28032445048:ios:3856fb4bdb7360754b1b8d</string>
+	<string>1:28032445048:ios:56e04c12b10aa2b84b1b8d</string>
 </dict>
 </plist>

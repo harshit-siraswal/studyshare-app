@@ -34,7 +34,6 @@
 # Gson (used by Supabase/Postgrest)
 -keep class com.google.gson.** { *; }
 -keep class sun.misc.Unsafe { *; }
--keep class com.google.gson.stream.** { *; }
 -keep class * implements com.google.gson.TypeAdapter
 -keep class * implements com.google.gson.TypeAdapterFactory
 -keep class * implements com.google.gson.JsonSerializer
@@ -48,8 +47,6 @@
 # ============================================
 # OkHttp & Networking (Supabase uses this)
 # ============================================
--keep class okhttp3.** { *; }
--keep interface okhttp3.** { *; }
 -dontwarn okhttp3.**
 -dontwarn okio.**
 -keepnames class okhttp3.internal.publicsuffix.PublicSuffixDatabase
@@ -86,7 +83,7 @@
 # App-Specific Models (Keep your data models)
 # ============================================
 # Keep all classes in your app package
--keep class me.mystudyspace.android.** { *; }
+-keep class me.studyshare.android.** { *; }
 
 # Keep model classes that might be serialized
 -keepclassmembers class * {

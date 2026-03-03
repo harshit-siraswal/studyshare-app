@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -29,6 +30,8 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
   late File _workingFile;
   bool _isRemovingBg = false;
   bool _isSaving = false;
+  bool _canRemoveBg = false;
+  bool _isWarmingUp = false;
   double _textScale = 1.0;
   Alignment _textAlignment = Alignment.bottomCenter;
   Color _textColor = Colors.white;
@@ -46,7 +49,7 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
   void initState() {
     super.initState();
     _workingFile = widget.sourceFile;
-    _warmCapabilities();
+    unawaited(_warmCapabilities());
   }
 
   @override
@@ -75,9 +78,25 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
   }
 
   Future<void> _warmCapabilities() async {
-    await _stickerService.warmUpCapabilities();
-    if (!mounted) return;
-    setState(() {});
+    if (mounted) {
+      setState(() => _isWarmingUp = true);
+    }
+    try {
+      await _stickerService.warmUpCapabilities();
+      final canRemoveBg = await _stickerService.canRemoveBackground();
+      if (!mounted) return;
+      setState(() {
+        _canRemoveBg = canRemoveBg;
+        _isWarmingUp = false;
+      });
+    } catch (e, st) {
+      debugPrint('Sticker capability warmup failed: $e');
+      debugPrint('$st');
+    } finally {
+      if (mounted && _isWarmingUp) {
+        setState(() => _isWarmingUp = false);
+      }
+    }
   }
 
   Future<void> _saveSticker() async {
@@ -130,7 +149,6 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bgColor = isDark ? AppTheme.darkBackground : AppTheme.lightBackground;
     final textColor = AppTheme.getTextColor(context);
-    final canRemoveBg = _stickerService.canRemoveBackground;
 
     return Scaffold(
       backgroundColor: bgColor,
@@ -161,7 +179,7 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
           children: [
             _buildPreview(),
             const SizedBox(height: 16),
-            _buildRemoveBgRow(isDark, canRemoveBg, textColor),
+            _buildRemoveBgRow(isDark, _canRemoveBg, textColor),
             const SizedBox(height: 16),
             _buildTextField(textColor),
             const SizedBox(height: 12),
@@ -237,7 +255,9 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         OutlinedButton.icon(
-          onPressed: (!canRemoveBg || _isRemovingBg) ? null : _removeBackground,
+          onPressed: (!canRemoveBg || _isRemovingBg || _isWarmingUp)
+              ? null
+              : _removeBackground,
           icon: _isRemovingBg
               ? const SizedBox(
                   width: 16,
@@ -246,7 +266,11 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
                 )
               : const Icon(Icons.auto_fix_high_rounded, size: 18),
           label: Text(
-            canRemoveBg ? 'Remove Background (HQ)' : 'Remove BG (Add API Key)',
+            _isWarmingUp
+                ? 'Checking capabilities...'
+                : (canRemoveBg
+                      ? 'Remove Background (HQ)'
+                      : 'Remove BG (Unavailable)'),
           ),
           style: OutlinedButton.styleFrom(
             foregroundColor: isDark ? Colors.white : Colors.black,
@@ -256,7 +280,7 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
           Padding(
             padding: const EdgeInsets.only(top: 6),
             child: Text(
-              'Set REMOVE_BG_API_KEY to enable background removal.',
+              'Background removal is currently unavailable.',
               style: GoogleFonts.inter(
                 fontSize: 12,
                 color: textColor.withValues(alpha: 0.6),

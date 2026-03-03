@@ -48,22 +48,39 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
   }
 
   Future<void> _checkTeacherRole() async {
-    final role = await _supabaseService.getCurrentUserRole();
-    if (mounted) {
-      setState(() {
-        _isTeacherOrAdmin =
-            role == AppRoles.teacher ||
-            role == AppRoles.admin ||
-            role == AppRoles.moderator;
-      });
+    try {
+      final profile = await _supabaseService.getCurrentUserProfile(
+        maxAttempts: 1,
+      );
+      final role = await _supabaseService.getCurrentUserRole();
+      final hasAdminKey =
+          profile['admin_key']?.toString().trim().isNotEmpty == true;
+      // TODO: uploadSyllabus must enforce admin_key verification server-side;
+      // client-side key presence must never be the sole authorization gate.
+      if (mounted) {
+        setState(() {
+          _isTeacherOrAdmin =
+              role == AppRoles.teacher ||
+              role == AppRoles.admin ||
+              role == AppRoles.moderator ||
+              hasAdminKey;
+        });
+      }
+    } catch (e, st) {
+      debugPrint('Failed to resolve teacher/admin role: $e\n$st');
+      if (!mounted) return;
+      setState(() => _isTeacherOrAdmin = false);
     }
   }
 
   void _onSemesterChanged(String? newValue) {
-    if (newValue == null || newValue == _selectedSemester) return;
+    final normalized = (newValue ?? '').trim();
+    if (normalized.isEmpty) return;
+
+    if (normalized == _selectedSemester) return;
 
     setState(() {
-      _selectedSemester = newValue;
+      _selectedSemester = normalized;
       _selectedSubject = null; // Reset subject
       _availableSubjects = _getSubjectsForBranch();
       _syllabusItems = []; // Clear list until subject selected
@@ -72,10 +89,11 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
   }
 
   void _onSubjectChanged(String? newValue) {
-    if (newValue == null || newValue == _selectedSubject) return;
+    final normalized = (newValue ?? '').trim();
+    if (normalized.isEmpty || normalized == _selectedSubject) return;
 
     setState(() {
-      _selectedSubject = newValue;
+      _selectedSubject = normalized;
     });
 
     _fetchSyllabus();
@@ -83,17 +101,25 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
 
   List<String> _getSubjectsForBranch() {
     // Map 'CSE' -> 'cse' for lookup
-    final branchKey = widget.department.toLowerCase();
+    final branchKey = widget.department.trim().toLowerCase();
 
-    // Convert string to Branch enum safely
-    final branch = Branch.values.cast<Branch?>().firstWhere(
-      (e) => e?.name == branchKey,
-      orElse: () => null,
-    );
+    Branch? branch;
+    try {
+      branch = Branch.values.byName(branchKey);
+    } on ArgumentError {
+      branch = null;
+    }
     if (branch == null) return [];
 
     final subjects = syllabusSubjects[branch] ?? [];
-    return List<String>.from(subjects)..sort();
+    final unique =
+        subjects
+            .map((item) => item.trim())
+            .where((item) => item.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+    return unique;
   }
 
   Future<void> _fetchSyllabus() async {
@@ -251,9 +277,19 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
       ),
       floatingActionButton: _isTeacherOrAdmin
           ? FloatingActionButton.extended(
-              onPressed: (_selectedSemester != null && _selectedSubject != null)
-                  ? () => _showUploadSyllabusDialog(isDark)
-                  : null,
+              onPressed: () {
+                if (_selectedSemester == null || _selectedSubject == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Select semester and subject before uploading.',
+                      ),
+                    ),
+                  );
+                  return;
+                }
+                _showUploadSyllabusDialog(isDark);
+              },
               backgroundColor:
                   (_selectedSemester != null && _selectedSubject != null)
                   ? widget.departmentColor
@@ -285,6 +321,9 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
     final borderColor = isDark ? AppTheme.darkBorder : AppTheme.lightBorder;
     final bgColor = isDark ? AppTheme.darkBackground : Colors.grey[50];
     final textColor = isDark ? Colors.white : Colors.black;
+    final selectedValue = (value != null && items.contains(value))
+        ? value
+        : null;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -297,7 +336,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
-          value: value,
+          value: selectedValue,
           isExpanded: true,
           hint: Row(
             children: [
@@ -331,7 +370,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
                   Icon(
                     icon,
                     size: 18,
-                    color: value == item
+                    color: selectedValue == item
                         ? widget.departmentColor
                         : AppTheme.textMuted,
                   ),
@@ -708,6 +747,9 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
           ),
         ],
       ),
-    );
+    ).whenComplete(() {
+      titleCtrl.dispose();
+      urlCtrl.dispose();
+    });
   }
 }

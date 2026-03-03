@@ -1,7 +1,6 @@
-import 'dart:convert';
 import 'dart:developer' as developer;
 
-import 'package:flutter/foundation.dart';
+import 'package:collection/collection.dart';
 
 import 'ai_chat_local_service.dart';
 
@@ -18,21 +17,23 @@ class ChatSessionDeleteResult {
   bool operator ==(Object other) {
     if (identical(this, other)) return true;
     if (other is! ChatSessionDeleteResult) return false;
+    const deepEq = DeepCollectionEquality();
     final thisPayload = sessions
-        .map((session) => jsonEncode(session.toJson()))
+        .map((session) => session.toJson())
         .toList(growable: false);
     final otherPayload = other.sessions
-        .map((session) => jsonEncode(session.toJson()))
+        .map((session) => session.toJson())
         .toList(growable: false);
-    return deleted == other.deleted && listEquals(thisPayload, otherPayload);
+    return deleted == other.deleted && deepEq.equals(thisPayload, otherPayload);
   }
 
   @override
   int get hashCode {
+    const deepEq = DeepCollectionEquality();
     final payload = sessions
-        .map((session) => jsonEncode(session.toJson()))
+        .map((session) => session.toJson())
         .toList(growable: false);
-    return Object.hash(deleted, Object.hashAll(payload));
+    return Object.hash(deleted, deepEq.hash(payload));
   }
 }
 
@@ -53,9 +54,6 @@ class ChatSessionRepository {
     final domain = parts[1];
     final maskedLocal = '${local[0]}***';
     final domainParts = domain.split('.');
-    if (domainParts.isEmpty) {
-      return '$maskedLocal@***';
-    }
     final domainHead = domainParts.first;
     final maskedDomainHead = domainHead.isEmpty ? '***' : '${domainHead[0]}***';
     final suffix = domainParts.length > 1

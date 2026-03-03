@@ -5,7 +5,7 @@ Prerequisites: install Wrangler CLI and authenticate first (`wrangler login`).
 
 ## A. Deploy worker code
 
-1. Open terminal in your cloned project directory (`<your-project-directory>`).
+1. Open a terminal in your cloned project directory.
 2. Run:
 
 ```powershell
@@ -22,31 +22,32 @@ npx wrangler deploy
 6. Click **Variables**
 7. Under **Environment Variables**, click **Add variable**
 8. Name: `ORIGIN_API_BASE_URL`
-9. Value: `https://origin-api.studyshare.in` (example; replace with your origin API base URL)
+9. Value: `https://origin-api.mystudyspace.in` (example; replace with your origin API base URL)
 10. Click **Save and deploy**
 
 ## C. Add worker route
 
 1. In the same worker, open **Triggers**
 2. Under **Routes**, click **Add route**
-3. Route: `api.studyshare.in/*`
-4. Zone: `studyshare.in`
+3. Route: `api.mystudyspace.in/*` (example; replace with your route)
+4. Zone: `mystudyspace.in` (example; replace with your zone)
 5. Click **Add route**
 
 ## D. Verify worker is forwarding correctly
 
-Replace `api.studyshare.in` below with your own public API domain.
+Replace `your-domain.example` below with your own public API domain.
 
 Run locally:
 
 ```powershell
-curl -i "https://your-domain.example/health"
+curl -i "https://your-domain.example/health" # Replace /health with any valid endpoint from your API
 ```
 
 Windows alternative:
 
 ```powershell
-curl.exe -i "https://your-domain.example/health"
+curl.exe -i "https://your-domain.example/health" # Replace /health with any valid endpoint from your API
 ```
 
 Expect: `HTTP/1.1 200 OK`
+

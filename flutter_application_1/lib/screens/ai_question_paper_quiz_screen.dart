@@ -22,7 +22,14 @@ class _AiQuestionPaperQuizScreenState extends State<AiQuestionPaperQuizScreen> {
 
   int _currentIndex = 0;
   bool _submitted = false;
+  bool _reviewMode = false;
   bool _isDownloading = false;
+
+  String _indexToLetter(int index) {
+    if (index < 0) return '?';
+    if (index < 26) return String.fromCharCode(65 + index);
+    return (index + 1).toString();
+  }
 
   @override
   void dispose() {
@@ -95,21 +102,26 @@ class _AiQuestionPaperQuizScreenState extends State<AiQuestionPaperQuizScreen> {
       buffer.writeln('');
       buffer.writeln('Q${i + 1}. ${q.question}');
       for (var j = 0; j < q.options.length; j++) {
-        final letter = String.fromCharCode(65 + j);
+        final letter = _indexToLetter(j);
         buffer.writeln('$letter. ${q.options[j]}');
       }
-      final correctLetter = String.fromCharCode(65 + q.correctIndex);
+      final hasValidCorrectIndex =
+          q.correctIndex >= 0 && q.correctIndex < q.options.length;
+      final correctLetter = hasValidCorrectIndex
+          ? _indexToLetter(q.correctIndex)
+          : '?';
       buffer.writeln('Answer: $correctLetter');
       if (q.explanation.trim().isNotEmpty) {
         buffer.writeln('Explanation: ${q.explanation}');
       }
       final source = q.source;
-      if (source.title.trim().isNotEmpty ||
-          source.section.trim().isNotEmpty ||
-          source.pages.trim().isNotEmpty) {
-        buffer.writeln(
-          'Source: ${source.title} | ${source.section} | ${source.pages}',
-        );
+      final sourceParts = <String>[
+        source.title.trim(),
+        source.section.trim(),
+        source.pages.trim(),
+      ].where((part) => part.isNotEmpty).toList(growable: false);
+      if (sourceParts.isNotEmpty) {
+        buffer.writeln('Source: ${sourceParts.join(' | ')}');
       }
     }
     return buffer.toString().trim();
@@ -369,11 +381,11 @@ class _AiQuestionPaperQuizScreenState extends State<AiQuestionPaperQuizScreen> {
             const SizedBox(height: 14),
             ...question.options.asMap().entries.map((entry) {
               final optionIndex = entry.key;
-              final label = String.fromCharCode(65 + optionIndex);
+              final label = _indexToLetter(optionIndex);
               final text = entry.value;
               final isSelected = selected == optionIndex;
               final isCorrect = question.correctIndex == optionIndex;
-              final showFeedback = selected != null;
+              final showFeedback = _reviewMode;
 
               Color border = isDark
                   ? AppTheme.darkBorder
@@ -383,7 +395,11 @@ class _AiQuestionPaperQuizScreenState extends State<AiQuestionPaperQuizScreen> {
                   ? Colors.white70
                   : const Color(0xFF334155);
 
-              if (showFeedback && isSelected && isCorrect) {
+              if (!showFeedback && isSelected) {
+                border = AppTheme.primary.withValues(alpha: 0.6);
+                fill = AppTheme.primary.withValues(alpha: 0.12);
+                textColor = AppTheme.primary;
+              } else if (showFeedback && isSelected && isCorrect) {
                 border = AppTheme.success;
                 fill = AppTheme.success.withValues(alpha: 0.14);
                 textColor = AppTheme.success;
@@ -399,11 +415,13 @@ class _AiQuestionPaperQuizScreenState extends State<AiQuestionPaperQuizScreen> {
               return Padding(
                 padding: const EdgeInsets.only(bottom: 10),
                 child: InkWell(
-                  onTap: () {
-                    setState(() {
-                      _selectedOptions[index] = optionIndex;
-                    });
-                  },
+                  onTap: _reviewMode
+                      ? null
+                      : () {
+                          setState(() {
+                            _selectedOptions[index] = optionIndex;
+                          });
+                        },
                   borderRadius: BorderRadius.circular(12),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 180),
@@ -457,6 +475,32 @@ class _AiQuestionPaperQuizScreenState extends State<AiQuestionPaperQuizScreen> {
                 ),
               );
             }),
+            if (_reviewMode && selected != null) ...[
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Text(
+                    'Your answer: '
+                    '${_indexToLetter(selected)}',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white70 : const Color(0xFF475569),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Correct: '
+                    '${_indexToLetter(question.correctIndex)}',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.success,
+                    ),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 8),
             Row(
               children: [
@@ -471,7 +515,23 @@ class _AiQuestionPaperQuizScreenState extends State<AiQuestionPaperQuizScreen> {
                 ),
                 const Spacer(),
                 ElevatedButton(
-                  onPressed: selected == null
+                  onPressed: _reviewMode
+                      ? () {
+                          if (_currentIndex ==
+                              widget.paper.questions.length - 1) {
+                            setState(() {
+                              _submitted = true;
+                              _reviewMode = false;
+                            });
+                          } else {
+                            setState(() => _currentIndex++);
+                            _pageController.nextPage(
+                              duration: const Duration(milliseconds: 240),
+                              curve: Curves.easeOutCubic,
+                            );
+                          }
+                        }
+                      : selected == null
                       ? null
                       : () {
                           if (_currentIndex ==
@@ -490,9 +550,13 @@ class _AiQuestionPaperQuizScreenState extends State<AiQuestionPaperQuizScreen> {
                     foregroundColor: Colors.white,
                   ),
                   child: Text(
-                    _currentIndex == widget.paper.questions.length - 1
-                        ? 'Finish'
-                        : 'Next',
+                    _reviewMode
+                        ? (_currentIndex == widget.paper.questions.length - 1
+                              ? 'Results'
+                              : 'Next')
+                        : (_currentIndex == widget.paper.questions.length - 1
+                              ? 'Submit'
+                              : 'Next'),
                   ),
                 ),
               ],
@@ -558,6 +622,7 @@ class _AiQuestionPaperQuizScreenState extends State<AiQuestionPaperQuizScreen> {
                       onPressed: () {
                         setState(() {
                           _submitted = false;
+                          _reviewMode = false;
                           _selectedOptions.clear();
                           _currentIndex = 0;
                         });
@@ -577,23 +642,47 @@ class _AiQuestionPaperQuizScreenState extends State<AiQuestionPaperQuizScreen> {
                   ),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: _isDownloading ? null : _downloadPaperPdf,
-                      icon: _isDownloading
-                          ? const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.picture_as_pdf_outlined, size: 16),
-                      label: const Text('Download PDF'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        foregroundColor: Colors.white,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _submitted = false;
+                          _reviewMode = true;
+                          _currentIndex = 0;
+                        });
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (_pageController.hasClients) {
+                            _pageController.jumpToPage(0);
+                          }
+                        });
+                      },
+                      icon: const Icon(Icons.fact_check_rounded, size: 16),
+                      label: const Text('Review Answers'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTheme.primary,
+                        side: const BorderSide(color: AppTheme.primary),
                       ),
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _isDownloading ? null : _downloadPaperPdf,
+                  icon: _isDownloading
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.picture_as_pdf_outlined, size: 16),
+                  label: const Text('Download PDF'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
               ),
             ],
           ),

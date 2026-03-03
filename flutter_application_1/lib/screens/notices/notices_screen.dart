@@ -970,7 +970,7 @@ class _NoticesScreenState extends State<NoticesScreen>
       collegeId: widget.collegeId,
       isDark: isDark,
     );
-    if (posted && mounted) {
+    if (posted == true && mounted) {
       _loadNotices();
     }
   }

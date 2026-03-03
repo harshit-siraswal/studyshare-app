@@ -162,7 +162,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (dialogContext) => BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
         child: AlertDialog(
-          backgroundColor: AppTheme.darkSurface,
+          backgroundColor:
+              Theme.of(dialogContext).dialogTheme.backgroundColor ??
+              Theme.of(dialogContext).colorScheme.surface,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
           ),
@@ -185,21 +187,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 'Sign Out',
                 style: GoogleFonts.inter(
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
+                  color: Theme.of(dialogContext).colorScheme.onSurface,
                 ),
               ),
             ],
           ),
           content: Text(
             'Are you sure you want to sign out of your account?',
-            style: GoogleFonts.inter(color: AppTheme.textMuted),
+            style: GoogleFonts.inter(
+              color: Theme.of(dialogContext).colorScheme.onSurfaceVariant,
+            ),
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext),
               child: Text(
                 'Cancel',
-                style: GoogleFonts.inter(color: AppTheme.textMuted),
+                style: GoogleFonts.inter(
+                  color: Theme.of(dialogContext).colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
             ElevatedButton(
@@ -344,18 +350,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               value: isDark,
                               activeColor: AppTheme.primary,
                               onChanged: (_) {
-                                final size = MediaQuery.sizeOf(context);
-                                final center = Offset(
-                                  size.width / 2,
-                                  size.height / 2,
-                                );
-                                animateThemeTransition(
-                                  context,
-                                  center,
-                                  () {
-                                    themeProvider.toggleTheme();
-                                  },
-                                );
+                                animateThemeTransition(context, () {
+                                  themeProvider.toggleTheme();
+                                });
                               },
                             ),
                             isDark: isDark,
@@ -428,12 +425,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           _buildGroupedTile(
                             icon: Icons.info_outline_rounded,
                             iconBgColor: Colors.brown.shade400,
-                            title: 'About MyStudySpace',
+                            title: 'About StudyShare',
                             subtitle: 'Version $_appVersion',
                             onTap: () {
                               showAboutDialog(
                                 context: context,
-                                applicationName: 'MyStudySpace',
+                                applicationName: 'StudyShare',
                                 applicationVersion: _appVersion,
                                 applicationIcon: Container(
                                   padding: const EdgeInsets.all(8),
@@ -599,3 +596,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 }
+
+
+

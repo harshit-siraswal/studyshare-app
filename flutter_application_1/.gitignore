@@ -67,6 +67,8 @@ fetch_lotties.js
 
 # Local environment secrets (use --dart-define-from-file=.env)
 .env
-.env.local
-.env.production
+.env.*
 !.env.example
+
+# Firebase service config files must be provisioned via local secrets/CI.
+android/app/google-services.json

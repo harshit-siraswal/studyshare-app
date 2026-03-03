@@ -1,3 +1,5 @@
+import 'dart:async' show unawaited;
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter_linkify/flutter_linkify.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -296,10 +298,17 @@ class _NoticeCardState extends State<NoticeCard> {
                           try {
                             final uri = Uri.tryParse(link.url);
                             if (uri != null) {
-                              final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+                              final launched = await launchUrl(
+                                uri,
+                                mode: LaunchMode.externalApplication,
+                              );
                               if (!launched && mounted) {
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Could not open: ${link.url}')),
+                                  SnackBar(
+                                    content: Text(
+                                      'Could not open: ${link.url}',
+                                    ),
+                                  ),
                                 );
                               }
                             }
@@ -307,7 +316,9 @@ class _NoticeCardState extends State<NoticeCard> {
                             debugPrint('Failed to launch URL: $e');
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Unable to open link')),
+                                const SnackBar(
+                                  content: Text('Unable to open link'),
+                                ),
                               );
                             }
                           }
@@ -477,7 +488,7 @@ class _NoticeCardState extends State<NoticeCard> {
                           ),
                         ),
                         Text(
-                          'MyStudySpace Notice',
+                          'StudyShare Notice',
                           style: GoogleFonts.inter(
                             color: Colors.grey,
                             fontSize: 12,
@@ -514,7 +525,7 @@ class _NoticeCardState extends State<NoticeCard> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      'via MyStudySpace',
+                      'via StudyShare',
                       style: GoogleFonts.inter(
                         color: AppTheme.primary,
                         fontWeight: FontWeight.bold,
@@ -542,18 +553,28 @@ class _NoticeCardState extends State<NoticeCard> {
 
         await Share.shareXFiles([
           XFile(file.path),
-        ], text: 'Check out this notice on MyStudySpace!');
+        ], text: 'Check out this notice on StudyShare!');
       } finally {
         // Delay deletion to avoid Android race condition
-        Future.delayed(const Duration(seconds: 2), () {
-          try { file.deleteSync(); } catch (_) {}
-        });
+        unawaited(
+          Future.delayed(const Duration(seconds: 8), () async {
+            try {
+              await file.delete();
+            } catch (_) {}
+          }),
+        );
       }
-    } catch (e) {
+    } catch (e, st) {
+      debugPrint('Notice share image generation failed: $e\n$st');
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to generate image: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to generate image. Please try again.'),
+        ),
+      );
     }
   }
 }
+
+
+

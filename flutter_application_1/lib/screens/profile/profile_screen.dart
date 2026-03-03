@@ -50,8 +50,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _profileBio;
   String? _profileSemester;
   String? _profileBranch;
+  String? _profileSubject;
   String? _profileAdminKey;
   String _profileRole = AppRoles.readOnly;
+  int _aiTokenBudget = 0;
+  int _aiTokenUsed = 0;
+  int _aiTokenRemaining = 0;
 
   // Real stats
   int _uploadCount = 0;
@@ -72,12 +76,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     _loadStats();
-    _loadProfile();
+    _loadProfile(forceRefresh: true);
   }
 
-  Future<void> _loadProfile() async {
+  Future<void> _loadProfile({bool forceRefresh = false}) async {
     try {
-      final profile = await _supabaseService.getCurrentUserProfile();
+      if (forceRefresh) {
+        _supabaseService.invalidateCurrentUserProfileCache();
+      }
+      final profile = await _supabaseService.getCurrentUserProfile(
+        forceRefresh: forceRefresh,
+      );
       if (!mounted) return;
       setState(() {
         _profileDisplayName = profile['display_name']?.toString();
@@ -85,7 +94,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _profileBio = profile['bio']?.toString();
         _profileSemester = profile['semester']?.toString();
         _profileBranch = profile['branch']?.toString();
+        _profileSubject = profile['subject']?.toString();
         _profileAdminKey = profile['admin_key']?.toString();
+        _aiTokenBudget = _toSafeInt(profile['ai_token_budget']);
+        _aiTokenUsed = _toSafeInt(profile['ai_token_used']);
+        final remainingFromApi = _toSafeInt(profile['ai_token_remaining']);
+        _aiTokenRemaining = _aiTokenBudget > 0
+            ? remainingFromApi.clamp(0, _aiTokenBudget)
+            : remainingFromApi;
+        if (_aiTokenBudget > 0 &&
+            _aiTokenRemaining == 0 &&
+            _aiTokenUsed < _aiTokenBudget) {
+          _aiTokenRemaining = (_aiTokenBudget - _aiTokenUsed).clamp(
+            0,
+            _aiTokenBudget,
+          );
+        }
         final roleRaw = profile['role']?.toString().trim().toUpperCase() ?? '';
         final hasAdminKey =
             _profileAdminKey != null && _profileAdminKey!.trim().isNotEmpty;
@@ -151,6 +175,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String get _displayName =>
       _profileDisplayName ?? _authService.displayName ?? 'User';
   String? get _photoUrl => _profilePhotoUrl ?? _authService.photoUrl;
+
+  int _toSafeInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.round();
+    return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
 
   Future<void> _handleLogout() async {
     try {
@@ -225,7 +255,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               );
               // Refresh profile on return in case edits occurred
-              if (mounted) _loadProfile();
+              if (mounted) _loadProfile(forceRefresh: true);
             },
           ),
         ],
@@ -234,9 +264,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               onRefresh: () async {
-                await _loadProfile();
+                await _loadProfile(forceRefresh: true);
                 await _loadStats();
-                setState(() {});
               },
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
@@ -247,6 +276,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     _buildProfileHeader(textColor, subTextColor),
                     const SizedBox(height: 24),
                     _buildStatsRow(textColor, subTextColor),
+                    const SizedBox(height: 24),
+                    _buildAiTokenUsageCard(textColor, subTextColor, isDark),
                     const SizedBox(height: 24),
                     _buildContributionBadgeCard(
                       textColor,
@@ -408,13 +439,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             initialBio: _profileBio,
                             initialSemester: _profileSemester,
                             initialBranch: _profileBranch,
+                            initialSubject: _profileSubject,
                             role: _profileRole,
                             initialAdminKey: _profileAdminKey,
                           ),
                         ),
                       );
                       if (updated != null && mounted) {
-                        await _loadProfile();
+                        await _loadProfile(forceRefresh: true);
                       }
                     },
                     child: Container(
@@ -679,6 +711,142 @@ class _ProfileScreenState extends State<ProfileScreen> {
               fontSize: 12,
               color: subTextColor,
               fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAiTokenUsageCard(
+    Color textColor,
+    Color subTextColor,
+    bool isDark,
+  ) {
+    final budget = _aiTokenBudget;
+    final used = budget > 0 ? _aiTokenUsed.clamp(0, budget) : _aiTokenUsed;
+    final remaining = budget > 0
+        ? _aiTokenRemaining.clamp(0, budget)
+        : _aiTokenRemaining;
+    final progress = budget > 0 ? (used / budget).clamp(0.0, 1.0) : 0.0;
+    final exhausted = budget > 0 && remaining <= 0;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.white,
+        border: Border.all(
+          color: exhausted
+              ? AppTheme.error.withValues(alpha: 0.35)
+              : AppTheme.primary.withValues(alpha: 0.22),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.24 : 0.06),
+            blurRadius: 12,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.token_rounded,
+                size: 18,
+                color: exhausted ? AppTheme.error : AppTheme.primary,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'AI Token Budget (₹1 Cap)',
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: textColor,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: exhausted
+                      ? AppTheme.error.withValues(alpha: 0.14)
+                      : AppTheme.primary.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  exhausted ? 'Exhausted' : '$remaining left',
+                  style: GoogleFonts.inter(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: exhausted ? AppTheme.error : AppTheme.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 8,
+              backgroundColor: isDark
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : Colors.black.withValues(alpha: 0.06),
+              valueColor: AlwaysStoppedAnimation<Color>(
+                exhausted ? AppTheme.error : AppTheme.primary,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              _buildAiTokenMetric('Remaining', '$remaining', textColor, subTextColor),
+              _buildAiTokenMetric('Used', '$used', textColor, subTextColor),
+              _buildAiTokenMetric(
+                'Total',
+                budget > 0 ? '$budget' : '--',
+                textColor,
+                subTextColor,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAiTokenMetric(
+    String label,
+    String value,
+    Color textColor,
+    Color subTextColor,
+  ) {
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            value,
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: textColor,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: subTextColor,
             ),
           ),
         ],
@@ -1326,7 +1494,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           itemCount: resources.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 12),
+          separatorBuilder: (_, _) => const SizedBox(height: 12),
           itemBuilder: (context, index) {
             final resource = resources[index];
             return ResourceCard(

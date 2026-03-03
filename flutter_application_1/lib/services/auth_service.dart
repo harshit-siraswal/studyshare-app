@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:developer' as developer;
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
+import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
@@ -10,6 +11,14 @@ import 'backend_api_service.dart';
 import 'push_notification_service.dart';
 
 class AuthService {
+  int _banCheckFailureCount = 0;
+  DateTime? _lastBanCheckFailureAt;
+  DateTime? _lastBanCheckAlertAt;
+  bool _banCheckAlertSent = false;
+  static const Duration _banCheckRetryWindow = Duration(seconds: 30);
+  static const Duration _banCheckAlertCooldown = Duration(minutes: 5);
+  static const int _banCheckAlertThreshold = 3;
+
   firebase_auth.FirebaseAuth get _auth => firebase_auth.FirebaseAuth.instance;
 
   // Only create GoogleSignIn for mobile platforms
@@ -25,11 +34,15 @@ class AuthService {
        _pushService = pushService ?? PushNotificationService() {
     // Only initialize GoogleSignIn on mobile (not web)
     if (!kIsWeb) {
-      _googleSignIn = GoogleSignIn(
-        // CRITICAL: serverClientId is the Web Client ID from google-services.json
-        // This is required for Android to work with Firebase Auth
-        serverClientId: AppConfig.googleServerClientId,
-      );
+      final serverClientId = AppConfig.googleServerClientId.trim();
+      // Do not force an empty serverClientId. When omitted, Android/iOS can use
+      // Firebase platform config (google-services/GoogleService-Info) directly.
+      _googleSignIn = serverClientId.isEmpty
+          ? GoogleSignIn(scopes: const ['email', 'profile'])
+          : GoogleSignIn(
+              serverClientId: serverClientId,
+              scopes: const ['email', 'profile'],
+            );
     }
   }
 
@@ -53,13 +66,6 @@ class AuthService {
 
   // Get photo URL
   String? get photoUrl => currentUser?.photoURL;
-  int _banCheckFailureCount = 0;
-  DateTime? _lastBanCheckFailureAt;
-  DateTime? _lastBanCheckAlertAt;
-  bool _banCheckAlertSent = false;
-  static const Duration _banCheckRetryWindow = Duration(seconds: 30);
-  static const Duration _banCheckAlertCooldown = Duration(minutes: 5);
-  static const int _banCheckAlertThreshold = 3;
 
   String _maskEmail(String email) {
     final trimmed = email.trim().toLowerCase();
@@ -75,20 +81,20 @@ class AuthService {
   }
 
   void incrementBanCheckFailure() {
+    final now = DateTime.now();
     _banCheckFailureCount += 1;
-    _lastBanCheckFailureAt = DateTime.now();
+    _lastBanCheckFailureAt = now;
     developer.log(
       'metric=ban_check_failure count=$_banCheckFailureCount',
       name: 'auth.metrics',
       level: 900,
     );
-    final now = DateTime.now();
     final canSendAlert =
         !_banCheckAlertSent ||
         _lastBanCheckAlertAt == null ||
         now.difference(_lastBanCheckAlertAt!) >= _banCheckAlertCooldown;
     if (_banCheckFailureCount >= _banCheckAlertThreshold && canSendAlert) {
-      sendBanCheckFailureAlert();
+      _logBanCheckFailureAlert();
       _banCheckAlertSent = true;
       _lastBanCheckAlertAt = now;
     }
@@ -100,7 +106,7 @@ class AuthService {
     return DateTime.now().difference(lastFailure) > _banCheckRetryWindow;
   }
 
-  void sendBanCheckFailureAlert() {
+  void _logBanCheckFailureAlert() {
     developer.log(
       'alert=ban_check_failures_exceeded threshold=$_banCheckAlertThreshold '
       'current=$_banCheckFailureCount',
@@ -184,10 +190,28 @@ class AuthService {
       }
 
       return userCredential;
+    } on PlatformException catch (e) {
+      final errorMessage = '${e.code} ${e.message ?? ''}'.toLowerCase();
+      debugPrint('Google Sign-In platform error: $e');
+      if (_looksLikeGoogleConfigIssue(errorMessage)) {
+        throw Exception(
+          'Google Sign-In configuration error. Verify Firebase app identifiers '
+          '(Android: ${AppConfig.androidBundleId}, iOS: ${AppConfig.iosBundleId}) and ensure '
+          'the signing SHA fingerprint for the installed build is added in Firebase.',
+        );
+      }
+      rethrow;
     } catch (e) {
       debugPrint('Error signing in with Google: $e');
       rethrow;
     }
+  }
+
+  bool _looksLikeGoogleConfigIssue(String message) {
+    return message.contains('developer_error') ||
+        message.contains('apiexception: 10') ||
+        message.contains('status code 10') ||
+        message.contains('12500');
   }
 
   /// Sign in with email and password
@@ -286,7 +310,7 @@ class AuthService {
         }
       }
       try {
-        prefs ??= await SharedPreferences.getInstance();
+        prefs = await SharedPreferences.getInstance();
         await prefs.remove('fcm_token_owner_email');
         await prefs.remove('premium_until');
         await prefs.remove('premium_tier');

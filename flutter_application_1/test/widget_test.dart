@@ -1,14 +1,25 @@
-// This is a basic Flutter widget test.
-//
-// This is a placeholder test file. The default counter test was removed
-// since this app doesn't use the default counter template.
-
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'package:flutter_application_1/main.dart';
+import 'package:flutter_application_1/providers/theme_provider.dart';
 
 void main() {
   testWidgets('App smoke test', (WidgetTester tester) async {
-    // TODO: Add actual widget tests for MyStudySpace
-    // For now, this is a placeholder to ensure the test passes
-    expect(1 + 1, equals(2));
+    SharedPreferences.setMockInitialValues({});
+    final prefs = await SharedPreferences.getInstance();
+    final themeProvider = ThemeProvider(prefs);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        child: StudyShareApp(prefs: prefs, themeProvider: themeProvider),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byType(StudyShareApp), findsOneWidget);
   });
 }
+
+

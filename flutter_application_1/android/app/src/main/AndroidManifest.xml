@@ -19,8 +19,9 @@
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     
     <application
-        android:label="MyStudySpace"
+        android:label="StudyShare"
         android:name="${applicationName}"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:networkSecurityConfig="@xml/network_security_config">
         <activity
@@ -67,7 +68,9 @@
             android:value="2" />
             
         <!-- Home Widget Receivers -->
-        <receiver android:name=".SyllabusWidgetProvider" android:exported="true">
+        <receiver
+            android:name="me.studyshare.android.SyllabusWidgetProvider"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
@@ -75,7 +78,9 @@
                 android:resource="@xml/syllabus_widget_info" />
         </receiver>
 
-        <receiver android:name=".NoticesWidgetProvider" android:exported="true">
+        <receiver
+            android:name="me.studyshare.android.NoticesWidgetProvider"
+            android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
@@ -117,3 +122,5 @@
         </intent>
     </queries>
 </manifest>
+
+

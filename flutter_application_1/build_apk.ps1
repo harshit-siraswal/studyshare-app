@@ -56,12 +56,36 @@ if (Test-Path "$badgerDir\build.gradle") {
 $buildArgs = @("build", "apk", "--release", "--verbose")
 
 $envFile = Join-Path $PSScriptRoot ".env"
+$envFileContent = $null
 if (Test-Path $envFile) {
-    Write-Host "Using --dart-define-from-file=.env" -ForegroundColor Cyan
-    $buildArgs += "--dart-define-from-file=.env"
+    try {
+        $envFileContent = Get-Content -Path $envFile -Raw -ErrorAction Stop
+    }
+    catch {
+        Write-Host "Error: Failed to read $envFile. $_" -ForegroundColor Red
+        exit 1
+    }
+
+    if ([string]::IsNullOrWhiteSpace($envFileContent)) {
+        Write-Host "Error: $envFile exists but is empty/unreadable. Fix the file or remove it to use environment variables only." -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host "Using --dart-define-from-file=$envFile" -ForegroundColor Cyan
+    $buildArgs += "--dart-define-from-file=$envFile"
 }
 else {
     Write-Host ".env not found. Falling back to process environment variables only." -ForegroundColor Yellow
+}
+
+function Test-EnvKeyPresent {
+    param(
+        [string]$Content,
+        [string]$Key
+    )
+    if ([string]::IsNullOrEmpty($Content)) { return $false }
+    $escaped = [regex]::Escape($Key)
+    return [regex]::IsMatch($Content, "(?m)^\s*$escaped\s*=")
 }
 
 # Explicit environment variables override values coming from .env.
@@ -79,16 +103,21 @@ $defineKeys = @(
 foreach ($key in $defineKeys) {
     $value = [Environment]::GetEnvironmentVariable($key)
     if ($null -ne $value -and $value -ne "") {
+        if ($value.Contains("`r") -or $value.Contains("`n") -or $value.Contains([char]0)) {
+            Write-Host "Skipping $key override: value contains unsupported control characters." -ForegroundColor Yellow
+            continue
+        }
+        $safeValue = $value.Replace('\', '\\').Replace('"', '\"')
         Write-Host "Using $key from environment override" -ForegroundColor Cyan
-        $buildArgs += "--dart-define=$key=$value"
+        $buildArgs += "--dart-define=$key=$safeValue"
     }
 }
 
-if (-not $env:GIPHY_API_KEY -and -not (Test-Path $envFile)) {
+if (-not $env:GIPHY_API_KEY -and -not (Test-EnvKeyPresent -Content $envFileContent -Key "GIPHY_API_KEY")) {
     Write-Host "GIPHY_API_KEY not supplied. GIF features will be disabled." -ForegroundColor Yellow
 }
 
-if (-not $env:REMOVE_BG_API_KEY -and -not (Test-Path $envFile)) {
+if (-not $env:REMOVE_BG_API_KEY -and -not (Test-EnvKeyPresent -Content $envFileContent -Key "REMOVE_BG_API_KEY")) {
     Write-Host "REMOVE_BG_API_KEY not supplied. Background removal will fail at runtime." -ForegroundColor Yellow
 }
 

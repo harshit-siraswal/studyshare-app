@@ -27,7 +27,9 @@ class OnboardingOverlay extends StatefulWidget {
   @override
   State<OnboardingOverlay> createState() => _OnboardingOverlayState();
 
-  /// Check if the user has completed onboarding
+  /// Checks onboarding completion for the shared default key only.
+  /// This does not use an instance's [completionPreferenceKey];
+  /// use [hasCompletedOnboardingForKey] for custom keys.
   static Future<bool> hasCompletedOnboarding() async {
     return hasCompletedOnboardingForKey(_defaultCompletionKey);
   }
@@ -38,7 +40,9 @@ class OnboardingOverlay extends StatefulWidget {
     return prefs.getBool(key) ?? false;
   }
 
-  /// Mark onboarding as complete
+  /// Marks onboarding complete for the shared default key only.
+  /// This does not use an instance's [completionPreferenceKey];
+  /// use [setOnboardingCompleteForKey] for custom keys.
   static Future<void> setOnboardingComplete() async {
     await setOnboardingCompleteForKey(_defaultCompletionKey);
   }
@@ -49,7 +53,9 @@ class OnboardingOverlay extends StatefulWidget {
     await prefs.setBool(key, true);
   }
 
-  /// Reset onboarding for testing
+  /// Resets onboarding for the shared default key only.
+  /// This does not use an instance's [completionPreferenceKey];
+  /// use [resetOnboardingForKey] for custom keys.
   static Future<void> resetOnboarding() async {
     await resetOnboardingForKey(_defaultCompletionKey);
   }
@@ -180,8 +186,8 @@ class _OnboardingOverlayState extends State<OnboardingOverlay>
       setState(() {
         _currentStep = widget.steps.length - 1;
         _spotlightStepIndex = -1;
-        _updateSpotlight();
       });
+      _updateSpotlight();
       return;
     }
 
@@ -214,6 +220,9 @@ class _OnboardingOverlayState extends State<OnboardingOverlay>
       }
 
       final targetKey = widget.steps[_currentStep].targetKey;
+      // _spotlightStepIndex semantics:
+      // - targetKey == null: intentional no-target step, so use _currentStep.
+      // - renderBox == null: temporary missing render object, so use -1 and retry later.
       if (targetKey == null) {
         setState(() {
           _spotlightRect = null;
@@ -541,11 +550,11 @@ class SpotlightPainter extends CustomPainter {
   }
 }
 
-/// Default onboarding steps for MyStudySpace
+/// Default onboarding steps for StudyShare
 List<OnboardingStep> getDefaultOnboardingSteps() {
   return const [
     OnboardingStep(
-      title: 'Welcome to MyStudySpace! 📚',
+      title: 'Welcome to StudyShare! 📚',
       description:
           'Your all-in-one study companion. Let\'s take a quick tour of the main features.',
       icon: Icons.auto_stories_rounded,
@@ -576,3 +585,6 @@ List<OnboardingStep> getDefaultOnboardingSteps() {
     ),
   ];
 }
+
+
+

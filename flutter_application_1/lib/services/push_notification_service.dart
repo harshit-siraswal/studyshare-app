@@ -135,8 +135,8 @@ class PushNotificationService {
     if (Platform.isAndroid) {
       const channel = AndroidNotificationChannel(
         'studyspace_notifications',
-        'StudySpace Notifications',
-        description: 'Notifications from StudySpace',
+        'StudyShare Notifications',
+        description: 'Notifications from StudyShare',
         importance: Importance.high,
         playSound: true,
         enableVibration: true,
@@ -155,8 +155,8 @@ class PushNotificationService {
 
     const androidDetails = AndroidNotificationDetails(
       'studyspace_notifications',
-      'StudySpace Notifications',
-      channelDescription: 'Notifications from StudySpace',
+      'StudyShare Notifications',
+      channelDescription: 'Notifications from StudyShare',
       importance: Importance.high,
       priority: Priority.high,
       showWhen: true,
@@ -176,7 +176,7 @@ class PushNotificationService {
 
     await _localNotifications.show(
       notification.hashCode,
-      notification.title ?? 'StudySpace',
+      notification.title ?? 'StudyShare',
       notification.body ?? '',
       details,
       payload: message.data.toString(),

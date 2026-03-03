@@ -6,6 +6,7 @@ import '../../services/backend_api_service.dart';
 
 import '../profile/saved_posts_screen.dart';
 import '../../services/subscription_service.dart';
+import '../../models/user.dart';
 import 'chatroom_screen.dart';
 import 'discover_rooms_screen.dart';
 
@@ -34,6 +35,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
 
   final FocusNode _searchFocusNode = FocusNode();
   bool _isSearchFocused = false;
+  bool _isTeacherOrAdmin = false;
 
   List<Map<String, dynamic>> _rooms = [];
   List<Map<String, dynamic>> _filteredRooms = [];
@@ -41,6 +43,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
   bool _isLoading = true;
 
   bool get _isReadOnly {
+    if (_isTeacherOrAdmin) return false;
     final email = widget.userEmail;
     final domain = widget.collegeDomain;
     if (domain.isEmpty) return true;
@@ -54,6 +57,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
       if (mounted) _supabaseService.attachContext(context);
     });
     _searchFocusNode.addListener(_onSearchFocusChange);
+    _loadWriterRole();
     _loadRooms();
   }
 
@@ -104,6 +108,20 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
         return name.contains(query.toLowerCase());
       }).toList();
     });
+  }
+
+  Future<void> _loadWriterRole() async {
+    try {
+      final role = await _supabaseService.getCurrentUserRole();
+      if (!mounted) return;
+      setState(() {
+        _isTeacherOrAdmin = role == AppRoles.teacher || role == AppRoles.admin;
+      });
+    } catch (e, st) {
+      debugPrint('ChatroomListScreen._loadWriterRole failed: $e\n$st');
+      if (!mounted) return;
+      setState(() => _isTeacherOrAdmin = false);
+    }
   }
 
   @override
@@ -524,6 +542,8 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
             ),
             TextButton(
               onPressed: () async {
+                final parentContext = this.context;
+                final messenger = ScaffoldMessenger.of(parentContext);
                 // Join logic
                 if (codeController.text.isNotEmpty) {
                   try {
@@ -532,16 +552,14 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                       widget.userEmail,
                       widget.collegeId,
                     );
-                    if (mounted) {
-                      Navigator.pop(context);
-                      _loadRooms();
-                    }
+                    if (!mounted) return;
+                    Navigator.of(parentContext).pop();
+                    _loadRooms();
                   } catch (e) {
-                    if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text('Failed to join room: $e')),
-                      );
-                    }
+                    if (!mounted) return;
+                    messenger.showSnackBar(
+                      SnackBar(content: Text('Failed to join room: $e')),
+                    );
                   }
                 }
               },
@@ -671,6 +689,8 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
               ),
               TextButton(
                 onPressed: () async {
+                  final parentContext = this.context;
+                  final messenger = ScaffoldMessenger.of(parentContext);
                   if (nameCtrl.text.isNotEmpty) {
                     try {
                       // Duration
@@ -685,13 +705,12 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                         collegeId: widget.collegeId,
                         durationInDays: duration,
                       );
-                      if (mounted) {
-                        Navigator.pop(context);
-                        _loadRooms();
-                      }
+                      if (!mounted) return;
+                      Navigator.of(parentContext).pop();
+                      _loadRooms();
                     } catch (e) {
                       if (!mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      messenger.showSnackBar(
                         const SnackBar(
                           content: Text(
                             'Failed to create room. Please try again.',

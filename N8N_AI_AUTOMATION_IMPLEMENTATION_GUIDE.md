@@ -1,4 +1,4 @@
-# n8n Implementation Guide For MyStudySpace AI
+﻿# n8n Implementation Guide For MyStudySpace AI
 
 Last updated: February 28, 2026
 
@@ -57,7 +57,7 @@ This matches your app split:
   - Failure policy:
     - Fail-fast (no retry): schema/auth/permission errors (`4xx`, signature mismatch).
     - Retryable: network timeout, `429`, `5xx`, temporary provider outages.
-  - Dead-letter handling: after max retries, persist to `ai_jobs_dlq` with `job_id`, `attempt_count`, `last_error`, `trace_id`.
+  - Dead-letter handling: persist each failed retry attempt to `ai_jobs_dlq` with incremented `attempt_count`, `last_error`, and `trace_id` for audit/debugging.
 
 Output:
 - `job_id`, `status`, `chunk_count`, `index_id`, `error`
@@ -77,7 +77,7 @@ Output:
   - Failure policy:
     - Fail-fast: invalid user scope, schema validation fail, unsupported action.
     - Retryable: model timeout, storage transient error, callback endpoint timeout.
-  - Dead-letter handling: store final failure in `ai_jobs` (`status=failed`) and mirror to DLQ for replay.
+- Dead-letter handling: keep final failure in `ai_jobs` (`status=failed`) and persist each failed retry attempt in DLQ with `attempt_count`, `last_error`, and `trace_id` for replay/audit.
 
 Output:
 - `action: "start_quiz"`, `artifact_url`, `question_count`, `status`
@@ -96,7 +96,7 @@ Output:
   - Failure policy:
     - Fail-fast: invalid attachment payload, authorization failure, schema mismatch.
     - Retryable: network timeout, temporary PDF renderer/storage outage.
-  - Dead-letter handling: failed jobs move to `ai_jobs_dlq` and surface user-visible failure state.
+- Dead-letter handling: each failed retry attempt is recorded in `ai_jobs_dlq` with `attempt_count`, `last_error`, and `trace_id`, and exhausted jobs surface a user-visible failure state.
 
 Output:
 - `action: "download_report"`, `file_url`, `file_type`, `status`
@@ -116,7 +116,8 @@ Output:
   - Dead-letter handling: enqueue undelivered notifications with `next_retry_at`.
 
 ### Cross-workflow retry state and validation guidance
-- Persist retry state in `ai_jobs` (`attempt_count`, `next_retry_at`, `last_error`, `status_version`) and mirror exhausted jobs to `ai_jobs_dlq`.
+- Persist retry state in `ai_jobs`: `attempt_count`, `next_retry_at`, `last_error`, `status_version`.
+- Persist each failed attempt to `ai_jobs_dlq`: `attempt_count`, `last_error`, `trace_id`, plus a snapshot of `next_retry_at`, `status_version`, and any payload metadata needed for replay/audit.
 - Test resilience before production:
   - Inject mock `429/500/timeouts` at OCR, embedding, storage, callback.
   - Run load tests at expected peak concurrency and 2x burst.
@@ -224,9 +225,18 @@ Schema-validation failure callback example:
 - Ship logs to centralized store (e.g., ELK/CloudWatch/Datadog) with immutable retention controls.
 
 ### Rate limiting and abuse controls
-- Apply endpoint limits to webhook and callback paths:
+- Webhook/callback endpoints only (`/webhook/*`, `/callback/*`):
   - default `60 req/min` per IP and `120 req/min` per service key,
   - burst allowance up to 2x for 10 seconds with token bucket.
+- Job endpoints only (`POST /api/ai/jobs`, `GET /api/ai/jobs/:job_id`, job concurrency controls):
+  - max 5 concurrent jobs per user,
+  - max 20 job creates/min per user,
+  - max 60 job status polls/min per user.
+- Precedence rule:
+  - apply per-IP/per-service-key limits first at edge/gateway,
+  - then apply per-user/per-job limits on authenticated job endpoints.
+- Overlap handling:
+  - when multiple limits apply, enforce the first breached limit and return `429` for that scope.
 - Throttle behavior:
   - return `429` with retry-after,
   - record rate-limit hits and anomaly score,
@@ -314,6 +324,14 @@ services:
       - QUEUE_BULL_REDIS_HOST=redis
       - QUEUE_BULL_REDIS_PORT=6379
       - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+    deploy:
+      resources:
+        limits:
+          cpus: "4.0"
+          memory: 8G
+        reservations:
+          cpus: "2.0"
+          memory: 4G
     depends_on:
       - postgres
       - redis
@@ -339,33 +357,55 @@ services:
   redis:
     image: redis:7.2.5-alpine
     restart: unless-stopped
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --save
+      - "900 1"
+      - --save
+      - "300 10"
+      - --save
+      - "60 10000"
+    volumes:
+      - n8n-redis:/data
 
 volumes:
   n8n-postgres:
+  n8n-redis:
 ```
 
 ## 9) Backend integration checklist
 
 1. Add `ai_jobs` table:
    - `job_id`, `job_type`, `status`, `status_version`, `user_id`, `session_id`, `payload_json`, `result_json`, `error`, `trace_id`, timestamps
-2. Add backend endpoints:
+2. Add `ai_jobs_dlq` table:
+   - columns: `job_id` (uuid FK -> `ai_jobs.job_id`, nullable if using `ON DELETE SET NULL`), `attempt_count` (int), `last_error` (text), `trace_id` (varchar), optional `payload_json` (jsonb), optional `status_version` (int), optional `next_retry_at` (timestamp), `created_at`, `updated_at`
+   - primary key strategy (default): composite PK (`job_id`, `attempt_count`) so each failed retry attempt is stored as a separate DLQ record per job.
+   - optional fallback: use surrogate `id` (uuid PK) only if your team explicitly prefers surrogate keys; in that case you must add a UNIQUE constraint/index on (`job_id`, `attempt_count`) to preserve one-record-per-attempt semantics.
+   - constraints/indexes:
+     - always: FK on `job_id` `ON DELETE SET NULL` (retain DLQ history after `ai_jobs` cleanup), index on `trace_id`
+     - if using composite PK (`job_id`, `attempt_count`): PostgreSQL and MySQL/InnoDB use leftmost-prefix indexes so a standalone `job_id` index is not required; SQLite may not efficiently use composite indexes for single-column `job_id` lookups, so add a standalone `job_id` index there; Oracle follows leftmost-prefix behavior similar to PostgreSQL
+     - if using surrogate `id` PK: add a standalone index on `job_id` for all databases
+   - retention policy: archive or delete `ai_jobs_dlq` records after 180 days independent of `ai_jobs` cleanup; keep a scheduled cleanup job for orphaned rows if `job_id` is set to null.
+3. Add backend endpoints:
    - `POST /api/ai/jobs` create job and forward to n8n
    - `GET /api/ai/jobs/:job_id` job status/result
    - `POST /api/ai/jobs/callback` n8n signed callback
-3. Enforce authentication and authorization:
+4. Enforce authentication and authorization:
    - require auth for `POST /api/ai/jobs` and `GET /api/ai/jobs/:job_id`
    - verify user owns `job_id` (`user_id/session_id` check) before returning status
    - lock callback endpoint to trusted service identity + signature validation
-4. Add rate limiting and throttling:
-   - job creation limit: max 5 concurrent jobs per user, max 20 creates/min per user
-   - status polling limit: max 60 polls/min per user
+5. Add rate limiting and throttling:
+   - webhook/callback endpoints: max 60 req/min per IP and 120 req/min per service key
+   - job endpoints: max 5 concurrent jobs/user, max 20 creates/min/user, max 60 polls/min/user
    - on limit breach return `429` and backoff hint
-5. Add idempotency:
+6. Add idempotency:
    - ignore duplicate callbacks by `job_id` + `status_version`
-6. Data retention and cleanup:
+7. Data retention and cleanup:
    - archive or delete completed `result_json`/`error` after 30-90 days (policy-based)
    - retain minimal audit fields (`job_id`, `trace_id`, status timeline) for 180 days
-7. Observability:
+8. Observability:
    - propagate/store `trace_id` through backend -> n8n -> backend and include in error logs and alerts
    - ensure retention/idempotency policies preserve traceability for incident review
 
@@ -440,3 +480,4 @@ volumes:
 
 Use this guide with:
 - `AI_CHAT_MODERNIZATION_PLAN.md`
+

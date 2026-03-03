@@ -24,6 +24,12 @@ ssh -i "EC2_KEY_PATH" EC2_SSH_USER@EC2_PUBLIC_IP
 cd BACKEND_PATH_ON_EC2
 git rev-parse --abbrev-ref HEAD
 git status --porcelain
+# Edit only the value assigned to `DEPLOY_BRANCH` below (for example: `main` or `production`).
+DEPLOY_BRANCH=
+if [ -z "$DEPLOY_BRANCH" ]; then
+  echo "DEPLOY_BRANCH is not set - please set it to your deploy branch"
+  exit 1
+fi
 if [ -n "$(git status --porcelain)" ]; then
   echo "Repository has uncommitted changes. Stash or commit before deploy."
   exit 1
@@ -32,12 +38,22 @@ fi
 # 1) stash: git stash save "pre-deploy-$(date +%Y%m%d-%H%M%S)"
 # 2) commit: git add . && git commit -m "Pre-deploy commit"
 git fetch origin
-git log HEAD..origin/<branch>
+git log HEAD..origin/"$DEPLOY_BRANCH"
+git log --stat HEAD..origin/"$DEPLOY_BRANCH"
+# Optional but recommended per commit:
+# git show <commit_sha>
+# git show --pretty=fuller --show-signature <commit_sha>
+# git verify-commit <commit_sha>
+read -r -p "Proceed with pull from origin/$DEPLOY_BRANCH? Type yes to continue: " confirm_pull
+if [ "$confirm_pull" != "yes" ]; then
+  echo "Deployment aborted by operator before pull."
+  exit 1
+fi
 git tag -a "deploy-$(date +%Y%m%d-%H%M%S)" -m "pre-deploy"
-git pull origin <branch>
+git pull origin "$DEPLOY_BRANCH"
 ```
 
-2. Ensure `<branch>` is your intended deploy branch (`main`/`production`).
+2. `git pull` must run only after incoming commits are reviewed and confirmed (or signatures are verified).
 
 ## C. Update backend environment
 
@@ -54,8 +70,8 @@ nano .env
 NODE_ENV=production
 PORT=3001
 TRUST_PROXY=1
-FRONTEND_URL=https://studyshare.in
-CORS_ALLOWED_ORIGINS=https://www.studyshare.in,https://studyshare.in,https://admin-studyspace.vercel.app,https://admin.studyshare.in
+FRONTEND_URL=https://mystudyspace.in
+CORS_ALLOWED_ORIGINS=https://www.mystudyspace.in,https://mystudyspace.in,https://admin-studyspace.vercel.app,https://admin.mystudyspace.in
 ```
 
 3. This is not exhaustive. Also verify all required variables for your stack (database credentials, JWT/secret keys, API keys, email/SMS credentials, storage keys, and other service-specific config from your app config or `.env.example`).
@@ -86,6 +102,25 @@ Use one path only, based on your setup.
 
 ```bash
 docker compose down
+for i in 1 2 3 4 5; do
+  if [ -z "$(docker compose ps -q)" ]; then
+    break
+  fi
+  echo "Waiting for containers to stop... (attempt $i/5)"
+  sleep 2
+done
+if [ -n "$(docker compose ps -q)" ]; then
+  echo "Containers are still running after docker compose down; aborting deploy."
+  docker compose ps
+  exit 1
+fi
+df -h .
+# Abort if available space on current filesystem is below 2GB (adjust threshold as needed):
+if [ "$(df -Pk . | awk 'NR==2 {print $4}')" -lt 2097152 ]; then
+  echo "Low disk space (<2GB). Clean up unused Docker images/containers/caches before deploy."
+  echo "Examples: docker image prune -a, docker container prune, docker volume prune, npm cache clean --force"
+  exit 1
+fi
 docker compose up -d --build
 docker compose ps
 ```
@@ -96,6 +131,13 @@ docker compose ps
 
 ```bash
 npm ci
+df -h .
+# Abort if available space on current filesystem is below 2GB (adjust threshold as needed):
+if [ "$(df -Pk . | awk 'NR==2 {print $4}')" -lt 2097152 ]; then
+  echo "Low disk space (<2GB). Clean up build caches/artifacts before deploy."
+  echo "Examples: npm cache clean --force, rm -rf node_modules/.cache, remove old build artifacts"
+  exit 1
+fi
 npm run build || { echo "Build failed - aborting deploy"; exit 1; }
 pm2 list
 pm2 reload <process-name>
@@ -117,10 +159,13 @@ curl -i http://localhost:3001/health
 If internal check fails, troubleshoot before external checks:
 
 ```bash
-pm2 logs <process-name>
+pm2 logs <process-name> --lines 50
 pm2 status
-docker compose logs
+docker compose logs --tail=50
 docker compose ps
+# lsof/netstat may be missing on minimal distros; use ss as default:
+ss -ltnp | grep 3001
+# Optional legacy tools (may require install/sudo):
 lsof -i :3001
 netstat -tulpn | grep 3001
 ```
@@ -133,7 +178,21 @@ Also re-check `.env` values and startup config.
 curl -i https://<YOUR_API_HOST>/health
 ```
 
-4. If internal passes but external fails, verify Security Group inbound rules, NACLs, and load balancer/listener target registration.
+4. Immediately verify recent application logs after external health check:
+
+```bash
+# PM2 runtime
+pm2 status
+pm2 logs <process-name> --lines 50
+
+# Docker runtime
+docker compose ps
+docker compose logs --tail=50 <service-name>
+```
+
+Use the exact process name from `pm2 status` and the exact compose service name from `docker compose ps` to correlate a successful `/health` response with any runtime warnings/errors.
+
+5. If internal passes but external fails, verify Security Group inbound rules, NACLs, and load balancer/listener target registration.
 
 Before running AWS CLI checks, confirm your AWS CLI credentials and region are configured (`aws configure` / `aws sts get-caller-identity`):
 
@@ -179,3 +238,5 @@ pm2 restart <process-name>
 ```
 
 4. Re-run health verification from section **E** (`curl -i http://localhost:3001/health` and external check).
+
+

@@ -1,8 +1,10 @@
-package me.mystudyspace.android
+package me.studyshare.android
 
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
 import io.flutter.embedding.android.FlutterActivity
@@ -14,19 +16,28 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 
 class MainActivity : FlutterActivity() {
     companion object {
-        private const val METHOD_CHANNEL = "me.mystudyspace.android/share_intent"
+        private const val METHOD_CHANNEL = "me.studyshare.android/share_intent"
         private const val EVENT_CHANNEL =
-            "me.mystudyspace.android/share_intent_events"
+            "me.studyshare.android/share_intent_events"
+        private const val CACHE_FILE_PREFIX = "incoming_"
+        private const val CACHE_MAX_AGE_MS = 24L * 60L * 60L * 1000L
     }
 
     private var eventSink: EventChannel.EventSink? = null
     private var initialPayload: String? = null
+    private val ioExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        ioExecutor.execute {
+            cleanupOldCacheFiles()
+        }
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
@@ -43,6 +54,26 @@ class MainActivity : FlutterActivity() {
                 "clearInitialShare" -> {
                     initialPayload = null
                     result.success(null)
+                }
+                "clearCachedFiles" -> {
+                    ioExecutor.execute {
+                        try {
+                            val deletedCount = cleanupOldCacheFiles(maxAgeMs = 0L)
+                            mainHandler.post {
+                                if (!canDeliverResultToFlutter()) return@post
+                                result.success(deletedCount)
+                            }
+                        } catch (e: Exception) {
+                            mainHandler.post {
+                                if (!canDeliverResultToFlutter()) return@post
+                                result.error(
+                                    "cache_cleanup_failed",
+                                    e.message ?: "Failed to clear cached files.",
+                                    null
+                                )
+                            }
+                        }
+                    }
                 }
 
                 else -> result.notImplemented()
@@ -72,6 +103,15 @@ class MainActivity : FlutterActivity() {
         val payload = buildSharePayload(intent) ?: return
         initialPayload = payload
         eventSink?.success(payload)
+    }
+
+    private fun canDeliverResultToFlutter(): Boolean {
+        return !isFinishing && !isDestroyed && flutterEngine != null
+    }
+
+    override fun onDestroy() {
+        ioExecutor.shutdown()
+        super.onDestroy()
     }
 
     private fun buildSharePayload(incomingIntent: Intent?): String? {
@@ -138,7 +178,7 @@ class MainActivity : FlutterActivity() {
             val displayName = queryDisplayName(uri) ?: "shared_file_$index"
             val mimeType = resolver.getType(uri)
             val extension = extensionFrom(displayName, mimeType)
-            val targetName = "incoming_${System.currentTimeMillis()}_${index}$extension"
+            val targetName = "${CACHE_FILE_PREFIX}${System.currentTimeMillis()}_${index}$extension"
             val targetFile = File(cacheDir, targetName)
 
             resolver.openInputStream(uri)?.use { input ->
@@ -159,16 +199,38 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    private fun cleanupOldCacheFiles(maxAgeMs: Long = CACHE_MAX_AGE_MS): Int {
+        val now = System.currentTimeMillis()
+        var deletedCount = 0
+        cacheDir.listFiles()?.forEach { file ->
+            if (!file.isFile || !file.name.startsWith(CACHE_FILE_PREFIX)) {
+                return@forEach
+            }
+            val ageMs = now - file.lastModified()
+            if (ageMs <= maxAgeMs) {
+                return@forEach
+            }
+            if (file.delete()) {
+                deletedCount += 1
+            } else {
+                android.util.Log.w("MainActivity", "Failed to delete cache file: ${file.name}")
+            }
+        }
+        return deletedCount
+    }
+
     private fun queryDisplayName(uri: Uri): String? {
+        val projection = arrayOf(OpenableColumns.DISPLAY_NAME)
         return try {
-            contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            contentResolver.query(uri, projection, null, null, null)
+                ?.use { cursor ->
                 val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
                 if (index >= 0 && cursor.moveToFirst()) {
                     cursor.getString(index)
                 } else {
                     null
                 }
-            }
+                }
         } catch (_: Exception) {
             null
         }
@@ -186,3 +248,6 @@ class MainActivity : FlutterActivity() {
         return ".bin"
     }
 }
+
+
+

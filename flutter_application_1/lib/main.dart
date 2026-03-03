@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
+import 'package:flutter/foundation.dart'
+    show debugPrint, debugPrintStack, kIsWeb;
 import 'dart:ui' show PlatformDispatcher;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -137,7 +138,10 @@ void main() async {
   // Global error handler — works in release mode
   FlutterError.onError = (details) {
     FlutterError.presentError(details);
-    debugPrint('FlutterError: ${details.exception}');
+    debugPrint('FlutterError: ${details.exceptionAsString()}');
+    if (details.stack != null) {
+      debugPrintStack(label: 'FlutterError stack', stackTrace: details.stack);
+    }
   };
   PlatformDispatcher.instance.onError = (error, stack) {
     debugPrint('PlatformDispatcher error: $error\n$stack');
@@ -561,7 +565,7 @@ class _AppRootState extends State<AppRoot> {
                   ),
                   const SizedBox(height: 12),
                   const Text(
-                    'MyStudySpace needs access to storage/media to function correctly. Please grant permissions in settings.',
+                    'StudyShare needs access to storage/media to function correctly. Please grant permissions in settings.',
                     textAlign: TextAlign.center,
                     style: TextStyle(color: Colors.grey),
                   ),
@@ -626,9 +630,9 @@ class _AppRootState extends State<AppRoot> {
         themeMode: _bootThemeMode,
         home: const Scaffold(
           body: AppSplashAnimation(
-            title: 'MyStudySpace',
+            title: 'StudyShare',
             subtitle: 'Connect. Learn. Share.',
-            loadingLabel: 'Starting MyStudySpace...',
+            loadingLabel: 'Starting StudyShare...',
           ),
         ),
       );
@@ -636,16 +640,16 @@ class _AppRootState extends State<AppRoot> {
 
     // AppState.ready
     return ProviderScope(
-      child: StudySpaceApp(prefs: _prefs!, themeProvider: _themeProvider!),
+      child: StudyShareApp(prefs: _prefs!, themeProvider: _themeProvider!),
     );
   }
 }
 
-class StudySpaceApp extends StatelessWidget {
+class StudyShareApp extends StatelessWidget {
   final SharedPreferences prefs;
   final ThemeProvider themeProvider;
 
-  const StudySpaceApp({
+  const StudyShareApp({
     super.key,
     required this.prefs,
     required this.themeProvider,
@@ -1035,9 +1039,9 @@ class SplashScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return const Scaffold(
       body: AppSplashAnimation(
-        title: 'MyStudySpace',
+        title: 'StudyShare',
         subtitle: 'Connect. Learn. Share.',
-        loadingLabel: 'Preparing your study space...',
+        loadingLabel: 'Loading StudyShare...',
       ),
     );
   }

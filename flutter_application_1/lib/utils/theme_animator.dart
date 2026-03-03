@@ -21,7 +21,6 @@ double _getDevicePixelRatio(BuildContext context) {
 /// Full-screen sun-setting / moon-rising theme transition.
 Future<void> animateThemeTransition(
   BuildContext context,
-  Offset tapOffset,
   VoidCallback toggleTheme,
 ) async {
   final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -91,7 +90,7 @@ class _SunMoonTransition extends StatefulWidget {
 }
 
 class _SunMoonTransitionState extends State<_SunMoonTransition>
-    with TickerProviderStateMixin {
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _animation;
 
@@ -496,17 +495,18 @@ class _SkyGradientPainter extends CustomPainter {
     }
 
     final rect = Rect.fromLTWH(0, 0, size.width, size.height);
+    final clampedOpacity = opacity.clamp(0.0, 1.0).toDouble();
+    final colorsWithOpacity = colors
+        .map((color) => color.withValues(alpha: clampedOpacity))
+        .toList(growable: false);
     final gradient = LinearGradient(
       begin: Alignment.topCenter,
       end: Alignment.bottomCenter,
-      colors: colors,
+      colors: colorsWithOpacity,
     );
 
-    final paint = Paint()
-      ..shader = gradient.createShader(rect)
-      ..color = Colors.white.withValues(alpha: opacity);
-
-    canvas.drawRect(rect, paint);
+    final gradientPaint = Paint()..shader = gradient.createShader(rect);
+    canvas.drawRect(rect, gradientPaint);
   }
 
   double _bellCurve(double t) {

@@ -212,7 +212,7 @@ class SubscriptionService {
       var options = {
         'key': AppConfig.razorpayKeyId,
         'amount': authorizedAmount,
-        'name': 'MyStudySpace Premium',
+        'name': 'StudyShare Premium',
         'description': description,
         'order_id': orderId,
         'prefill': {'contact': phone, 'email': email},
@@ -317,3 +317,6 @@ class SubscriptionService {
     _paymentCompleter?.complete(false);
   }
 }
+
+
+

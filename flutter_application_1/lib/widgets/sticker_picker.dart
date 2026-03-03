@@ -36,6 +36,7 @@ class _StickerPickerState extends State<StickerPicker>
   // Giphy state
   List<GiphyStickerItem> _giphyStickers = [];
   bool _giphyLoading = false;
+  bool _hasGiphy = false;
   String? _giphySavingId; // ID of the sticker currently being saved
 
   @override
@@ -79,6 +80,7 @@ class _StickerPickerState extends State<StickerPicker>
 
     try {
       await _stickerService.warmUpCapabilities();
+      final hasGiphy = await _stickerService.hasGiphy();
       await _stickerService.purgeLegacyPacks();
       final stickers = await _stickerService.getLocalStickers();
       final installedPacks = await _stickerService.getInstalledPackIds();
@@ -86,6 +88,7 @@ class _StickerPickerState extends State<StickerPicker>
       setState(() {
         _stickers = stickers;
         _installedPacks = installedPacks;
+        _hasGiphy = hasGiphy;
         _isLoading = false;
       });
     } catch (_) {
@@ -817,6 +820,7 @@ class _StickerPickerState extends State<StickerPicker>
   // ─── GIPHY TAB ────────────────────────────────────────────────────────────
 
   Future<void> _loadGiphy({String? query}) async {
+    if (!_hasGiphy) return;
     if (!mounted) return;
     setState(() => _giphyLoading = true);
     final results = await _stickerService.fetchGiphyStickers(query: query);
@@ -851,10 +855,10 @@ class _StickerPickerState extends State<StickerPicker>
 
   Widget _buildGiphyTab(bool isDark) {
     final mutedColor = AppTheme.getTextColor(context).withValues(alpha: 0.55);
-    if (!_stickerService.hasGiphy) {
+    if (!_hasGiphy) {
       return Center(
         child: Text(
-          'Giphy stickers unavailable.\nGIPHY_API_KEY not configured.',
+          'Giphy stickers are currently unavailable.',
           textAlign: TextAlign.center,
           style: GoogleFonts.inter(color: mutedColor),
         ),

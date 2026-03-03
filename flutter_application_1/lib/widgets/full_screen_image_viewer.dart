@@ -25,6 +25,16 @@ class FullScreenImageViewer extends StatefulWidget {
 class _FullScreenImageViewerState extends State<FullScreenImageViewer> {
   bool _isDownloading = false;
 
+  Dio _createDio() {
+    return Dio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 30),
+        receiveTimeout: const Duration(seconds: 30),
+        sendTimeout: const Duration(seconds: 30),
+      ),
+    );
+  }
+
   Future<void> _shareImage() async {
     String? savePath;
     try {
@@ -36,21 +46,14 @@ class _FullScreenImageViewerState extends State<FullScreenImageViewer> {
       String ext = _getImageExtension(widget.imageUrl);
       savePath = '${tempDir.path}/${DateTime.now().millisecondsSinceEpoch}$ext';
       
-      await Dio().download(
-        widget.imageUrl, 
-        savePath,
-        options: Options(receiveTimeout: const Duration(seconds: 30)),
-      );
-      
-      if (!mounted) return;
-      setState(() => _isDownloading = false);
+      final dio = _createDio();
+      await dio.download(widget.imageUrl, savePath);
       
       // Share
-      await Share.shareXFiles([XFile(savePath)], text: 'Check out this image from MyStudySpace!');
+      await Share.shareXFiles([XFile(savePath)], text: 'Check out this image from StudyShare!');
     } catch (e) {
       debugPrint('Error sharing image: $e');
       if (mounted) {
-        setState(() => _isDownloading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Unable to share image')),
         );
@@ -89,7 +92,6 @@ class _FullScreenImageViewerState extends State<FullScreenImageViewer> {
            }
            
            if (!status.isGranted) {
-              if (mounted) setState(() => _isDownloading = false);
               if (status.isPermanentlyDenied) {
                 if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -121,17 +123,15 @@ class _FullScreenImageViewerState extends State<FullScreenImageViewer> {
        }
 
        // Derive extension
-       String ext = p.extension(widget.imageUrl).toLowerCase();
-       if (!['.jpg', '.jpeg', '.png', '.webp', '.gif'].contains(ext)) {
-          ext = '.jpg';
-       }
+       String ext = _getImageExtension(widget.imageUrl);
 
-       String fileName = 'mystudyspace_${DateTime.now().millisecondsSinceEpoch}$ext';
+      String fileName = 'studyshare_${DateTime.now().millisecondsSinceEpoch}$ext';
        String savePath = p.join(downloadsDir.path, fileName);
        
        debugPrint('Downloading to $savePath');
        
-       await Dio().download(widget.imageUrl, savePath);
+       final dio = _createDio();
+       await dio.download(widget.imageUrl, savePath);
        
        if (!mounted) return;
        
@@ -143,7 +143,6 @@ class _FullScreenImageViewerState extends State<FullScreenImageViewer> {
     } catch (e) {
       debugPrint('Error saving image: $e');
       if (mounted) {
-        setState(() => _isDownloading = false);
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Failed to save image')),
         );
@@ -240,3 +239,5 @@ class _FullScreenImageViewerState extends State<FullScreenImageViewer> {
     return ext;
   }
 }
+
+

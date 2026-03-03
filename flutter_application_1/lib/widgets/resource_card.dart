@@ -40,11 +40,13 @@ class ResourceCard extends StatefulWidget {
 
 class _ResourceCardState extends State<ResourceCard> {
   final SupabaseService _supabaseService = SupabaseService();
+  final DownloadService _downloadService = DownloadService();
   int _upvotes = 0;
   int _downvotes = 0;
   int? _userVote;
   bool _isBookmarked = false;
   bool _isVoting = false;
+  bool _isDownloaded = false;
 
   @override
   void initState() {
@@ -52,6 +54,19 @@ class _ResourceCardState extends State<ResourceCard> {
     _upvotes = widget.resource.upvotes;
     _downvotes = widget.resource.downvotes;
     _checkBookmark();
+    _refreshVoteState();
+    _refreshDownloadState();
+  }
+
+  @override
+  void didUpdateWidget(covariant ResourceCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.resource.id != widget.resource.id ||
+        oldWidget.userEmail != widget.userEmail) {
+      _refreshDownloadState();
+      _checkBookmark();
+      _refreshVoteState();
+    }
   }
 
   Future<void> _checkBookmark() async {
@@ -60,6 +75,31 @@ class _ResourceCardState extends State<ResourceCard> {
       widget.resource.id,
     );
     if (mounted) setState(() => _isBookmarked = bookmarked);
+  }
+
+  Future<void> _refreshVoteState() async {
+    try {
+      final voteStatus = await _supabaseService.getResourceVoteStatus(
+        widget.resource.id,
+      );
+      if (!mounted) return;
+      setState(() {
+        _userVote = voteStatus.userVote;
+        _upvotes = voteStatus.upvotes;
+        _downvotes = voteStatus.downvotes;
+      });
+    } catch (e) {
+      debugPrint('Error refreshing vote state: $e');
+    }
+  }
+
+  Future<void> _refreshDownloadState() async {
+    final downloaded = await _downloadService.isDownloadedForUser(
+      widget.resource.id,
+      widget.userEmail,
+    );
+    if (!mounted) return;
+    setState(() => _isDownloaded = downloaded);
   }
 
   Future<void> _toggleBookmark() async {
@@ -131,10 +171,15 @@ class _ResourceCardState extends State<ResourceCard> {
   }
 
   Future<void> _handleDownload(BuildContext context) async {
-    final ds = DownloadService();
     // 1. Check if already downloaded
-    if (ds.isDownloadedForUser(widget.resource.id, widget.userEmail)) {
-      final path = ds.getLocalPathForUser(widget.resource.id, widget.userEmail);
+    if (await _downloadService.isDownloadedForUser(
+      widget.resource.id,
+      widget.userEmail,
+    )) {
+      final path = await _downloadService.getLocalPathForUser(
+        widget.resource.id,
+        widget.userEmail,
+      );
       if (path != null) {
         Navigator.push(
           context,
@@ -180,16 +225,18 @@ class _ResourceCardState extends State<ResourceCard> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Downloading...')));
-      await ds.downloadResource(
+      await _downloadService.downloadResource(
         widget.resource.fileUrl,
         widget.resource,
         ownerEmail: widget.userEmail,
       );
-      setState(() {}); // refresh icon
+      await _refreshDownloadState();
       if (mounted)
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Download Complete!')));
+    } on DownloadCancelledException {
+      return;
     } catch (e) {
       if (mounted)
         ScaffoldMessenger.of(
@@ -274,7 +321,7 @@ class _ResourceCardState extends State<ResourceCard> {
     );
   }
 
-  void _showPDFViewer() {
+  Future<void> _showPDFViewer() async {
     if (widget.resource.fileUrl.isEmpty) {
       ScaffoldMessenger.of(
         context,
@@ -282,8 +329,7 @@ class _ResourceCardState extends State<ResourceCard> {
       return;
     }
 
-    final downloadService = DownloadService();
-    final localPath = downloadService.getLocalPathForUser(
+    final localPath = await _downloadService.getLocalPathForUser(
       widget.resource.id,
       widget.userEmail,
     );
@@ -291,7 +337,7 @@ class _ResourceCardState extends State<ResourceCard> {
     bool hasLocalFile = false;
     if (!kIsWeb &&
         localPath != null &&
-        downloadService.isDownloadedForUser(
+        await _downloadService.isDownloadedForUser(
           widget.resource.id,
           widget.userEmail,
         )) {
@@ -326,10 +372,8 @@ class _ResourceCardState extends State<ResourceCard> {
 
   @override
   Widget build(BuildContext context) {
-    final ds = DownloadService();
-    // ... no change needed in build if _openResource is handling dispatch ...
-    // But we need to update _getTypeIcon and _getTypeColor below
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final moderationMetaRow = _buildModerationMetaRow();
 
     return Material(
       color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
@@ -377,7 +421,7 @@ class _ResourceCardState extends State<ResourceCard> {
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
                             color: isDark
-                                ? AppTheme.textLight
+                                ? AppTheme.textOnDark
                                 : AppTheme.textPrimary,
                           ),
                           maxLines: 1,
@@ -509,11 +553,7 @@ class _ResourceCardState extends State<ResourceCard> {
                                 onTap: () => _handleDownload(context),
                                 child: Padding(
                                   padding: const EdgeInsets.all(8.0),
-                                  child:
-                                      ds.isDownloadedForUser(
-                                        widget.resource.id,
-                                        widget.userEmail,
-                                      )
+                                  child: _isDownloaded
                                       ? Icon(
                                           Icons.offline_pin,
                                           size: 20,
@@ -542,120 +582,51 @@ class _ResourceCardState extends State<ResourceCard> {
                       ),
                     ),
                     if (widget.showModerationControls) ...[
-                      const SizedBox(height: 10),
-                      Column(
-                        children: [
-                          Row(
-                            children: [
-                              if (widget.onReject != null) ...[
-                                Expanded(
-                                  child: OutlinedButton.icon(
-                                    onPressed: widget.onReject,
-                                    icon: const Icon(
-                                      Icons.close_rounded,
-                                      size: 14,
-                                    ),
-                                    label: const Text(
-                                      'Reject',
-                                      style: TextStyle(fontSize: 11),
-                                    ),
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: AppTheme.error,
-                                      minimumSize: const Size(0, 36),
-                                      visualDensity: VisualDensity.compact,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 6,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                              if (widget.onReject != null &&
-                                  (widget.onRetract != null ||
-                                      widget.onApprove != null))
-                                const SizedBox(width: 8),
-                              if (widget.onRetract != null) ...[
-                                Expanded(
-                                  child: OutlinedButton.icon(
-                                    onPressed: widget.onRetract,
-                                    icon: const Icon(
-                                      Icons.undo_rounded,
-                                      size: 14,
-                                    ),
-                                    label: const Text(
-                                      'Retract',
-                                      style: TextStyle(fontSize: 11),
-                                    ),
-                                    style: OutlinedButton.styleFrom(
-                                      foregroundColor: AppTheme.warning,
-                                      minimumSize: const Size(0, 36),
-                                      visualDensity: VisualDensity.compact,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 6,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                              if (widget.onRetract != null &&
-                                  widget.onApprove != null)
-                                const SizedBox(width: 8),
-                              if (widget.onApprove != null) ...[
-                                Expanded(
-                                  child: ElevatedButton.icon(
-                                    onPressed: widget.onApprove,
-                                    icon: const Icon(
-                                      Icons.check_rounded,
-                                      size: 14,
-                                    ),
-                                    label: const Text(
-                                      'Approve',
-                                      style: TextStyle(fontSize: 11),
-                                    ),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: AppTheme.success,
-                                      foregroundColor: Colors.white,
-                                      minimumSize: const Size(0, 36),
-                                      visualDensity: VisualDensity.compact,
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 6,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ],
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.04)
+                              : Colors.black.withValues(alpha: 0.03),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.08)
+                                : Colors.black.withValues(alpha: 0.08),
                           ),
-                          if (widget.onDelete != null) ...[
-                            const SizedBox(height: 8),
-                            SizedBox(
-                              width: double.infinity,
-                              child: OutlinedButton.icon(
-                                onPressed: widget.onDelete,
-                                icon: const Icon(
-                                  Icons.delete_forever_rounded,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.verified_user_rounded,
                                   size: 14,
+                                  color: AppTheme.primary,
                                 ),
-                                label: const Text(
-                                  'Delete',
-                                  style: TextStyle(fontSize: 11),
-                                ),
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: AppTheme.error,
-                                  minimumSize: const Size(0, 36),
-                                  visualDensity: VisualDensity.compact,
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                    vertical: 6,
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Moderation',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: isDark
+                                        ? AppTheme.textOnDark
+                                        : AppTheme.textPrimary,
                                   ),
                                 ),
-                              ),
+                              ],
                             ),
+                            if (moderationMetaRow != null) ...[
+                              const SizedBox(height: 8),
+                              moderationMetaRow,
+                            ],
+                            const SizedBox(height: 10),
+                            ..._buildModerationActionButtons(),
                           ],
-                        ],
+                        ),
                       ),
                     ],
                   ],
@@ -664,6 +635,165 @@ class _ResourceCardState extends State<ResourceCard> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  List<Widget> _buildModerationActionButtons() {
+    final buttons = <Widget>[];
+
+    if (widget.onReject != null) {
+      buttons.add(
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: widget.onReject,
+            icon: const Icon(Icons.close_rounded, size: 16),
+            label: Text(
+              'Reject',
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppTheme.error,
+              side: BorderSide(color: AppTheme.error.withValues(alpha: 0.45)),
+              minimumSize: const Size(0, 38),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (widget.onRetract != null) {
+      buttons.add(
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: widget.onRetract,
+            icon: const Icon(Icons.undo_rounded, size: 16),
+            label: Text(
+              'Retract',
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppTheme.warning,
+              side: BorderSide(color: AppTheme.warning.withValues(alpha: 0.4)),
+              minimumSize: const Size(0, 38),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (widget.onApprove != null) {
+      buttons.add(
+        Expanded(
+          child: ElevatedButton.icon(
+            onPressed: widget.onApprove,
+            icon: const Icon(Icons.check_rounded, size: 16),
+            label: Text(
+              'Approve',
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.success,
+              foregroundColor: Colors.white,
+              minimumSize: const Size(0, 38),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (buttons.isEmpty) return const [];
+
+    return [
+      Row(
+        children: [
+          for (var i = 0; i < buttons.length; i++) ...[
+            if (i > 0) const SizedBox(width: 8),
+            buttons[i],
+          ],
+        ],
+      ),
+    ];
+  }
+
+  Widget? _buildModerationMetaRow() {
+    final teacherProfile = _buildTeacherProfileButton();
+    final deleteButton = _buildDeleteIconButton();
+    if (teacherProfile == null && deleteButton == null) return null;
+
+    return Row(
+      children: [
+        if (teacherProfile != null) ...[
+          Expanded(child: teacherProfile),
+          if (deleteButton != null) const SizedBox(width: 8),
+        ],
+        ?deleteButton,
+      ],
+    );
+  }
+
+  Widget? _buildTeacherProfileButton() {
+    if (!widget.resource.isTeacherUpload) return null;
+    final email = widget.resource.uploadedByEmail.trim();
+    if (email.isEmpty) return null;
+    final name = widget.resource.uploadedByName?.trim().isNotEmpty == true
+        ? widget.resource.uploadedByName!.trim()
+        : email.split('@').first;
+
+    return OutlinedButton.icon(
+      onPressed: () => _openUserProfile(email, name),
+      icon: const Icon(Icons.school_rounded, size: 14),
+      label: Text(
+        'Teacher profile',
+        style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600),
+      ),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppTheme.primary,
+        side: BorderSide(color: AppTheme.primary.withValues(alpha: 0.35)),
+        minimumSize: const Size(0, 34),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      ),
+    );
+  }
+
+  Widget? _buildDeleteIconButton() {
+    if (widget.onDelete == null) return null;
+    return OutlinedButton.icon(
+      onPressed: widget.onDelete,
+      icon: const Icon(Icons.delete_outline_rounded, size: 14),
+      label: Text(
+        'Delete',
+        style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600),
+      ),
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppTheme.error,
+        side: BorderSide(color: AppTheme.error.withValues(alpha: 0.4)),
+        minimumSize: const Size(0, 34),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
     );
   }
@@ -738,12 +868,7 @@ class _ResourceCardState extends State<ResourceCard> {
         child: InkWell(
           borderRadius: BorderRadius.circular(4),
           onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) =>
-                    UserProfileScreen(userEmail: email, userName: name),
-              ),
-            );
+            _openUserProfile(email, name);
           },
           child: ConstrainedBox(
             constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
@@ -774,6 +899,14 @@ class _ResourceCardState extends State<ResourceCard> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  void _openUserProfile(String email, String name) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => UserProfileScreen(userEmail: email, userName: name),
       ),
     );
   }

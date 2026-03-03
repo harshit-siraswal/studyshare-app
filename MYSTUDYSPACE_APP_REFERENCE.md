@@ -39,7 +39,7 @@ External dependencies used by mobile:
 - Supabase (DB and query layer)
 - Firebase Auth + FCM
 - Cloudinary (file hosting)
-- Optional n8n sidecar for async AI workloads (as documented in repo guide)
+- Optional n8n sidecar for async AI workloads (as documented in `N8N_AI_AUTOMATION_IMPLEMENTATION_GUIDE.md`)
 
 ## 3. Core App Features (Non-AI)
 
@@ -79,7 +79,7 @@ External dependencies used by mobile:
 
 ## 4. AI Features (Deep Dive)
 
-## 4.1 AI Studio (Resource-scoped AI from PDF Viewer)
+### 4.1 AI Studio (Resource-scoped AI from PDF Viewer)
 
 Entry point:
 - `PdfViewerScreen` opens `AiStudyToolsSheet`.
@@ -109,7 +109,7 @@ Studio local persistence:
 Studio export:
 - Summary can be exported as PDF and shared using `SummaryPdfService` + `share_plus`.
 
-## 4.2 AI Chat (Cross-resource + Attachments + Actions)
+### 4.2 AI Chat (Cross-resource + Attachments + Actions)
 
 Entry points:
 - Standalone AI Chat from app navigation.
@@ -147,7 +147,7 @@ Citation/source handling:
 - UI renders source chips/cards per answer.
 - Assistant text is sanitized to strip raw URL/source blocks from visible answer text when needed.
 
-## 4.3 AI Chat Intent Actions
+### 4.3 AI Chat Intent Actions
 
 The app has explicit intent handling for two artifact-style flows:
 
@@ -165,7 +165,7 @@ The app has explicit intent handling for two artifact-style flows:
 - Calls RAG with attachment context and report instruction.
 - Saves result to PDF on device via `SummaryPdfService`.
 
-## 4.4 Full-screen AI Quiz Engine
+### 4.4 Full-screen AI Quiz Engine
 
 `AiQuestionPaperQuizScreen` features:
 - One-question-at-a-time flow with progress bar.
@@ -173,7 +173,7 @@ The app has explicit intent handling for two artifact-style flows:
 - "View Theory" bottom sheet using per-question source metadata.
 - PDF export of full generated paper + answer/explanation/source lines.
 
-## 4.5 OCR Search in Viewer
+### 4.5 OCR Search in Viewer
 
 In `PdfViewerScreen`:
 - Native PDF text search is attempted first.
@@ -261,7 +261,7 @@ Bookmarks routes:
 
 ## 8. Teacher/Admin Mapping from Dashboard Context
 
-Based on `C:\Users\ASUS\Desktop\admin-studyspace` docs and code:
+Based on `<repo-root>/admin-studyspace` docs and code:
 - Admin dashboard supports resource moderation, notice management, syllabus upload, and user moderation.
 - Mobile app role logic treats users with `admin_key` as teacher-capable in many flows.
 - Mobile moderation endpoint aligns with dashboard/admin path style (`/api/admin/resources/.../status`).
@@ -320,5 +320,7 @@ Project docs used:
 - `FEATURE_DOCUMENTATION.md`
 - `AI_CHAT_MODERNIZATION_PLAN.md`
 - `N8N_AI_AUTOMATION_IMPLEMENTATION_GUIDE.md`
-- `C:\Users\ASUS\Desktop\admin-studyspace\PRD.md`
-- `C:\Users\ASUS\Desktop\admin-studyspace\TRD.md`
+- `<repo-root>/admin-studyspace/PRD.md`
+- `<repo-root>/admin-studyspace/TRD.md`
+
+

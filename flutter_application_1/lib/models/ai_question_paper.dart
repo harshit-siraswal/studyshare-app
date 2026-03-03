@@ -1,159 +1,146 @@
 import 'package:flutter/foundation.dart';
+import 'package:freezed_annotation/freezed_annotation.dart';
 
-class AiQuestionPaperSource {
-  final String title;
-  final String section;
-  final String pages;
-  final String note;
+part 'ai_question_paper.freezed.dart';
+part 'ai_question_paper.g.dart';
 
-  const AiQuestionPaperSource({
-    this.title = '',
-    this.section = '',
-    this.pages = '',
-    this.note = '',
-  });
+@freezed
+abstract class AiQuestionPaperSource with _$AiQuestionPaperSource {
+  const factory AiQuestionPaperSource({
+    @Default('') String title,
+    @Default('') String section,
+    @Default('') String pages,
+    @Default('') String note,
+  }) = _AiQuestionPaperSource;
 
-  factory AiQuestionPaperSource.fromJson(Map<String, dynamic> json) {
-    return AiQuestionPaperSource(
-      title: json['title']?.toString() ?? '',
-      section: json['section']?.toString() ?? '',
-      pages: json['pages']?.toString() ?? '',
-      note: json['note']?.toString() ?? '',
-    );
+  factory AiQuestionPaperSource.fromJson(Map<String, dynamic> json) =>
+      _$AiQuestionPaperSourceFromJson(_normalizeSourceJson(json));
+
+  static Map<String, dynamic> _normalizeSourceJson(Map<String, dynamic> json) {
+    return {
+      'title': json['title']?.toString() ?? '',
+      'section': json['section']?.toString() ?? '',
+      'pages': json['pages']?.toString() ?? '',
+      'note': json['note']?.toString() ?? '',
+    };
   }
-
-  Map<String, dynamic> toJson() {
-    return {'title': title, 'section': section, 'pages': pages, 'note': note};
-  }
-
-  @override
-  bool operator ==(Object other) {
-    return identical(this, other) ||
-        other is AiQuestionPaperSource &&
-            runtimeType == other.runtimeType &&
-            title == other.title &&
-            section == other.section &&
-            pages == other.pages &&
-            note == other.note;
-  }
-
-  @override
-  int get hashCode => Object.hash(title, section, pages, note);
 }
 
-class AiQuestionPaperQuestion {
-  final String question;
-  final List<String> options;
-  final int correctIndex;
-  final String explanation;
-  final AiQuestionPaperSource source;
+@freezed
+abstract class AiQuestionPaperQuestion with _$AiQuestionPaperQuestion {
+  @Assert('options.isNotEmpty', 'options must not be empty')
+  @Assert(
+    'correctIndex >= 0 && correctIndex < options.length',
+    'Invalid correctIndex for options length',
+  )
+  factory AiQuestionPaperQuestion({
+    required String question,
+    required List<String> options,
+    required int correctIndex,
+    @Default('') String explanation,
+    @Default(AiQuestionPaperSource()) AiQuestionPaperSource source,
+  }) = _AiQuestionPaperQuestion;
 
-  AiQuestionPaperQuestion({
-    required this.question,
-    required this.options,
-    required this.correctIndex,
-    this.explanation = '',
-    this.source = const AiQuestionPaperSource(),
-  }) {
-    if (options.isEmpty) {
-      throw ArgumentError('options must not be empty');
-    }
-    if (correctIndex < 0 || correctIndex >= options.length) {
-      throw ArgumentError(
-        'Invalid correctIndex=$correctIndex for options length=${options.length}',
-      );
-    }
-  }
+  factory AiQuestionPaperQuestion.fromJson(Map<String, dynamic> json) =>
+      _$AiQuestionPaperQuestionFromJson(_normalizeQuestionJson(json));
 
-  factory AiQuestionPaperQuestion.fromJson(Map<String, dynamic> json) {
+  static Map<String, dynamic> _normalizeQuestionJson(
+    Map<String, dynamic> json,
+  ) {
     final optionsRaw = json['options'];
     var parsedOptions = <String>[];
     if (optionsRaw is List) {
-      parsedOptions = optionsRaw.map((e) => e.toString()).toList();
+      parsedOptions = optionsRaw
+          .map((e) => e?.toString().trim() ?? '')
+          .where((value) => value.isNotEmpty)
+          .toList();
     }
     if (parsedOptions.isEmpty) {
-      parsedOptions = <String>[''];
+      throw FormatException(
+        'AiQuestionPaperQuestion.fromJson: missing/empty options for '
+        'question "${json['question']}". Payload: $json',
+      );
     }
+
     final rawCorrectIndex = (json['correctIndex'] as num?)?.toInt() ?? 0;
     final boundedCorrectIndex = rawCorrectIndex.clamp(
       0,
       parsedOptions.length - 1,
     );
-    return AiQuestionPaperQuestion(
-      question: json['question']?.toString() ?? '',
-      options: parsedOptions,
-      correctIndex: boundedCorrectIndex,
-      explanation: json['explanation']?.toString() ?? '',
-      source: json['source'] is Map
-          ? AiQuestionPaperSource.fromJson(
-              Map<String, dynamic>.from(json['source'] as Map),
-            )
-          : const AiQuestionPaperSource(),
-    );
-  }
 
-  Map<String, dynamic> toJson() {
+    final sourceRaw = json['source'];
+    final parsedSource = sourceRaw is Map
+        ? AiQuestionPaperSource.fromJson(Map<String, dynamic>.from(sourceRaw))
+        : const AiQuestionPaperSource();
+
     return {
-      'question': question,
-      'options': options,
-      'correctIndex': correctIndex,
-      'explanation': explanation,
-      'source': source.toJson(),
+      'question': json['question']?.toString() ?? '',
+      'options': parsedOptions,
+      'correctIndex': boundedCorrectIndex,
+      'explanation': json['explanation']?.toString() ?? '',
+      'source': parsedSource.toJson(),
     };
   }
-
-  @override
-  bool operator ==(Object other) {
-    return identical(this, other) ||
-        other is AiQuestionPaperQuestion &&
-            runtimeType == other.runtimeType &&
-            question == other.question &&
-            listEquals(options, other.options) &&
-            correctIndex == other.correctIndex &&
-            explanation == other.explanation &&
-            source == other.source;
-  }
-
-  @override
-  int get hashCode => Object.hash(
-    question,
-    Object.hashAll(options),
-    correctIndex,
-    explanation,
-    source,
-  );
 }
 
-class AiQuestionPaper {
-  final String title;
-  final String subject;
-  final String semester;
-  final String branch;
-  final List<String> instructions;
-  final List<AiQuestionPaperQuestion> questions;
-  final DateTime generatedAt;
-  final int pyqCount;
+@freezed
+abstract class AiQuestionPaper with _$AiQuestionPaper {
+  const factory AiQuestionPaper({
+    required String title,
+    required String subject,
+    required String semester,
+    required String branch,
+    required List<String> instructions,
+    required List<AiQuestionPaperQuestion> questions,
+    required DateTime generatedAt,
+    required int pyqCount,
+  }) = _AiQuestionPaper;
 
-  AiQuestionPaper({
-    required this.title,
-    required this.subject,
-    required this.semester,
-    required this.branch,
-    required this.instructions,
-    required this.questions,
-    required this.generatedAt,
-    required this.pyqCount,
-  });
+  factory AiQuestionPaper.fromJson(Map<String, dynamic> json) =>
+      _$AiQuestionPaperFromJson(_normalizePaperJson(json));
 
-  factory AiQuestionPaper.fromJson(Map<String, dynamic> json) {
+  static Map<String, dynamic> _normalizePaperJson(Map<String, dynamic> json) {
     final rawInstructions = (json['instructions'] as List?) ?? const [];
     final rawQuestions = (json['questions'] as List?) ?? const [];
-    final parsedQuestions = <AiQuestionPaperQuestion>[];
+    final parsedInstructions = <String>[];
+    final parsedQuestions = <Map<String, dynamic>>[];
+
+    for (var i = 0; i < rawInstructions.length; i++) {
+      final item = rawInstructions[i];
+      if (item is String) {
+        final instruction = item.trim();
+        if (instruction.isNotEmpty) {
+          parsedInstructions.add(instruction);
+        }
+        continue;
+      }
+      if (item is Map) {
+        final map = Map<String, dynamic>.from(item);
+        final candidate = map['text'] ?? map['instruction'] ?? map['value'];
+        final instruction = candidate?.toString().trim() ?? '';
+        if (instruction.isNotEmpty) {
+          parsedInstructions.add(instruction);
+        } else {
+          debugPrint(
+            'AiQuestionPaper.fromJson ignored malformed instruction '
+            'at index $i: $item',
+          );
+        }
+        continue;
+      }
+      debugPrint(
+        'AiQuestionPaper.fromJson ignored non-string instruction '
+        'at index $i: $item',
+      );
+    }
+
     for (var i = 0; i < rawQuestions.length; i++) {
       final item = rawQuestions[i];
       if (item is Map) {
         parsedQuestions.add(
-          AiQuestionPaperQuestion.fromJson(Map<String, dynamic>.from(item)),
+          AiQuestionPaperQuestion._normalizeQuestionJson(
+            Map<String, dynamic>.from(item),
+          ),
         );
       } else {
         debugPrint(
@@ -176,55 +163,17 @@ class AiQuestionPaper {
         'AiQuestionPaper.fromJson invalid generatedAt value: $generatedAtRaw',
       );
     }
-    return AiQuestionPaper(
-      title: json['title']?.toString() ?? '',
-      subject: json['subject']?.toString() ?? '',
-      semester: json['semester']?.toString() ?? '',
-      branch: json['branch']?.toString() ?? '',
-      instructions: rawInstructions.map((e) => e.toString()).toList(),
-      questions: parsedQuestions,
-      generatedAt: parsedGeneratedAt ?? generatedAtFallback,
-      pyqCount: (json['pyqCount'] as num?)?.toInt() ?? 0,
-    );
-  }
 
-  Map<String, dynamic> toJson() {
     return {
-      'title': title,
-      'subject': subject,
-      'semester': semester,
-      'branch': branch,
-      'instructions': instructions,
-      'questions': questions.map((q) => q.toJson()).toList(),
-      'generatedAt': generatedAt.toIso8601String(),
-      'pyqCount': pyqCount,
+      'title': json['title']?.toString() ?? '',
+      'subject': json['subject']?.toString() ?? '',
+      'semester': json['semester']?.toString() ?? '',
+      'branch': json['branch']?.toString() ?? '',
+      'instructions': parsedInstructions,
+      'questions': parsedQuestions,
+      'generatedAt': (parsedGeneratedAt ?? generatedAtFallback)
+          .toIso8601String(),
+      'pyqCount': (json['pyqCount'] as num?)?.toInt() ?? 0,
     };
   }
-
-  @override
-  bool operator ==(Object other) {
-    return identical(this, other) ||
-        other is AiQuestionPaper &&
-            runtimeType == other.runtimeType &&
-            title == other.title &&
-            subject == other.subject &&
-            semester == other.semester &&
-            branch == other.branch &&
-            listEquals(instructions, other.instructions) &&
-            listEquals(questions, other.questions) &&
-            generatedAt == other.generatedAt &&
-            pyqCount == other.pyqCount;
-  }
-
-  @override
-  int get hashCode => Object.hash(
-    title,
-    subject,
-    semester,
-    branch,
-    Object.hashAll(instructions),
-    Object.hashAll(questions),
-    generatedAt,
-    pyqCount,
-  );
 }

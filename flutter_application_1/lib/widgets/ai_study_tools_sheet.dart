@@ -221,14 +221,20 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     }
   }
 
+  bool _isNonEmptyOutput(Object? value) {
+    if (value is String) return value.trim().isNotEmpty;
+    if (value is List) return value.isNotEmpty;
+    return false;
+  }
+
   bool _hasOutput(String type) {
     switch (type) {
       case 'summary':
-        return _summary != null && _summary!.trim().isNotEmpty;
+        return _isNonEmptyOutput(_summary);
       case 'quiz':
-        return _quiz != null && _quiz!.isNotEmpty;
+        return _isNonEmptyOutput(_quiz);
       case 'flashcards':
-        return _flashcards != null && _flashcards!.isNotEmpty;
+        return _isNonEmptyOutput(_flashcards);
       default:
         return false;
     }
@@ -262,9 +268,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
   int get _readyOutputCount {
     var count = 0;
-    if (_summary != null && _summary!.trim().isNotEmpty) count++;
-    if (_quiz != null && _quiz!.isNotEmpty) count++;
-    if (_flashcards != null && _flashcards!.isNotEmpty) count++;
+    if (_isNonEmptyOutput(_summary)) count++;
+    if (_isNonEmptyOutput(_quiz)) count++;
+    if (_isNonEmptyOutput(_flashcards)) count++;
     return count;
   }
 
@@ -543,7 +549,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
       ],
       questions: questions,
       generatedAt: DateTime.now(),
-      pyqCount: 1,
+      pyqCount: 1, // Default: studio quiz payload does not provide PYQ count.
     );
   }
 
@@ -1945,3 +1951,4 @@ class _SummaryBlock {
 
   _SummaryBlock({required this.kind, required this.text});
 }
+

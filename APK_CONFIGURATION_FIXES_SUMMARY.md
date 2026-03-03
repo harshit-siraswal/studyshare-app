@@ -14,7 +14,8 @@ This document summarizes all the fixes implemented to resolve the "content not v
 
 **Problem:** Basic ProGuard rules were insufficient to protect Supabase, Firebase, and JSON serialization classes from being stripped by R8 in release builds.
 
-**Solution:** Comprehensive ProGuard rules added with protection for:
+**Solution:** ProGuard rules tightened to keep only the public API surface and
+reflection/serialization targets needed at runtime:
 - **Flutter core classes** (essential for app functionality)
 - **Supabase & Postgrest** (critical for data loading)
 - **JSON Serialization** (Gson, annotations, model classes)
@@ -23,19 +24,23 @@ This document summarizes all the fixes implemented to resolve the "content not v
 - **AndroidX libraries**
 - **App-specific models** (data classes)
 
-**Key Additions:**
+**Key Additions (example patterns to adapt):**
 ```proguard
-# Supabase & Postgrest (CRITICAL for data loading)
--keep class io.supabase.** { *; }
--keep class io.github.jan.supabase.** { *; }
+# Supabase & Postgrest (keep public API only)
+-keep class io.supabase.** { public *; }
+-keep class io.github.jan.supabase.** { public *; }
 
-# JSON Serialization (CRITICAL - Supabase uses this)
+# JSON Serialization (annotations + fields referenced by @SerializedName)
 -keepattributes Signature
 -keepattributes *Annotation*
--keep class com.google.gson.** { *; }
+-keep class com.google.gson.annotations.** { *; }
+-keep class com.google.gson.reflect.TypeToken { *; }
+-keepclassmembers class ** {
+  @com.google.gson.annotations.SerializedName <fields>;
+}
 
-# OkHttp & Networking (Supabase uses this)
--keep class okhttp3.** { *; }
+# OkHttp (only what is required at runtime)
+-dontwarn okhttp3.**
 -keepnames class okhttp3.internal.publicsuffix.PublicSuffixDatabase
 ```
 
@@ -50,11 +55,21 @@ This document summarizes all the fixes implemented to resolve the "content not v
 - But more importantly, we couldn't test if ProGuard rules were working
 - Production builds would fail if ProGuard was enabled later
 
-**Solution:** Enabled ProGuard with comprehensive rules:
+**Solution:** Enabled ProGuard with a release signing config driven by environment variables.
+Debug signing is only for local testing and must never be used for production.
 ```kotlin
+signingConfigs {
+    create("release") {
+        storeFile = file(System.getenv("KEYSTORE_PATH") ?: "")
+        storePassword = System.getenv("KEYSTORE_PASSWORD")
+        keyAlias = System.getenv("KEY_ALIAS")
+        keyPassword = System.getenv("KEY_PASSWORD")
+    }
+}
+
 buildTypes {
     release {
-        signingConfig = signingConfigs.getByName("debug")
+        signingConfig = signingConfigs.getByName("release")
         // Enable ProGuard/R8 with comprehensive rules
         isMinifyEnabled = true
         isShrinkResources = true
@@ -78,7 +93,7 @@ buildTypes {
 ```dart
 GestureDetector(
   onHorizontalDragEnd: (details) {
-    // Swipe right to open timer (if closed)
+    // Threshold: 200 logical pixels per second
     if (!_showTimer && details.primaryVelocity != null && details.primaryVelocity! > 200) {
       _toggleTimer();
     }
@@ -86,6 +101,8 @@ GestureDetector(
   child: /* main content */
 )
 ```
+Consider extracting the threshold into a named constant such as
+`const double timerOpenVelocityThreshold = 200.0` and reuse it in the condition.
 
 **Features:**
 - ✅ Swipe **right** from anywhere on screen → Opens timer panel
@@ -117,6 +134,9 @@ GestureDetector(
 - ✅ Skip/Back/Next buttons
 - ✅ Highlight effects for features
 - ✅ Stored in SharedPreferences (`hasSeenHomeHelp`)
+- ✅ Provide a reset entry point: add a public reset method that clears
+  `hasSeenHomeHelp`, and call the existing show logic from `HomeScreen` when a
+  "Show Tutorial Again" action is selected (settings or toolbar).
 
 **Files:**
 - `flutter_application_1/lib/widgets/help_overlay.dart` (new)
@@ -135,9 +155,14 @@ GestureDetector(
 **File:** `flutter_application_1/android/app/src/main/AndroidManifest.xml`
 
 ### ✅ Firebase Configuration
-**Status:** Already correct
+**Status:** Release SHA-1 must be registered for production builds
 - ✅ `google-services.json` present with correct App ID: `1:28032445048:android:352231dac56a6b1f4b1b8d`
-- ✅ SHA-1 fingerprint registered: `d28b5b4378c3de608a967638ad9d2dfdb2c08633`
+- ✅ Debug SHA-1 registered: `d28b5b4378c3de608a967638ad9d2dfdb2c08633`
+- ✅ Action required for release builds:
+  - Generate a release keystore, obtain its SHA-1 (`keytool -list -v -keystore ...`)
+  - Add that SHA-1 to the Firebase Android app settings
+  - Download the updated `google-services.json` and replace
+    `flutter_application_1/android/app/google-services.json`
 - ✅ Firebase auto-initialization in `main.dart` (uses `google-services.json`)
 
 **File:** `flutter_application_1/android/app/google-services.json`
@@ -160,6 +185,28 @@ GestureDetector(
 - [ ] Run `flutter pub get`
 - [ ] Build release APK: `flutter build apk --release`
 - [ ] Install APK on device: `adb install build/app/outputs/flutter-apk/app-release.apk`
+
+### Device/OS Coverage
+- [ ] Android versions: min API through latest (e.g., API 21–34)
+- [ ] Device categories: phone, tablet, foldable
+- [ ] Manufacturer variations: Samsung, Pixel, OnePlus (or equivalents)
+- [ ] Screen sizes: small, medium, large
+
+### Network Conditions
+- [ ] WiFi
+- [ ] Cellular
+- [ ] Offline
+- [ ] Poor connectivity (throttled/packet loss)
+
+### Performance Metrics
+- [ ] APK size (release)
+- [ ] Cold start time
+- [ ] Memory usage during typical flows
+
+### ProGuard/R8 Validation
+- [ ] Test on lower API levels (min supported)
+- [ ] Test on low-memory devices
+- [ ] Measure APK size reduction vs non-minified build
 
 ### Functional Testing
 
@@ -271,6 +318,9 @@ adb logcat | grep -i "error\|exception\|crash\|supabase\|firebase"
    isMinifyEnabled = false
    isShrinkResources = false
    ```
+   Warning: this is diagnostic only. It will increase APK size, can change
+   execution paths so some bugs only appear in minified builds, and must not be
+   used for production. Re-enable ProGuard before any release build.
    If content appears without ProGuard, the issue is ProGuard rules (should be fixed now).
 
 ### If Help Overlay Doesn't Appear
@@ -365,3 +415,5 @@ The app should now:
 - ✅ Provide better user experience with gestures and help
 
 **Ready for testing!** 🚀
+
+

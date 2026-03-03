@@ -25,6 +25,7 @@ import '../../widgets/user_badge.dart';
 import 'post_detail_screen.dart';
 import '../../services/cloudinary_service.dart';
 import '../../config/app_config.dart';
+import '../../models/user.dart';
 
 class ChatRoomScreen extends StatefulWidget {
   final String roomId;
@@ -51,8 +52,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   final SupabaseService _supabaseService = SupabaseService();
   final AuthService _authService = AuthService();
   final BackendApiService _backendApiService = BackendApiService();
+  bool _isTeacherOrAdmin = false;
 
   bool get _isReadOnly {
+    if (_isTeacherOrAdmin) return false;
     final domain = widget.collegeDomain;
     if (domain.isEmpty) return true;
     return !widget.userEmail.endsWith(domain);
@@ -95,6 +98,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       duration: const Duration(milliseconds: 600),
     );
 
+    _loadWriterRole();
     _loadRoomData();
     _subscribeToPosts();
     _subscribeToPresence();
@@ -185,6 +189,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       if (mounted && requestId == _loadRequestId) {
         setState(() => _isLoading = false);
       }
+    }
+  }
+
+  Future<void> _loadWriterRole() async {
+    try {
+      final role = await _supabaseService.getCurrentUserRole();
+      if (!mounted) return;
+      setState(() {
+        _isTeacherOrAdmin = role == AppRoles.teacher || role == AppRoles.admin;
+      });
+    } catch (e, st) {
+      debugPrint('ChatRoomScreen._loadWriterRole failed: $e\n$st');
+      if (!mounted) return;
+      setState(() => _isTeacherOrAdmin = false);
     }
   }
 

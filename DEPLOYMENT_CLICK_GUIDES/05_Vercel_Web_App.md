@@ -12,7 +12,7 @@ Project path: `<your-local-project-directory>`
 ## B. Set API URL
 
 1. Add/update:
-- `VITE_API_URL` = `https://api.studyshare.in` (apply to **Production** and **Preview**)
+- `VITE_API_URL` = `https://api.mystudyspace.in` (apply to **Production** and **Preview**)
 
 2. Click **Save**
 
@@ -21,12 +21,12 @@ Project path: `<your-local-project-directory>`
 1. Click **Deployments**
 2. Open latest deployment
 3. Click menu `...`
-4. Click **Redeploy**
-5. Click **Redeploy**
+4. Click **Redeploy** (to open the confirmation dialog)
+5. Click **Redeploy** again (to confirm)
 
 ## D. Verify web app API calls
 
-1. Open your web app (`https://studyshare.in`)
+1. Open your web app (`https://mystudyspace.in`)
 2. Login with a test user
 3. Confirm these work:
 - Profile load
@@ -35,3 +35,4 @@ Project path: `<your-local-project-directory>`
 - Start a test upload from the upload dialog
 - Verify a signed upload URL is returned (a URL containing upload authentication tokens)
 - Confirm the upload completes successfully
+

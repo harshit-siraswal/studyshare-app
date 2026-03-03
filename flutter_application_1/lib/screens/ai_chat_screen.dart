@@ -66,6 +66,10 @@ class AIChatMessage {
   List<RagSource> sources;
   bool cached;
   bool noLocal;
+  double? retrievalScore;
+  double? llmConfidenceScore;
+  double? combinedConfidence;
+  bool ocrFailureAffectsRetrieval;
   AiQuestionPaper? quizActionPaper;
 
   AIChatMessage({
@@ -74,6 +78,10 @@ class AIChatMessage {
     this.sources = const [],
     this.cached = false,
     this.noLocal = false,
+    this.retrievalScore,
+    this.llmConfidenceScore,
+    this.combinedConfidence,
+    this.ocrFailureAffectsRetrieval = false,
     this.quizActionPaper,
   });
 }
@@ -171,6 +179,7 @@ class _AIChatScreenState extends State<AIChatScreen>
   final List<_ChatAttachment> _attachments = [];
   final List<_ChatAttachment> _stickyAttachments = [];
   bool _isUploadingAttachment = false;
+  bool _isOcrActionLoading = false;
   List<LocalAiChatSession> _sessions = [];
   String? _activeSessionId;
   bool _isHistoryLoading = true;
@@ -199,6 +208,16 @@ class _AIChatScreenState extends State<AIChatScreen>
     'Give me 5 MCQs on Operating Systems with answers.',
     'Explain stack vs queue with a real-world example.',
     'List key formulas from my notes for quick revision.',
+  ];
+  static const List<String> _noContextPhrases = [
+    "couldn't find enough relevant information",
+    'could not find enough relevant information',
+    "couldn't locate",
+    'could not locate',
+    'unable to find',
+    'no relevant information',
+    'no relevant content found',
+    'no relevant',
   ];
 
   bool get _isStudioChat => widget.resourceContext != null;
@@ -695,6 +714,10 @@ class _AIChatScreenState extends State<AIChatScreen>
           .toList(),
       cached: message.cached,
       noLocal: message.noLocal,
+      retrievalScore: message.retrievalScore,
+      llmConfidenceScore: message.llmConfidenceScore,
+      combinedConfidence: message.combinedConfidence,
+      ocrFailureAffectsRetrieval: message.ocrFailureAffectsRetrieval,
       actionType: quizPayload == null ? null : 'start_quiz',
       actionPayload: quizPayload,
       createdAt: DateTime.now().toIso8601String(),
@@ -718,8 +741,212 @@ class _AIChatScreenState extends State<AIChatScreen>
           .toList(),
       cached: message.cached,
       noLocal: message.noLocal,
+      retrievalScore: message.retrievalScore,
+      llmConfidenceScore: message.llmConfidenceScore,
+      combinedConfidence: message.combinedConfidence,
+      ocrFailureAffectsRetrieval: message.ocrFailureAffectsRetrieval,
       quizActionPaper: quizActionPaper,
     );
+  }
+
+  double? _toNullableDouble(dynamic value) {
+    if (value is num) return value.toDouble();
+    if (value is String) return double.tryParse(value);
+    return null;
+  }
+
+  Future<RagSource?> _pickSourceForOcrAction(List<RagSource> sources) async {
+    final candidates = sources.where((s) => s.fileId.trim().isNotEmpty).toList();
+    if (candidates.isEmpty) return null;
+    if (candidates.length == 1) return candidates.first;
+
+    return showModalBottomSheet<RagSource>(
+      context: context,
+      builder: (sheetContext) {
+        final isDark = Theme.of(sheetContext).brightness == Brightness.dark;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 12),
+              Text(
+                'Select source',
+                style: GoogleFonts.inter(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? Colors.white : Colors.black,
+                ),
+              ),
+              const SizedBox(height: 10),
+              ...candidates.map((source) {
+                return ListTile(
+                  title: Text(
+                    source.title,
+                    style: GoogleFonts.inter(
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                  subtitle: source.startPage != null
+                      ? Text(
+                          'Pages ${source.startPage}-${source.endPage ?? source.startPage}',
+                        )
+                      : null,
+                  onTap: () => Navigator.pop(sheetContext, source),
+                );
+              }),
+              const SizedBox(height: 6),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _retryOcrForMessage(AIChatMessage msg) async {
+    if (_isOcrActionLoading) return;
+    final source = await _pickSourceForOcrAction(msg.sources);
+    if (source == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No source available for OCR retry.')),
+      );
+      return;
+    }
+
+    setState(() => _isOcrActionLoading = true);
+    try {
+      await _api.retryNotebookSourceNow(sourceId: source.fileId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('OCR retry started for "${source.title}".')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e.toString().replaceFirst('Exception: ', ''),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isOcrActionLoading = false);
+    }
+  }
+
+  Future<void> _cancelOcrRetryForMessage(AIChatMessage msg) async {
+    if (_isOcrActionLoading) return;
+    final source = await _pickSourceForOcrAction(msg.sources);
+    if (source == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No source available to cancel retry.')),
+      );
+      return;
+    }
+
+    setState(() => _isOcrActionLoading = true);
+    try {
+      await _api.cancelNotebookSourceRetry(sourceId: source.fileId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Retry cancelled for "${source.title}".')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e.toString().replaceFirst('Exception: ', ''),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isOcrActionLoading = false);
+    }
+  }
+
+  Future<void> _requestReuploadForMessage(AIChatMessage msg) async {
+    if (_isOcrActionLoading) return;
+    final source = await _pickSourceForOcrAction(msg.sources);
+    if (source == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No source available for re-upload.')),
+      );
+      return;
+    }
+
+    final picked = await FilePicker.platform.pickFiles(
+      allowMultiple: false,
+      type: FileType.custom,
+      allowedExtensions: const [
+        'pdf',
+        'ppt',
+        'pptx',
+        'doc',
+        'docx',
+        'txt',
+        'md',
+        'png',
+        'jpg',
+        'jpeg',
+        'tiff',
+        'bmp',
+        'gif',
+      ],
+    );
+
+    if (picked == null || picked.files.isEmpty) return;
+    final file = picked.files.first;
+    final filePath = file.path;
+    if (filePath == null || filePath.trim().isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not read file path for upload. Try again.'),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isOcrActionLoading = true);
+    try {
+      final upload = await _api.uploadNotebookSource(
+        filePath: filePath,
+        collegeId: widget.collegeId,
+        notebookId: _activeSessionId,
+        title: file.name,
+        sourceScope: 'ai_chat_reupload',
+      );
+      final replacementFileId = upload['replacement_file_id']?.toString() ?? '';
+      if (replacementFileId.isEmpty) {
+        throw Exception('Upload did not return replacement_file_id.');
+      }
+      await _api.requestNotebookSourceReupload(
+        sourceId: source.fileId,
+        replacementFileId: replacementFileId,
+        reason: 'manual_reupload_from_ai_chat',
+        ocrErrorCode: 'ocr_failed',
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Re-upload request submitted for "${source.title}".'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e.toString().replaceFirst('Exception: ', ''),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isOcrActionLoading = false);
+    }
   }
 
   Future<void> _persistCurrentSession() async {
@@ -1208,6 +1435,19 @@ class _AIChatScreenState extends State<AIChatScreen>
         response['response']?.toString() ??
         response['data']?.toString() ??
         '';
+  }
+
+  bool _responseIndicatesNoLocal(Map<String, dynamic> response) {
+    if (response['no_local'] == true) return true;
+    final data = response['data'];
+    if (data is Map && data['no_local'] == true) return true;
+    return false;
+  }
+
+  bool _looksLikeNoContextAnswer(String answer) {
+    final normalized = answer.trim().toLowerCase();
+    if (normalized.isEmpty) return true;
+    return _noContextPhrases.any(normalized.contains);
   }
 
   Map<String, dynamic>? _decodeJsonMapFromText(String raw) {
@@ -1738,39 +1978,58 @@ Return STRICT JSON only (no markdown). Schema:
         ...attachmentPayload,
         ...contextAttachments,
       ];
+      final totalAttachmentCount = mergedAttachments.length;
+      final hasPdfAttachments = mergedAttachments.any(
+        (item) => item['type']?.toString().toLowerCase() == 'pdf',
+      );
+      final hasImageAttachments = mergedAttachments.any(
+        (item) => item['type']?.toString().toLowerCase() == 'image',
+      );
       var lastAnswer = '';
       AiQuestionPaper? paper;
-      for (var attempt = 0; attempt < 2 && paper == null; attempt++) {
-        final strictMode = attempt == 1;
+      var forceOcr = false;
+      for (var attempt = 0; attempt < 3 && paper == null; attempt++) {
+        final strictMode = attempt > 0;
         final prompt = _buildQuestionPaperPrompt(
           userPrompt: userPrompt,
           semester: config.semester,
           branch: config.branch,
           inferredSubject: inferredSubject,
-          contextResourcesCount: contextAttachments.length,
+          contextResourcesCount: totalAttachmentCount,
           strictAntiPlaceholder: strictMode,
         );
+        final allowWeb =
+            (attempt == 2) || (mergedAttachments.isEmpty && attempt > 0);
         final response = await _api.queryRag(
           question: prompt,
           collegeId: widget.collegeId,
           sessionId: _activeSessionId,
           fileId: widget.resourceContext?.fileId,
-          allowWeb: strictMode || contextAttachments.isEmpty,
-          useOcr: true,
-          forceOcr: true,
-          ocrProvider: 'google_vision',
+          allowWeb: allowWeb,
+          useOcr: hasImageAttachments || forceOcr,
+          forceOcr: forceOcr,
+          ocrProvider: (hasImageAttachments || forceOcr)
+              ? 'google_vision'
+              : null,
           attachments: mergedAttachments,
           history: history,
           filters: contextFilters,
         );
         final answer = _extractRagAnswer(response);
         lastAnswer = answer;
+        final noLocal =
+            _responseIndicatesNoLocal(response) ||
+            _looksLikeNoContextAnswer(answer);
+        if (noLocal && hasPdfAttachments && !forceOcr) {
+          forceOcr = true;
+          continue;
+        }
         final candidate = _parseQuestionPaper(
           rawResponse: answer,
           semester: config.semester,
           branch: config.branch,
           fallbackSubject: inferredSubject,
-          contextResourceCount: contextAttachments.length,
+          contextResourceCount: totalAttachmentCount,
         );
         if (candidate == null) continue;
         if (_isLowQualityQuestionPaper(candidate)) {
@@ -2079,6 +2338,17 @@ Return STRICT JSON only (no markdown). Schema:
             setState(() {
               aiMessage.sources = sources;
               aiMessage.noLocal = data['no_local'] == true;
+              aiMessage.retrievalScore = _toNullableDouble(
+                data['retrieval_score'],
+              );
+              aiMessage.llmConfidenceScore = _toNullableDouble(
+                data['llm_confidence_score'],
+              );
+              aiMessage.combinedConfidence = _toNullableDouble(
+                data['combined_confidence'],
+              );
+              aiMessage.ocrFailureAffectsRetrieval =
+                  data['ocr_failure_affects_retrieval'] == true;
             });
           } else if (type == 'chunk') {
             final textChunk = chunk['text']?.toString() ?? '';
@@ -2110,6 +2380,17 @@ Return STRICT JSON only (no markdown). Schema:
                 setState(() {
                   aiMessage.sources = sources;
                   aiMessage.noLocal = chunk['no_local'] == true;
+                  aiMessage.retrievalScore = _toNullableDouble(
+                    chunk['retrieval_score'],
+                  );
+                  aiMessage.llmConfidenceScore = _toNullableDouble(
+                    chunk['llm_confidence_score'],
+                  );
+                  aiMessage.combinedConfidence = _toNullableDouble(
+                    chunk['combined_confidence'],
+                  );
+                  aiMessage.ocrFailureAffectsRetrieval =
+                      chunk['ocr_failure_affects_retrieval'] == true;
                 });
               }
             }
@@ -2170,7 +2451,7 @@ Return STRICT JSON only (no markdown). Schema:
       await _finishLongResponseTracker(
         tracker: tracker,
         notificationTitle: 'AI Response Ready',
-        notificationBody: 'Your AI answer is ready in StudySpace.',
+        notificationBody: 'Your AI answer is ready in StudyShare.',
       );
     }
   }
@@ -2310,6 +2591,7 @@ Return STRICT JSON only (no markdown). Schema:
     bool isDark,
     int index,
     double screenWidth,
+    double bubbleMaxWidth,
   ) {
     final isCompact = screenWidth < 380;
     final isSmallPhone = screenWidth < 350;
@@ -2333,6 +2615,8 @@ Return STRICT JSON only (no markdown). Schema:
       color: textColor,
       letterSpacing: 0.05,
     );
+    final skeletonLine1Width = (bubbleMaxWidth * 0.6).clamp(110.0, 260.0);
+    final skeletonLine2Width = (bubbleMaxWidth * 0.45).clamp(88.0, 220.0);
 
     final messageBody = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2374,6 +2658,27 @@ Return STRICT JSON only (no markdown). Schema:
                     style: GoogleFonts.inter(
                       fontSize: isCompact ? 9 : 9.5,
                       color: AppTheme.warning,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+              if (msg.combinedConfidence != null) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    'Conf ${(msg.combinedConfidence! * 100).toStringAsFixed(0)}%',
+                    style: GoogleFonts.inter(
+                      fontSize: isCompact ? 9 : 9.5,
+                      color: AppTheme.primary,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -2431,7 +2736,7 @@ Return STRICT JSON only (no markdown). Schema:
                     children: [
                       Container(
                         height: 8,
-                        width: 170,
+                        width: skeletonLine1Width,
                         decoration: BoxDecoration(
                           color: isDark
                               ? Colors.white24
@@ -2442,7 +2747,7 @@ Return STRICT JSON only (no markdown). Schema:
                       const SizedBox(height: 6),
                       Container(
                         height: 8,
-                        width: 138,
+                        width: skeletonLine2Width,
                         decoration: BoxDecoration(
                           color: isDark
                               ? Colors.white24
@@ -2458,6 +2763,69 @@ Return STRICT JSON only (no markdown). Schema:
           )
         else
           Text(msg.content, style: messageTextStyle),
+        if (!msg.isUser && msg.ocrFailureAffectsRetrieval) ...[
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: AppTheme.warning.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: AppTheme.warning.withValues(alpha: 0.28),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Results may be incomplete because OCR failed for one or more sources.',
+                  style: GoogleFonts.inter(
+                    fontSize: isCompact ? 11 : 11.5,
+                    color: isDark ? Colors.white70 : Colors.black87,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    _buildBubbleAction(
+                      icon: Icons.refresh_rounded,
+                      label: _isOcrActionLoading ? 'Retrying...' : 'Retry OCR',
+                      onTap: _isOcrActionLoading
+                          ? () {}
+                          : () => _retryOcrForMessage(msg),
+                      color: isDark ? Colors.white70 : Colors.black87,
+                      isCompact: isCompact,
+                    ),
+                    _buildBubbleAction(
+                      icon: Icons.cancel_schedule_send_rounded,
+                      label: _isOcrActionLoading ? 'Working...' : 'Cancel Retry',
+                      onTap: _isOcrActionLoading
+                          ? () {}
+                          : () => _cancelOcrRetryForMessage(msg),
+                      color: isDark ? Colors.white70 : Colors.black87,
+                      isCompact: isCompact,
+                    ),
+                    _buildBubbleAction(
+                      icon: Icons.upload_file_rounded,
+                      label: _isOcrActionLoading
+                          ? 'Uploading...'
+                          : 'Request Re-upload',
+                      onTap: _isOcrActionLoading
+                          ? () {}
+                          : () => _requestReuploadForMessage(msg),
+                      color: isDark ? Colors.white70 : Colors.black87,
+                      isCompact: isCompact,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
         if (!msg.isUser && msg.sources.isNotEmpty) ...[
           const SizedBox(height: 12),
           Text(
@@ -3098,6 +3466,7 @@ Return STRICT JSON only (no markdown). Schema:
                               isDark,
                               index,
                               screenWidth,
+                              bubbleMaxWidth,
                             ),
                           ),
                         );

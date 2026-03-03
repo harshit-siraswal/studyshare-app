@@ -134,51 +134,39 @@ class _ResourceSearchScreenState extends State<ResourceSearchScreen> {
       // Handle Downloads separately: fetch from local storage, not API
       if (_selectedType == 'Downloads') {
         final hasPremiumAccess = await _subscriptionService.isPremium();
-        var localResults = _downloadService.getAllDownloadedResourcesForUser(
-          widget.userEmail,
-          hasPremiumAccess: hasPremiumAccess,
-        );
+        final downloadedResults = await _downloadService
+            .getAllDownloadedResourcesForUser(
+              widget.userEmail,
+              hasPremiumAccess: hasPremiumAccess,
+            );
+        final query = _searchController.text.trim().toLowerCase();
+        final selectedSemester = _selectedSemester?.toLowerCase();
+        final selectedBranch = _selectedBranch?.toLowerCase();
+        final selectedSubject = _selectedSubject?.toLowerCase();
+        var localResults = downloadedResults.where((resource) {
+          if (query.isNotEmpty) {
+            final matchesQuery =
+                resource.title.toLowerCase().contains(query) ||
+                (resource.description?.toLowerCase().contains(query) ?? false);
+            if (!matchesQuery) return false;
+          }
+          if (selectedSemester != null &&
+              (resource.semester ?? '').toLowerCase() != selectedSemester) {
+            return false;
+          }
+          if (selectedBranch != null &&
+              (resource.branch ?? '').toLowerCase() != selectedBranch) {
+            return false;
+          }
+          if (selectedSubject != null &&
+              (resource.subject ?? '').toLowerCase() != selectedSubject) {
+            return false;
+          }
+          return true;
+        }).toList();
 
-        // Apply local filtering if search query is provided
-        if (_searchController.text.isNotEmpty) {
-          final query = _searchController.text.toLowerCase();
-          localResults = localResults
-              .where(
-                (resource) =>
-                    resource.title.toLowerCase().contains(query) ||
-                    (resource.description?.toLowerCase().contains(query) ??
-                        false),
-              )
-              .toList();
+        if (query.isNotEmpty) {
           _addRecentSearch(_searchController.text);
-        }
-
-        if (_selectedSemester != null) {
-          final selectedSemester = _selectedSemester!.toLowerCase();
-          localResults = localResults
-              .where(
-                (resource) =>
-                    (resource.semester ?? '').toLowerCase() == selectedSemester,
-              )
-              .toList();
-        }
-        if (_selectedBranch != null) {
-          final selectedBranch = _selectedBranch!.toLowerCase();
-          localResults = localResults
-              .where(
-                (resource) =>
-                    (resource.branch ?? '').toLowerCase() == selectedBranch,
-              )
-              .toList();
-        }
-        if (_selectedSubject != null) {
-          final selectedSubject = _selectedSubject!.toLowerCase();
-          localResults = localResults
-              .where(
-                (resource) =>
-                    (resource.subject ?? '').toLowerCase() == selectedSubject,
-              )
-              .toList();
         }
 
         final localSort = _mapSortOption(_selectedSort);
@@ -961,8 +949,9 @@ class _ResourceSearchScreenState extends State<ResourceSearchScreen> {
     if (uiType == 'All') return null;
     if (uiType == 'Videos') return 'video';
     if (uiType == 'Downloads') {
-      // Downloads are local-only; no API type exists.
-      return null;
+      throw StateError(
+        'uiType "Downloads" is local-only and must not be mapped to an API type',
+      );
     }
     return uiType.toLowerCase();
   }

@@ -66,6 +66,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     'odp',
     'txt',
   ];
+  static const int _premiumUnlockThreshold = 10;
   static const branches = {
     'CSE': 'cse',
     'ECE': 'ece',
@@ -250,11 +251,11 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
         return _showError('Enter video URL');
       }
       final uri = Uri.tryParse(_videoUrl);
+      final scheme = uri?.scheme.toLowerCase();
       if (uri == null ||
           !uri.hasScheme ||
           !uri.hasAuthority ||
-          (uri.scheme.toLowerCase() != 'http' &&
-              uri.scheme.toLowerCase() != 'https')) {
+          (scheme != 'http' && scheme != 'https')) {
         return _showError('Enter a valid HTTP/HTTPS video URL');
       }
     }
@@ -425,7 +426,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
         bool isRemoved = false;
 
         bool isPremiumUnlock =
-            contributionCount == 10 ||
+            contributionCount == _premiumUnlockThreshold ||
             (badgeUnlocked && contributionBadge?.id == 'pro');
 
         if (isPremiumUnlock) {

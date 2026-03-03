@@ -118,8 +118,11 @@ class StickerService {
   ];
   static Future<void>? _capabilityFetchFuture;
   static bool _remoteCapabilitiesLoaded = false;
-  static bool _remoteGiphyEnabled = false;
-  static bool _remoteRemoveBgEnabled = false;
+  static bool _giphyAvailable = false;
+  static bool _removeBgAvailable = false;
+  static DateTime? _lastCapabilityAttemptAt;
+  static bool _lastCapabilityAttemptHadToken = false;
+  static const Duration _capabilityRetryBackoff = Duration(seconds: 30);
 
   static const List<StickerPack> availablePacks = [
     StickerPack(
@@ -179,14 +182,37 @@ class StickerService {
   String get _giphyKey => AppConfig.giphyApiKey;
   String get _removeBgKey => AppConfig.removeBgApiKey;
 
-  bool get hasGiphy => _giphyKey.isNotEmpty || _remoteGiphyEnabled;
+  @visibleForTesting
+  static void resetForTesting() {
+    _capabilityFetchFuture = null;
+    _remoteCapabilitiesLoaded = false;
+    _giphyAvailable = false;
+    _removeBgAvailable = false;
+    _lastCapabilityAttemptAt = null;
+    _lastCapabilityAttemptHadToken = false;
+  }
+
+  Future<bool> hasGiphy() async {
+    await _ensureCapabilities();
+    return _giphyKey.isNotEmpty || _giphyAvailable;
+  }
 
   /// Returns true when background removal is available.
-  bool get canRemoveBackground =>
-      _removeBgKey.isNotEmpty || _remoteRemoveBgEnabled;
+  Future<bool> canRemoveBackground() async {
+    await _ensureCapabilities();
+    return _removeBgKey.isNotEmpty || _removeBgAvailable;
+  }
 
   Future<void> warmUpCapabilities() async {
     await _ensureCapabilities();
+  }
+
+  bool get _hasSignedInUser {
+    try {
+      return firebase_auth.FirebaseAuth.instance.currentUser != null;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<String?> _getIdToken() async {
@@ -200,22 +226,46 @@ class StickerService {
     }
   }
 
-  Uri _backendUri(String path, [Map<String, String>? queryParameters]) {
-    final normalizedBase = AppConfig.apiUrl.replaceAll(RegExp(r'/+$'), '');
-    return Uri.parse(
-      '$normalizedBase$path',
-    ).replace(queryParameters: queryParameters);
+  List<Uri> _backendUris(String path, [Map<String, String>? queryParameters]) {
+    return AppConfig.apiBaseUrls
+        .map(
+          (baseUrl) => Uri.parse(
+            '$baseUrl$path',
+          ).replace(queryParameters: queryParameters),
+        )
+        .toList(growable: false);
   }
 
   Future<void> _ensureCapabilities() async {
     if (_giphyKey.isNotEmpty && _removeBgKey.isNotEmpty) {
       _remoteCapabilitiesLoaded = true;
-      _remoteGiphyEnabled = true;
-      _remoteRemoveBgEnabled = true;
+      _giphyAvailable = true;
+      _removeBgAvailable = true;
       return;
     }
 
-    if (_remoteCapabilitiesLoaded) return;
+    final now = DateTime.now();
+    final recentlyAttempted =
+        _lastCapabilityAttemptAt != null &&
+        now.difference(_lastCapabilityAttemptAt!) < _capabilityRetryBackoff;
+    final hasSignedInUser = _hasSignedInUser;
+
+    if (_remoteCapabilitiesLoaded) {
+      final hasUnavailableCapabilities =
+          !_giphyAvailable || !_removeBgAvailable;
+      if (!hasUnavailableCapabilities || recentlyAttempted) {
+        return;
+      }
+    }
+
+    if (!_remoteCapabilitiesLoaded && recentlyAttempted) {
+      final shouldRetryAfterLogin =
+          hasSignedInUser && !_lastCapabilityAttemptHadToken;
+      if (!shouldRetryAfterLogin) {
+        return;
+      }
+    }
+
     if (_capabilityFetchFuture != null) {
       await _capabilityFetchFuture;
       return;
@@ -230,33 +280,62 @@ class StickerService {
   }
 
   Future<void> _fetchCapabilitiesFromBackend() async {
+    _lastCapabilityAttemptAt = DateTime.now();
     try {
       final token = await _getIdToken();
-      final response = await http
-          .get(
-            _backendUri('/api/stickers/config'),
-            headers: {
-              'Content-Type': 'application/json',
-              if (token != null && token.isNotEmpty)
-                'Authorization': 'Bearer $token',
-            },
-          )
-          .timeout(const Duration(seconds: 12));
+      final hasToken = token != null && token.isNotEmpty;
+      _lastCapabilityAttemptHadToken = hasToken;
 
-      if (response.statusCode >= 200 && response.statusCode < 300) {
-        final parsed = jsonDecode(response.body) as Map<String, dynamic>;
-        _remoteGiphyEnabled = parsed['giphyEnabled'] == true;
-        _remoteRemoveBgEnabled = parsed['removeBgEnabled'] == true;
-      } else {
-        _remoteGiphyEnabled = false;
-        _remoteRemoveBgEnabled = false;
+      if (!hasToken) {
+        _remoteCapabilitiesLoaded = false;
+        return;
+      }
+
+      final previousLoaded = _remoteCapabilitiesLoaded;
+      final previousGiphy = _giphyAvailable;
+      final previousRemoveBg = _removeBgAvailable;
+      var resolved = false;
+      for (final uri in _backendUris('/api/stickers/config')) {
+        try {
+          final response = await http
+              .get(
+                uri,
+                headers: {
+                  'Content-Type': 'application/json',
+                  if (hasToken) 'Authorization': 'Bearer $token',
+                },
+              )
+              .timeout(const Duration(seconds: 12));
+
+          if (response.statusCode >= 200 && response.statusCode < 300) {
+            final parsed = jsonDecode(response.body) as Map<String, dynamic>;
+            _giphyAvailable = parsed['giphyEnabled'] == true;
+            _removeBgAvailable = parsed['removeBgEnabled'] == true;
+            _remoteCapabilitiesLoaded = true;
+            resolved = true;
+            break;
+          }
+        } catch (e) {
+          debugPrint('Sticker capability check failed at $uri: $e');
+        }
+      }
+
+      if (!resolved) {
+        if (previousLoaded) {
+          _remoteCapabilitiesLoaded = previousLoaded;
+          _giphyAvailable = previousGiphy;
+          _removeBgAvailable = previousRemoveBg;
+        } else {
+          _remoteCapabilitiesLoaded = false;
+          _giphyAvailable = false;
+          _removeBgAvailable = false;
+        }
       }
     } catch (e) {
       debugPrint('Sticker capability check failed: $e');
-      _remoteGiphyEnabled = false;
-      _remoteRemoveBgEnabled = false;
-    } finally {
-      _remoteCapabilitiesLoaded = true;
+      _remoteCapabilitiesLoaded = false;
+      _giphyAvailable = false;
+      _removeBgAvailable = false;
     }
   }
 
@@ -270,14 +349,11 @@ class StickerService {
     final trimmedQuery = query?.trim();
     final hasDirectKey = _giphyKey.isNotEmpty;
 
-    Uri uri;
-    Map<String, String>? headers;
-
     if (hasDirectKey) {
       final endpoint = trimmedQuery != null && trimmedQuery.isNotEmpty
           ? '$_giphyBase/stickers/search'
           : '$_giphyBase/stickers/trending';
-      uri = Uri.parse(endpoint).replace(
+      final uri = Uri.parse(endpoint).replace(
         queryParameters: {
           'api_key': _giphyKey,
           'limit': limit.toString(),
@@ -287,42 +363,55 @@ class StickerService {
             'q': trimmedQuery,
         },
       );
-      headers = null;
+      try {
+        final res = await http.get(uri).timeout(const Duration(seconds: 15));
+        if (res.statusCode != 200) return [];
+        final decoded = jsonDecode(res.body) as Map<String, dynamic>?;
+        final data = (decoded?['data'] as List?) ?? [];
+        return data
+            .map((e) => GiphyStickerItem.fromJson(e as Map<String, dynamic>))
+            .where((s) => s.previewUrl.isNotEmpty)
+            .toList();
+      } catch (e) {
+        debugPrint('[Giphy] fetchGiphyStickers error: $e');
+        return [];
+      }
     } else {
       await _ensureCapabilities();
-      if (!_remoteGiphyEnabled) return [];
       final token = await _getIdToken();
-      uri = _backendUri(
-        trimmedQuery != null && trimmedQuery.isNotEmpty
-            ? '/api/stickers/giphy/search'
-            : '/api/stickers/giphy/trending',
-        {
-          'limit': limit.toString(),
-          'offset': offset.toString(),
-          'rating': rating,
-          if (trimmedQuery != null && trimmedQuery.isNotEmpty)
-            'q': trimmedQuery,
-        },
-      );
-      headers = {
+      final headers = {
         'Content-Type': 'application/json',
         if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
       };
-    }
+      final endpoint = trimmedQuery != null && trimmedQuery.isNotEmpty
+          ? '/api/stickers/giphy/search'
+          : '/api/stickers/giphy/trending';
+      final uris = _backendUris(endpoint, {
+        'limit': limit.toString(),
+        'offset': offset.toString(),
+        'rating': rating,
+        if (trimmedQuery != null && trimmedQuery.isNotEmpty) 'q': trimmedQuery,
+      });
 
-    try {
-      final res = await http
-          .get(uri, headers: headers)
-          .timeout(const Duration(seconds: 15));
-      if (res.statusCode != 200) return [];
-      final decoded = jsonDecode(res.body) as Map<String, dynamic>?;
-      final data = (decoded?['data'] as List?) ?? [];
-      return data
-          .map((e) => GiphyStickerItem.fromJson(e as Map<String, dynamic>))
-          .where((s) => s.previewUrl.isNotEmpty)
-          .toList();
-    } catch (e) {
-      debugPrint('[Giphy] fetchGiphyStickers error: $e');
+      for (final uri in uris) {
+        try {
+          final res = await http
+              .get(uri, headers: headers)
+              .timeout(const Duration(seconds: 15));
+          if (res.statusCode != 200) continue;
+          final decoded = jsonDecode(res.body) as Map<String, dynamic>?;
+          final data = (decoded?['data'] as List?) ?? [];
+          _giphyAvailable = true;
+          _remoteCapabilitiesLoaded = true;
+          return data
+              .map((e) => GiphyStickerItem.fromJson(e as Map<String, dynamic>))
+              .where((s) => s.previewUrl.isNotEmpty)
+              .toList();
+        } catch (e) {
+          debugPrint('[Giphy] fetchGiphyStickers error at $uri: $e');
+        }
+      }
+
       return [];
     }
   }
@@ -331,7 +420,7 @@ class StickerService {
   Future<List<GiphyStickerCategory>> fetchGiphyCategories() async {
     if (_giphyKey.isEmpty) {
       await _ensureCapabilities();
-      if (!_remoteGiphyEnabled) return [];
+      if (!_giphyAvailable) return [];
       // Categories endpoint is optional in proxy mode for now.
       return [];
     }
@@ -361,11 +450,9 @@ class StickerService {
           .timeout(const Duration(seconds: 30));
       if (res.statusCode != 200) return null;
       final dir = await getStickerDirectory();
-      final ext = sticker.originalUrl.contains('.webp')
-          ? '.webp'
-          : sticker.originalUrl.contains('.gif')
-          ? '.gif'
-          : '.gif';
+      final parsed = Uri.tryParse(sticker.originalUrl);
+      final rawExt = path.extension(parsed?.path ?? '').toLowerCase();
+      final ext = {'.webp', '.gif', '.png'}.contains(rawExt) ? rawExt : '.png';
       final filename = 'giphy_${sticker.id}$ext';
       final file = File(path.join(dir.path, filename));
       if (await file.exists()) return file; // already saved
@@ -503,10 +590,7 @@ class StickerService {
   Future<File?> removeBackground(File sourceFile) async {
     if (_removeBgKey.isEmpty) {
       await _ensureCapabilities();
-      if (_remoteRemoveBgEnabled) {
-        return _removeBackgroundViaBackend(sourceFile);
-      }
-      throw Exception('REMOVE_BG_API_KEY not set');
+      return _removeBackgroundViaBackend(sourceFile);
     }
 
     Object? lastError;
@@ -573,45 +657,62 @@ class StickerService {
 
   Future<File?> _removeBackgroundViaBackend(File sourceFile) async {
     final token = await _getIdToken();
-    final request = http.MultipartRequest(
-      'POST',
-      _backendUri('/api/stickers/remove-bg'),
-    );
+    Object? lastError;
 
-    if (token != null && token.isNotEmpty) {
-      request.headers['Authorization'] = 'Bearer $token';
+    for (final uri in _backendUris('/api/stickers/remove-bg')) {
+      try {
+        final request = http.MultipartRequest('POST', uri);
+
+        if (token != null && token.isNotEmpty) {
+          request.headers['Authorization'] = 'Bearer $token';
+        }
+
+        request.fields['size'] = 'auto';
+        request.fields['format'] = 'png';
+        request.files.add(
+          await http.MultipartFile.fromPath('image', sourceFile.path),
+        );
+
+        final response = await request.send().timeout(
+          const Duration(seconds: 50),
+        );
+        final bytes = await response.stream.toBytes();
+
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          final errorBody = utf8.decode(bytes, allowMalformed: true).trim();
+          lastError = Exception(
+            errorBody.isNotEmpty
+                ? 'Background removal failed: $errorBody'
+                : 'Background removal failed (${response.statusCode})',
+          );
+          continue;
+        }
+
+        if (bytes.isEmpty) {
+          lastError = Exception('Background removal failed: empty output');
+          continue;
+        }
+
+        final tempDir = await getTemporaryDirectory();
+        final outputPath = path.join(
+          tempDir.path,
+          'mss_removebg_${DateTime.now().millisecondsSinceEpoch}.png',
+        );
+        final outputFile = File(outputPath);
+        await outputFile.writeAsBytes(bytes, flush: true);
+        _removeBgAvailable = true;
+        _remoteCapabilitiesLoaded = true;
+        return outputFile;
+      } catch (e) {
+        lastError = e;
+        debugPrint('Backend remove-bg failed at $uri: $e');
+      }
     }
 
-    request.fields['size'] = 'auto';
-    request.fields['format'] = 'png';
-    request.files.add(
-      await http.MultipartFile.fromPath('image', sourceFile.path),
-    );
-
-    final response = await request.send().timeout(const Duration(seconds: 50));
-    final bytes = await response.stream.toBytes();
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      final errorBody = utf8.decode(bytes, allowMalformed: true).trim();
-      throw Exception(
-        errorBody.isNotEmpty
-            ? 'Background removal failed: $errorBody'
-            : 'Background removal failed (${response.statusCode})',
-      );
-    }
-
-    if (bytes.isEmpty) {
-      throw Exception('Background removal failed: empty output');
-    }
-
-    final tempDir = await getTemporaryDirectory();
-    final outputPath = path.join(
-      tempDir.path,
-      'mss_removebg_${DateTime.now().millisecondsSinceEpoch}.png',
-    );
-    final outputFile = File(outputPath);
-    await outputFile.writeAsBytes(bytes, flush: true);
-    return outputFile;
+    throw lastError ??
+        Exception(
+          'Background removal is unavailable right now. Please try again.',
+        );
   }
 
   bool _shouldRetryRemoveBg(Object error) {

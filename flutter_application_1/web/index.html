@@ -19,29 +19,34 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="StudySpace - Your Academic Companion">
+  <meta name="description" content="StudyShare - Your Academic Companion">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="StudySpace">
+  <meta name="apple-mobile-web-app-title" content="StudyShare">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png" />
 
-  <title>StudySpace</title>
+  <title>StudyShare</title>
   <link rel="manifest" href="manifest.json">
 </head>
 
 <body>
   <!-- Firebase SDK -->
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/12.10.0/firebase-app-compat.js"></script>
 
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 
   <script>
-    // Firebase configuration from the existing web app
+    // TODO(studyshare-migration): This still points to legacy project
+    // "studyspace-kiet". Firebase project IDs are immutable. Planned migration:
+    // 1) Create StudyShare Firebase project
+    // 2) Migrate required data/services
+    // 3) Replace firebaseConfig values here
+    // Also enforce API key referrer restrictions + App Check in Firebase/GCP.
     const firebaseConfig = {
       apiKey: "AIzaSyDt_mnuBryHcssBjRSdnPlh9VIC58LKL9Q",
       authDomain: "studyspace-kiet.firebaseapp.com",

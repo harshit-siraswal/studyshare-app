@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
@@ -14,6 +15,9 @@ class BackendApiService {
 
   final FirebaseAuth? _injectedAuth;
   bool _ragStreamUnavailable = false;
+  static final http.Client _httpClient = http.Client();
+  static const Duration _requestTimeout = Duration(seconds: 20);
+  static const Duration _streamRequestTimeout = Duration(seconds: 30);
 
   FirebaseAuth? get _auth {
     if (_injectedAuth != null) return _injectedAuth;
@@ -59,18 +63,19 @@ class BackendApiService {
     Uri uri,
     Map<String, String> headers,
     Map<String, dynamic>? body,
-  ) {
+  ) async {
     final encodedBody = jsonEncode(body ?? {});
-    switch (method.toUpperCase()) {
-      case 'POST':
-        return http.post(uri, headers: headers, body: encodedBody);
-      case 'PUT':
-        return http.put(uri, headers: headers, body: encodedBody);
-      case 'DELETE':
-        return http.delete(uri, headers: headers, body: encodedBody);
-      default:
-        return http.get(uri, headers: headers);
-    }
+    final future = switch (method.toUpperCase()) {
+      'POST' => _httpClient.post(uri, headers: headers, body: encodedBody),
+      'PUT' => _httpClient.put(uri, headers: headers, body: encodedBody),
+      'DELETE' => _httpClient.delete(uri, headers: headers, body: encodedBody),
+      _ => _httpClient.get(uri, headers: headers),
+    };
+    return future.timeout(_requestTimeout);
+  }
+
+  Future<http.StreamedResponse> _sendStreamedRequest(http.BaseRequest request) {
+    return _httpClient.send(request).timeout(_streamRequestTimeout);
   }
 
   Future<Map<String, dynamic>> _requestJson(
@@ -206,7 +211,7 @@ class BackendApiService {
   Future<Map<String, dynamic>> toggleSaveChatMessage({
     required String messageId,
     required String roomId,
-    required BuildContext context,
+    BuildContext? context,
   }) async {
     return _requestJson(
       '/api/chat/saved',
@@ -339,6 +344,28 @@ class BackendApiService {
     final list = (data['notices'] as List?) ?? const [];
     return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
+
+  Future<Map<String, dynamic>> createNotice({
+    required String collegeId,
+    required String title,
+    required String content,
+    String department = 'general',
+    String? imageUrl,
+  }) async {
+    return _requestJson(
+      '/api/notices',
+      method: 'POST',
+      body: {
+        // API currently expects imageUrl and fileUrl to match for notice attachments.
+        'collegeId': collegeId,
+        'title': title,
+        'content': content,
+        'department': department,
+        'imageUrl': ?imageUrl,
+        'fileUrl': ?imageUrl,
+      },
+    );
+  }
   // ----------------------------
   // Notice comments
   // ----------------------------
@@ -414,6 +441,7 @@ class BackendApiService {
     String? college,
     String? branch,
     String? semester,
+    String? subject,
     String? adminKey,
     required BuildContext context,
   }) async {
@@ -428,6 +456,7 @@ class BackendApiService {
         'college': ?college,
         'branch': ?branch,
         'semester': ?semester,
+        'subject': ?subject,
         'admin_key': ?adminKey,
       },
     );
@@ -583,15 +612,17 @@ class BackendApiService {
     final uri = Uri.parse(
       '$_baseUrl/api/admin/resources/${Uri.encodeComponent(resourceId)}/status',
     );
-    final res = await http.patch(
-      uri,
-      headers: {
-        'Content-Type': 'application/json',
-        // Admin endpoints authenticate via bearer admin key/hash.
-        'Authorization': 'Bearer $adminKey',
-      },
-      body: jsonEncode({'status': status}),
-    );
+    final res = await _httpClient
+        .patch(
+          uri,
+          headers: {
+            'Content-Type': 'application/json',
+            // Admin endpoints authenticate via bearer admin key/hash.
+            'Authorization': 'Bearer $adminKey',
+          },
+          body: jsonEncode({'status': status}),
+        )
+        .timeout(_requestTimeout);
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
       String message = 'Failed to update resource status';
@@ -611,18 +642,19 @@ class BackendApiService {
   Future<void> deleteResourceAsAdmin({
     required String resourceId,
     required String adminKey,
-    required BuildContext context,
   }) async {
     final uri = Uri.parse(
       '$_baseUrl/api/admin/resources/${Uri.encodeComponent(resourceId)}',
     );
-    final res = await http.delete(
-      uri,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $adminKey',
-      },
-    );
+    final res = await _httpClient
+        .delete(
+          uri,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $adminKey',
+          },
+        )
+        .timeout(_requestTimeout);
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
       String message = 'Failed to delete resource';
@@ -637,6 +669,170 @@ class BackendApiService {
       }
       throw Exception(message);
     }
+  }
+
+  Future<Map<String, dynamic>> banUserAsAdmin({
+    required String email,
+    required String adminKey,
+    String? reason,
+    String? collegeId,
+  }) async {
+    final uri = Uri.parse('$_baseUrl/api/admin/users-ban');
+    final res = await _httpClient
+        .post(
+          uri,
+          headers: {
+            'Content-Type': 'application/json',
+            // Keep parity with admin-studyspace: bearer admin key/hash auth.
+            'Authorization': 'Bearer $adminKey',
+          },
+          body: jsonEncode({
+            'email': email.trim().toLowerCase(),
+            'reason': ?reason,
+            'collegeId': ?collegeId,
+          }),
+        )
+        .timeout(_requestTimeout);
+
+    Map<String, dynamic> data = <String, dynamic>{};
+    try {
+      final parsed = jsonDecode(res.body);
+      if (parsed is Map<String, dynamic>) {
+        data = parsed;
+      } else if (parsed is Map) {
+        data = Map<String, dynamic>.from(parsed);
+      }
+    } catch (_) {
+      // Preserve best-effort message fallback below.
+    }
+
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      final message =
+          data['message']?.toString() ??
+          data['error']?.toString() ??
+          (res.body.trim().isNotEmpty ? res.body : 'Failed to ban user');
+      throw Exception(message);
+    }
+
+    return data;
+  }
+
+  Future<List<Map<String, dynamic>>> listAdminResources({
+    required String adminKey,
+    String? collegeId,
+    String? status,
+    String? semester,
+    String? branch,
+    String? subject,
+    int page = 1,
+    int pageSize = 100,
+  }) async {
+    final queryParams = <String, String>{
+      'page': page.toString(),
+      'pageSize': pageSize.toString(),
+      if (collegeId != null && collegeId.trim().isNotEmpty)
+        'collegeId': collegeId.trim(),
+      if (status != null && status.trim().isNotEmpty) 'status': status.trim(),
+      if (semester != null && semester.trim().isNotEmpty)
+        'semester': semester.trim(),
+      if (branch != null && branch.trim().isNotEmpty) 'branch': branch.trim(),
+      if (subject != null && subject.trim().isNotEmpty)
+        'subject': subject.trim(),
+    };
+
+    final uri = Uri.parse(
+      '$_baseUrl/api/admin/resources',
+    ).replace(queryParameters: queryParams);
+    final res = await _httpClient
+        .get(
+          uri,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $adminKey',
+          },
+        )
+        .timeout(_requestTimeout);
+
+    Map<String, dynamic> data = <String, dynamic>{};
+    try {
+      final parsed = jsonDecode(res.body);
+      if (parsed is Map<String, dynamic>) {
+        data = parsed;
+      } else if (parsed is Map) {
+        data = Map<String, dynamic>.from(parsed);
+      }
+    } catch (_) {
+      // Preserve best-effort fallback below.
+    }
+
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      final message =
+          data['message']?.toString() ??
+          data['error']?.toString() ??
+          (res.body.trim().isNotEmpty
+              ? res.body
+              : 'Failed to load admin resources');
+      throw Exception(message);
+    }
+
+    final resourcesRaw = data['resources'];
+    if (resourcesRaw is! List) return const [];
+    return resourcesRaw
+        .whereType<Map>()
+        .map((row) => Map<String, dynamic>.from(row))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> uploadSyllabusAsAdmin({
+    required String adminKey,
+    required String collegeId,
+    required String semester,
+    required String branch,
+    required String subject,
+    required String title,
+    required String pdfUrl,
+    String? academicYear,
+  }) async {
+    final uri = Uri.parse('$_baseUrl/api/admin');
+    final res = await _httpClient
+        .post(
+          uri,
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'action': 'upload_syllabus',
+            'keyHash': adminKey,
+            'collegeId': collegeId,
+            'semester': semester,
+            'branch': branch,
+            'subject': subject,
+            'title': title,
+            'pdfUrl': pdfUrl,
+            'academicYear': ?academicYear,
+          }),
+        )
+        .timeout(_requestTimeout);
+
+    Map<String, dynamic> data = <String, dynamic>{};
+    try {
+      final parsed = jsonDecode(res.body);
+      if (parsed is Map<String, dynamic>) {
+        data = parsed;
+      } else if (parsed is Map) {
+        data = Map<String, dynamic>.from(parsed);
+      }
+    } catch (_) {
+      // Preserve best-effort fallback below.
+    }
+
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      final message =
+          data['message']?.toString() ??
+          data['error']?.toString() ??
+          (res.body.trim().isNotEmpty ? res.body : 'Failed to upload syllabus');
+      throw Exception(message);
+    }
+
+    return data;
   }
 
   // ----------------------------
@@ -857,6 +1053,94 @@ class BackendApiService {
     );
   }
 
+  Future<Map<String, dynamic>> uploadNotebookSource({
+    required String filePath,
+    required String collegeId,
+    String? notebookId,
+    String? title,
+    String? sourceScope,
+  }) async {
+    final token = await _getIdToken();
+    final uri = Uri.parse('$_baseUrl/api/notebooks/sources/upload');
+    final request = http.MultipartRequest('POST', uri)
+      ..fields['college_id'] = collegeId;
+
+    if (notebookId != null && notebookId.trim().isNotEmpty) {
+      request.fields['notebook_id'] = notebookId.trim();
+    }
+    if (title != null && title.trim().isNotEmpty) {
+      request.fields['title'] = title.trim();
+    }
+    if (sourceScope != null && sourceScope.trim().isNotEmpty) {
+      request.fields['source_scope'] = sourceScope.trim();
+    }
+    if (token != null && token.isNotEmpty) {
+      request.headers['Authorization'] = 'Bearer $token';
+    }
+
+    request.files.add(await http.MultipartFile.fromPath('file', filePath));
+    final streamed = await _sendStreamedRequest(request);
+    final body = await streamed.stream.bytesToString();
+    Map<String, dynamic> data;
+    try {
+      data = jsonDecode(body) as Map<String, dynamic>;
+    } catch (_) {
+      throw Exception(
+        'Notebook source upload failed (${streamed.statusCode}): $body',
+      );
+    }
+
+    if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
+      final message =
+          data['message']?.toString() ??
+          data['error_code']?.toString() ??
+          data['error']?.toString() ??
+          'Notebook source upload failed';
+      throw Exception(message);
+    }
+
+    return data;
+  }
+
+  Future<Map<String, dynamic>> requestNotebookSourceReupload({
+    required String sourceId,
+    required String replacementFileId,
+    String? reason,
+    String? ocrErrorCode,
+  }) async {
+    return _requestJson(
+      '/api/notebooks/sources/${Uri.encodeComponent(sourceId)}/request-reupload',
+      method: 'POST',
+      body: {
+        'replacement_file_id': replacementFileId,
+        'reason': ?reason,
+        'ocr_error_code': ?ocrErrorCode,
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>> retryNotebookSourceNow({
+    required String sourceId,
+    String? reason,
+  }) async {
+    return _requestJson(
+      '/api/notebooks/sources/${Uri.encodeComponent(sourceId)}/retry-now',
+      method: 'POST',
+      body: {'reason': ?reason},
+    );
+  }
+
+  Future<Map<String, dynamic>> cancelNotebookSourceRetry({
+    required String sourceId,
+    String? reason,
+  }) async {
+    return _requestJson(
+      '/api/notebooks/sources/${Uri.encodeComponent(sourceId)}/cancel-retry',
+      method: 'POST',
+      body: {'reason': ?reason},
+    );
+  }
+
   bool _isUnsupportedRagStreamStatus(int statusCode) {
     return statusCode == 404 ||
         statusCode == 405 ||
@@ -911,11 +1195,30 @@ class BackendApiService {
     final noLocal =
         response['no_local'] == true ||
         (data is Map && data['no_local'] == true);
+    final retrievalScore =
+        response['retrieval_score'] ??
+        (data is Map ? data['retrieval_score'] : null);
+    final llmConfidenceScore =
+        response['llm_confidence_score'] ??
+        (data is Map ? data['llm_confidence_score'] : null);
+    final combinedConfidence =
+        response['combined_confidence'] ??
+        (data is Map ? data['combined_confidence'] : null);
+    final ocrFailureAffectsRetrieval =
+        response['ocr_failure_affects_retrieval'] ??
+        (data is Map ? data['ocr_failure_affects_retrieval'] : null);
 
     if (normalizedSources.isNotEmpty || noLocal) {
       yield jsonEncode({
         'type': 'metadata',
-        'data': {'sources': normalizedSources, 'no_local': noLocal},
+        'data': {
+          'sources': normalizedSources,
+          'no_local': noLocal,
+          'retrieval_score': ?retrievalScore,
+          'llm_confidence_score': ?llmConfidenceScore,
+          'combined_confidence': ?combinedConfidence,
+          'ocr_failure_affects_retrieval': ?ocrFailureAffectsRetrieval,
+        },
       });
     }
 
@@ -990,7 +1293,7 @@ class BackendApiService {
         'filters': ?filters,
       });
 
-    final response = await request.send();
+    final response = await _sendStreamedRequest(request);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final body = await response.stream.bytesToString();
       if (_isUnsupportedRagStreamStatus(response.statusCode)) {

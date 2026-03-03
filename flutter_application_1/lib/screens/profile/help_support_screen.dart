@@ -25,7 +25,10 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
     'Other',
   ];
 
-  InputDecoration _buildInputDecoration({required String hintText, required bool isDark}) {
+  InputDecoration _buildInputDecoration({
+    required String hintText,
+    required bool isDark,
+  }) {
     return InputDecoration(
       hintText: hintText,
       hintStyle: TextStyle(color: AppTheme.textMuted),
@@ -72,7 +75,8 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
 
     try {
       // Compose email with mailto URI
-      final emailBody = '''
+      final emailBody =
+          '''
 Category: $_selectedCategory
 Subject: $subject
 
@@ -87,7 +91,8 @@ Sent from ${AppConfig.appName} v${AppConfig.appVersion}
         scheme: 'mailto',
         path: AppConfig.supportEmail,
         query: _encodeQueryParameters({
-          'subject': '[$_selectedCategory] $subject - ${AppConfig.appName} Feedback',
+          'subject':
+              '[$_selectedCategory] $subject - ${AppConfig.appName} Feedback',
           'body': emailBody,
         }),
       );
@@ -103,7 +108,9 @@ Sent from ${AppConfig.appName} v${AppConfig.appVersion}
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Email client opened - please send the email to complete your feedback.'),
+              content: Text(
+                'Email client opened - please send the email to complete your feedback.',
+              ),
               backgroundColor: Colors.green,
             ),
           );
@@ -140,7 +147,9 @@ Sent from ${AppConfig.appName} v${AppConfig.appVersion}
           children: [
             Text(
               'Please send your feedback manually to:',
-              style: GoogleFonts.inter(color: isDark ? Colors.white70 : Colors.black87),
+              style: GoogleFonts.inter(
+                color: isDark ? Colors.white70 : Colors.black87,
+              ),
             ),
             const SizedBox(height: 12),
             Container(
@@ -171,20 +180,33 @@ Sent from ${AppConfig.appName} v${AppConfig.appVersion}
 
   String _encodeQueryParameters(Map<String, String> params) {
     return params.entries
-        .map((e) => '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}')
+        .map(
+          (e) =>
+              '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value)}',
+        )
         .join('&');
   }
 
-  @override  Widget build(BuildContext context) {
+  @override
+  Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+    final categoryOptions = _categories;
+    final selectedCategory = _categories.contains(_selectedCategory)
+        ? _selectedCategory
+        : null;
+
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : const Color(0xFFF8FAFC),
+      backgroundColor: isDark
+          ? AppTheme.darkBackground
+          : const Color(0xFFF8FAFC),
       appBar: AppBar(
         backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_rounded, color: isDark ? Colors.white : Colors.black),
+          icon: Icon(
+            Icons.arrow_back_ios_rounded,
+            color: isDark ? Colors.white : Colors.black,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
@@ -253,9 +275,9 @@ Sent from ${AppConfig.appName} v${AppConfig.appVersion}
                 ],
               ),
             ),
-            
+
             const SizedBox(height: 24),
-            
+
             // Category dropdown
             Text(
               'Category',
@@ -276,27 +298,35 @@ Sent from ${AppConfig.appName} v${AppConfig.appVersion}
               ),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
-                  value: _selectedCategory,
+                  value: selectedCategory,
                   isExpanded: true,
+                  hint: Text(
+                    'Select category',
+                    style: GoogleFonts.inter(
+                      color: isDark ? Colors.white70 : Colors.black54,
+                    ),
+                  ),
                   dropdownColor: isDark ? AppTheme.darkCard : Colors.white,
                   style: GoogleFonts.inter(
                     color: isDark ? Colors.white : Colors.black,
                   ),
-                  items: _categories.map((category) {
+                  items: categoryOptions.map((category) {
                     return DropdownMenuItem(
                       value: category,
                       child: Text(category),
                     );
                   }).toList(),
                   onChanged: (value) {
-                    if (value != null) setState(() => _selectedCategory = value);
+                    if (value != null) {
+                      setState(() => _selectedCategory = value);
+                    }
                   },
                 ),
               ),
             ),
-            
+
             const SizedBox(height: 20),
-            
+
             // Subject field
             Text(
               'Subject',
@@ -308,15 +338,17 @@ Sent from ${AppConfig.appName} v${AppConfig.appVersion}
             const SizedBox(height: 8),
             TextField(
               controller: _subjectController,
-              style: GoogleFonts.inter(color: isDark ? Colors.white : Colors.black),
+              style: GoogleFonts.inter(
+                color: isDark ? Colors.white : Colors.black,
+              ),
               decoration: _buildInputDecoration(
                 hintText: 'Brief description of your issue',
                 isDark: isDark,
               ),
             ),
-            
+
             const SizedBox(height: 20),
-            
+
             // Message field
             Text(
               'Message',
@@ -329,15 +361,17 @@ Sent from ${AppConfig.appName} v${AppConfig.appVersion}
             TextField(
               controller: _messageController,
               maxLines: 6,
-              style: GoogleFonts.inter(color: isDark ? Colors.white : Colors.black),
+              style: GoogleFonts.inter(
+                color: isDark ? Colors.white : Colors.black,
+              ),
               decoration: _buildInputDecoration(
                 hintText: 'Describe your issue or suggestion in detail...',
                 isDark: isDark,
               ),
             ),
-            
+
             const SizedBox(height: 32),
-            
+
             // Submit button
             SizedBox(
               width: double.infinity,
@@ -370,9 +404,9 @@ Sent from ${AppConfig.appName} v${AppConfig.appVersion}
                       ),
               ),
             ),
-            
+
             const SizedBox(height: 24),
-            
+
             // Contact info
             Container(
               padding: const EdgeInsets.all(16),

@@ -8,6 +8,10 @@ class LocalAiChatMessage {
   final List<Map<String, dynamic>> sources;
   final bool cached;
   final bool noLocal;
+  final double? retrievalScore;
+  final double? llmConfidenceScore;
+  final double? combinedConfidence;
+  final bool ocrFailureAffectsRetrieval;
   final String? actionType;
   final Map<String, dynamic>? actionPayload;
   final String createdAt;
@@ -18,6 +22,10 @@ class LocalAiChatMessage {
     required this.sources,
     required this.cached,
     required this.noLocal,
+    this.retrievalScore,
+    this.llmConfidenceScore,
+    this.combinedConfidence,
+    this.ocrFailureAffectsRetrieval = false,
     this.actionType,
     this.actionPayload,
     required this.createdAt,
@@ -61,6 +69,17 @@ class LocalAiChatMessage {
           : const [],
       cached: json['cached'] == true,
       noLocal: json['no_local'] == true,
+      retrievalScore: json['retrieval_score'] is num
+          ? (json['retrieval_score'] as num).toDouble()
+          : double.tryParse(json['retrieval_score']?.toString() ?? ''),
+      llmConfidenceScore: json['llm_confidence_score'] is num
+          ? (json['llm_confidence_score'] as num).toDouble()
+          : double.tryParse(json['llm_confidence_score']?.toString() ?? ''),
+      combinedConfidence: json['combined_confidence'] is num
+          ? (json['combined_confidence'] as num).toDouble()
+          : double.tryParse(json['combined_confidence']?.toString() ?? ''),
+      ocrFailureAffectsRetrieval:
+          json['ocr_failure_affects_retrieval'] == true,
       actionType: rawActionType == null || rawActionType.trim().isEmpty
           ? null
           : rawActionType.trim(),
@@ -77,6 +96,12 @@ class LocalAiChatMessage {
       'sources': sources,
       'cached': cached,
       'no_local': noLocal,
+      if (retrievalScore != null) 'retrieval_score': retrievalScore,
+      if (llmConfidenceScore != null)
+        'llm_confidence_score': llmConfidenceScore,
+      if (combinedConfidence != null)
+        'combined_confidence': combinedConfidence,
+      'ocr_failure_affects_retrieval': ocrFailureAffectsRetrieval,
       if (actionType != null && actionType!.isNotEmpty)
         'action_type': actionType,
       if (actionPayload != null && actionPayload!.isNotEmpty)

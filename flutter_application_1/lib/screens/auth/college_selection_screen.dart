@@ -191,7 +191,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   TextButton.icon(
-                    onPressed: _showManualCollegeDialog,
+                    onPressed: () => _showManualCollegeDialog(isDark),
                     icon: const Icon(
                       Icons.edit_rounded,
                       color: AppTheme.primary,
@@ -263,7 +263,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
             ),
             const SizedBox(height: 10),
             OutlinedButton(
-              onPressed: _showManualCollegeDialog,
+              onPressed: () => _showManualCollegeDialog(isDark),
               child: const Text('Use manual setup'),
             ),
           ],
@@ -295,7 +295,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
             ),
             const SizedBox(height: 12),
             OutlinedButton(
-              onPressed: _showManualCollegeDialog,
+              onPressed: () => _showManualCollegeDialog(isDark),
               child: const Text('Use manual setup'),
             ),
           ],
@@ -442,6 +442,8 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
   }
 
   Future<void> _showRequestCollegeDialog(bool isDark) async {
+    final parentContext = context;
+    final scaffoldMessenger = ScaffoldMessenger.of(parentContext);
     final nameController = TextEditingController();
     final domainController = TextEditingController();
 
@@ -499,7 +501,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                     final name = nameController.text.trim();
                     final domain = domainController.text.trim().toLowerCase();
                     if (name.isEmpty || domain.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      scaffoldMessenger.showSnackBar(
                         const SnackBar(
                           content: Text('Please enter college name and domain'),
                         ),
@@ -507,7 +509,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                       return;
                     }
                     if (!_isValidDomain(domain)) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      scaffoldMessenger.showSnackBar(
                         const SnackBar(
                           content: Text(
                             'Please enter a valid college domain (e.g., kiet.edu)',
@@ -517,7 +519,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                       return;
                     }
 
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    scaffoldMessenger.showSnackBar(
                       const SnackBar(
                         content: Text(
                           'College request submission is coming soon. Please contact support for now.',
@@ -543,8 +545,9 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
     domainController.dispose();
   }
 
-  Future<void> _showManualCollegeDialog() async {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+  Future<void> _showManualCollegeDialog(bool isDark) async {
+    final parentContext = context;
+    final scaffoldMessenger = ScaffoldMessenger.of(parentContext);
     final nameController = TextEditingController();
     final domainController = TextEditingController();
 
@@ -603,7 +606,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                         .toLowerCase()
                         .replaceAll('@', '');
                     if (name.isEmpty || domain.isEmpty) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      scaffoldMessenger.showSnackBar(
                         const SnackBar(
                           content: Text('Please enter college name and domain'),
                         ),
@@ -611,7 +614,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                       return;
                     }
                     if (!_isValidDomain(domain)) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      scaffoldMessenger.showSnackBar(
                         const SnackBar(
                           content: Text(
                             'Please enter a valid college domain (e.g., kiet.edu)',

@@ -304,7 +304,7 @@ class AppSplashAnimation extends StatefulWidget {
 
   const AppSplashAnimation({
     super.key,
-    this.title = 'MyStudySpace',
+    this.title = 'StudyShare',
     this.subtitle = 'Connect. Learn. Share.',
     this.loadingLabel = 'Preparing your study space',
   });
@@ -600,3 +600,6 @@ class _LogoGlyphPainter extends CustomPainter {
         oldDelegate.shimmer != shimmer;
   }
 }
+
+
+

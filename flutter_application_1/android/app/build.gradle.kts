@@ -15,8 +15,16 @@ configurations.all {
 }
 
 android {
-    namespace = "me.mystudyspace.android"
+    namespace = "me.studyshare.android"
     compileSdk = 36
+    val keystorePath = System.getenv("KEYSTORE_PATH")?.trim().orEmpty()
+    val keystorePassword = System.getenv("KEYSTORE_PASSWORD")?.trim().orEmpty()
+    val keyAlias = System.getenv("KEY_ALIAS")?.trim().orEmpty()
+    val keyPassword = System.getenv("KEY_PASSWORD")?.trim().orEmpty()
+    val hasReleaseSigning = keystorePath.isNotEmpty() &&
+        keystorePassword.isNotEmpty() &&
+        keyAlias.isNotEmpty() &&
+        keyPassword.isNotEmpty()
 
     ndkVersion = flutter.ndkVersion
 
@@ -32,7 +40,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "me.mystudyspace.android"
+        applicationId = "me.studyshare.android"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -42,11 +50,32 @@ android {
         multiDexEnabled = true
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = keystorePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+            }
+        } else {
+            logger.warn(
+                "Release signing is not configured. Set KEYSTORE_PATH, " +
+                    "KEYSTORE_PASSWORD, KEY_ALIAS, and KEY_PASSWORD to enable " +
+                    "signed release builds."
+            )
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            } else {
+                logger.lifecycle(
+                    "Release build will be unsigned because signing env vars are missing."
+                )
+            }
             // Enable ProGuard/R8 with comprehensive rules to prevent code stripping
             // This is CRITICAL for Supabase, Firebase, and JSON serialization to work in release builds
             isMinifyEnabled = true

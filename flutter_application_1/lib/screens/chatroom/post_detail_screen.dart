@@ -676,6 +676,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
     final authorName =
         post['author_name'] ?? post['author_email']?.split('@')[0] ?? 'User';
+    final authorPhotoUrl = post['author_photo_url']?.toString().trim() ?? '';
+    final hasAuthorPhoto = authorPhotoUrl.isNotEmpty;
     final createdAt = post['created_at'] != null
         ? DateTime.parse(post['created_at'])
         : DateTime.now();
@@ -714,12 +716,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     CircleAvatar(
                       radius: 18,
                       backgroundColor: AppTheme.primary.withValues(alpha: 0.2),
-                      backgroundImage: post['author_photo_url'] != null
-                          ? NetworkImage(post['author_photo_url'])
+                      backgroundImage: hasAuthorPhoto
+                          ? NetworkImage(authorPhotoUrl)
                           : null,
-                      child: post['author_photo_url'] == null
+                      child: !hasAuthorPhoto
                           ? Text(
-                              authorName[0].toUpperCase(),
+                              authorName.isNotEmpty
+                                  ? authorName[0].toUpperCase()
+                                  : '?',
                               style: GoogleFonts.inter(
                                 fontWeight: FontWeight.bold,
                                 color: AppTheme.primary,
@@ -1444,6 +1448,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       content: Text("You must be signed in to report."),
                     ),
                   );
+                  if (mounted && dialogCtx.mounted) {
+                    Navigator.pop(dialogCtx);
+                  }
                   return;
                 }
                 final reporterId = _authService.currentUser!.uid;

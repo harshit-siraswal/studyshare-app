@@ -5,7 +5,7 @@ Run these from local PowerShell.
 ## A. Health checks
 
 ```powershell
-curl.exe -i "https://api.studyshare.in/health"
+curl.exe -i "https://api.mystudyspace.in/health"
 curl.exe -i "https://admin-studyspace.vercel.app/api/admin/push-notification" -H "Authorization: Bearer test" # intentionally invalid token
 ```
 
@@ -16,23 +16,29 @@ Expected:
 ## B. CORS preflight checks
 
 ```powershell
-curl.exe -i -X OPTIONS "https://api.studyshare.in/api/auth/verify" -H "Origin: https://studyshare.in" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: content-type,authorization"
-curl.exe -i -X OPTIONS "https://api.studyshare.in/api/auth/verify" -H "Origin: https://admin-studyspace.vercel.app" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: content-type,authorization"
+curl.exe -i -X OPTIONS "https://api.mystudyspace.in/api/auth/verify" -H "Origin: https://mystudyspace.in" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: content-type,authorization"
+curl.exe -i -X OPTIONS "https://api.mystudyspace.in/api/auth/verify" -H "Origin: https://www.mystudyspace.in" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: content-type,authorization"
+curl.exe -i -X OPTIONS "https://api.mystudyspace.in/api/auth/verify" -H "Origin: https://admin-studyspace.vercel.app" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: content-type,authorization"
+curl.exe -i -X OPTIONS "https://api.mystudyspace.in/api/auth/verify" -H "Origin: https://admin.mystudyspace.in" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: content-type,authorization"
 ```
 
 Expected:
 - No 500
 - Preflight should be handled without backend crash
 - `OPTIONS` should return `200`/`204`
-- `Access-Control-Allow-Origin` present (exact allowed origin or `*`)
-- `Access-Control-Allow-Methods` includes expected methods (`GET, POST, OPTIONS`)
-- `Access-Control-Allow-Headers` includes expected custom headers
-- `Access-Control-Allow-Credentials` present when credentials are required
+- `Access-Control-Allow-Origin` exactly matches the request origin and is one of:
+  - `https://mystudyspace.in`
+  - `https://www.mystudyspace.in`
+  - `https://admin-studyspace.vercel.app`
+  - `https://admin.mystudyspace.in`
+- `Access-Control-Allow-Methods` includes: `GET, POST, PUT, PATCH, DELETE, OPTIONS`
+- `Access-Control-Allow-Headers` includes: `Authorization, Content-Type`
+- `Access-Control-Allow-Credentials` should be omitted or `false` for this bearer-token deployment (no cookie auth expected)
 
 ## C. Auth-required endpoint behavior
 
 ```powershell
-curl.exe -i -X POST "https://api.studyshare.in/api/notices/demo/comments/demo/like" -H "Content-Type: application/json" -d "{}"
+curl.exe -i -X POST "https://api.mystudyspace.in/api/notices/demo/comments/demo/like" -H "Content-Type: application/json" -d "{}"
 ```
 
 Expected:
@@ -40,7 +46,7 @@ Expected:
 
 ## D. Browser smoke test
 
-1. Web app (`https://studyshare.in`)
+1. Web app (`https://mystudyspace.in`)
 - Login
 - Open notifications
 - Join chat
@@ -54,7 +60,7 @@ Expected:
 
 ## E. If anything fails
 
-1. Check EC2 backend logs:
+1. SSH into EC2 and run backend log checks there (not in local PowerShell):
 ```bash
 docker compose logs -f api
 ```
@@ -68,3 +74,4 @@ pm2 logs
 
 3. Check Vercel logs:
 - Vercel project -> Deployments -> latest -> Functions logs
+

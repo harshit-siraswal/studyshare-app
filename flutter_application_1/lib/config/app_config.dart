@@ -1,5 +1,7 @@
-// StudySpace Flutter App - Environment Configuration
-// Keep this file secure and do not commit to version control
+// StudyShare Flutter App - Environment Configuration.
+// This file may contain public client-side config (for example Supabase anon key
+// and Firebase/web-visible IDs). Do NOT commit true secrets here; inject secrets
+// like REMOVE_BG_API_KEY and payment private keys via secure --dart-define/CI.
 
 class AppConfig {
   static const String _defaultApiUrl = 'https://api.studyshare.in';
@@ -27,6 +29,7 @@ class AppConfig {
     }
     return trimmed;
   }
+
   static String get supabaseAnonKey {
     final trimmed = _supabaseAnonKeyFromEnv.trim();
     if (trimmed.isEmpty || trimmed == 'your-anon-key') {
@@ -91,9 +94,11 @@ class AppConfig {
       '6Ld7RUAsAAAAAKlJBKqsXHXnmP6PXRYvYhYjhsJF';
 
   // App Info
-  static const String appName = 'MyStudySpace';
+  static const String appName = 'StudyShare';
   static const String appVersion = '1.0.0';
-  static const String webDomain = 'mystudyspace.me';
+  static const String webDomain = 'studyshare.me';
+  static const String androidBundleId = 'me.studyshare.android';
+  static const String iosBundleId = 'me.studyshare.ios';
 
   // Razorpay Live Key
   static const String razorpayKeyId = String.fromEnvironment(
@@ -101,7 +106,7 @@ class AppConfig {
     defaultValue: '',
   );
   // Support Email
-  static const String supportEmail = 'support@mystudyspace.me';
+  static const String supportEmail = 'support@studyshare.me';
   // Giphy API Key (Get from Giphy Developers Dashboard: developers.giphy.com)
   static const String giphyApiKey = String.fromEnvironment(
     'GIPHY_API_KEY',
@@ -126,6 +131,9 @@ class AppConfig {
   // Google Sign-In Server Client ID (Web Client ID)
   static const String googleServerClientId = String.fromEnvironment(
     'GOOGLE_SERVER_CLIENT_ID',
+    // Default web client id from Firebase project (public identifier, not a secret).
+    defaultValue:
+        '28032445048-kg3k969ha8c9kc88hta90tddf5178n1o.apps.googleusercontent.com',
   );
 
   /// Validates that critical environment variables are set.
@@ -161,9 +169,11 @@ class AppConfig {
       );
     }
 
-    // Optional: GIPHY_API_KEY - GIF picker won't work without it
+    // Optional: GIPHY_API_KEY (backend proxy can also provide this capability)
     if (giphyApiKey.isEmpty) {
-      warnings.add('GIPHY_API_KEY not set - GIF features will be disabled');
+      warnings.add(
+        'GIPHY_API_KEY not set locally; GIF features depend on backend capability.',
+      );
     }
 
     // Optional: GOOGLE_SERVER_CLIENT_ID

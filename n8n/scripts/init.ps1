@@ -19,8 +19,33 @@ if (-not (Test-Path $envPath)) {
 
 function New-HexSecret([int]$bytes) {
   $buffer = New-Object byte[] $bytes
-  [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($buffer)
+  $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+  try {
+    $rng.GetBytes($buffer)
+  } finally {
+    $rng.Dispose()
+  }
   return ([BitConverter]::ToString($buffer)).Replace("-", "").ToLowerInvariant()
+}
+
+function Normalize-EnvValue {
+  param([string]$Value)
+  if ($null -eq $Value) { return $null }
+  $v = $Value.Trim()
+  if ($v.Length -lt 2) { return $v }
+
+  $first = $v[0]
+  $last = $v[$v.Length - 1]
+  if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+    $v = $v.Substring(1, $v.Length - 2)
+    if ($first -eq '"') {
+      $v = $v.Replace('\"', '"')
+    } else {
+      $v = $v.Replace("\'", "'")
+    }
+    $v = $v.Replace('\\', '\')
+  }
+  return $v
 }
 
 function Set-EnvVar {
@@ -33,7 +58,15 @@ function Set-EnvVar {
   $escapedName = [Regex]::Escape($Name)
   $linePattern = "(?m)^$escapedName=.*$"
   if ([Regex]::IsMatch($content, $linePattern)) {
-    $content = [Regex]::Replace($content, $linePattern, "$Name=$Value")
+    $replacementLine = "$Name=$Value"
+    $content = [Regex]::Replace(
+      $content,
+      $linePattern,
+      [System.Text.RegularExpressions.MatchEvaluator]{
+        param($match)
+        return $replacementLine
+      }
+    )
   } else {
     if (-not $content.EndsWith("`n")) {
       $content += "`n"
@@ -50,7 +83,7 @@ function Get-EnvVar {
   )
   $line = Select-String -Path $Path -Pattern "^$([Regex]::Escape($Name))=" | Select-Object -First 1
   if ($null -eq $line) { return $null }
-  return ($line.Line -split "=", 2)[1]
+  return (Normalize-EnvValue (($line.Line -split "=", 2)[1]))
 }
 
 function Should-ReplaceSecret {
@@ -60,8 +93,7 @@ function Should-ReplaceSecret {
   return (
     $v.StartsWith("replace") -or
     $v.StartsWith("change") -or
-    $v.Contains("example") -or
-    $v.Contains("password")
+    $v.StartsWith("example")
   )
 }
 

@@ -2,8 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 class AppLocalizations {
+  // Keep language codes as the single source of truth and derive locales from it
+  // so supportedLanguageCodes and supportedLocales cannot drift apart.
   static const List<String> supportedLanguageCodes = <String>['en'];
-  static const List<Locale> supportedLocales = <Locale>[Locale('en')];
+  static final List<Locale> supportedLocales = List<Locale>.unmodifiable(
+    supportedLanguageCodes.map((code) => Locale(code)),
+  );
 
   static AppLocalizations? of(BuildContext context) {
     return Localizations.of<AppLocalizations>(context, AppLocalizations);

@@ -1,7 +1,7 @@
 # MyStudySpace APK — Full Audit Report (Functionality + Database + UI/UX)
 
 **Date:** 2026-01-28  
-**Scope:** Android APK (Flutter app) vs existing Web app (`C:\Users\ASUS\Studyspace`)  
+**Scope:** Android APK (Flutter app) vs existing Web app (`<PROJECT_ROOT>/Studyspace`)  
 **Current status (reported):** “Only able to view resources; almost all other actions fail (loading / PostgREST errors / non-functional UI).”
 
 ---
@@ -26,7 +26,7 @@ Your **database security model** (as implemented in `Studyspace` SQL files) is:
 ## Repository Sources Used (Ground Truth)
 
 ### Web / Architecture / SQL (Studyspace)
-Located at: `C:\Users\ASUS\Studyspace`
+Located at: `<PROJECT_ROOT>/Studyspace`
 
 Key files used in this audit:
 - `UNIFIED_RLS.sql` — defines the **core security architecture**
@@ -39,7 +39,11 @@ Key files used in this audit:
 - `.env` — includes `VITE_API_URL` and reCAPTCHA site key
 
 ### Flutter / APK (mystudyspace-app)
-Located at: `C:\Users\ASUS\Desktop\mystudyspace-app`
+Located at: `<PROJECT_ROOT>/mystudyspace-app`
+
+Note: Replace `<PROJECT_ROOT>` with your local workspace root (for example
+`D:\Projects` or `~/dev`). If you need per-developer overrides, store them in a
+config or `.env` rather than hardcoding absolute paths.
 
 Key files referenced:
 - `flutter_application_1/lib/services/supabase_service.dart`
@@ -267,7 +271,7 @@ If the APK performs direct Supabase writes, you will see errors like:
 Recommended constant:
 - Bottom app bar height: ~60
 - Extra buffer: 8
-- Effective bottom padding: `MediaQuery.viewPaddingOf(context).bottom + 60 + 8`
+- Effective bottom padding: `MediaQuery.of(context).viewPadding.bottom + 60 + 8`
 
 ---
 
@@ -404,4 +408,6 @@ Recommended constant:
 ### Option B (automatic .docx generation)
 If you want me to generate a real `.docx` file automatically, approve installing `python-docx` locally and I’ll generate:
 - `MyStudySpace_APK_Audit_Report.docx`
+
+
 

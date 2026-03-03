@@ -1,2 +1,9 @@
 .env
 backups/
+node_modules/
+logs/
+*.log
+.n8n/
+dist/
+*.db
+*.sqlite

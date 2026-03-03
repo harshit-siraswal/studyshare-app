@@ -78,7 +78,7 @@ class _DepartmentCard3DState extends State<DepartmentCard3D>
       ..setEntry(3, 2, 0.001)
       ..rotateX(_xRotation)
       ..rotateY(_yRotation)
-      ..scaleByDouble(scale, scale, scale, 1.0);
+      ..scale(scale, scale, scale);
   }
 
   void _resetTransform() {

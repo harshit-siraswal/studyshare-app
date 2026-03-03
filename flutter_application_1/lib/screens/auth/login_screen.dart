@@ -178,7 +178,7 @@ class _LoginScreenState extends State<LoginScreen> {
       );
       if (banResult?['banCheckSkipped'] == true) {
         if (mounted) {
-          _showSuccess(
+          _showWarning(
             'Limited verification mode: some security checks are temporarily unavailable.',
           );
         }
@@ -215,6 +215,21 @@ class _LoginScreenState extends State<LoginScreen> {
   void _showSuccess(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(message), backgroundColor: AppTheme.success),
+    );
+  }
+
+  void _showWarning(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: Colors.white),
+            const SizedBox(width: 10),
+            Expanded(child: Text(message)),
+          ],
+        ),
+        backgroundColor: AppTheme.warning,
+      ),
     );
   }
 

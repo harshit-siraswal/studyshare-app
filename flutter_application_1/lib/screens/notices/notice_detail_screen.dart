@@ -366,7 +366,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                           ),
                         ),
                         Text(
-                          'MyStudySpace Notice',
+                          'StudyShare Notice',
                           style: GoogleFonts.inter(
                             color: Colors.grey,
                             fontSize: 12,
@@ -403,7 +403,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      'via MyStudySpace',
+                      'via StudyShare',
                       style: GoogleFonts.inter(
                         color: AppTheme.primary,
                         fontWeight: FontWeight.bold,
@@ -429,7 +429,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
 
       await Share.shareXFiles([
         XFile(file.path),
-      ], text: 'Check out this notice on MyStudySpace!');
+      ], text: 'Check out this notice on StudyShare!');
     } catch (e) {
       debugPrint('Failed to generate image: $e');
       _showError('Failed to generate image');
@@ -1112,3 +1112,6 @@ class _MediaViewerScreen extends StatelessWidget {
     );
   }
 }
+
+
+

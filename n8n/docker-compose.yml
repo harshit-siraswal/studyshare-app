@@ -8,9 +8,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       TZ: ${TZ}
     volumes:
-      - type: bind
-        source: ${N8N_DATA_ROOT}/postgres
-        target: /var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
@@ -22,13 +20,16 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$${REDIS_PASSWORD}"
     volumes:
-      - type: bind
-        source: ${N8N_DATA_ROOT}/redis
-        target: /data
+      - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$${REDIS_PASSWORD}\" redis-cli ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -62,6 +63,8 @@ services:
       N8N_EDITOR_BASE_URL: ${N8N_EDITOR_BASE_URL}
       WEBHOOK_URL: ${WEBHOOK_URL}
       N8N_SECURE_COOKIE: ${N8N_SECURE_COOKIE}
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      OCR_INTERNAL_API_KEY: ${OCR_INTERNAL_API_KEY}
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
       DB_POSTGRESDB_PORT: "5432"
@@ -71,12 +74,19 @@ services:
       EXECUTIONS_MODE: queue
       QUEUE_BULL_REDIS_HOST: redis
       QUEUE_BULL_REDIS_PORT: "6379"
+      QUEUE_BULL_REDIS_PASSWORD: ${REDIS_PASSWORD}
       N8N_CONCURRENCY_PRODUCTION_LIMIT: ${N8N_CONCURRENCY_PRODUCTION_LIMIT}
       OFFLOAD_MANUAL_EXECUTIONS_TO_WORKERS: "true"
     volumes:
       - type: bind
         source: ${N8N_DATA_ROOT}/n8n_data
         target: /home/node/.n8n
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
     networks:
       - n8n_net
 
@@ -96,6 +106,8 @@ services:
       N8N_DIAGNOSTICS_ENABLED: "false"
       N8N_PERSONALIZATION_ENABLED: "false"
       N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS: "true"
+      INTERNAL_API_KEY: ${INTERNAL_API_KEY}
+      OCR_INTERNAL_API_KEY: ${OCR_INTERNAL_API_KEY}
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
       DB_TYPE: postgresdb
       DB_POSTGRESDB_HOST: postgres
@@ -106,6 +118,7 @@ services:
       EXECUTIONS_MODE: queue
       QUEUE_BULL_REDIS_HOST: redis
       QUEUE_BULL_REDIS_PORT: "6379"
+      QUEUE_BULL_REDIS_PASSWORD: ${REDIS_PASSWORD}
     volumes:
       - type: bind
         source: ${N8N_DATA_ROOT}/n8n_data
@@ -116,3 +129,7 @@ services:
 networks:
   n8n_net:
     driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:

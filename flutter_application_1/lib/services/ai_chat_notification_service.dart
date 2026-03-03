@@ -1,6 +1,6 @@
 import 'dart:io' show Platform;
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 class AiChatNotificationService {
@@ -16,6 +16,11 @@ class AiChatNotificationService {
 
   static const String _channelId = 'ai_chat_long_response';
   static const String _channelName = 'AI Chat Updates';
+  static const String _channelDescription =
+      'Notifications when AI responses are ready';
+  bool? _darwinPermissionsGranted;
+
+  bool? get darwinPermissionsGranted => _darwinPermissionsGranted;
 
   Future<void> initialize() async {
     if (kIsWeb || _initialized) return;
@@ -33,17 +38,27 @@ class AiChatNotificationService {
   }
 
   Future<void> _performInitialization() async {
+    if (!Platform.isAndroid && !Platform.isIOS && !Platform.isMacOS) {
+      debugPrint(
+        'AiChatNotificationService: Unsupported platform '
+        '${Platform.operatingSystem}.',
+      );
+      _initialized = false;
+      return;
+    }
+
     const androidSettings = AndroidInitializationSettings(
       '@mipmap/ic_launcher',
     );
-    const iosSettings = DarwinInitializationSettings(
+    const darwinSettings = DarwinInitializationSettings(
       requestAlertPermission: true,
       requestBadgePermission: true,
       requestSoundPermission: true,
     );
     const initSettings = InitializationSettings(
       android: androidSettings,
-      iOS: iosSettings,
+      iOS: darwinSettings,
+      macOS: darwinSettings,
     );
     await _plugin.initialize(initSettings);
 
@@ -51,7 +66,7 @@ class AiChatNotificationService {
       const channel = AndroidNotificationChannel(
         _channelId,
         _channelName,
-        description: 'Notifications when AI responses are ready',
+        description: _channelDescription,
         importance: Importance.high,
       );
       await _plugin
@@ -60,6 +75,30 @@ class AiChatNotificationService {
           >()
           ?.createNotificationChannel(channel);
     }
+    if (Platform.isIOS) {
+      _darwinPermissionsGranted = await _plugin
+          .resolvePlatformSpecificImplementation<
+            IOSFlutterLocalNotificationsPlugin
+          >()
+          ?.requestPermissions(alert: true, badge: true, sound: true);
+      if (_darwinPermissionsGranted != true) {
+        debugPrint(
+          'AiChatNotificationService: iOS notification permissions denied.',
+        );
+      }
+    } else if (Platform.isMacOS) {
+      _darwinPermissionsGranted = await _plugin
+          .resolvePlatformSpecificImplementation<
+            MacOSFlutterLocalNotificationsPlugin
+          >()
+          ?.requestPermissions(alert: true, badge: true, sound: true);
+      if (_darwinPermissionsGranted != true) {
+        debugPrint(
+          'AiChatNotificationService: macOS notification permissions denied.',
+        );
+      }
+    }
+
     _initialized = true;
   }
 
@@ -84,7 +123,7 @@ class AiChatNotificationService {
     const androidDetails = AndroidNotificationDetails(
       _channelId,
       _channelName,
-      channelDescription: 'Notifications when AI responses are ready',
+      channelDescription: _channelDescription,
       importance: Importance.high,
       priority: Priority.high,
       playSound: true,
@@ -99,13 +138,18 @@ class AiChatNotificationService {
     const details = NotificationDetails(
       android: androidDetails,
       iOS: iosDetails,
+      macOS: iosDetails,
     );
 
-    await _plugin.show(
-      _nextNotificationId(),
-      title,
-      body,
-      details,
-    );
+    final notificationId = _nextNotificationId();
+    try {
+      await _plugin.show(notificationId, title, body, details);
+    } catch (e, st) {
+      debugPrint(
+        'AiChatNotificationService.notifyAnswerReady failed '
+        '(id=$notificationId): $e',
+      );
+      debugPrint('$st');
+    }
   }
 }

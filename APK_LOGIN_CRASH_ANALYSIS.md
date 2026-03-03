@@ -711,3 +711,5 @@ Show proper loading indicators during authentication to prevent user confusion.
 5. Add connectivity check → Test
 
 After each fix, rebuild and test the APK to isolate which issue was causing the crash.
+
+

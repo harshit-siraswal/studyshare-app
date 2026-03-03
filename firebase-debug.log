@@ -1,0 +1,196 @@
+[debug] [2026-03-03T11:08:36.607Z] ----------------------------------------------------------------------
+[debug] [2026-03-03T11:08:36.609Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\ASUS\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js projects:list
+[debug] [2026-03-03T11:08:36.610Z] CLI Version:   15.0.0
+[debug] [2026-03-03T11:08:36.610Z] Platform:      win32
+[debug] [2026-03-03T11:08:36.610Z] Node Version:  v24.11.0
+[debug] [2026-03-03T11:08:36.610Z] Time:          Tue Mar 03 2026 16:38:36 GMT+0530 (India Standard Time)
+[debug] [2026-03-03T11:08:36.610Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-03-03T11:08:36.611Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2026-03-03T11:08:36.639Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-03-03T11:08:37.339Z] <<< [apiv2][status] GET https://firebase-public.firebaseio.com/cli.json 200
+[debug] [2026-03-03T11:08:37.339Z] <<< [apiv2][body] GET https://firebase-public.firebaseio.com/cli.json {"cloudBuildErrorAfter":1594252800000,"cloudBuildWarnAfter":1590019200000,"defaultNode10After":1594252800000,"minVersion":"3.0.5","node8DeploysDisabledAfter":1613390400000,"node8RuntimeDisabledAfter":1615809600000,"node8WarnAfter":1600128000000}
+[debug] [2026-03-03T11:08:43.509Z] Running auto auth
+[debug] [2026-03-03T11:08:43.511Z] No OAuth tokens found
+[debug] [2026-03-03T11:08:43.512Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects pageSize=1000
+[debug] [2026-03-03T11:08:44.277Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects 200
+[debug] [2026-03-03T11:09:12.605Z] ----------------------------------------------------------------------
+[debug] [2026-03-03T11:09:12.608Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\ASUS\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js apps:list --project studyspace-kiet
+[debug] [2026-03-03T11:09:12.608Z] CLI Version:   15.0.0
+[debug] [2026-03-03T11:09:12.608Z] Platform:      win32
+[debug] [2026-03-03T11:09:12.608Z] Node Version:  v24.11.0
+[debug] [2026-03-03T11:09:12.608Z] Time:          Tue Mar 03 2026 16:39:12 GMT+0530 (India Standard Time)
+[debug] [2026-03-03T11:09:12.608Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-03-03T11:09:12.649Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-03-03T11:09:13.070Z] Running auto auth
+[debug] [2026-03-03T11:09:13.073Z] No OAuth tokens found
+[debug] [2026-03-03T11:09:13.074Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/studyspace-kiet:searchApps pageSize=100
+[debug] [2026-03-03T11:09:13.605Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/studyspace-kiet:searchApps 200
+[debug] [2026-03-03T11:09:37.339Z] ----------------------------------------------------------------------
+[debug] [2026-03-03T11:09:37.342Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\ASUS\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js apps:create android StudyShare --package-name me.studyshare.android --project studyspace-kiet
+[debug] [2026-03-03T11:09:37.342Z] CLI Version:   15.0.0
+[debug] [2026-03-03T11:09:37.342Z] Platform:      win32
+[debug] [2026-03-03T11:09:37.342Z] Node Version:  v24.11.0
+[debug] [2026-03-03T11:09:37.343Z] Time:          Tue Mar 03 2026 16:39:37 GMT+0530 (India Standard Time)
+[debug] [2026-03-03T11:09:37.343Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-03-03T11:09:37.360Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-03-03T11:09:37.791Z] Running auto auth
+[info] Create your ANDROID app in project studyspace-kiet:
+[debug] [2026-03-03T11:09:37.794Z] No OAuth tokens found
+[debug] [2026-03-03T11:09:37.795Z] >>> [apiv2][query] POST https://firebase.googleapis.com/v1beta1/projects/studyspace-kiet/androidApps [none]
+[debug] [2026-03-03T11:09:37.795Z] >>> [apiv2][body] POST https://firebase.googleapis.com/v1beta1/projects/studyspace-kiet/androidApps {"displayName":"StudyShare","packageName":"me.studyshare.android"}
+[debug] [2026-03-03T11:09:39.855Z] <<< [apiv2][status] POST https://firebase.googleapis.com/v1beta1/projects/studyspace-kiet/androidApps 200
+[debug] [2026-03-03T11:09:39.856Z] <<< [apiv2][body] POST https://firebase.googleapis.com/v1beta1/projects/studyspace-kiet/androidApps {"name":"operations/workflows/MDA2ZDM4MjAtZDY3OS00Mjg4LWJlMzctNWRlMmUyOThiNjE4"}
+[debug] [2026-03-03T11:09:39.857Z] No OAuth tokens found
+[debug] [2026-03-03T11:09:39.857Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/operations/workflows/MDA2ZDM4MjAtZDY3OS00Mjg4LWJlMzctNWRlMmUyOThiNjE4 [none]
+[debug] [2026-03-03T11:09:40.436Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/operations/workflows/MDA2ZDM4MjAtZDY3OS00Mjg4LWJlMzctNWRlMmUyOThiNjE4 200
+[debug] [2026-03-03T11:09:40.436Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/operations/workflows/MDA2ZDM4MjAtZDY3OS00Mjg4LWJlMzctNWRlMmUyOThiNjE4 {"name":"operations/workflows/MDA2ZDM4MjAtZDY3OS00Mjg4LWJlMzctNWRlMmUyOThiNjE4"}
+[debug] [2026-03-03T11:09:40.939Z] [Create Android app Poller] Retrying task index 0
+[debug] [2026-03-03T11:09:40.940Z] No OAuth tokens found
+[debug] [2026-03-03T11:09:40.940Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/operations/workflows/MDA2ZDM4MjAtZDY3OS00Mjg4LWJlMzctNWRlMmUyOThiNjE4 [none]
+[debug] [2026-03-03T11:09:41.573Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/operations/workflows/MDA2ZDM4MjAtZDY3OS00Mjg4LWJlMzctNWRlMmUyOThiNjE4 200
+[debug] [2026-03-03T11:09:41.573Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/operations/workflows/MDA2ZDM4MjAtZDY3OS00Mjg4LWJlMzctNWRlMmUyOThiNjE4 {"name":"operations/workflows/MDA2ZDM4MjAtZDY3OS00Mjg4LWJlMzctNWRlMmUyOThiNjE4"}
+[debug] [2026-03-03T11:09:42.574Z] [Create Android app Poller] Retrying task index 0
+[debug] [2026-03-03T11:09:42.577Z] No OAuth tokens found
+[debug] [2026-03-03T11:09:42.579Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/operations/workflows/MDA2ZDM4MjAtZDY3OS00Mjg4LWJlMzctNWRlMmUyOThiNjE4 [none]
+[debug] [2026-03-03T11:09:43.155Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/operations/workflows/MDA2ZDM4MjAtZDY3OS00Mjg4LWJlMzctNWRlMmUyOThiNjE4 200
+[debug] [2026-03-03T11:09:43.155Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/operations/workflows/MDA2ZDM4MjAtZDY3OS00Mjg4LWJlMzctNWRlMmUyOThiNjE4 {"name":"operations/workflows/MDA2ZDM4MjAtZDY3OS00Mjg4LWJlMzctNWRlMmUyOThiNjE4"}
+[debug] [2026-03-03T11:09:45.157Z] [Create Android app Poller] Retrying task index 0
+[debug] [2026-03-03T11:09:45.159Z] No OAuth tokens found
+[debug] [2026-03-03T11:09:45.159Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/operations/workflows/MDA2ZDM4MjAtZDY3OS00Mjg4LWJlMzctNWRlMmUyOThiNjE4 [none]
+[debug] [2026-03-03T11:09:45.923Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/operations/workflows/MDA2ZDM4MjAtZDY3OS00Mjg4LWJlMzctNWRlMmUyOThiNjE4 200
+[debug] [2026-03-03T11:10:06.480Z] ----------------------------------------------------------------------
+[debug] [2026-03-03T11:10:06.480Z] ----------------------------------------------------------------------
+[debug] [2026-03-03T11:10:06.482Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\ASUS\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js apps:android:sha:create 1:28032445048:android:c78a0d588b4fedb04b1b8d 5939FE56812EC1505A1F3211598250D0CB8D3EAB05111E96D2B669B0C4566762 --project studyspace-kiet
+[debug] [2026-03-03T11:10:06.483Z] CLI Version:   15.0.0
+[debug] [2026-03-03T11:10:06.483Z] Platform:      win32
+[debug] [2026-03-03T11:10:06.483Z] Node Version:  v24.11.0
+[debug] [2026-03-03T11:10:06.483Z] Time:          Tue Mar 03 2026 16:40:06 GMT+0530 (India Standard Time)
+[debug] [2026-03-03T11:10:06.483Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-03-03T11:10:06.503Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-03-03T11:10:06.483Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\ASUS\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js apps:android:sha:create 1:28032445048:android:c78a0d588b4fedb04b1b8d D28B5B4378C3DE608A967638AD9D2DFDB2C08633 --project studyspace-kiet
+[debug] [2026-03-03T11:10:06.483Z] CLI Version:   15.0.0
+[debug] [2026-03-03T11:10:06.484Z] Platform:      win32
+[debug] [2026-03-03T11:10:06.484Z] Node Version:  v24.11.0
+[debug] [2026-03-03T11:10:06.484Z] Time:          Tue Mar 03 2026 16:40:06 GMT+0530 (India Standard Time)
+[debug] [2026-03-03T11:10:06.484Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-03-03T11:10:06.503Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-03-03T11:10:06.848Z] Running auto auth
+[debug] [2026-03-03T11:10:06.848Z] Running auto auth
+[debug] [2026-03-03T11:10:06.852Z] No OAuth tokens found
+[debug] [2026-03-03T11:10:06.853Z] >>> [apiv2][query] POST https://firebase.googleapis.com/v1beta1/projects/studyspace-kiet/androidApps/1:28032445048:android:c78a0d588b4fedb04b1b8d/sha [none]
+[debug] [2026-03-03T11:10:06.853Z] >>> [apiv2][body] POST https://firebase.googleapis.com/v1beta1/projects/studyspace-kiet/androidApps/1:28032445048:android:c78a0d588b4fedb04b1b8d/sha {"shaHash":"5939FE56812EC1505A1F3211598250D0CB8D3EAB05111E96D2B669B0C4566762","certType":"SHA_256"}
+[debug] [2026-03-03T11:10:06.852Z] No OAuth tokens found
+[debug] [2026-03-03T11:10:06.853Z] >>> [apiv2][query] POST https://firebase.googleapis.com/v1beta1/projects/studyspace-kiet/androidApps/1:28032445048:android:c78a0d588b4fedb04b1b8d/sha [none]
+[debug] [2026-03-03T11:10:06.853Z] >>> [apiv2][body] POST https://firebase.googleapis.com/v1beta1/projects/studyspace-kiet/androidApps/1:28032445048:android:c78a0d588b4fedb04b1b8d/sha {"shaHash":"D28B5B4378C3DE608A967638AD9D2DFDB2C08633","certType":"SHA_1"}
+[debug] [2026-03-03T11:10:07.857Z] <<< [apiv2][status] POST https://firebase.googleapis.com/v1beta1/projects/studyspace-kiet/androidApps/1:28032445048:android:c78a0d588b4fedb04b1b8d/sha 200
+[debug] [2026-03-03T11:10:09.484Z] <<< [apiv2][status] POST https://firebase.googleapis.com/v1beta1/projects/studyspace-kiet/androidApps/1:28032445048:android:c78a0d588b4fedb04b1b8d/sha 200
+[debug] [2026-03-03T11:10:19.679Z] ----------------------------------------------------------------------
+[debug] [2026-03-03T11:10:19.680Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\ASUS\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js apps:sdkconfig ANDROID 1:28032445048:android:c78a0d588b4fedb04b1b8d --project studyspace-kiet --out flutter_application_1/android/app/google-services.json
+[debug] [2026-03-03T11:10:19.681Z] CLI Version:   15.0.0
+[debug] [2026-03-03T11:10:19.681Z] Platform:      win32
+[debug] [2026-03-03T11:10:19.681Z] Node Version:  v24.11.0
+[debug] [2026-03-03T11:10:19.681Z] Time:          Tue Mar 03 2026 16:40:19 GMT+0530 (India Standard Time)
+[debug] [2026-03-03T11:10:19.681Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-03-03T11:10:19.701Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-03-03T11:10:20.134Z] Running auto auth
+[debug] [2026-03-03T11:10:20.139Z] No OAuth tokens found
+[debug] [2026-03-03T11:10:20.140Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/-/androidApps/1:28032445048:android:c78a0d588b4fedb04b1b8d/config [none]
+[debug] [2026-03-03T11:10:22.094Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/-/androidApps/1:28032445048:android:c78a0d588b4fedb04b1b8d/config 200
+[debug] [2026-03-03T11:10:22.094Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/-/androidApps/1:28032445048:android:c78a0d588b4fedb04b1b8d/config {"configFilename":"google-services.json","configFileContents":"ewogICJwcm9qZWN0X2luZm8iOiB7CiAgICAicHJvamVjdF9udW1iZXIiOiAiMjgwMzI0NDUwNDgiLAogICAgInByb2plY3RfaWQiOiAic3R1ZHlzcGFjZS1raWV0IiwKICAgICJzdG9yYWdlX2J1Y2tldCI6ICJzdHVkeXNwYWNlLWtpZXQuZmlyZWJhc2VzdG9yYWdlLmFwcCIKICB9LAogICJjbGllbnQiOiBbCiAgICB7CiAgICAgICJjbGllbnRfaW5mbyI6IHsKICAgICAgICAibW9iaWxlc2RrX2FwcF9pZCI6ICIxOjI4MDMyNDQ1MDQ4OmFuZHJvaWQ6MzUyMjMxZGFjNTZhNmIxZjRiMWI4ZCIsCiAgICAgICAgImFuZHJvaWRfY2xpZW50X2luZm8iOiB7CiAgICAgICAgICAicGFja2FnZV9uYW1lIjogIm1lLm15c3R1ZHlzcGFjZS5hbmRyb2lkIgogICAgICAgIH0KICAgICAgfSwKICAgICAgIm9hdXRoX2NsaWVudCI6IFsKICAgICAgICB7CiAgICAgICAgICAiY2xpZW50X2lkIjogIjI4MDMyNDQ1MDQ4LTlvODRldTVqcTE2bmxxdDNoNDM5Y2I0b250dHA1MzFkLmFwcHMuZ29vZ2xldXNlcmNvbnRlbnQuY29tIiwKICAgICAgICAgICJjbGllbnRfdHlwZSI6IDEsCiAgICAgICAgICAiYW5kcm9pZF9pbmZvIjogewogICAgICAgICAgICAicGFja2FnZV9uYW1lIjogIm1lLm15c3R1ZHlzcGFjZS5hbmRyb2lkIiwKICAgICAgICAgICAgImNlcnRpZmljYXRlX2hhc2giOiAiZDI4YjViNDM3OGMzZGU2MDhhOTY3NjM4YWQ5ZDJkZmRiMmMwODYzMyIKICAgICAgICAgIH0KICAgICAgICB9LAogICAgICAgIHsKICAgICAgICAgICJjbGllbnRfaWQiOiAiMjgwMzI0NDUwNDgta2czazk2OWhhOGM5a2M4OGh0YTkwdGRkZjUxNzhuMW8uYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLAogICAgICAgICAgImNsaWVudF90eXBlIjogMwogICAgICAgIH0KICAgICAgXSwKICAgICAgImFwaV9rZXkiOiBbCiAgICAgICAgewogICAgICAgICAgImN1cnJlbnRfa2V5IjogIkFJemFTeURpZ2pGbXY3Q0ZyV3Z4X2JBbTNhTXhqVVVKeVZHUlNLayIKICAgICAgICB9CiAgICAgIF0sCiAgICAgICJzZXJ2aWNlcyI6IHsKICAgICAgICAiYXBwaW52aXRlX3NlcnZpY2UiOiB7CiAgICAgICAgICAib3RoZXJfcGxhdGZvcm1fb2F1dGhfY2xpZW50IjogWwogICAgICAgICAgICB7CiAgICAgICAgICAgICAgImNsaWVudF9pZCI6ICIyODAzMjQ0NTA0OC1rZzNrOTY5aGE4YzlrYzg4aHRhOTB0ZGRmNTE3OG4xby5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbSIsCiAgICAgICAgICAgICAgImNsaWVudF90eXBlIjogMwogICAgICAgICAgICB9LAogICAgICAgICAgICB7CiAgICAgICAgICAgICAgImNsaWVudF9pZCI6ICIyODAzMjQ0NTA0OC1mMTJjaXR2aXM3N2hoZ25naHQwbmVtZGZvNDZoOWI4cC5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbSIsCiAgICAgICAgICAgICAgImNsaWVudF90eXBlIjogMiwKICAgICAgICAgICAgICAiaW9zX2luZm8iOiB7CiAgICAgICAgICAgICAgICAiYnVuZGxlX2lkIjogIm1lLm15c3R1ZHlzcGFjZS5pb3MiCiAgICAgICAgICAgICAgfQogICAgICAgICAgICB9CiAgICAgICAgICBdCiAgICAgICAgfQogICAgICB9CiAgICB9LAogICAgewogICAgICAiY2xpZW50X2luZm8iOiB7CiAgICAgICAgIm1vYmlsZXNka19hcHBfaWQiOiAiMToyODAzMjQ0NTA0ODphbmRyb2lkOmM3OGEwZDU4OGI0ZmVkYjA0YjFiOGQiLAogICAgICAgICJhbmRyb2lkX2NsaWVudF9pbmZvIjogewogICAgICAgICAgInBhY2thZ2VfbmFtZSI6ICJtZS5zdHVkeXNoYXJlLmFuZHJvaWQiCiAgICAgICAgfQogICAgICB9LAogICAgICAib2F1dGhfY2xpZW50IjogWwogICAgICAgIHsKICAgICAgICAgICJjbGllbnRfaWQiOiAiMjgwMzI0NDUwNDgtbGdpbzRuajhwbDZlamlwNGQwbjRzdGYyMXM2Nm1vdXUuYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLAogICAgICAgICAgImNsaWVudF90eXBlIjogMSwKICAgICAgICAgICJhbmRyb2lkX2luZm8iOiB7CiAgICAgICAgICAgICJwYWNrYWdlX25hbWUiOiAibWUuc3R1ZHlzaGFyZS5hbmRyb2lkIiwKICAgICAgICAgICAgImNlcnRpZmljYXRlX2hhc2giOiAiZDI4YjViNDM3OGMzZGU2MDhhOTY3NjM4YWQ5ZDJkZmRiMmMwODYzMyIKICAgICAgICAgIH0KICAgICAgICB9LAogICAgICAgIHsKICAgICAgICAgICJjbGllbnRfaWQiOiAiMjgwMzI0NDUwNDgta2czazk2OWhhOGM5a2M4OGh0YTkwdGRkZjUxNzhuMW8uYXBwcy5nb29nbGV1c2VyY29udGVudC5jb20iLAogICAgICAgICAgImNsaWVudF90eXBlIjogMwogICAgICAgIH0KICAgICAgXSwKICAgICAgImFwaV9rZXkiOiBbCiAgICAgICAgewogICAgICAgICAgImN1cnJlbnRfa2V5IjogIkFJemFTeURpZ2pGbXY3Q0ZyV3Z4X2JBbTNhTXhqVVVKeVZHUlNLayIKICAgICAgICB9CiAgICAgIF0sCiAgICAgICJzZXJ2aWNlcyI6IHsKICAgICAgICAiYXBwaW52aXRlX3NlcnZpY2UiOiB7CiAgICAgICAgICAib3RoZXJfcGxhdGZvcm1fb2F1dGhfY2xpZW50IjogWwogICAgICAgICAgICB7CiAgICAgICAgICAgICAgImNsaWVudF9pZCI6ICIyODAzMjQ0NTA0OC1rZzNrOTY5aGE4YzlrYzg4aHRhOTB0ZGRmNTE3OG4xby5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbSIsCiAgICAgICAgICAgICAgImNsaWVudF90eXBlIjogMwogICAgICAgICAgICB9LAogICAgICAgICAgICB7CiAgICAgICAgICAgICAgImNsaWVudF9pZCI6ICIyODAzMjQ0NTA0OC1mMTJjaXR2aXM3N2hoZ25naHQwbmVtZGZvNDZoOWI4cC5hcHBzLmdvb2dsZXVzZXJjb250ZW50LmNvbSIsCiAgICAgICAgICAgICAgImNsaWVudF90eXBlIjogMiwKICAgICAgICAgICAgICAiaW9zX2luZm8iOiB7CiAgICAgICAgICAgICAgICAiYnVuZGxlX2lkIjogIm1lLm15c3R1ZHlzcGFjZS5pb3MiCiAgICAgICAgICAgICAgfQogICAgICAgICAgICB9CiAgICAgICAgICBdCiAgICAgICAgfQogICAgICB9CiAgICB9CiAgXSwKICAiY29uZmlndXJhdGlvbl92ZXJzaW9uIjogIjEiCn0="}
+[error] 
+[error] Error: flutter_application_1/android/app/google-services.json already exists
+[debug] [2026-03-03T11:10:32.848Z] ----------------------------------------------------------------------
+[debug] [2026-03-03T11:10:32.852Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\ASUS\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js apps:sdkconfig ANDROID 1:28032445048:android:c78a0d588b4fedb04b1b8d --project studyspace-kiet --out C:\Users\ASUS\AppData\Local\Temp\google-services-studyshare.json
+[debug] [2026-03-03T11:10:32.853Z] CLI Version:   15.0.0
+[debug] [2026-03-03T11:10:32.853Z] Platform:      win32
+[debug] [2026-03-03T11:10:32.853Z] Node Version:  v24.11.0
+[debug] [2026-03-03T11:10:32.853Z] Time:          Tue Mar 03 2026 16:40:32 GMT+0530 (India Standard Time)
+[debug] [2026-03-03T11:10:32.854Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-03-03T11:10:32.916Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-03-03T11:10:33.477Z] Running auto auth
+[debug] [2026-03-03T11:10:33.481Z] No OAuth tokens found
+[debug] [2026-03-03T11:10:33.483Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/-/androidApps/1:28032445048:android:c78a0d588b4fedb04b1b8d/config [none]
+[debug] [2026-03-03T11:10:35.020Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/-/androidApps/1:28032445048:android:c78a0d588b4fedb04b1b8d/config 200
+[debug] [2026-03-03T11:11:07.416Z] ----------------------------------------------------------------------
+[debug] [2026-03-03T11:11:07.421Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\ASUS\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js apps:sdkconfig IOS 1:28032445048:ios:4b25f06e20772c6b4b1b8d --project studyspace-kiet --out C:\Users\ASUS\AppData\Local\Temp\GoogleService-Info-studyshare.plist
+[debug] [2026-03-03T11:11:07.421Z] CLI Version:   15.0.0
+[debug] [2026-03-03T11:11:07.421Z] Platform:      win32
+[debug] [2026-03-03T11:11:07.421Z] Node Version:  v24.11.0
+[debug] [2026-03-03T11:11:07.422Z] Time:          Tue Mar 03 2026 16:41:07 GMT+0530 (India Standard Time)
+[debug] [2026-03-03T11:11:07.422Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-03-03T11:11:07.476Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-03-03T11:11:07.869Z] Running auto auth
+[debug] [2026-03-03T11:11:07.872Z] No OAuth tokens found
+[debug] [2026-03-03T11:11:07.873Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/-/iosApps/1:28032445048:ios:4b25f06e20772c6b4b1b8d/config [none]
+[debug] [2026-03-03T11:11:07.879Z] ----------------------------------------------------------------------
+[debug] [2026-03-03T11:11:07.882Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\ASUS\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js apps:create ios StudyShare --bundle-id me.studyshare.ios --project studyspace-kiet
+[debug] [2026-03-03T11:11:07.882Z] CLI Version:   15.0.0
+[debug] [2026-03-03T11:11:07.883Z] Platform:      win32
+[debug] [2026-03-03T11:11:07.883Z] Node Version:  v24.11.0
+[debug] [2026-03-03T11:11:07.883Z] Time:          Tue Mar 03 2026 16:41:07 GMT+0530 (India Standard Time)
+[debug] [2026-03-03T11:11:07.883Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-03-03T11:11:07.917Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-03-03T11:11:08.331Z] Running auto auth
+[info] Create your IOS app in project studyspace-kiet:
+[debug] [2026-03-03T11:11:08.335Z] No OAuth tokens found
+[debug] [2026-03-03T11:11:08.336Z] >>> [apiv2][query] POST https://firebase.googleapis.com/v1beta1/projects/studyspace-kiet/iosApps [none]
+[debug] [2026-03-03T11:11:08.337Z] >>> [apiv2][body] POST https://firebase.googleapis.com/v1beta1/projects/studyspace-kiet/iosApps {"displayName":"StudyShare","bundleId":"me.studyshare.ios"}
+[debug] [2026-03-03T11:11:08.952Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/-/iosApps/1:28032445048:ios:4b25f06e20772c6b4b1b8d/config 404
+[debug] [2026-03-03T11:11:08.952Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/-/iosApps/1:28032445048:ios:4b25f06e20772c6b4b1b8d/config {"error":{"code":404,"message":"App not found. App [1:28032445048:ios:4b25f06e20772c6b4b1b8d]","status":"NOT_FOUND"}}
+[debug] [2026-03-03T11:11:08.953Z] Request to https://firebase.googleapis.com/v1beta1/projects/-/iosApps/1:28032445048:ios:4b25f06e20772c6b4b1b8d/config had HTTP Error: 404, App not found. App [1:28032445048:ios:4b25f06e20772c6b4b1b8d]
+[debug] [2026-03-03T11:11:08.955Z] FirebaseError: Request to https://firebase.googleapis.com/v1beta1/projects/-/iosApps/1:28032445048:ios:4b25f06e20772c6b4b1b8d/config had HTTP Error: 404, App not found. App [1:28032445048:ios:4b25f06e20772c6b4b1b8d]
+    at responseToError (C:\Users\ASUS\AppData\Roaming\npm\node_modules\firebase-tools\lib\responseToError.js:53:12)
+    at RetryOperation._fn (C:\Users\ASUS\AppData\Roaming\npm\node_modules\firebase-tools\lib\apiv2.js:322:77)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+[error] 
+[error] Error: Failed to get IOS app configuration. See firebase-debug.log for more info.
+[debug] [2026-03-03T11:11:10.137Z] <<< [apiv2][status] POST https://firebase.googleapis.com/v1beta1/projects/studyspace-kiet/iosApps 200
+[debug] [2026-03-03T11:11:10.138Z] <<< [apiv2][body] POST https://firebase.googleapis.com/v1beta1/projects/studyspace-kiet/iosApps {"name":"operations/workflows/Y2E1NjVlYjktZmRlYi00YjEwLThlOGItYTZiNDM4MWZlYzYx"}
+[debug] [2026-03-03T11:11:10.138Z] No OAuth tokens found
+[debug] [2026-03-03T11:11:10.139Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/operations/workflows/Y2E1NjVlYjktZmRlYi00YjEwLThlOGItYTZiNDM4MWZlYzYx [none]
+[debug] [2026-03-03T11:11:10.696Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/operations/workflows/Y2E1NjVlYjktZmRlYi00YjEwLThlOGItYTZiNDM4MWZlYzYx 200
+[debug] [2026-03-03T11:11:10.697Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/operations/workflows/Y2E1NjVlYjktZmRlYi00YjEwLThlOGItYTZiNDM4MWZlYzYx {"name":"operations/workflows/Y2E1NjVlYjktZmRlYi00YjEwLThlOGItYTZiNDM4MWZlYzYx"}
+[debug] [2026-03-03T11:11:11.205Z] [Create iOS app Poller] Retrying task index 0
+[debug] [2026-03-03T11:11:11.205Z] No OAuth tokens found
+[debug] [2026-03-03T11:11:11.205Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/operations/workflows/Y2E1NjVlYjktZmRlYi00YjEwLThlOGItYTZiNDM4MWZlYzYx [none]
+[debug] [2026-03-03T11:11:11.776Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/operations/workflows/Y2E1NjVlYjktZmRlYi00YjEwLThlOGItYTZiNDM4MWZlYzYx 200
+[debug] [2026-03-03T11:11:11.776Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/operations/workflows/Y2E1NjVlYjktZmRlYi00YjEwLThlOGItYTZiNDM4MWZlYzYx {"name":"operations/workflows/Y2E1NjVlYjktZmRlYi00YjEwLThlOGItYTZiNDM4MWZlYzYx"}
+[debug] [2026-03-03T11:11:12.783Z] [Create iOS app Poller] Retrying task index 0
+[debug] [2026-03-03T11:11:12.784Z] No OAuth tokens found
+[debug] [2026-03-03T11:11:12.784Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/operations/workflows/Y2E1NjVlYjktZmRlYi00YjEwLThlOGItYTZiNDM4MWZlYzYx [none]
+[debug] [2026-03-03T11:11:13.370Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/operations/workflows/Y2E1NjVlYjktZmRlYi00YjEwLThlOGItYTZiNDM4MWZlYzYx 200
+[debug] [2026-03-03T11:11:35.432Z] ----------------------------------------------------------------------
+[debug] [2026-03-03T11:11:35.450Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\ASUS\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js apps:sdkconfig IOS 1:28032445048:ios:56e04c12b10aa2b84b1b8d --project studyspace-kiet --out C:\Users\ASUS\AppData\Local\Temp\GoogleService-Info-studyshare.plist
+[debug] [2026-03-03T11:11:35.452Z] CLI Version:   15.0.0
+[debug] [2026-03-03T11:11:35.452Z] Platform:      win32
+[debug] [2026-03-03T11:11:35.453Z] Node Version:  v24.11.0
+[debug] [2026-03-03T11:11:35.454Z] Time:          Tue Mar 03 2026 16:41:35 GMT+0530 (India Standard Time)
+[debug] [2026-03-03T11:11:35.454Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-03-03T11:11:35.604Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-03-03T11:11:36.522Z] Running auto auth
+[debug] [2026-03-03T11:11:36.600Z] No OAuth tokens found
+[debug] [2026-03-03T11:11:36.654Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/-/iosApps/1:28032445048:ios:56e04c12b10aa2b84b1b8d/config [none]
+[debug] [2026-03-03T11:11:37.953Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/-/iosApps/1:28032445048:ios:56e04c12b10aa2b84b1b8d/config 200
+[debug] [2026-03-03T11:15:40.138Z] ----------------------------------------------------------------------
+[debug] [2026-03-03T11:15:40.140Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\ASUS\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js apps:list --project studyspace-kiet
+[debug] [2026-03-03T11:15:40.141Z] CLI Version:   15.0.0
+[debug] [2026-03-03T11:15:40.141Z] Platform:      win32
+[debug] [2026-03-03T11:15:40.141Z] Node Version:  v24.11.0
+[debug] [2026-03-03T11:15:40.141Z] Time:          Tue Mar 03 2026 16:45:40 GMT+0530 (India Standard Time)
+[debug] [2026-03-03T11:15:40.141Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-03-03T11:15:40.159Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-03-03T11:15:40.542Z] Running auto auth
+[debug] [2026-03-03T11:15:40.548Z] No OAuth tokens found
+[debug] [2026-03-03T11:15:40.549Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/studyspace-kiet:searchApps pageSize=100
+[debug] [2026-03-03T11:15:41.370Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/studyspace-kiet:searchApps 200

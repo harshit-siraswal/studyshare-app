@@ -90,10 +90,10 @@ class IncomingShareService {
   static final IncomingShareService instance = IncomingShareService._();
 
   static const MethodChannel _methodChannel = MethodChannel(
-    'me.mystudyspace.android/share_intent',
+    'me.studyshare.android/share_intent',
   );
   static const EventChannel _eventChannel = EventChannel(
-    'me.mystudyspace.android/share_intent_events',
+    'me.studyshare.android/share_intent_events',
   );
 
   final StreamController<IncomingSharePayload> _controller =
@@ -204,3 +204,6 @@ class IncomingShareService {
     );
   }
 }
+
+
+

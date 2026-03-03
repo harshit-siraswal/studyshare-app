@@ -26,6 +26,7 @@ class AppUser {
   final String? bio;
   final String? semester;
   final String? branch;
+  final String? subject;
   final String? adminKey;
   final String role; // READ_ONLY, COLLEGE_USER, MODERATOR, ADMIN, TEACHER
   final DateTime createdAt;
@@ -40,6 +41,7 @@ class AppUser {
     this.bio,
     this.semester,
     this.branch,
+    this.subject,
     this.adminKey,
     this.role = AppRoles.readOnly,
     required this.createdAt,
@@ -61,13 +63,14 @@ class AppUser {
     return AppUser(
       id: id,
       email: email,
-      displayName: json['display_name'],
-      username: json['username'],
-      profilePhotoUrl: json['profile_photo_url'],
-      college: json['college'],
-      bio: json['bio'],
+      displayName: json['display_name']?.toString(),
+      username: json['username']?.toString(),
+      profilePhotoUrl: json['profile_photo_url']?.toString(),
+      college: json['college']?.toString(),
+      bio: json['bio']?.toString(),
       semester: json['semester']?.toString(),
       branch: json['branch']?.toString(),
+      subject: json['subject']?.toString(),
       adminKey: json['admin_key']?.toString(),
       role: () {
         final raw = json['role']?.toString().trim().toUpperCase() ?? '';
@@ -115,6 +118,7 @@ class AppUser {
       'bio': bio,
       'semester': semester,
       'branch': branch,
+      'subject': subject,
       'admin_key': adminKey,
       'role': role,
       'created_at': createdAt.toIso8601String(),

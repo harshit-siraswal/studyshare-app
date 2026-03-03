@@ -125,7 +125,7 @@ class _PaywallDialogState extends State<PaywallDialog> {
               ),
 
               Text(
-                'StudySpace Premium',
+                'StudyShare Premium',
                 style: GoogleFonts.inter(
                   fontSize: 24,
                   fontWeight: FontWeight.w800,

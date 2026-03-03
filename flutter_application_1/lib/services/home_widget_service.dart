@@ -4,7 +4,9 @@ import '../models/resource.dart';
 import '../models/notice.dart';
 
 class HomeWidgetService {
-  String _groupId = 'group.com.mystudyspace.app';
+  static const String _defaultAndroidWidgetPackage = 'me.studyshare.android';
+
+  String _groupId = 'group.com.studyshare.app';
   String _noticesWidgetName = 'NoticesWidgetProvider';
   String _syllabusWidgetName = 'SyllabusWidgetProvider';
 
@@ -19,26 +21,25 @@ class HomeWidgetService {
   void resetForTesting() {
     _isInitialized = false;
     _initializing = null;
-    _groupId = 'group.com.mystudyspace.app';
+    _groupId = 'group.com.studyshare.app';
     _noticesWidgetName = 'NoticesWidgetProvider';
     _syllabusWidgetName = 'SyllabusWidgetProvider';
   }
 
-  void configure({
+  Future<void> configure({
     String? groupId,
     String? noticesWidgetName,
     String? syllabusWidgetName,
-  }) {
+  }) async {
     if (groupId != null) _groupId = groupId;
     if (noticesWidgetName != null) _noticesWidgetName = noticesWidgetName;
     if (syllabusWidgetName != null) _syllabusWidgetName = syllabusWidgetName;
 
-    // Re-apply groupId if already initialized
-    if (_isInitialized && groupId != null) {
-      HomeWidget.setAppGroupId(_groupId).catchError((e) {
-        debugPrint('Error re-applying groupId after configure: $e');
-        return null;
-      });
+    // Re-apply groupId if already initialized (iOS only).
+    if (_isInitialized &&
+        groupId != null &&
+        defaultTargetPlatform == TargetPlatform.iOS) {
+      await HomeWidget.setAppGroupId(_groupId);
     }
   }
 
@@ -56,7 +57,9 @@ class HomeWidgetService {
       return false;
     }
     try {
-      await HomeWidget.setAppGroupId(_groupId);
+      if (defaultTargetPlatform == TargetPlatform.iOS) {
+        await HomeWidget.setAppGroupId(_groupId);
+      }
       _isInitialized = true;
       return true;
     } catch (e) {
@@ -68,11 +71,35 @@ class HomeWidgetService {
     }
   }
 
+  String _qualifiedAndroidName(String widgetName) {
+    if (widgetName.contains('.')) return widgetName;
+    return '$_defaultAndroidWidgetPackage.$widgetName';
+  }
+
+  Future<bool> _ensureInitialized() async {
+    if (_isInitialized) return true;
+    final ready = await initialize();
+    if (!ready) {
+      debugPrint('HomeWidgetService not initialized');
+    }
+    return ready;
+  }
+
+  Future<void> _updateWidget(String widgetName) async {
+    final result = await HomeWidget.updateWidget(
+      name: widgetName,
+      qualifiedAndroidName: _qualifiedAndroidName(widgetName),
+    );
+    if (result != true) {
+      debugPrint(
+        'HomeWidget update returned $result for $widgetName '
+        '(qualified: ${_qualifiedAndroidName(widgetName)})',
+      );
+    }
+  }
+
   Future<bool> syncNotices(List<Notice> notices) async {
-    if (!_isInitialized) {
-      if (!kIsWeb) {
-        debugPrint('HomeWidgetService not initialized');
-      }
+    if (!await _ensureInitialized()) {
       return false;
     }
     try {
@@ -81,16 +108,22 @@ class HomeWidgetService {
       if (recentNotices.isEmpty) {
         displayText = 'No recent notices.';
       } else {
+        final buffer = StringBuffer();
         for (var n in recentNotices) {
-          displayText += '• ${n.title}\n';
+          buffer.writeln('• ${n.title}');
         }
+        displayText = buffer.toString().trim();
       }
 
       await HomeWidget.saveWidgetData<String>(
         'notices_data',
         displayText.trim(),
       );
-      await HomeWidget.updateWidget(name: _noticesWidgetName);
+      await HomeWidget.saveWidgetData<String>(
+        'notices_title',
+        'Recent Notices',
+      );
+      await _updateWidget(_noticesWidgetName);
       return true;
     } catch (e) {
       debugPrint('Error syncing notices to widget: $e');
@@ -103,10 +136,7 @@ class HomeWidgetService {
     String branch,
     List<Resource> preFilteredSyllabusItems,
   ) async {
-    if (!_isInitialized) {
-      if (!kIsWeb) {
-        debugPrint('HomeWidgetService not initialized');
-      }
+    if (!await _ensureInitialized()) {
       return false;
     }
     try {
@@ -116,9 +146,11 @@ class HomeWidgetService {
       if (relevantSyllabus.isEmpty) {
         displayText = 'No syllabus for $branch Sem $semester.';
       } else {
+        final buffer = StringBuffer();
         for (var s in relevantSyllabus) {
-          displayText += '• ${s.title}\n';
+          buffer.writeln('• ${s.title}');
         }
+        displayText = buffer.toString().trim();
       }
 
       await HomeWidget.saveWidgetData<String>(
@@ -129,7 +161,7 @@ class HomeWidgetService {
         'syllabus_title',
         'Syllabus: $branch S$semester',
       );
-      await HomeWidget.updateWidget(name: _syllabusWidgetName);
+      await _updateWidget(_syllabusWidgetName);
       return true;
     } catch (e) {
       debugPrint('Error syncing syllabus to widget: $e');

@@ -1,10 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import 'package:custom_refresh_indicator/custom_refresh_indicator.dart';
 import 'package:lottie/lottie.dart';
-import 'package:audioplayers/audioplayers.dart';
 import 'package:badges/badges.dart' as badges;
 import 'package:flutter_app_badger/flutter_app_badger.dart';
 import '../../config/theme.dart';
@@ -61,20 +62,30 @@ class _StudyScreenState extends State<StudyScreen>
   List<Resource> _resources = [];
   bool _isLoading = true;
   bool _isLoadingMore = false;
-  final AudioPlayer _audioPlayer = AudioPlayer();
   late Future<List<DepartmentData>> _departmentsFuture;
+  Timer? _voteRefreshDebounce;
 
   // Following resources
   List<Resource> _followingResources = [];
   bool _isLoadingFollowing = true;
+  bool _isLoadingMoreModeration = false;
+  bool _hasMoreModeration = true;
+  int _moderationPage = 1;
+  static const int _moderationPageSize = 50;
   bool _isModerating = false;
 
   // User Profile Data
   String _userRole = 'READ_ONLY';
   String _userSemester = '1';
   String _userBranch = '';
+  String? _profileSemesterFilter;
+  String? _profileBranchFilter;
+  String? _profileSubjectFilter;
   String? _userAdminKey;
   bool _didRetryInitialEmptyLoad = false;
+  bool _resourcesRelevantOnly = true;
+  bool _moderationRelevantOnly = true;
+  bool _isResourceScopeToggleLoading = false;
 
   // Filters
   String? _selectedSemester;
@@ -193,8 +204,18 @@ class _StudyScreenState extends State<StudyScreen>
       final role = _resolveProfileRole(profile);
       final semester = profile['semester']?.toString();
       final branch = profile['branch']?.toString();
+      final subject = profile['subject']?.toString();
       if (mounted) {
         setState(() {
+          _profileSemesterFilter = (semester == null || semester.isEmpty)
+              ? null
+              : semester;
+          _profileBranchFilter = (branch == null || branch.isEmpty)
+              ? null
+              : branch;
+          _profileSubjectFilter = (subject == null || subject.isEmpty)
+              ? null
+              : subject;
           _userRole = role;
           _userSemester = (semester == null || semester.isEmpty)
               ? '1'
@@ -212,11 +233,22 @@ class _StudyScreenState extends State<StudyScreen>
 
   @override
   void dispose() {
+    _voteRefreshDebounce?.cancel();
     _searchController.dispose();
     _scrollController.dispose();
     _tabController.dispose();
-    _audioPlayer.dispose();
     super.dispose();
+  }
+
+  void _handleResourceVoteChanged() {
+    if (_mapSortOption(_selectedSort) != 'upvotes') {
+      return;
+    }
+    _voteRefreshDebounce?.cancel();
+    _voteRefreshDebounce = Timer(const Duration(milliseconds: 700), () {
+      if (!mounted) return;
+      _loadResources();
+    });
   }
 
   Future<void> _loadFollowingFeed() async {
@@ -226,14 +258,37 @@ class _StudyScreenState extends State<StudyScreen>
 
     try {
       if (_isTeacherOrAdmin) {
-        final resources = await _supabaseService.getPendingResourcesForTeacher(
+        final adminKey = _userAdminKey?.trim() ?? '';
+        if (adminKey.isEmpty) {
+          if (!mounted) return;
+          setState(() {
+            _followingResources = [];
+            _isLoadingFollowing = false;
+            _hasMoreModeration = false;
+            _isLoadingMoreModeration = false;
+          });
+          return;
+        }
+
+        const requestPage = 1;
+        final resourcesPayload = await _apiService.listAdminResources(
+          adminKey: adminKey,
           collegeId: widget.collegeId,
-          branch: _userBranch,
-          statuses: const ['pending', 'approved', 'rejected'],
+          semester: _resolvedModerationSemesterFilter(),
+          branch: _resolvedModerationBranchFilter(),
+          subject: _resolvedModerationSubjectFilter(),
+          page: requestPage,
+          pageSize: _moderationPageSize,
         );
+        final resources = resourcesPayload
+            .map((json) => Resource.fromJson(json))
+            .toList();
         if (!mounted) return;
         setState(() {
+          _moderationPage = requestPage;
           _followingResources = resources;
+          _hasMoreModeration = resources.length >= _moderationPageSize;
+          _isLoadingMoreModeration = false;
           _isLoadingFollowing = false;
         });
       } else {
@@ -243,6 +298,8 @@ class _StudyScreenState extends State<StudyScreen>
           setState(() {
             _followingResources = [];
             _isLoadingFollowing = false;
+            _hasMoreModeration = false;
+            _isLoadingMoreModeration = false;
           });
           return;
         }
@@ -254,12 +311,65 @@ class _StudyScreenState extends State<StudyScreen>
         if (!mounted) return;
         setState(() {
           _followingResources = resources;
+          _hasMoreModeration = false;
+          _isLoadingMoreModeration = false;
           _isLoadingFollowing = false;
         });
       }
     } catch (e) {
+      debugPrint('Error loading following/moderation feed: $e');
       if (!mounted) return;
-      setState(() => _isLoadingFollowing = false);
+      setState(() {
+        _isLoadingFollowing = false;
+        _isLoadingMoreModeration = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to load feed. Please try again.')),
+      );
+    }
+  }
+
+  Future<void> _loadMoreModerationResources() async {
+    if (!_isTeacherOrAdmin ||
+        _isLoadingMoreModeration ||
+        _isLoadingFollowing ||
+        !_hasMoreModeration) {
+      return;
+    }
+
+    final adminKey = _userAdminKey?.trim() ?? '';
+    if (adminKey.isEmpty) return;
+
+    final nextPage = _moderationPage + 1;
+    setState(() => _isLoadingMoreModeration = true);
+    try {
+      final resourcesPayload = await _apiService.listAdminResources(
+        adminKey: adminKey,
+        collegeId: widget.collegeId,
+        semester: _resolvedModerationSemesterFilter(),
+        branch: _resolvedModerationBranchFilter(),
+        subject: _resolvedModerationSubjectFilter(),
+        page: nextPage,
+        pageSize: _moderationPageSize,
+      );
+      final resources = resourcesPayload
+          .map((json) => Resource.fromJson(json))
+          .toList();
+
+      if (!mounted) return;
+      setState(() {
+        _moderationPage = nextPage;
+        _followingResources = [..._followingResources, ...resources];
+        _hasMoreModeration = resources.length >= _moderationPageSize;
+        _isLoadingMoreModeration = false;
+      });
+    } catch (e) {
+      debugPrint('Error loading more moderation resources: $e');
+      if (!mounted) return;
+      setState(() => _isLoadingMoreModeration = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to load more moderation items.')),
+      );
     }
   }
 
@@ -273,6 +383,7 @@ class _StudyScreenState extends State<StudyScreen>
       widget.collegeId,
     );
 
+    if (!mounted) return;
     setState(() {
       _semesters = ['All', ...semesters];
       _branches = ['All', ...branches];
@@ -286,12 +397,60 @@ class _StudyScreenState extends State<StudyScreen>
         widget.collegeId,
         branch: _selectedBranch,
       );
+      if (!mounted) return;
       setState(() {
         _subjects = ['All', ...subjects];
       });
     } else {
+      if (!mounted) return;
       setState(() => _subjects = []);
     }
+  }
+
+  String? _normalizeFilterValue(String? value) {
+    final trimmed = value?.trim() ?? '';
+    final lower = trimmed.toLowerCase();
+    const nullLikeValues = {'all', 'null', 'none', 'n/a', '-'};
+    if (trimmed.isEmpty || nullLikeValues.contains(lower)) {
+      return null;
+    }
+    return trimmed;
+  }
+
+  String? _resolvedResourceSemesterFilter() {
+    if (_resourcesRelevantOnly) {
+      return _normalizeFilterValue(_profileSemesterFilter);
+    }
+    return _normalizeFilterValue(_selectedSemester);
+  }
+
+  String? _resolvedResourceBranchFilter() {
+    if (_resourcesRelevantOnly) {
+      return _normalizeFilterValue(_profileBranchFilter);
+    }
+    return _normalizeFilterValue(_selectedBranch);
+  }
+
+  String? _resolvedResourceSubjectFilter() {
+    if (_resourcesRelevantOnly) {
+      return _normalizeFilterValue(_profileSubjectFilter);
+    }
+    return _normalizeFilterValue(_selectedSubject);
+  }
+
+  String? _resolvedModerationSemesterFilter() {
+    if (!_moderationRelevantOnly) return null;
+    return _profileSemesterFilter;
+  }
+
+  String? _resolvedModerationBranchFilter() {
+    if (!_moderationRelevantOnly) return null;
+    return _profileBranchFilter;
+  }
+
+  String? _resolvedModerationSubjectFilter() {
+    if (!_moderationRelevantOnly) return null;
+    return _profileSubjectFilter;
   }
 
   Future<void> _loadResources({bool refresh = false}) async {
@@ -306,30 +465,21 @@ class _StudyScreenState extends State<StudyScreen>
     // Handle Downloads Filter
     if (_selectedType == 'Downloads') {
       final hasPremiumAccess = await _subscriptionService.isPremium();
+      final downloadedResources = await _downloadService
+          .getAllDownloadedResourcesForUser(
+            _effectiveUserEmail,
+            hasPremiumAccess: hasPremiumAccess,
+          );
       if (!mounted) return;
       setState(() {
-        _resources = _downloadService.getAllDownloadedResourcesForUser(
-          _effectiveUserEmail,
-          hasPremiumAccess: hasPremiumAccess,
-        );
+        _resources = downloadedResources;
         _isLoading = false;
       });
       return;
     }
 
     try {
-      final resources = await _supabaseService.getResources(
-        collegeId: widget.collegeId,
-        semester: _selectedSemester != 'All' ? _selectedSemester : null,
-        branch: _selectedBranch != 'All' ? _selectedBranch : null,
-        subject: _selectedSubject != 'All' ? _selectedSubject : null,
-        type: _mapResourceType(_selectedType),
-        searchQuery: _searchController.text.isNotEmpty
-            ? _searchController.text
-            : null,
-        sortBy: _mapSortOption(_selectedSort),
-        offset: 0,
-      );
+      final resources = await _fetchResourcesWithRelevantFallback(offset: 0);
 
       if (!mounted) return;
 
@@ -375,12 +525,29 @@ class _StudyScreenState extends State<StudyScreen>
     }
   }
 
+  int get _manualAcademicFilterCount {
+    if (_resourcesRelevantOnly) return 0;
+    return [
+      _selectedSemester != null && _selectedSemester != 'All',
+      _selectedBranch != null && _selectedBranch != 'All',
+      _selectedSubject != null && _selectedSubject != 'All',
+    ].where((isApplied) => isApplied).length;
+  }
+
+  bool get _hasManualAcademicFilters => _manualAcademicFilterCount > 0;
+
+  int get _activeResourceFilterCount {
+    return _manualAcademicFilterCount +
+        (_selectedType != null && _selectedType != 'All' ? 1 : 0) +
+        (_selectedSort != 'Recent' ? 1 : 0) +
+        (!_resourcesRelevantOnly ? 1 : 0);
+  }
+
   bool get _hasActiveFilters {
-    return (_selectedSemester != null && _selectedSemester != 'All') ||
-        (_selectedBranch != null && _selectedBranch != 'All') ||
-        (_selectedSubject != null && _selectedSubject != 'All') ||
+    return _hasManualAcademicFilters ||
         (_selectedType != null && _selectedType != 'All') ||
         _selectedSort != 'Recent' ||
+        !_resourcesRelevantOnly ||
         _searchController.text.trim().isNotEmpty;
   }
 
@@ -400,28 +567,104 @@ class _StudyScreenState extends State<StudyScreen>
     setState(() => _isLoadingMore = true);
 
     try {
-      final moreResources = await _supabaseService.getResources(
-        collegeId: widget.collegeId,
-        semester: _selectedSemester != 'All' ? _selectedSemester : null,
-        branch: _selectedBranch != 'All' ? _selectedBranch : null,
-        subject: _selectedSubject != 'All' ? _selectedSubject : null,
-        type: _mapResourceType(_selectedType),
-        searchQuery: _searchController.text.isNotEmpty
-            ? _searchController.text
-            : null,
-        sortBy: _mapSortOption(_selectedSort),
+      final moreResources = await _fetchResourcesWithRelevantFallback(
         offset: _resources.length,
       );
 
       if (!mounted) return;
 
       setState(() {
-        _resources.addAll(moreResources);
+        _resources = [..._resources, ...moreResources];
         _isLoadingMore = false;
       });
     } catch (e) {
-      setState(() => _isLoadingMore = false);
+      if (mounted) {
+        setState(() => _isLoadingMore = false);
+      }
     }
+  }
+
+  Future<List<Resource>> _queryResources({
+    required int offset,
+    String? semester,
+    String? branch,
+    String? subject,
+  }) {
+    return _supabaseService.getResources(
+      collegeId: widget.collegeId,
+      semester: semester,
+      branch: branch,
+      subject: subject,
+      type: _mapResourceType(_selectedType),
+      searchQuery: _searchController.text.isNotEmpty
+          ? _searchController.text
+          : null,
+      sortBy: _mapSortOption(_selectedSort),
+      offset: offset,
+    );
+  }
+
+  Future<List<Resource>> _fetchResourcesWithRelevantFallback({
+    required int offset,
+  }) async {
+    final semesterFilter = _resolvedResourceSemesterFilter();
+    final branchFilter = _resolvedResourceBranchFilter();
+    final subjectFilter = _resolvedResourceSubjectFilter();
+
+    final primary = await _queryResources(
+      offset: offset,
+      semester: semesterFilter,
+      branch: branchFilter,
+      subject: subjectFilter,
+    );
+
+    if (!_resourcesRelevantOnly || primary.isNotEmpty) {
+      return primary;
+    }
+
+    final hasRelevantFilters = [
+      semesterFilter,
+      branchFilter,
+      subjectFilter,
+    ].any((value) => value != null && value.trim().isNotEmpty);
+    if (!hasRelevantFilters) {
+      return primary;
+    }
+
+    final seen = <String>{
+      '${semesterFilter ?? ''}|${branchFilter ?? ''}|${subjectFilter ?? ''}',
+    };
+    final fallbackAttempts =
+        <({String? semester, String? branch, String? subject})>[
+          (semester: semesterFilter, branch: branchFilter, subject: null),
+          (semester: null, branch: branchFilter, subject: subjectFilter),
+          (semester: null, branch: branchFilter, subject: null),
+          (semester: null, branch: null, subject: subjectFilter),
+          (semester: semesterFilter, branch: null, subject: null),
+          (semester: null, branch: null, subject: null),
+        ];
+
+    for (final attempt in fallbackAttempts) {
+      final key =
+          '${attempt.semester ?? ''}|${attempt.branch ?? ''}|${attempt.subject ?? ''}';
+      if (!seen.add(key)) continue;
+
+      final rows = await _queryResources(
+        offset: offset,
+        semester: attempt.semester,
+        branch: attempt.branch,
+        subject: attempt.subject,
+      );
+      if (rows.isNotEmpty) {
+        debugPrint(
+          'Relevant scope fallback matched resources with filters: '
+          'semester=${attempt.semester}, branch=${attempt.branch}, subject=${attempt.subject}',
+        );
+        return rows;
+      }
+    }
+
+    return primary;
   }
 
   // Unused method removed
@@ -454,6 +697,7 @@ class _StudyScreenState extends State<StudyScreen>
                     Column(
                       children: [
                         _buildSearchBar(),
+                        _buildResourcesScopeStrip(),
                         Expanded(
                           child: CustomRefreshIndicator(
                             onRefresh: () => _loadResources(refresh: true),
@@ -500,44 +744,54 @@ class _StudyScreenState extends State<StudyScreen>
                     ),
 
                     // Following / Moderation Tab
-                    CustomRefreshIndicator(
-                      onRefresh: _loadFollowingFeed,
-                      builder: (context, child, controller) {
-                        return Stack(
-                          children: [
-                            if (controller.value > 0.0)
-                              Positioned(
-                                top: 25 * controller.value,
-                                left: 0,
-                                right: 0,
-                                child: Center(
-                                  child: SizedBox(
-                                    height: 80,
-                                    width: 80,
-                                    child: Opacity(
-                                      opacity: controller.value.clamp(0.0, 1.0),
-                                      child: Lottie.asset(
-                                        'assets/lottie/refresh.json',
-                                        animate: controller.isLoading,
+                    Column(
+                      children: [
+                        if (isTeacher) _buildModerationScopeStrip(),
+                        Expanded(
+                          child: CustomRefreshIndicator(
+                            onRefresh: _loadFollowingFeed,
+                            builder: (context, child, controller) {
+                              return Stack(
+                                children: [
+                                  if (controller.value > 0.0)
+                                    Positioned(
+                                      top: 25 * controller.value,
+                                      left: 0,
+                                      right: 0,
+                                      child: Center(
+                                        child: SizedBox(
+                                          height: 80,
+                                          width: 80,
+                                          child: Opacity(
+                                            opacity: controller.value.clamp(
+                                              0.0,
+                                              1.0,
+                                            ),
+                                            child: Lottie.asset(
+                                              'assets/lottie/refresh.json',
+                                              animate: controller.isLoading,
+                                            ),
+                                          ),
+                                        ),
                                       ),
                                     ),
+                                  Transform.translate(
+                                    offset: Offset(0, 100 * controller.value),
+                                    child: child,
                                   ),
-                                ),
-                              ),
-                            Transform.translate(
-                              offset: Offset(0, 100 * controller.value),
-                              child: child,
-                            ),
-                          ],
-                        );
-                      },
-                      child: _isLoadingFollowing
-                          ? _buildLoadingSkeleton()
-                          : _followingResources.isEmpty
-                          ? (isTeacher
-                                ? _buildModerationEmptyState()
-                                : _buildFollowingEmptyState())
-                          : _buildFollowingGrid(),
+                                ],
+                              );
+                            },
+                            child: _isLoadingFollowing
+                                ? _buildLoadingSkeleton()
+                                : _followingResources.isEmpty
+                                ? (isTeacher
+                                      ? _buildModerationEmptyState()
+                                      : _buildFollowingEmptyState())
+                                : _buildFollowingGrid(),
+                          ),
+                        ),
+                      ],
                     ),
                     // Syllabus Tab
                     _buildSyllabusTab(isDark),
@@ -589,6 +843,163 @@ class _StudyScreenState extends State<StudyScreen>
     );
   }
 
+  Widget _buildResourcesScopeStrip() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+      child: Row(
+        children: [
+          Text(
+            'Resources scope',
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white70 : const Color(0xFF4B5563),
+            ),
+          ),
+          const Spacer(),
+          _buildScopeToggle(
+            relevantOnly: _resourcesRelevantOnly,
+            onChanged: (relevantOnly) {
+              _handleResourcesScopeChanged(relevantOnly);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleResourcesScopeChanged(bool relevantOnly) async {
+    if (_resourcesRelevantOnly == relevantOnly ||
+        _isResourceScopeToggleLoading) {
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _resourcesRelevantOnly = relevantOnly;
+      _isResourceScopeToggleLoading = true;
+    });
+
+    try {
+      if (relevantOnly) {
+        await _loadUserProfile();
+        if (!mounted) return;
+        await _loadResources(refresh: true);
+        return;
+      }
+
+      if (_selectedBranch != null && _selectedBranch != 'All') {
+        await _loadSubjects();
+      }
+      if (!mounted) return;
+      await _loadResources(refresh: true);
+    } finally {
+      if (mounted) {
+        setState(() => _isResourceScopeToggleLoading = false);
+      }
+    }
+  }
+
+  Widget _buildModerationScopeStrip() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+      child: Row(
+        children: [
+          Text(
+            'Moderation scope',
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white70 : const Color(0xFF4B5563),
+            ),
+          ),
+          const Spacer(),
+          _buildScopeToggle(
+            relevantOnly: _moderationRelevantOnly,
+            onChanged: (relevantOnly) {
+              if (_moderationRelevantOnly == relevantOnly) return;
+              setState(() => _moderationRelevantOnly = relevantOnly);
+              _loadFollowingFeed();
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScopeToggle({
+    required bool relevantOnly,
+    required ValueChanged<bool> onChanged,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final background = isDark
+        ? const Color(0xFF12151C)
+        : const Color(0xFFF3F4F6);
+    final activeColor = isDark
+        ? AppTheme.primary.withValues(alpha: 0.32)
+        : AppTheme.primary.withValues(alpha: 0.16);
+    final border = isDark ? Colors.white10 : const Color(0xFFE5E7EB);
+
+    Widget segment({
+      required String label,
+      required bool selected,
+      required VoidCallback onTap,
+    }) {
+      return Expanded(
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(999),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            decoration: BoxDecoration(
+              color: selected ? activeColor : Colors.transparent,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Center(
+              child: Text(
+                label,
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: selected
+                      ? AppTheme.primary
+                      : (isDark ? Colors.white70 : const Color(0xFF6B7280)),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      width: 128,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        children: [
+          segment(
+            label: 'Relevant',
+            selected: relevantOnly,
+            onTap: () => onChanged(true),
+          ),
+          segment(
+            label: 'All',
+            selected: !relevantOnly,
+            onTap: () => onChanged(false),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _navigateToExploreStudents(BuildContext context) {
     Navigator.push(
       context,
@@ -618,7 +1029,9 @@ class _StudyScreenState extends State<StudyScreen>
           ),
           const SizedBox(height: 8),
           Text(
-            'No resources to moderate for your branch.',
+            _moderationRelevantOnly
+                ? 'No resources to moderate for your saved scope.'
+                : 'No resources available for moderation.',
             style: GoogleFonts.inter(
               fontSize: 13,
               color: AppTheme.textMuted.withValues(alpha: 0.7),
@@ -671,6 +1084,8 @@ class _StudyScreenState extends State<StudyScreen>
 
   Widget _buildFollowingGrid() {
     final isTeacher = _isTeacherOrAdmin;
+    final showLoadMore =
+        isTeacher && (_hasMoreModeration || _isLoadingMoreModeration);
 
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(
@@ -679,8 +1094,27 @@ class _StudyScreenState extends State<StudyScreen>
         16,
         100,
       ), // Bottom padding for floating nav
-      itemCount: _followingResources.length,
+      itemCount: _followingResources.length + (showLoadMore ? 1 : 0),
       itemBuilder: (context, index) {
+        if (showLoadMore && index == _followingResources.length) {
+          return Padding(
+            padding: const EdgeInsets.only(top: 8, bottom: 12),
+            child: Center(
+              child: _isLoadingMoreModeration
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : OutlinedButton.icon(
+                      onPressed: _loadMoreModerationResources,
+                      icon: const Icon(Icons.expand_more_rounded),
+                      label: const Text('Load more'),
+                    ),
+            ),
+          );
+        }
+
         final resource = _followingResources[index];
         final status = resource.status.toLowerCase();
         final bool isApproved = status == 'approved';
@@ -742,6 +1176,7 @@ class _StudyScreenState extends State<StudyScreen>
 
       if (!mounted) return;
       await _loadFollowingFeed();
+      if (!mounted) return;
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -779,39 +1214,40 @@ class _StudyScreenState extends State<StudyScreen>
       return;
     }
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete Resource?'),
-        content: Text(
-          'This will permanently delete "${resource.title}" from StudySpace.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    setState(() => _isModerating = true);
     try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Delete Resource?'),
+          content: Text(
+            'This will permanently delete "${resource.title}" from StudyShare.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+              child: const Text('Delete'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmed != true) return;
+      if (!mounted) return;
+      setState(() => _isModerating = true);
+
       await _apiService.deleteResourceAsAdmin(
         resourceId: resource.id,
         adminKey: _userAdminKey!,
-        context: context,
       );
 
       if (!mounted) return;
       await _loadFollowingFeed();
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Resource deleted successfully')),
       );
@@ -1074,18 +1510,11 @@ class _StudyScreenState extends State<StudyScreen>
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final hasActiveFilters =
-        (_selectedSemester != null && _selectedSemester != 'All') ||
-        (_selectedBranch != null && _selectedBranch != 'All') ||
-        (_selectedSubject != null && _selectedSubject != 'All') ||
+        _hasManualAcademicFilters ||
         (_selectedType != null && _selectedType != 'All') ||
-        _selectedSort != 'Recent';
-    final activeFilterCount = [
-      _selectedSemester != null && _selectedSemester != 'All',
-      _selectedBranch != null && _selectedBranch != 'All',
-      _selectedSubject != null && _selectedSubject != 'All',
-      _selectedType != null && _selectedType != 'All',
-      _selectedSort != 'Recent',
-    ].where((v) => v).length;
+        _selectedSort != 'Recent' ||
+        !_resourcesRelevantOnly;
+    final activeFilterCount = _activeResourceFilterCount;
 
     final searchBarColor = isDark ? Colors.black : const Color(0xFFF4F6FB);
     final borderColor = hasActiveFilters
@@ -1318,6 +1747,7 @@ class _StudyScreenState extends State<StudyScreen>
                       _selectedSubject = null;
                       _selectedType = null;
                       _selectedSort = 'Recent';
+                      _resourcesRelevantOnly = true;
                       _subjects = [];
                     });
                     syncSheet();
@@ -1343,6 +1773,22 @@ class _StudyScreenState extends State<StudyScreen>
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
               child: Column(
                 children: [
+                  if (_resourcesRelevantOnly)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Relevant scope uses profile semester/branch/subject. '
+                          'Switch to All to apply manual academic filters.',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: isDark ? Colors.white60 : Colors.black54,
+                          ),
+                        ),
+                      ),
+                    ),
                   _buildSheetSelectionRow(
                     label: 'Sort by',
                     value: _selectedSort,
@@ -1391,23 +1837,30 @@ class _StudyScreenState extends State<StudyScreen>
                   ),
                   _buildSheetSelectionRow(
                     label: 'Semester',
-                    value: _selectedSemester ?? 'All',
+                    value: _resourcesRelevantOnly
+                        ? (_profileSemesterFilter ?? 'Profile not set')
+                        : (_selectedSemester ?? 'All'),
                     isDark: isDark,
-                    onTap: () {
-                      _showPickerSheet(
-                        title: 'Semester',
-                        items: _semesters.isEmpty ? ['All'] : _semesters,
-                        selectedValue: _selectedSemester ?? 'All',
-                        isDark: isDark,
-                        onSelected: (value) {
-                          setState(() {
-                            _selectedSemester = value == 'All' ? null : value;
-                          });
-                          syncSheet();
-                          _loadResources(refresh: true);
-                        },
-                      );
-                    },
+                    enabled: !_resourcesRelevantOnly,
+                    onTap: _resourcesRelevantOnly
+                        ? null
+                        : () {
+                            _showPickerSheet(
+                              title: 'Semester',
+                              items: _semesters.isEmpty ? ['All'] : _semesters,
+                              selectedValue: _selectedSemester ?? 'All',
+                              isDark: isDark,
+                              onSelected: (value) {
+                                setState(() {
+                                  _selectedSemester = value == 'All'
+                                      ? null
+                                      : value;
+                                });
+                                syncSheet();
+                                _loadResources(refresh: true);
+                              },
+                            );
+                          },
                   ),
                   Divider(
                     height: 1,
@@ -1415,25 +1868,32 @@ class _StudyScreenState extends State<StudyScreen>
                   ),
                   _buildSheetSelectionRow(
                     label: 'Branch',
-                    value: _selectedBranch ?? 'All',
+                    value: _resourcesRelevantOnly
+                        ? (_profileBranchFilter ?? 'Profile not set')
+                        : (_selectedBranch ?? 'All'),
                     isDark: isDark,
-                    onTap: () {
-                      _showPickerSheet(
-                        title: 'Branch',
-                        items: _branches.isEmpty ? ['All'] : _branches,
-                        selectedValue: _selectedBranch ?? 'All',
-                        isDark: isDark,
-                        onSelected: (value) {
-                          setState(() {
-                            _selectedBranch = value == 'All' ? null : value;
-                            _selectedSubject = null;
-                          });
-                          syncSheet();
-                          _loadSubjects();
-                          _loadResources(refresh: true);
-                        },
-                      );
-                    },
+                    enabled: !_resourcesRelevantOnly,
+                    onTap: _resourcesRelevantOnly
+                        ? null
+                        : () {
+                            _showPickerSheet(
+                              title: 'Branch',
+                              items: _branches.isEmpty ? ['All'] : _branches,
+                              selectedValue: _selectedBranch ?? 'All',
+                              isDark: isDark,
+                              onSelected: (value) {
+                                setState(() {
+                                  _selectedBranch = value == 'All'
+                                      ? null
+                                      : value;
+                                  _selectedSubject = null;
+                                });
+                                syncSheet();
+                                _loadSubjects();
+                                _loadResources(refresh: true);
+                              },
+                            );
+                          },
                   ),
                   Divider(
                     height: 1,
@@ -1441,15 +1901,21 @@ class _StudyScreenState extends State<StudyScreen>
                   ),
                   _buildSheetSelectionRow(
                     label: 'Subject',
-                    value:
-                        _selectedSubject ??
-                        (_selectedBranch == null
-                            ? 'Select branch first'
-                            : 'All'),
+                    value: _resourcesRelevantOnly
+                        ? (_profileSubjectFilter ?? 'Profile not set')
+                        : (_selectedSubject ??
+                              (_selectedBranch == null
+                                  ? 'Select branch first'
+                                  : 'All')),
                     isDark: isDark,
                     enabled:
-                        _selectedBranch != null && _selectedBranch != 'All',
-                    onTap: (_selectedBranch == null || _selectedBranch == 'All')
+                        !_resourcesRelevantOnly &&
+                        _selectedBranch != null &&
+                        _selectedBranch != 'All',
+                    onTap:
+                        (_resourcesRelevantOnly ||
+                            _selectedBranch == null ||
+                            _selectedBranch == 'All')
                         ? null
                         : () {
                             _showPickerSheet(
@@ -1675,7 +2141,7 @@ class _StudyScreenState extends State<StudyScreen>
                   child: ResourceCard(
                     resource: resource,
                     userEmail: _effectiveUserEmail,
-                    onVoteChanged: () => _loadResources(),
+                    onVoteChanged: _handleResourceVoteChanged,
                   ),
                 ),
               ),
@@ -1701,12 +2167,22 @@ class _StudyScreenState extends State<StudyScreen>
   }
 
   Widget _buildLoadingCard() {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final baseColor =
+        theme.cardTheme.color ??
+        (isDark ? AppTheme.darkCard : AppTheme.lightCard);
+    final lightTarget = isDark
+        ? theme.colorScheme.onSurface
+        : theme.colorScheme.surface;
+    final highlightColor =
+        Color.lerp(baseColor, lightTarget, isDark ? 0.22 : 0.08) ?? baseColor;
     return Shimmer.fromColors(
-      baseColor: AppTheme.darkCard,
-      highlightColor: AppTheme.darkBorder,
+      baseColor: baseColor,
+      highlightColor: highlightColor,
       child: Container(
         decoration: BoxDecoration(
-          color: AppTheme.darkCard,
+          color: baseColor,
           borderRadius: BorderRadius.circular(16),
         ),
       ),
@@ -1748,6 +2224,7 @@ class _StudyScreenState extends State<StudyScreen>
                 _selectedSubject = null;
                 _selectedType = null;
                 _selectedSort = 'Recent';
+                _resourcesRelevantOnly = true;
                 _searchController.clear();
               });
               _loadResources(refresh: true);

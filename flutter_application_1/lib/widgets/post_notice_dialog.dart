@@ -2,17 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../config/theme.dart';
+import '../models/department_option.dart';
 import '../services/supabase_service.dart';
-
-const List<Map<String, String>> _departmentOptions = [
-  {'id': 'general', 'name': 'General Notices'},
-  {'id': 'cse', 'name': 'Computer Science'},
-  {'id': 'ece', 'name': 'Electronics & Comm'},
-  {'id': 'eee', 'name': 'Electrical Engg'},
-  {'id': 'me', 'name': 'Mechanical Engg'},
-  {'id': 'ce', 'name': 'Civil Engineering'},
-  {'id': 'it', 'name': 'Information Tech'},
-];
 
 Future<bool> showPostNoticeDialog({
   required BuildContext context,
@@ -27,17 +18,40 @@ Future<bool> showPostNoticeDialog({
   final contentCtrl = TextEditingController();
   final imageUrlCtrl = TextEditingController();
 
-  var selectedDept = 'general';
+  final uniqueDepartmentOptions = <DepartmentOption>[
+    ...{
+      for (final option in departmentOptions)
+        if (option.id.trim().isNotEmpty && option.name.trim().isNotEmpty)
+          option.id.trim(): DepartmentOption(
+            id: option.id.trim(),
+            name: option.name.trim(),
+          ),
+    }.values,
+  ];
+  String? selectedDept =
+      uniqueDepartmentOptions.any((option) => option.id == 'general')
+      ? 'general'
+      : (uniqueDepartmentOptions.isNotEmpty
+            ? uniqueDepartmentOptions.first.id
+            : null);
   var posted = false;
+  final dialogBg = resolvedIsDark ? const Color(0xFF1C1C1E) : Colors.white;
+  final fieldFill = resolvedIsDark
+      ? const Color(0xFF2C2C2E)
+      : const Color(0xFFF3F4F6);
 
   try {
     await showDialog<void>(
       context: parentCtx,
       builder: (dialogCtx) => StatefulBuilder(
         builder: (stateCtx, setDialogState) => AlertDialog(
-          backgroundColor: resolvedIsDark
-              ? const Color(0xFF1C1C1E)
-              : Colors.white,
+          backgroundColor: dialogBg,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 8),
+          contentPadding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+          actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
           title: Row(
             children: [
               Icon(Icons.campaign_rounded, color: AppTheme.primary),
@@ -55,11 +69,25 @@ Future<bool> showPostNoticeDialog({
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Share important updates with your campus.',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: AppTheme.textMuted,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
                 TextField(
                   controller: titleCtrl,
                   decoration: InputDecoration(
                     labelText: 'Title',
                     labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
+                    prefixIcon: const Icon(Icons.title_rounded),
+                    filled: true,
+                    fillColor: fieldFill,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
                     ),
@@ -76,6 +104,9 @@ Future<bool> showPostNoticeDialog({
                     labelText: 'Content',
                     alignLabelWithHint: true,
                     labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
+                    prefixIcon: const Icon(Icons.notes_rounded),
+                    filled: true,
+                    fillColor: fieldFill,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
                     ),
@@ -86,10 +117,18 @@ Future<bool> showPostNoticeDialog({
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  initialValue: selectedDept,
+                  value:
+                      uniqueDepartmentOptions.any(
+                        (option) => option.id == selectedDept,
+                      )
+                      ? selectedDept
+                      : null,
                   decoration: InputDecoration(
                     labelText: 'Department',
                     labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
+                    prefixIcon: const Icon(Icons.apartment_rounded),
+                    filled: true,
+                    fillColor: fieldFill,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
                     ),
@@ -101,10 +140,10 @@ Future<bool> showPostNoticeDialog({
                     color: resolvedIsDark ? Colors.white : Colors.black,
                     fontSize: 14,
                   ),
-                  items: _departmentOptions.map((dept) {
+                  items: uniqueDepartmentOptions.map((dept) {
                     return DropdownMenuItem(
-                      value: dept['id'],
-                      child: Text(dept['name'] ?? ''),
+                      value: dept.id,
+                      child: Text(dept.name),
                     );
                   }).toList(),
                   onChanged: (value) {
@@ -123,6 +162,9 @@ Future<bool> showPostNoticeDialog({
                     hintStyle: GoogleFonts.inter(
                       color: AppTheme.textMuted.withValues(alpha: 0.5),
                     ),
+                    prefixIcon: const Icon(Icons.image_outlined),
+                    filled: true,
+                    fillColor: fieldFill,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
                     ),
@@ -142,16 +184,25 @@ Future<bool> showPostNoticeDialog({
                 style: GoogleFonts.inter(color: AppTheme.textMuted),
               ),
             ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-              ),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
               onPressed: () async {
                 if (titleCtrl.text.trim().isEmpty ||
                     contentCtrl.text.trim().isEmpty) {
                   ScaffoldMessenger.of(parentCtx).showSnackBar(
                     const SnackBar(
                       content: Text('Please fill title and content'),
+                    ),
+                  );
+                  return;
+                }
+                final normalizedDept = (selectedDept ?? '').trim();
+                if (uniqueDepartmentOptions.isEmpty || normalizedDept.isEmpty) {
+                  ScaffoldMessenger.of(parentCtx).showSnackBar(
+                    const SnackBar(
+                      content: Text(
+                        'Please select a valid department before posting.',
+                      ),
                     ),
                   );
                   return;
@@ -181,7 +232,7 @@ Future<bool> showPostNoticeDialog({
                     collegeId: collegeId,
                     title: titleCtrl.text.trim(),
                     content: contentCtrl.text.trim(),
-                    department: selectedDept,
+                    department: normalizedDept,
                     imageUrl: imageUrl.isEmpty ? null : imageUrl,
                   );
                   posted = true;
@@ -202,8 +253,9 @@ Future<bool> showPostNoticeDialog({
                   );
                 }
               },
-              child: Text(
-                'Post',
+              icon: const Icon(Icons.send_rounded, size: 16),
+              label: Text(
+                'Post notice',
                 style: GoogleFonts.inter(
                   color: Colors.white,
                   fontWeight: FontWeight.w600,

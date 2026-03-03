@@ -3,6 +3,13 @@
 This app reads runtime secrets using `String.fromEnvironment(...)`.
 Do not hardcode keys in Dart files.
 
+## Security warning
+
+Values loaded through `String.fromEnvironment(...)` are compile-time constants and are embedded in APK/IPA binaries.
+They can be extracted by reverse engineering tools (for example `apktool`).
+This is a normal mobile-app limitation, so avoid embedding high-privilege secrets.
+Prefer backend APIs (with proper auth) for sensitive operations, and keep using `--dart-define` / `--dart-define-from-file` with empty defaults in source.
+
 ## Required behavior
 
 - Keep secret defaults empty in source code.
@@ -38,21 +45,46 @@ flutter build apk --release \
   --dart-define=REMOVE_BG_API_KEY=$REMOVE_BG_API_KEY
 ```
 
+### GitHub Actions
+
+```yaml
+- name: Build APK
+  run: |
+    flutter build apk --release \
+      --dart-define=GIPHY_API_KEY=${{ secrets.GIPHY_API_KEY }} \
+      --dart-define=REMOVE_BG_API_KEY=${{ secrets.REMOVE_BG_API_KEY }}
+```
+
+### GitLab CI
+
+```yaml
+build_apk:
+  script:
+    - >
+      flutter build apk --release
+      --dart-define=GIPHY_API_KEY=$GIPHY_API_KEY
+      --dart-define=REMOVE_BG_API_KEY=$REMOVE_BG_API_KEY
+```
+
 ## EC2 build setup
 
 If you build the Flutter APK on EC2, keys must be present on that EC2 build machine
 at build time (not only on your laptop).
 
-Option A: Keep a local `.env` on EC2 and build from file:
+Option A: Fetch secrets during build (recommended):
 
 ```bash
 cd flutter_application_1
-cp .env.example .env
-# fill values
-flutter build apk --release --dart-define-from-file=.env
+# Example: AWS Secrets Manager / SSM fetch to environment variables
+# Replace `...` with your real secret identifiers/flags (for example: secret-id, parameter name, region, and `--with-decryption`).
+# export GIPHY_API_KEY="$(aws secretsmanager get-secret-value ...)" # target env var: GIPHY_API_KEY
+# export REMOVE_BG_API_KEY="$(aws ssm get-parameter ... --with-decryption ...)" # target env var: REMOVE_BG_API_KEY
+flutter build apk --release \
+  --dart-define=GIPHY_API_KEY=$GIPHY_API_KEY \
+  --dart-define=REMOVE_BG_API_KEY=$REMOVE_BG_API_KEY
 ```
 
-Option B: Use EC2 environment variables (recommended for automation):
+Option B: Use EC2 environment variables directly (recommended for automation):
 
 ```bash
 export GIPHY_API_KEY="..."

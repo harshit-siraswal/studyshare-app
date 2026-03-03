@@ -56,6 +56,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   int _currentIndex = 0;
   bool _showHelpOverlay = false;
   bool _canPostNotices = false;
+  bool _roleLoading = true;
   StreamSubscription<IncomingSharePayload>? _shareSubscription;
   bool _isHandlingIncomingShare = false;
 
@@ -130,11 +131,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             role == AppRoles.teacher ||
             role == AppRoles.admin ||
             role == AppRoles.moderator;
+        _roleLoading = false;
       });
     } catch (e) {
       debugPrint('Failed to resolve composer access: $e');
       if (!mounted) return;
-      setState(() => _canPostNotices = false);
+      setState(() {
+        _canPostNotices = false;
+        _roleLoading = false;
+      });
     }
   }
 
@@ -201,7 +206,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text(
-                'Share sticker files (.webp/.png/.gif) to install them in MyStudySpace.',
+                'Share sticker files (.webp/.png/.gif) to install them in StudyShare.',
               ),
             ),
           );
@@ -544,12 +549,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  IconData _getFabIcon() => _canPostNotices
-      ? Icons.add_rounded
-      : (_currentIndex == 1 ? Icons.search_rounded : Icons.add_rounded);
+  IconData _getFabIcon() =>
+      _currentIndex == 1 ? Icons.search_rounded : Icons.add_rounded;
 
   Future<void> _handleFabTap() async {
-    if (_canPostNotices) {
+    if (_roleLoading) return;
+    if (_currentIndex == 2) {
+      if (!_canPostNotices) {
+        return;
+      }
       final posted = await showPostNoticeDialog(
         context: context,
         collegeId: widget.collegeId,
@@ -561,21 +569,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       return;
     }
 
-    if (_currentIndex != 1) {
-      await _showUpload();
+    if (_currentIndex == 1) {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => DiscoverRoomsScreen(
+            collegeId: widget.collegeId,
+            collegeDomain: widget.collegeDomain,
+            userEmail: _effectiveUserEmail,
+          ),
+        ),
+      );
       return;
     }
 
-    await Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => DiscoverRoomsScreen(
-          collegeId: widget.collegeId,
-          collegeDomain: widget.collegeDomain,
-          userEmail: _effectiveUserEmail,
-        ),
-      ),
-    );
+    await _showUpload();
   }
 
   Widget _buildAnimatedFab(
@@ -600,47 +608,53 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return Positioned(
       left: left,
       bottom: bottom,
-      child: Hero(
-        tag: 'fab_main', // Static tag
-        child: GestureDetector(
-          onTap: () async {
-            HapticFeedback.mediumImpact();
-            await _handleFabTap();
-          },
-          child: Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [AppTheme.primary, AppTheme.primaryDark],
-              ),
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: AppTheme.primary.withValues(alpha: 0.4),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
-                ),
-              ],
-            ),
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 350),
-              transitionBuilder: (child, animation) {
-                return RotationTransition(
-                  turns: Tween<double>(
-                    begin: 0.0,
-                    end: 0.25,
-                  ).animate(animation),
-                  child: ScaleTransition(scale: animation, child: child),
-                );
+      child: IgnorePointer(
+        ignoring: _roleLoading,
+        child: Opacity(
+          opacity: _roleLoading ? 0.6 : 1.0,
+          child: Hero(
+            tag: 'fab_main', // Static tag
+            child: GestureDetector(
+              onTap: () async {
+                HapticFeedback.mediumImpact();
+                await _handleFabTap();
               },
-              child: Icon(
-                _getFabIcon(),
-                key: ValueKey<IconData>(_getFabIcon()),
-                color: Colors.white,
-                size: 28,
+              child: Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [AppTheme.primary, AppTheme.primaryDark],
+                  ),
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppTheme.primary.withValues(alpha: 0.4),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 350),
+                  transitionBuilder: (child, animation) {
+                    return RotationTransition(
+                      turns: Tween<double>(
+                        begin: 0.0,
+                        end: 0.25,
+                      ).animate(animation),
+                      child: ScaleTransition(scale: animation, child: child),
+                    );
+                  },
+                  child: Icon(
+                    _getFabIcon(),
+                    key: ValueKey<IconData>(_getFabIcon()),
+                    color: Colors.white,
+                    size: 28,
+                  ),
+                ),
               ),
             ),
           ),
