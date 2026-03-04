@@ -24,6 +24,9 @@ class SupabaseService {
   static const Duration _filterValuesCacheTtl = Duration(minutes: 5);
   static const int _maxResourceListCacheEntries = 24;
   static const int _maxFilterValuesCacheEntries = 24;
+  static final ValueNotifier<int> aiTokenRefreshNotifier = ValueNotifier<int>(
+    0,
+  );
 
   SupabaseClient get _client => Supabase.instance.client;
   final BackendApiService _api = BackendApiService();
@@ -102,6 +105,11 @@ class SupabaseService {
     _cachedCurrentUserProfile = null;
     _cachedCurrentUserProfileEmail = null;
     _cachedCurrentUserProfileAt = null;
+  }
+
+  void markAiTokenBalanceStale() {
+    invalidateCurrentUserProfileCache();
+    aiTokenRefreshNotifier.value = aiTokenRefreshNotifier.value + 1;
   }
 
   void invalidateResourceListCache() {

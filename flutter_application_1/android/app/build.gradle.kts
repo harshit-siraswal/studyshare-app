@@ -73,8 +73,9 @@ android {
                 signingConfig = signingConfigs.getByName("release")
             } else {
                 logger.lifecycle(
-                    "Release build will be unsigned because signing env vars are missing."
+                    "Release signing env vars are missing. Falling back to debug signing for installable local release build."
                 )
+                signingConfig = signingConfigs.getByName("debug")
             }
             // Enable ProGuard/R8 with comprehensive rules to prevent code stripping
             // This is CRITICAL for Supabase, Firebase, and JSON serialization to work in release builds

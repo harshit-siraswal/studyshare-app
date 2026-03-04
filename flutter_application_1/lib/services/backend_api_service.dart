@@ -467,14 +467,14 @@ class BackendApiService {
   // ----------------------------
 
   Future<Map<String, dynamic>> createPaymentOrder({
-    required int amount,
     required String planId,
+    int? amount,
     BuildContext? context,
   }) async {
     return _requestJson(
       '/api/payments/order',
       method: 'POST',
-      body: {'amount': amount, 'planId': planId},
+      body: {'planId': planId, 'amount': ?amount},
     );
   }
 

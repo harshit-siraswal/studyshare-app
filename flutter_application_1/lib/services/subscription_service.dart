@@ -6,10 +6,12 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../config/app_config.dart';
 import 'backend_api_service.dart';
+import 'supabase_service.dart';
 
 class SubscriptionService {
   final BackendApiService _api = BackendApiService();
   final SupabaseClient _supabase = Supabase.instance.client;
+  final SupabaseService _supabaseService = SupabaseService();
   FirebaseAuth get _firebaseAuth => FirebaseAuth.instance;
   late Razorpay _razorpay;
   Completer<bool>? _paymentCompleter;
@@ -188,8 +190,8 @@ class SubscriptionService {
     try {
       // 2. Create Order on Backend
       final orderData = await _api.createPaymentOrder(
-        amount: amount,
         planId: planId,
+        amount: amount,
         context: context.mounted ? context : null,
       );
 
@@ -265,12 +267,14 @@ class SubscriptionService {
 
       // Set Plan
       String newTier = 'pro';
+      final planFromResponse =
+          result['plan_id']?.toString() ?? result['plan']?.toString();
       if (_pendingPlanId != null) {
         newTier = (_pendingPlanId == 'quarterly' || _pendingPlanId == 'max')
             ? 'max'
             : 'pro';
-      } else if (result.containsKey('plan')) {
-        newTier = (result['plan'] == 'quarterly' || result['plan'] == 'max')
+      } else if (planFromResponse != null) {
+        newTier = (planFromResponse == 'quarterly' || planFromResponse == 'max')
             ? 'max'
             : 'pro';
       }
@@ -289,6 +293,7 @@ class SubscriptionService {
 
       await prefs.setString('premium_until', newExpiry.toIso8601String());
       debugPrint('Success: Subscription activated locally until $newExpiry');
+      _supabaseService.markAiTokenBalanceStale();
 
       _resetPaymentState();
       _paymentCompleter?.complete(true);
@@ -317,6 +322,3 @@ class SubscriptionService {
     _paymentCompleter?.complete(false);
   }
 }
-
-
-

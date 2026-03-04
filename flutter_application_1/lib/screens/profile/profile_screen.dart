@@ -56,6 +56,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   int _aiTokenBudget = 0;
   int _aiTokenUsed = 0;
   int _aiTokenRemaining = 0;
+  DateTime? _aiTokenCycleEndsAt;
 
   // Real stats
   int _uploadCount = 0;
@@ -68,6 +69,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   void dispose() {
+    SupabaseService.aiTokenRefreshNotifier.removeListener(
+      _handleAiTokenRefresh,
+    );
     _searchController.dispose();
     super.dispose();
   }
@@ -75,7 +79,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void initState() {
     super.initState();
+    SupabaseService.aiTokenRefreshNotifier.addListener(_handleAiTokenRefresh);
     _loadStats();
+    _loadProfile(forceRefresh: true);
+  }
+
+  void _handleAiTokenRefresh() {
+    if (!mounted) return;
     _loadProfile(forceRefresh: true);
   }
 
@@ -102,6 +112,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _aiTokenRemaining = _aiTokenBudget > 0
             ? remainingFromApi.clamp(0, _aiTokenBudget)
             : remainingFromApi;
+        _aiTokenCycleEndsAt = DateTime.tryParse(
+          profile['ai_token_cycle_ends_at']?.toString() ?? '',
+        );
         if (_aiTokenBudget > 0 &&
             _aiTokenRemaining == 0 &&
             _aiTokenUsed < _aiTokenBudget) {
@@ -762,13 +775,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(
-                  'AI Token Budget (₹1 Cap)',
-                  style: GoogleFonts.inter(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: textColor,
-                  ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Monthly AI Tokens',
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: textColor,
+                      ),
+                    ),
+                    if (_aiTokenCycleEndsAt != null)
+                      Text(
+                        'Resets on ${_aiTokenCycleEndsAt!.day}/${_aiTokenCycleEndsAt!.month}/${_aiTokenCycleEndsAt!.year}',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: subTextColor,
+                        ),
+                      ),
+                  ],
                 ),
               ),
               Container(
@@ -807,7 +834,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
           const SizedBox(height: 12),
           Row(
             children: [
-              _buildAiTokenMetric('Remaining', '$remaining', textColor, subTextColor),
+              _buildAiTokenMetric(
+                'Remaining',
+                '$remaining',
+                textColor,
+                subTextColor,
+              ),
               _buildAiTokenMetric('Used', '$used', textColor, subTextColor),
               _buildAiTokenMetric(
                 'Total',
@@ -1370,8 +1402,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 backgroundColor: Colors.transparent,
                 builder: (_) => PaywallDialog(
                   onSuccess: () {
-                    // Refresh to show premium badge/ring if successful
-                    setState(() {});
+                    _loadProfile(forceRefresh: true);
+                    _loadStats();
                   },
                 ),
               );

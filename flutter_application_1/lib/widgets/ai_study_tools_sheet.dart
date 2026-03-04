@@ -9,6 +9,7 @@ import '../screens/ai_question_paper_quiz_screen.dart';
 import '../services/ai_output_local_service.dart';
 import '../services/backend_api_service.dart';
 import '../services/summary_pdf_service.dart';
+import '../services/supabase_service.dart';
 import 'branded_loader.dart';
 
 class QuizQuestion {
@@ -90,6 +91,7 @@ class AiStudyToolsSheet extends StatefulWidget {
 class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     with SingleTickerProviderStateMixin {
   final BackendApiService _api = BackendApiService();
+  final SupabaseService _supabaseService = SupabaseService();
   static const Color _studioBlue = Color(0xFF2563EB);
   static const Color _studioBlueDark = Color(0xFF1D4ED8);
 
@@ -392,6 +394,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
           _savedLocallyMap['flashcards'] = false;
         });
       }
+      _supabaseService.markAiTokenBalanceStale();
     } catch (e) {
       setState(() {
         _error = e.toString().replaceFirst('Exception: ', '');
@@ -1951,4 +1954,3 @@ class _SummaryBlock {
 
   _SummaryBlock({required this.kind, required this.text});
 }
-

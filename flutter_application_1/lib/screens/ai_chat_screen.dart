@@ -756,7 +756,9 @@ class _AIChatScreenState extends State<AIChatScreen>
   }
 
   Future<RagSource?> _pickSourceForOcrAction(List<RagSource> sources) async {
-    final candidates = sources.where((s) => s.fileId.trim().isNotEmpty).toList();
+    final candidates = sources
+        .where((s) => s.fileId.trim().isNotEmpty)
+        .toList();
     if (candidates.isEmpty) return null;
     if (candidates.length == 1) return candidates.first;
 
@@ -823,11 +825,7 @@ class _AIChatScreenState extends State<AIChatScreen>
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            e.toString().replaceFirst('Exception: ', ''),
-          ),
-        ),
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
       );
     } finally {
       if (mounted) setState(() => _isOcrActionLoading = false);
@@ -855,11 +853,7 @@ class _AIChatScreenState extends State<AIChatScreen>
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            e.toString().replaceFirst('Exception: ', ''),
-          ),
-        ),
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
       );
     } finally {
       if (mounted) setState(() => _isOcrActionLoading = false);
@@ -938,11 +932,7 @@ class _AIChatScreenState extends State<AIChatScreen>
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            e.toString().replaceFirst('Exception: ', ''),
-          ),
-        ),
+        SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
       );
     } finally {
       if (mounted) setState(() => _isOcrActionLoading = false);
@@ -1988,6 +1978,7 @@ Return STRICT JSON only (no markdown). Schema:
       var lastAnswer = '';
       AiQuestionPaper? paper;
       var forceOcr = false;
+      var aiInvoked = false;
       for (var attempt = 0; attempt < 3 && paper == null; attempt++) {
         final strictMode = attempt > 0;
         final prompt = _buildQuestionPaperPrompt(
@@ -2015,6 +2006,7 @@ Return STRICT JSON only (no markdown). Schema:
           history: history,
           filters: contextFilters,
         );
+        aiInvoked = true;
         final answer = _extractRagAnswer(response);
         lastAnswer = answer;
         final noLocal =
@@ -2040,6 +2032,9 @@ Return STRICT JSON only (no markdown). Schema:
           continue;
         }
         paper = candidate;
+      }
+      if (aiInvoked) {
+        _supabase.markAiTokenBalanceStale();
       }
 
       if (paper == null) {
@@ -2131,6 +2126,7 @@ Return STRICT JSON only (no markdown). Schema:
         history: history,
         filters: contextFilters,
       );
+      _supabase.markAiTokenBalanceStale();
       final answer = _sanitizeAssistantAnswerText(
         _extractRagAnswer(response).trim(),
       );
@@ -2295,6 +2291,7 @@ Return STRICT JSON only (no markdown). Schema:
 
     AIChatMessage? aiMessageForError;
     var malformedChunkCount = 0;
+    var aiInvoked = false;
 
     try {
       _resetTypingRenderer();
@@ -2319,6 +2316,7 @@ Return STRICT JSON only (no markdown). Schema:
         history: history,
         filters: contextFilters,
       );
+      aiInvoked = true;
 
       var receivedContent = false;
       await for (final chunkStr in stream) {
@@ -2422,6 +2420,9 @@ Return STRICT JSON only (no markdown). Schema:
       }
 
       await _persistCurrentSession();
+      if (aiInvoked) {
+        _supabase.markAiTokenBalanceStale();
+      }
     } catch (e) {
       _streamTypingDone = true;
       _completeTypingDrainIfDrained();
@@ -2802,7 +2803,9 @@ Return STRICT JSON only (no markdown). Schema:
                     ),
                     _buildBubbleAction(
                       icon: Icons.cancel_schedule_send_rounded,
-                      label: _isOcrActionLoading ? 'Working...' : 'Cancel Retry',
+                      label: _isOcrActionLoading
+                          ? 'Working...'
+                          : 'Cancel Retry',
                       onTap: _isOcrActionLoading
                           ? () {}
                           : () => _cancelOcrRetryForMessage(msg),
