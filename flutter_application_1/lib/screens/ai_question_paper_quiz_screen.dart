@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../config/theme.dart';
 import '../models/ai_question_paper.dart';
@@ -55,11 +56,20 @@ class _AiQuestionPaperQuizScreenState extends State<AiQuestionPaperQuizScreen> {
       final file = await _pdfService.saveSummaryPdf(
         title: widget.paper.title,
         summary: _buildPaperForPdf(),
+        subtitle: 'AI Test Paper',
+        watermarkText: 'StudyShare Test',
+      );
+      if (!mounted) return;
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path)],
+          text: 'StudyShare test paper: ${widget.paper.title}',
+        ),
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Question paper downloaded: ${file.path}'),
+          content: Text('PDF saved and ready to share: ${file.path}'),
           behavior: SnackBarBehavior.floating,
         ),
       );

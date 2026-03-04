@@ -17,7 +17,8 @@ class BackendApiService {
   bool _ragStreamUnavailable = false;
   static final http.Client _httpClient = http.Client();
   static const Duration _requestTimeout = Duration(seconds: 20);
-  static const Duration _streamRequestTimeout = Duration(seconds: 30);
+  static const Duration _streamRequestTimeout = Duration(seconds: 120);
+  static const Duration _aiRequestTimeout = Duration(seconds: 120);
 
   FirebaseAuth? get _auth {
     if (_injectedAuth != null) return _injectedAuth;
@@ -63,6 +64,7 @@ class BackendApiService {
     Uri uri,
     Map<String, String> headers,
     Map<String, dynamic>? body,
+    Duration timeout,
   ) async {
     final encodedBody = jsonEncode(body ?? {});
     final future = switch (method.toUpperCase()) {
@@ -71,7 +73,7 @@ class BackendApiService {
       'DELETE' => _httpClient.delete(uri, headers: headers, body: encodedBody),
       _ => _httpClient.get(uri, headers: headers),
     };
-    return future.timeout(_requestTimeout);
+    return future.timeout(timeout);
   }
 
   Future<http.StreamedResponse> _sendStreamedRequest(http.BaseRequest request) {
@@ -82,6 +84,7 @@ class BackendApiService {
     String path, {
     String method = 'GET',
     Map<String, dynamic>? body,
+    Duration timeout = _requestTimeout,
   }) async {
     String? token = await _getIdToken();
     final uri = Uri.parse('$_baseUrl$path');
@@ -95,7 +98,7 @@ class BackendApiService {
         ? null
         : Map<String, dynamic>.from(body);
 
-    var res = await _sendRequest(method, uri, headers, effectiveBody);
+    var res = await _sendRequest(method, uri, headers, effectiveBody, timeout);
 
     if (res.statusCode == 401 || res.statusCode == 403) {
       final refreshedToken = await _getIdToken(forceRefresh: true);
@@ -109,7 +112,7 @@ class BackendApiService {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         };
-        res = await _sendRequest(method, uri, headers, effectiveBody);
+        res = await _sendRequest(method, uri, headers, effectiveBody, timeout);
       }
     }
 
@@ -930,6 +933,7 @@ class BackendApiService {
     return _requestJson(
       '/api/ai/summary',
       method: 'POST',
+      timeout: _aiRequestTimeout,
       body: {
         'file_id': fileId,
         'college_id': ?collegeId,
@@ -956,6 +960,7 @@ class BackendApiService {
     return _requestJson(
       '/api/ai/quiz',
       method: 'POST',
+      timeout: _aiRequestTimeout,
       body: {
         'file_id': fileId,
         'college_id': ?collegeId,
@@ -982,6 +987,7 @@ class BackendApiService {
     return _requestJson(
       '/api/ai/flashcards',
       method: 'POST',
+      timeout: _aiRequestTimeout,
       body: {
         'file_id': fileId,
         'college_id': ?collegeId,
@@ -1035,6 +1041,7 @@ class BackendApiService {
     return _requestJson(
       '/api/rag/query',
       method: 'POST',
+      timeout: _aiRequestTimeout,
       body: {
         'question': question,
         'college_id': ?collegeId,

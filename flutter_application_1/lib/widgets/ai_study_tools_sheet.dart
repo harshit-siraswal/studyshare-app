@@ -448,6 +448,8 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
       final file = await widget.summaryPdfService.saveSummaryPdf(
         title: widget.resourceTitle,
         summary: summary,
+        subtitle: 'AI Study Summary',
+        watermarkText: 'StudyShare',
       );
       if (!mounted) return;
       final box =

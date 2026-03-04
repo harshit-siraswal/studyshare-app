@@ -1309,13 +1309,13 @@ class _AIChatScreenState extends State<AIChatScreen>
         .trim();
 
     final hasQuizKeyword = RegExp(
-      r'\b(quiz|mcq|question paper|questionpaper|mock test|exam paper|practice test)\b',
+      r'\b(quiz|mcq|question paper|questionpaper|mock test|exam paper|practice test|test|assessment)\b',
     ).hasMatch(normalized);
     if (!hasQuizKeyword) return false;
 
     final explicitQuizIntent =
         RegExp(
-          r'\b(make|create|generate|build|prepare|give|start)\s+(?:me\s+)?(?:a\s+)?(?:quick\s+)?(quiz|mcq|question paper|mock test|practice test)\b',
+          r'\b(make|create|generate|build|prepare|give|start)\s+(?:me\s+)?(?:a\s+)?(?:quick\s+)?(quiz|mcq|question paper|mock test|practice test|test|assessment)\b',
         ).hasMatch(normalized) ||
         RegExp(
           r'\b(ask|test)\s+me\s+(?:\d+\s+)?(?:questions?|mcqs?|quiz)\b',
@@ -1324,7 +1324,7 @@ class _AIChatScreenState extends State<AIChatScreen>
           r'\b(?:questions?|mcqs?)\s+(?:on|for|about|from)\b',
         ).hasMatch(normalized) ||
         RegExp(
-          r'\b(quiz|mcq|question paper|mock test|practice test)\s+(?:on|for|about|from)\b',
+          r'\b(quiz|mcq|question paper|mock test|practice test|test|assessment)\s+(?:on|for|about|from)\b',
         ).hasMatch(normalized) ||
         normalized.contains('test me on');
 
@@ -2318,6 +2318,8 @@ Return STRICT JSON only (no markdown). Schema:
       final file = await _summaryPdfService.saveSummaryPdf(
         title: 'AI_Report_${DateTime.now().millisecondsSinceEpoch}',
         summary: answer,
+        subtitle: 'AI Chat Summary',
+        watermarkText: 'StudyShare',
       );
       if (!mounted) return;
       setState(() {
