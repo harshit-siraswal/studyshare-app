@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../config/theme.dart';
@@ -106,12 +108,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _profileBranch = profile['branch']?.toString();
         _profileSubject = profile['subject']?.toString();
         _profileAdminKey = profile['admin_key']?.toString();
-        _aiTokenBudget = _toSafeInt(profile['ai_token_budget']);
-        _aiTokenUsed = _toSafeInt(profile['ai_token_used']);
+        final budgetFromApi = _toSafeInt(profile['ai_token_budget']);
+        final usedFromApi = _toSafeInt(profile['ai_token_used']);
         final remainingFromApi = _toSafeInt(profile['ai_token_remaining']);
+        final baseBudgetFromApi = _toSafeInt(profile['ai_token_base_budget']);
+        final premiumMultiplierFromApi = math.max(
+          1,
+          _toSafeInt(profile['ai_token_premium_multiplier']),
+        );
+        final currentMultiplier = math.max(
+          1,
+          _toSafeInt(profile['ai_token_budget_multiplier']),
+        );
+        final tier = profile['subscription_tier']?.toString().toLowerCase();
+        final subscriptionEnd = DateTime.tryParse(
+          profile['subscription_end_date']?.toString() ?? '',
+        );
+        final isPremiumActive =
+            (tier == 'pro' || tier == 'max') &&
+            subscriptionEnd != null &&
+            subscriptionEnd.toUtc().isAfter(DateTime.now().toUtc());
+        final safeBaseBudget = baseBudgetFromApi > 0
+            ? baseBudgetFromApi
+            : (budgetFromApi > 0 && currentMultiplier > 1
+                  ? (budgetFromApi / currentMultiplier).round()
+                  : (budgetFromApi > 0 ? budgetFromApi : 40160));
+        final resolvedMultiplier = currentMultiplier > 1
+            ? currentMultiplier
+            : (isPremiumActive ? premiumMultiplierFromApi : 1);
+
+        _aiTokenBudget = budgetFromApi > 0
+            ? budgetFromApi
+            : safeBaseBudget * resolvedMultiplier;
+        _aiTokenUsed = usedFromApi.clamp(0, _aiTokenBudget);
         _aiTokenRemaining = _aiTokenBudget > 0
             ? remainingFromApi.clamp(0, _aiTokenBudget)
-            : remainingFromApi;
+            : 0;
         _aiTokenCycleEndsAt = DateTime.tryParse(
           profile['ai_token_cycle_ends_at']?.toString() ?? '',
         );
@@ -843,11 +875,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
               _buildAiTokenMetric('Used', '$used', textColor, subTextColor),
               _buildAiTokenMetric(
                 'Total',
-                budget > 0 ? '$budget' : '--',
+                '${budget > 0 ? budget : 40160}',
                 textColor,
                 subTextColor,
               ),
             ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Consumption: input tokens + weighted output tokens.',
+            style: GoogleFonts.inter(
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              color: subTextColor,
+            ),
           ),
         ],
       ),

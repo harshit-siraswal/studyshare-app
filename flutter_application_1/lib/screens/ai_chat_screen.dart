@@ -1448,26 +1448,189 @@ class _AIChatScreenState extends State<AIChatScreen>
     ).firstMatch(raw);
     final cleaned = (fenceMatch?.group(1) ?? raw).trim();
 
-    dynamic tryDecode(String source) {
-      try {
-        return jsonDecode(source);
-      } catch (_) {
-        return null;
-      }
-    }
-
-    final full = tryDecode(cleaned);
+    final full = _tryDecodeJson(cleaned);
     if (full is Map<String, dynamic>) return full;
     if (full is Map) return Map<String, dynamic>.from(full);
 
-    final start = cleaned.indexOf('{');
-    final end = cleaned.lastIndexOf('}');
-    if (start == -1 || end <= start) return null;
-    final sliced = cleaned.substring(start, end + 1);
-    final parsed = tryDecode(sliced);
-    if (parsed is Map<String, dynamic>) return parsed;
-    if (parsed is Map) return Map<String, dynamic>.from(parsed);
-    return null;
+    final firstObjectStart = cleaned.indexOf('{');
+    if (firstObjectStart != -1) {
+      final firstObjectEnd = _findBalancedObjectEnd(cleaned, firstObjectStart);
+      if (firstObjectEnd != -1) {
+        final sliced = cleaned.substring(firstObjectStart, firstObjectEnd + 1);
+        final parsed = _tryDecodeJson(sliced);
+        if (parsed is Map<String, dynamic>) return parsed;
+        if (parsed is Map) return Map<String, dynamic>.from(parsed);
+      }
+    }
+
+    return _recoverQuestionPaperJson(cleaned);
+  }
+
+  dynamic _tryDecodeJson(String source) {
+    try {
+      return jsonDecode(source);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  int _findBalancedObjectEnd(String source, int startIndex) {
+    if (startIndex < 0 ||
+        startIndex >= source.length ||
+        source[startIndex] != '{') {
+      return -1;
+    }
+
+    var depth = 0;
+    var inString = false;
+    var escaped = false;
+
+    for (var i = startIndex; i < source.length; i++) {
+      final char = source[i];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (char == r'\') {
+          escaped = true;
+          continue;
+        }
+        if (char == '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (char == '"') {
+        inString = true;
+        continue;
+      }
+      if (char == '{') {
+        depth++;
+        continue;
+      }
+      if (char == '}') {
+        depth--;
+        if (depth == 0) return i;
+      }
+    }
+    return -1;
+  }
+
+  String _decodeJsonEscapedString(String value) {
+    final decoded = _tryDecodeJson('"$value"');
+    if (decoded is String) return decoded;
+    return value;
+  }
+
+  String? _extractJsonStringField(String source, String field) {
+    final pattern = RegExp(
+      '"${RegExp.escape(field)}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"',
+      caseSensitive: false,
+    );
+    final match = pattern.firstMatch(source);
+    if (match == null) return null;
+    final raw = match.group(1);
+    if (raw == null) return null;
+    final decoded = _decodeJsonEscapedString(raw).trim();
+    return decoded.isEmpty ? null : decoded;
+  }
+
+  List<String> _extractJsonStringArrayField(String source, String field) {
+    final fieldMatch = RegExp(
+      '"${RegExp.escape(field)}"\\s*:\\s*\\[',
+      caseSensitive: false,
+    ).firstMatch(source);
+    if (fieldMatch == null) return const [];
+
+    final values = <String>[];
+    var inString = false;
+    var escaped = false;
+    final buffer = StringBuffer();
+
+    for (var i = fieldMatch.end; i < source.length; i++) {
+      final char = source[i];
+      if (inString) {
+        if (escaped) {
+          buffer.write(char);
+          escaped = false;
+          continue;
+        }
+        if (char == r'\') {
+          escaped = true;
+          continue;
+        }
+        if (char == '"') {
+          final value = _decodeJsonEscapedString(buffer.toString()).trim();
+          if (value.isNotEmpty) values.add(value);
+          buffer.clear();
+          inString = false;
+          continue;
+        }
+        buffer.write(char);
+        continue;
+      }
+
+      if (char == '"') {
+        inString = true;
+        continue;
+      }
+      if (char == ']') {
+        break;
+      }
+    }
+    return values;
+  }
+
+  List<Map<String, dynamic>> _extractQuestionObjectsFromPartialJson(
+    String source,
+  ) {
+    final questionsMatch = RegExp(
+      '"questions"\\s*:\\s*\\[',
+      caseSensitive: false,
+    ).firstMatch(source);
+    if (questionsMatch == null) return const [];
+
+    final parsed = <Map<String, dynamic>>[];
+    var cursor = questionsMatch.end;
+    while (cursor < source.length) {
+      final char = source[cursor];
+      if (char == ']') break;
+      if (char != '{') {
+        cursor++;
+        continue;
+      }
+
+      final end = _findBalancedObjectEnd(source, cursor);
+      if (end == -1) break;
+
+      final objectSlice = source.substring(cursor, end + 1);
+      final decoded = _tryDecodeJson(objectSlice);
+      if (decoded is Map<String, dynamic>) {
+        parsed.add(decoded);
+      } else if (decoded is Map) {
+        parsed.add(Map<String, dynamic>.from(decoded));
+      }
+      cursor = end + 1;
+    }
+    return parsed;
+  }
+
+  Map<String, dynamic>? _recoverQuestionPaperJson(String source) {
+    final questions = _extractQuestionObjectsFromPartialJson(source);
+    if (questions.isEmpty) return null;
+
+    final recovered = <String, dynamic>{
+      'questions': questions,
+    };
+    final title = _extractJsonStringField(source, 'title');
+    final subject = _extractJsonStringField(source, 'subject');
+    final instructions = _extractJsonStringArrayField(source, 'instructions');
+    if (title != null) recovered['title'] = title;
+    if (subject != null) recovered['subject'] = subject;
+    if (instructions.isNotEmpty) recovered['instructions'] = instructions;
+    return recovered;
   }
 
   int _resolveAnswerIndex({
@@ -1531,19 +1694,27 @@ class _AIChatScreenState extends State<AIChatScreen>
         continue;
       }
 
-      final optionMatch = RegExp(r'^[A-Da-d][\).:\-]\s*(.+)$').firstMatch(line);
+      final optionMatch = RegExp(
+        r'^(?:[A-Da-d]|[1-4])[\).:\-]\s*(.+)$',
+      ).firstMatch(line);
       if (optionMatch != null) {
         currentOptions.add(optionMatch.group(1)?.trim() ?? '');
         continue;
       }
 
       final answerMatch = RegExp(
-        r'^(?:answer|correct)\s*[:\-]\s*([A-Da-d])$',
+        r'^(?:answer|correct)\s*[:\-]\s*([A-Da-d1-4])$',
         caseSensitive: false,
       ).firstMatch(line);
       if (answerMatch != null) {
-        final char = answerMatch.group(1)?.toUpperCase() ?? 'A';
-        currentAnswer = char.codeUnitAt(0) - 65;
+        final token = answerMatch.group(1)?.trim() ?? 'A';
+        final numeric = int.tryParse(token);
+        if (numeric != null && numeric >= 1 && numeric <= 4) {
+          currentAnswer = numeric - 1;
+        } else {
+          final char = token.toUpperCase();
+          currentAnswer = char.codeUnitAt(0) - 65;
+        }
         continue;
       }
 
@@ -1732,7 +1903,7 @@ class _AIChatScreenState extends State<AIChatScreen>
         ? '''
 Additional quality gate (must pass):
 - Do not use placeholder values such as "Question text", "A option", or "Subject Name".
-- Return at least 12 unique subject-relevant questions.
+- Return at least 10 unique subject-relevant questions.
 - Ensure options are distinct and answers match one of the options.
 '''
         : '';
@@ -1746,11 +1917,11 @@ Attached study documents available: $contextResourcesCount
 
 Requirements:
 1) Analyze available notes/resources to match exam pattern and difficulty.
-2) Generate exactly 20 MCQs.
+2) Generate exactly 10 MCQs.
 3) 4 options per question.
 4) Include one correct answer.
-5) Include concise explanation.
-6) For each question include source mapping in "source" using title/section/pages.
+5) Include concise explanation (one sentence, max 20 words).
+6) Include source mapping in "source" only if evidence is available from context.
 $qualityGate
 
 Return STRICT JSON only (no markdown). Schema:
@@ -1765,10 +1936,10 @@ Return STRICT JSON only (no markdown). Schema:
       "answer": "<A|B|C|D>",
       "explanation": "<short reason>",
       "source": {
-        "title": "<document title>",
-        "section": "<chapter or topic>",
-        "pages": "<page range>",
-        "note": "<supporting note>"
+        "title": "<document title or empty string>",
+        "section": "<chapter or topic or empty string>",
+        "pages": "<page range or empty string>",
+        "note": "<supporting note or empty string>"
       }
     }
   ]
