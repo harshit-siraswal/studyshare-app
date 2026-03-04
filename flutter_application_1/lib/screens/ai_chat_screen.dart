@@ -449,13 +449,33 @@ class _AIChatScreenState extends State<AIChatScreen>
   String _buildRagPrompt({
     required String userPrompt,
     required bool hasAttachments,
+    bool preferLocalOnly = false,
   }) {
     final cleaned = userPrompt.trim();
+    if (cleaned.isNotEmpty && preferLocalOnly) {
+      return '$cleaned\n\n'
+          'Important: Use only the uploaded/pinned study material context. '
+          'Do not add outside web/general info. If the notes do not contain '
+          'the answer, say that clearly and ask what to upload.';
+    }
     if (cleaned.isNotEmpty) return cleaned;
     if (hasAttachments) {
       return 'Please analyze the attached files and help me study.';
     }
     return userPrompt;
+  }
+
+  bool _promptRequiresLocalContext(String prompt) {
+    final normalized = prompt.toLowerCase();
+    return normalized.contains('from pdf') ||
+        normalized.contains('from my pdf') ||
+        normalized.contains('from notes') ||
+        normalized.contains('from my notes') ||
+        normalized.contains('based on pdf') ||
+        normalized.contains('based on notes') ||
+        normalized.contains('use my pdf') ||
+        normalized.contains('use my notes') ||
+        normalized.contains('from attached');
   }
 
   Map<String, dynamic>? _buildContextFilters() {
@@ -540,13 +560,15 @@ class _AIChatScreenState extends State<AIChatScreen>
         }
       } catch (e) {
         debugPrint(
-          'Question-paper profile lookup failed, falling back to manual config: $e',
+          'Question-paper profile lookup failed, using defaults: $e',
         );
-        return _showQuestionPaperConfigDialog();
       }
     }
 
-    return _showQuestionPaperConfigDialog();
+    return const _QuestionPaperRequestConfig(
+      semester: '1',
+      branch: 'General',
+    );
   }
 
   Future<void> _scrollToBottom({
@@ -2402,6 +2424,10 @@ Return STRICT JSON only (no markdown). Schema:
     final userPrompt = text.isEmpty
         ? 'Please analyze the attached files and help me study.'
         : text;
+    final localContextRequired =
+        hasAttachments ||
+        _isStudioChat ||
+        _promptRequiresLocalContext(userPrompt);
     final attachmentPayload = effectiveAttachments
         .map(
           (item) => <String, dynamic>{
@@ -2414,6 +2440,7 @@ Return STRICT JSON only (no markdown). Schema:
     final sendPrompt = _buildRagPrompt(
       userPrompt: userPrompt,
       hasAttachments: hasAttachments,
+      preferLocalOnly: localContextRequired,
     );
     final history = _buildStructuredHistory(pendingUserPrompt: userPrompt);
     final contextFilters = _buildContextFilters();
@@ -2480,8 +2507,9 @@ Return STRICT JSON only (no markdown). Schema:
         question: sendPrompt,
         collegeId: widget.collegeId,
         sessionId: _activeSessionId,
+        minScore: localContextRequired ? 0.08 : null,
         fileId: widget.resourceContext?.fileId,
-        allowWeb: true,
+        allowWeb: !localContextRequired,
         useOcr: shouldForceVisionOcr,
         forceOcr: shouldForceVisionOcr,
         ocrProvider: shouldForceVisionOcr ? 'google_vision' : null,

@@ -59,20 +59,19 @@ class _AiQuestionPaperQuizScreenState extends State<AiQuestionPaperQuizScreen> {
         subtitle: 'AI Test Paper',
         watermarkText: 'StudyShare Test',
       );
-      if (!mounted) return;
-      await SharePlus.instance.share(
-        ShareParams(
-          files: [XFile(file.path)],
-          text: 'StudyShare test paper: ${widget.paper.title}',
-        ),
-      );
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('PDF saved and ready to share: ${file.path}'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('PDF saved and ready to share: ${file.path}'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+          await SharePlus.instance.share(
+            ShareParams(
+              files: [XFile(file.path)],
+              text: 'StudyShare test paper: ${widget.paper.title}',
+            ),
+          );
     } catch (e, stackTrace) {
       debugPrint('Failed to download question paper PDF: $e\n$stackTrace');
       if (!mounted) return;

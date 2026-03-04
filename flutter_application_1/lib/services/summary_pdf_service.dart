@@ -65,7 +65,6 @@ class SummaryPdfService {
         stackTrace: st,
       );
     }
-
     final appDocs = await getApplicationDocumentsDirectory();
     final exportsDir = Directory(p.join(appDocs.path, 'exports'));
     if (!await exportsDir.exists()) {
@@ -86,6 +85,8 @@ class SummaryPdfService {
     required String subtitle,
     required String watermarkText,
     required String summary,
+    String? headerBrandName,
+    String? headerSubtitle,
   }) {
     final lines = _buildWrappedLines(
       title: title,
@@ -127,7 +128,7 @@ class SummaryPdfService {
       final contentId = contentObjectIds[i];
       final stream = _buildPageStream(
         pages[i],
-        watermarkText: watermarkText,
+        watermarkText: watermarkText.trim().isEmpty ? (headerBrandName ?? 'StudyShare') : watermarkText.trim(),
       );
 
       objectMap[contentId] =
