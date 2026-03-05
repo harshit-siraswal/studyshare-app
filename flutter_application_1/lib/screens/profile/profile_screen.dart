@@ -58,7 +58,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
   int _aiTokenBudget = 0;
   int _aiTokenUsed = 0;
   int _aiTokenRemaining = 0;
+  int _aiTokenBaseBudget = 40160;
+  int _aiTokenBudgetMultiplier = 1;
+  int _aiTokenPremiumMultiplier = 10;
+  int _aiTokenCycleDays = 30;
+  DateTime? _aiTokenCycleStartedAt;
   DateTime? _aiTokenCycleEndsAt;
+  static const int _tokensPerCredit = 2000;
+  Future<bool>? _isPremiumFuture;
+  Future<List<Resource>>? _contributionsFuture;
 
   // Real stats
   int _uploadCount = 0;
@@ -82,13 +90,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void initState() {
     super.initState();
     SupabaseService.aiTokenRefreshNotifier.addListener(_handleAiTokenRefresh);
+    _refreshPremiumFuture();
     _loadStats();
-    _loadProfile(forceRefresh: true);
+    _loadProfile();
   }
 
   void _handleAiTokenRefresh() {
     if (!mounted) return;
     _loadProfile(forceRefresh: true);
+  }
+
+  void _refreshPremiumFuture() {
+    _isPremiumFuture = _subscriptionService.isPremium();
+  }
+
+  void _refreshContributionsFuture() {
+    final email = _userEmail;
+    if (email.isEmpty) {
+      _contributionsFuture = Future.value(const <Resource>[]);
+      return;
+    }
+    _contributionsFuture = _supabaseService.getUserResources(email);
   }
 
   Future<void> _loadProfile({bool forceRefresh = false}) async {
@@ -97,6 +119,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _supabaseService.invalidateCurrentUserProfileCache();
       }
       final profile = await _supabaseService.getCurrentUserProfile(
+        maxAttempts: forceRefresh ? 2 : 1,
         forceRefresh: forceRefresh,
       );
       if (!mounted) return;
@@ -136,25 +159,40 @@ class _ProfileScreenState extends State<ProfileScreen> {
         final resolvedMultiplier = currentMultiplier > 1
             ? currentMultiplier
             : (isPremiumActive ? premiumMultiplierFromApi : 1);
+        final derivedBudget = math.max(1, safeBaseBudget * resolvedMultiplier);
+        final resolvedBudget = budgetFromApi > 0
+            ? math.max(budgetFromApi, derivedBudget)
+            : derivedBudget;
+        final resolvedUsed = usedFromApi.clamp(0, resolvedBudget);
+        final derivedRemaining = (resolvedBudget - resolvedUsed).clamp(
+          0,
+          resolvedBudget,
+        );
+        final resolvedRemaining =
+            (remainingFromApi <= 0 ||
+                remainingFromApi > resolvedBudget ||
+                resolvedBudget > budgetFromApi)
+            ? derivedRemaining
+            : remainingFromApi.clamp(0, resolvedBudget);
 
-        _aiTokenBudget = budgetFromApi > 0
-            ? budgetFromApi
-            : safeBaseBudget * resolvedMultiplier;
-        _aiTokenUsed = usedFromApi.clamp(0, _aiTokenBudget);
-        _aiTokenRemaining = _aiTokenBudget > 0
-            ? remainingFromApi.clamp(0, _aiTokenBudget)
-            : 0;
+        _aiTokenBudget = resolvedBudget;
+        _aiTokenUsed = resolvedUsed;
+        _aiTokenRemaining = resolvedRemaining;
+        _aiTokenBaseBudget = safeBaseBudget > 0 ? safeBaseBudget : 40160;
+        _aiTokenBudgetMultiplier = resolvedMultiplier;
+        _aiTokenPremiumMultiplier = premiumMultiplierFromApi;
+        _aiTokenCycleDays = math.max(
+          1,
+          _toSafeInt(profile['ai_token_cycle_days']) > 0
+              ? _toSafeInt(profile['ai_token_cycle_days'])
+              : 30,
+        );
+        _aiTokenCycleStartedAt = DateTime.tryParse(
+          profile['ai_token_cycle_started_at']?.toString() ?? '',
+        );
         _aiTokenCycleEndsAt = DateTime.tryParse(
           profile['ai_token_cycle_ends_at']?.toString() ?? '',
         );
-        if (_aiTokenBudget > 0 &&
-            _aiTokenRemaining == 0 &&
-            _aiTokenUsed < _aiTokenBudget) {
-          _aiTokenRemaining = (_aiTokenBudget - _aiTokenUsed).clamp(
-            0,
-            _aiTokenBudget,
-          );
-        }
         final roleRaw = profile['role']?.toString().trim().toUpperCase() ?? '';
         final hasAdminKey =
             _profileAdminKey != null && _profileAdminKey!.trim().isNotEmpty;
@@ -177,6 +215,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
         } else {
           _profileRole = AppRoles.readOnly;
         }
+        if (_contributionsFuture == null || forceRefresh) {
+          _refreshContributionsFuture();
+        }
+        if (forceRefresh) {
+          _refreshPremiumFuture();
+        }
         _profileLoading = false;
       });
     } catch (_) {
@@ -189,18 +233,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
     try {
-      final stats = await _supabaseService.getUserStats(
-        _authService.userEmail!,
+      final userEmail = _authService.userEmail!;
+      final stats = await _supabaseService.getUserStats(userEmail);
+      final contributions = _toSafeInt(
+        stats['uploads'] ?? stats['contributions'] ?? 0,
       );
-      final followingCount = await _supabaseService.getFollowingCount(
-        _authService.userEmail!,
-      );
-      final followersCount = await _supabaseService.getFollowersCount(
-        _authService.userEmail!,
-      );
+      final followingCount = _toSafeInt(stats['following']);
+      final followersCount = _toSafeInt(stats['followers']);
       if (mounted) {
         setState(() {
-          _uploadCount = stats['uploads'] ?? stats['contributions'] ?? 0;
+          _uploadCount = contributions;
           _followersCount = followersCount;
           _followingCount = followingCount;
           _contributionBadge = ContributionBadgeCatalog.resolve(_uploadCount);
@@ -225,6 +267,64 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (value is int) return value;
     if (value is num) return value.round();
     return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  String _formatTokenCompact3(int value) {
+    final abs = value.abs();
+    if (abs < 1000) return value.toString();
+
+    double scaled = value.toDouble();
+    String suffix = '';
+    if (abs >= 1000000000) {
+      scaled = value / 1000000000;
+      suffix = 'B';
+    } else if (abs >= 1000000) {
+      scaled = value / 1000000;
+      suffix = 'M';
+    } else {
+      scaled = value / 1000;
+      suffix = 'K';
+    }
+
+    final absScaled = scaled.abs();
+    final decimals = absScaled >= 100 ? 0 : (absScaled >= 10 ? 1 : 2);
+    final compact = scaled
+        .toStringAsFixed(decimals)
+        .replaceFirst(RegExp(r'\.?0+$'), '');
+    return '$compact$suffix';
+  }
+
+  String _formatTokenWithCommas(int value) {
+    final digits = value.toString();
+    final buffer = StringBuffer();
+    for (var i = 0; i < digits.length; i++) {
+      final remaining = digits.length - i;
+      buffer.write(digits[i]);
+      if (remaining > 1 && remaining % 3 == 1) {
+        buffer.write(',');
+      }
+    }
+    return buffer.toString();
+  }
+
+  String _formatTokenDetailed(int value) {
+    return '${_formatTokenCompact3(value)} (${_formatTokenWithCommas(value)})';
+  }
+
+  String _formatCreditCompact(int tokenValue) {
+    if (tokenValue <= 0) return '0';
+    final credits = tokenValue / _tokensPerCredit;
+    return math.max(1, credits.round()).toString();
+  }
+
+  String _formatCreditDetailed(int tokenValue) {
+    return '${_formatCreditCompact(tokenValue)} credits '
+        '(${_formatTokenWithCommas(tokenValue)} tokens)';
+  }
+
+  String _formatCreditRange(int minTokens, int maxTokens) {
+    return '${_formatCreditCompact(minTokens)} - '
+        '${_formatCreditCompact(maxTokens)} credits';
   }
 
   Future<void> _handleLogout() async {
@@ -311,6 +411,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               onRefresh: () async {
                 await _loadProfile(forceRefresh: true);
                 await _loadStats();
+                if (!mounted) return;
+                setState(() {
+                  _refreshPremiumFuture();
+                  _refreshContributionsFuture();
+                });
               },
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
@@ -332,7 +437,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     const SizedBox(height: 24),
                     // Premium Badge / Status
                     FutureBuilder<bool>(
-                      future: _subscriptionService.isPremium(),
+                      future: _isPremiumFuture ??= _subscriptionService
+                          .isPremium(),
                       builder: (context, snapshot) {
                         final isPremium = snapshot.data ?? false;
                         final isVerified =
@@ -380,7 +486,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildProfileHeader(Color textColor, Color subTextColor) {
     return FutureBuilder<bool>(
-      future: _subscriptionService.isPremium(),
+      future: _isPremiumFuture ??= _subscriptionService.isPremium(),
       builder: (context, snapshot) {
         final isPremium = snapshot.data ?? false;
 
@@ -776,122 +882,363 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final progress = budget > 0 ? (used / budget).clamp(0.0, 1.0) : 0.0;
     final exhausted = budget > 0 && remaining <= 0;
 
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.white,
-        border: Border.all(
-          color: exhausted
-              ? AppTheme.error.withValues(alpha: 0.35)
-              : AppTheme.primary.withValues(alpha: 0.22),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.24 : 0.06),
-            blurRadius: 12,
-            offset: const Offset(0, 5),
-          ),
-        ],
+    return GestureDetector(
+      onTap: () => _showAiTokenConsumptionDetailsSheet(
+        textColor: textColor,
+        subTextColor: subTextColor,
+        isDark: isDark,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                Icons.token_rounded,
-                size: 18,
-                color: exhausted ? AppTheme.error : AppTheme.primary,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Monthly AI Tokens',
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: textColor,
-                      ),
-                    ),
-                    if (_aiTokenCycleEndsAt != null)
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.white,
+          border: Border.all(
+            color: exhausted
+                ? AppTheme.error.withValues(alpha: 0.35)
+                : AppTheme.primary.withValues(alpha: 0.22),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: isDark ? 0.24 : 0.06),
+              blurRadius: 12,
+              offset: const Offset(0, 5),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.token_rounded,
+                  size: 18,
+                  color: exhausted ? AppTheme.error : AppTheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Text(
-                        'Resets on ${_aiTokenCycleEndsAt!.day}/${_aiTokenCycleEndsAt!.month}/${_aiTokenCycleEndsAt!.year}',
+                        'Monthly AI Credits',
                         style: GoogleFonts.inter(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                          color: subTextColor,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: textColor,
                         ),
                       ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: exhausted
-                      ? AppTheme.error.withValues(alpha: 0.14)
-                      : AppTheme.primary.withValues(alpha: 0.14),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Text(
-                  exhausted ? 'Exhausted' : '$remaining left',
-                  style: GoogleFonts.inter(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: exhausted ? AppTheme.error : AppTheme.primary,
+                      if (_aiTokenCycleEndsAt != null)
+                        Text(
+                          'Resets on ${_aiTokenCycleEndsAt!.day}/${_aiTokenCycleEndsAt!.month}/${_aiTokenCycleEndsAt!.year}',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                            color: subTextColor,
+                          ),
+                        ),
+                    ],
                   ),
                 ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: exhausted
+                        ? AppTheme.error.withValues(alpha: 0.14)
+                        : AppTheme.primary.withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    exhausted
+                        ? 'Exhausted'
+                        : '${_formatCreditCompact(remaining)} credits left',
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: exhausted ? AppTheme.error : AppTheme.primary,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Icon(Icons.info_outline_rounded, size: 16, color: subTextColor),
+              ],
+            ),
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: LinearProgressIndicator(
+                value: progress,
+                minHeight: 8,
+                backgroundColor: isDark
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : Colors.black.withValues(alpha: 0.06),
+                valueColor: AlwaysStoppedAnimation<Color>(
+                  exhausted ? AppTheme.error : AppTheme.primary,
+                ),
               ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: LinearProgressIndicator(
-              value: progress,
-              minHeight: 8,
-              backgroundColor: isDark
-                  ? Colors.white.withValues(alpha: 0.08)
-                  : Colors.black.withValues(alpha: 0.06),
-              valueColor: AlwaysStoppedAnimation<Color>(
-                exhausted ? AppTheme.error : AppTheme.primary,
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                _buildAiTokenMetric(
+                  'Remaining',
+                  _formatCreditCompact(remaining),
+                  textColor,
+                  subTextColor,
+                ),
+                _buildAiTokenMetric(
+                  'Used',
+                  _formatCreditCompact(used),
+                  textColor,
+                  subTextColor,
+                ),
+                _buildAiTokenMetric(
+                  'Total',
+                  _formatCreditCompact(budget > 0 ? budget : 40160),
+                  textColor,
+                  subTextColor,
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '1 credit = ${_formatTokenWithCommas(_tokensPerCredit)} '
+              'billable tokens (input + weighted output).',
+              style: GoogleFonts.inter(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: subTextColor,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _formatCycleDate(DateTime? value) {
+    if (value == null) return 'N/A';
+    final local = value.toLocal();
+    final dd = local.day.toString().padLeft(2, '0');
+    final mm = local.month.toString().padLeft(2, '0');
+    final yyyy = local.year.toString();
+    final hh = local.hour.toString().padLeft(2, '0');
+    final min = local.minute.toString().padLeft(2, '0');
+    return '$dd/$mm/$yyyy $hh:$min';
+  }
+
+  Widget _buildTokenDetailRow(
+    String label,
+    String value,
+    Color labelColor,
+    Color valueColor,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: labelColor,
               ),
             ),
           ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              _buildAiTokenMetric(
-                'Remaining',
-                '$remaining',
-                textColor,
-                subTextColor,
-              ),
-              _buildAiTokenMetric('Used', '$used', textColor, subTextColor),
-              _buildAiTokenMetric(
-                'Total',
-                '${budget > 0 ? budget : 40160}',
-                textColor,
-                subTextColor,
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
+          const SizedBox(width: 12),
           Text(
-            'Consumption: input tokens + weighted output tokens.',
+            value,
             style: GoogleFonts.inter(
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-              color: subTextColor,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: valueColor,
             ),
           ),
         ],
       ),
+    );
+  }
+
+  Future<void> _showAiTokenConsumptionDetailsSheet({
+    required Color textColor,
+    required Color subTextColor,
+    required bool isDark,
+  }) async {
+    final budget = _aiTokenBudget > 0 ? _aiTokenBudget : 40160;
+    final used = _aiTokenUsed.clamp(0, budget);
+    final remaining = _aiTokenRemaining.clamp(0, budget);
+    final cycleLabel =
+        '${_aiTokenCycleDays > 0 ? _aiTokenCycleDays : 30} day cycle';
+    final usagePercent = budget > 0
+        ? ((used / budget) * 100).toStringAsFixed(1)
+        : '0.0';
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: isDark ? AppTheme.darkCard : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 22),
+            child: SingleChildScrollView(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.query_stats_rounded,
+                        color: AppTheme.primary,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'AI Credits & Token Usage',
+                        style: GoogleFonts.inter(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: textColor,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  _buildTokenDetailRow(
+                    'Total monthly credits',
+                    _formatCreditDetailed(budget),
+                    subTextColor,
+                    textColor,
+                  ),
+                  _buildTokenDetailRow(
+                    'Used in current cycle',
+                    '${_formatCreditDetailed(used)} ($usagePercent%)',
+                    subTextColor,
+                    textColor,
+                  ),
+                  _buildTokenDetailRow(
+                    'Remaining credits',
+                    _formatCreditDetailed(remaining),
+                    subTextColor,
+                    textColor,
+                  ),
+                  _buildTokenDetailRow(
+                    'Token to credit ratio',
+                    '1 credit = ${_formatTokenWithCommas(_tokensPerCredit)} tokens',
+                    subTextColor,
+                    textColor,
+                  ),
+                  _buildTokenDetailRow(
+                    'Base budget',
+                    _formatTokenDetailed(_aiTokenBaseBudget),
+                    subTextColor,
+                    textColor,
+                  ),
+                  _buildTokenDetailRow(
+                    'Current multiplier',
+                    '${_aiTokenBudgetMultiplier}x',
+                    subTextColor,
+                    textColor,
+                  ),
+                  _buildTokenDetailRow(
+                    'Premium multiplier',
+                    '${_aiTokenPremiumMultiplier}x',
+                    subTextColor,
+                    textColor,
+                  ),
+                  _buildTokenDetailRow(
+                    'Cycle',
+                    cycleLabel,
+                    subTextColor,
+                    textColor,
+                  ),
+                  _buildTokenDetailRow(
+                    'Cycle started',
+                    _formatCycleDate(_aiTokenCycleStartedAt),
+                    subTextColor,
+                    textColor,
+                  ),
+                  _buildTokenDetailRow(
+                    'Cycle ends',
+                    _formatCycleDate(_aiTokenCycleEndsAt),
+                    subTextColor,
+                    textColor,
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'Estimated cost per task:',
+                    style: GoogleFonts.inter(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: textColor,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  _buildTokenDetailRow(
+                    'AI Chat reply',
+                    '${_formatCreditRange(300, 1200)} '
+                        '(~${_formatTokenCompact3(300)}-${_formatTokenCompact3(1200)} tokens)',
+                    subTextColor,
+                    textColor,
+                  ),
+                  _buildTokenDetailRow(
+                    'Generate summary',
+                    '${_formatCreditRange(1400, 3200)} '
+                        '(~${_formatTokenCompact3(1400)}-${_formatTokenCompact3(3200)} tokens)',
+                    subTextColor,
+                    textColor,
+                  ),
+                  _buildTokenDetailRow(
+                    'Generate flashcards',
+                    '${_formatCreditRange(1800, 4200)} '
+                        '(~${_formatTokenCompact3(1800)}-${_formatTokenCompact3(4200)} tokens)',
+                    subTextColor,
+                    textColor,
+                  ),
+                  _buildTokenDetailRow(
+                    'Generate quiz',
+                    '${_formatCreditRange(2200, 5200)} '
+                        '(~${_formatTokenCompact3(2200)}-${_formatTokenCompact3(5200)} tokens)',
+                    subTextColor,
+                    textColor,
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    'How consumption is calculated:',
+                    style: GoogleFonts.inter(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: textColor,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Billable usage = input tokens + weighted output tokens. '
+                    'Task numbers are estimates and vary with note size and '
+                    'response length. Your quota resets when the cycle ends.',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: subTextColor,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -1445,6 +1792,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   onSuccess: () {
                     _loadProfile(forceRefresh: true);
                     _loadStats();
+                    if (mounted) {
+                      setState(() => _refreshPremiumFuture());
+                    }
                   },
                 ),
               );
@@ -1532,7 +1882,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildContributionsList() {
     return FutureBuilder<List<Resource>>(
-      future: _supabaseService.getUserResources(_userEmail),
+      future: _contributionsFuture ??= _supabaseService.getUserResources(
+        _userEmail,
+      ),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());

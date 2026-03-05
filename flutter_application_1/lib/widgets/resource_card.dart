@@ -10,6 +10,8 @@ import '../services/download_service.dart';
 import '../services/subscription_service.dart';
 import '../widgets/paywall_dialog.dart';
 import '../screens/profile/user_profile_screen.dart';
+import '../screens/viewer/youtube_player_screen.dart';
+import '../utils/youtube_link_utils.dart';
 import 'user_badge.dart';
 
 class ResourceCard extends StatefulWidget {
@@ -360,12 +362,45 @@ class _ResourceCardState extends State<ResourceCard> {
   }
 
   Future<void> _openVideo() async {
-    final url = widget.resource.fileUrl;
-    if (url.isEmpty) return;
-    final uri = Uri.parse(url);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    final youtube = parseYoutubeLink(widget.resource.fileUrl);
+    if (youtube != null) {
+      if (!mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => YoutubePlayerScreen(
+            videoUrl: youtube.watchUri.toString(),
+            title: widget.resource.title,
+            resourceId: widget.resource.id,
+            collegeId: widget.resource.collegeId,
+            subject: widget.resource.subject,
+            semester: widget.resource.semester,
+            branch: widget.resource.branch,
+          ),
+        ),
+      );
+      return;
     }
+
+    final uri = _buildExternalVideoUri(widget.resource.fileUrl);
+    if (uri == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Invalid video URL')));
+      return;
+    }
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (launched || !mounted) return;
+    final fallbackLaunched = await launchUrl(uri);
+    if (fallbackLaunched || !mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Could not open video link')));
+  }
+
+  Uri? _buildExternalVideoUri(String rawUrl) {
+    return buildExternalUri(rawUrl);
   }
 
   int get _netVotes => _upvotes - _downvotes;

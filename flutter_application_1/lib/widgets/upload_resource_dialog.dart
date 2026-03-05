@@ -12,6 +12,7 @@ import '../services/backend_api_service.dart';
 import 'package:http/http.dart' as http;
 import 'success_overlay.dart';
 import '../utils/contribution_badge.dart';
+import '../utils/youtube_link_utils.dart';
 
 class UploadResourceDialog extends StatefulWidget {
   final String collegeId;
@@ -243,21 +244,22 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     if (_semester.isEmpty) return _showError('Select semester');
     if (_branch.isEmpty) return _showError('Select branch');
     if (_subject.isEmpty) return _showError('Select subject');
+    String resolvedVideoUrl = '';
     if (_typeIndex == 0 && _selectedFile == null) {
       return _showError('Attach a file to contribute');
     }
     if (_typeIndex == 1) {
-      if (_videoUrl.isEmpty) {
+      final rawVideo = _videoUrl.trim();
+      if (rawVideo.isEmpty) {
         return _showError('Enter video URL');
       }
-      final uri = Uri.tryParse(_videoUrl);
-      final scheme = uri?.scheme.toLowerCase();
-      if (uri == null ||
-          !uri.hasScheme ||
-          !uri.hasAuthority ||
-          (scheme != 'http' && scheme != 'https')) {
+      final normalizedVideo = normalizeExternalUrl(rawVideo);
+      final uri = buildExternalUri(normalizedVideo);
+      if (uri == null) {
         return _showError('Enter a valid HTTP/HTTPS video URL');
       }
+      final youtube = parseYoutubeLink(normalizedVideo);
+      resolvedVideoUrl = (youtube?.watchUri ?? uri).toString();
     }
     if (_typeIndex == 0 &&
         _selectedFile != null &&
@@ -383,7 +385,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
         'branch': _branch,
         'subject': _subject,
         'source': uploaderSource,
-        'file_url': filePath ?? _videoUrl,
+        'file_url': filePath ?? resolvedVideoUrl,
         'description': _description.trim(),
         'chapter': _chapter.trim().isEmpty ? null : _chapter.trim(),
         'topic': _topic.trim().isEmpty ? null : _topic.trim(),

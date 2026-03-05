@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:async';
+import 'dart:io';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
@@ -19,6 +20,35 @@ class BackendApiService {
   static const Duration _requestTimeout = Duration(seconds: 20);
   static const Duration _streamRequestTimeout = Duration(seconds: 120);
   static const Duration _aiRequestTimeout = Duration(seconds: 120);
+  static const Set<int> _hardUnsupportedRagStreamStatuses = <int>{
+    404,
+    405,
+    406,
+    415,
+    501,
+  };
+  static const Set<int> _transientRagStreamFallbackStatuses = <int>{
+    500,
+    502,
+    503,
+    504,
+    520,
+    521,
+    522,
+    523,
+    524,
+    525,
+    526,
+  };
+  static const Set<int> _edgeNetworkErrorStatuses = <int>{
+    520,
+    521,
+    522,
+    523,
+    524,
+    525,
+    526,
+  };
 
   FirebaseAuth? get _auth {
     if (_injectedAuth != null) return _injectedAuth;
@@ -80,13 +110,50 @@ class BackendApiService {
     return _httpClient.send(request).timeout(_streamRequestTimeout);
   }
 
+  String _compactErrorBody(String body, {int maxLength = 220}) {
+    final compact = body.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (compact.length <= maxLength) return compact;
+    return '${compact.substring(0, maxLength)}...';
+  }
+
+  bool _looksLikeHtmlPayload(String body) {
+    final trimmed = body.trimLeft();
+    if (trimmed.isEmpty) return false;
+    final lowered = trimmed.toLowerCase();
+    return lowered.startsWith('<!doctype html') ||
+        lowered.startsWith('<html') ||
+        lowered.contains('<html') ||
+        lowered.contains('<body');
+  }
+
+  String _friendlyHttpErrorMessage({
+    required int statusCode,
+    required String body,
+    required String fallbackMessage,
+  }) {
+    if (_looksLikeHtmlPayload(body)) {
+      if (_edgeNetworkErrorStatuses.contains(statusCode)) {
+        return 'Backend temporarily unreachable (HTTP $statusCode). '
+            'Please retry in a moment.';
+      }
+      return '$fallbackMessage (HTTP $statusCode).';
+    }
+    final compact = _compactErrorBody(body);
+    if (compact.isEmpty) return '$fallbackMessage (HTTP $statusCode).';
+    return '$fallbackMessage (HTTP $statusCode): $compact';
+  }
+
   Future<Map<String, dynamic>> _requestJson(
     String path, {
     String method = 'GET',
     Map<String, dynamic>? body,
     Duration timeout = _requestTimeout,
+    bool requireAuthToken = false,
   }) async {
     String? token = await _getIdToken();
+    if (requireAuthToken && (token == null || token.isEmpty)) {
+      throw Exception('Authentication required');
+    }
     final uri = Uri.parse('$_baseUrl$path');
 
     var headers = <String, String>{
@@ -116,19 +183,38 @@ class BackendApiService {
       }
     }
 
-    Map<String, dynamic> data;
+    Map<String, dynamic>? data;
     try {
-      data = jsonDecode(res.body) as Map<String, dynamic>;
-    } catch (_) {
-      throw Exception('API error (${res.statusCode}): ${res.body}');
-    }
+      final decoded = jsonDecode(res.body);
+      if (decoded is Map<String, dynamic>) {
+        data = decoded;
+      } else if (decoded is Map) {
+        data = decoded.cast<String, dynamic>();
+      }
+    } catch (_) {}
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
       final msg =
-          data['message']?.toString() ??
-          data['error']?.toString() ??
-          'API request failed';
-      throw Exception(msg);
+          data?['message']?.toString() ?? data?['error']?.toString() ?? '';
+      if (msg.trim().isNotEmpty) {
+        throw Exception(msg.trim());
+      }
+      throw Exception(
+        _friendlyHttpErrorMessage(
+          statusCode: res.statusCode,
+          body: res.body,
+          fallbackMessage: 'API request failed',
+        ),
+      );
+    }
+    if (data == null) {
+      throw Exception(
+        _friendlyHttpErrorMessage(
+          statusCode: res.statusCode,
+          body: res.body,
+          fallbackMessage: 'API response was not valid JSON',
+        ),
+      );
     }
     return data;
   }
@@ -470,14 +556,21 @@ class BackendApiService {
   // ----------------------------
 
   Future<Map<String, dynamic>> createPaymentOrder({
-    required String planId,
+    String? planId,
+    String purchaseType = 'premium',
+    int? rechargeRupees,
     int? amount,
     BuildContext? context,
   }) async {
     return _requestJson(
       '/api/payments/order',
       method: 'POST',
-      body: {'planId': planId, 'amount': ?amount},
+      body: {
+        'purchaseType': purchaseType,
+        'planId': ?planId,
+        'rechargeRupees': ?rechargeRupees,
+        'amount': ?amount,
+      },
     );
   }
 
@@ -596,6 +689,23 @@ class BackendApiService {
   }
 
   Future<int> getUnreadNotificationCount() async {
+    try {
+      final data = await _requestJson(
+        '/api/notifications/unread-count',
+        method: 'GET',
+      );
+      final countRaw = data['count'] ?? data['unreadCount'] ?? data['unread'];
+      if (countRaw is num) {
+        return countRaw.toInt();
+      }
+      final parsed = int.tryParse(countRaw?.toString() ?? '');
+      if (parsed != null) {
+        return parsed;
+      }
+    } catch (_) {
+      // Fallback below for backward compatibility.
+    }
+
     final notifications = await getNotifications(limit: 200, offset: 0);
     return notifications.where((notification) {
       final isReadRaw = notification.containsKey('is_read')
@@ -1149,11 +1259,12 @@ class BackendApiService {
   }
 
   bool _isUnsupportedRagStreamStatus(int statusCode) {
-    return statusCode == 404 ||
-        statusCode == 405 ||
-        statusCode == 406 ||
-        statusCode == 415 ||
-        statusCode == 501;
+    return _hardUnsupportedRagStreamStatuses.contains(statusCode);
+  }
+
+  bool _shouldFallbackRagStreamStatus(int statusCode) {
+    return _isUnsupportedRagStreamStatus(statusCode) ||
+        _transientRagStreamFallbackStatuses.contains(statusCode);
   }
 
   Stream<String> _queryRagAsSyntheticStream({
@@ -1255,8 +1366,8 @@ class BackendApiService {
     List<Map<String, String>>? history,
     Map<String, dynamic>? filters,
   }) async* {
-    if (_ragStreamUnavailable) {
-      yield* _queryRagAsSyntheticStream(
+    Stream<String> fallbackStream() {
+      return _queryRagAsSyntheticStream(
         question: question,
         collegeId: collegeId,
         sessionId: sessionId,
@@ -1271,6 +1382,10 @@ class BackendApiService {
         history: history,
         filters: filters,
       );
+    }
+
+    if (_ragStreamUnavailable) {
+      yield* fallbackStream();
       return;
     }
 
@@ -1300,44 +1415,65 @@ class BackendApiService {
         'filters': ?filters,
       });
 
-    final response = await _sendStreamedRequest(request);
+    http.StreamedResponse response;
+    try {
+      response = await _sendStreamedRequest(request);
+    } on TimeoutException catch (error) {
+      debugPrint(
+        '[BackendApi] Stream request timed out. Falling back to /api/rag/query. '
+        '$error',
+      );
+      yield* fallbackStream();
+      return;
+    } on SocketException catch (error) {
+      debugPrint(
+        '[BackendApi] Stream socket failure. Falling back to /api/rag/query. '
+        '$error',
+      );
+      yield* fallbackStream();
+      return;
+    } on http.ClientException catch (error) {
+      debugPrint(
+        '[BackendApi] Stream client failure. Falling back to /api/rag/query. '
+        '$error',
+      );
+      yield* fallbackStream();
+      return;
+    }
+
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final body = await response.stream.bytesToString();
-      if (_isUnsupportedRagStreamStatus(response.statusCode)) {
-        _ragStreamUnavailable = true;
+      if (_shouldFallbackRagStreamStatus(response.statusCode)) {
+        if (_isUnsupportedRagStreamStatus(response.statusCode)) {
+          _ragStreamUnavailable = true;
+        }
         debugPrint(
-          '[BackendApi] Stream endpoint unavailable '
-          '(${response.statusCode}). Falling back to /api/rag/query.',
+          '[BackendApi] Stream endpoint failure (${response.statusCode}). '
+          '${_isUnsupportedRagStreamStatus(response.statusCode) ? 'Disabling stream endpoint until app restart. ' : ''}'
+          'Falling back to /api/rag/query.',
         );
-        yield* _queryRagAsSyntheticStream(
-          question: question,
-          collegeId: collegeId,
-          sessionId: sessionId,
-          topK: topK,
-          minScore: minScore,
-          allowWeb: allowWeb,
-          fileId: fileId,
-          useOcr: useOcr,
-          forceOcr: forceOcr,
-          ocrProvider: ocrProvider,
-          attachments: attachments,
-          history: history,
-          filters: filters,
-        );
+        yield* fallbackStream();
         return;
       }
+      String? parsedMessage;
       try {
-        final data = jsonDecode(body) as Map<String, dynamic>;
-        final message =
-            data['message']?.toString() ??
-            data['error']?.toString() ??
-            'RAG stream request failed';
-        throw Exception(message);
-      } catch (_) {
-        throw Exception(
-          'RAG stream request failed (${response.statusCode}): $body',
-        );
+        final decoded = jsonDecode(body);
+        if (decoded is Map) {
+          final data = decoded.cast<String, dynamic>();
+          parsedMessage =
+              data['message']?.toString() ?? data['error']?.toString();
+        }
+      } catch (_) {}
+      if (parsedMessage != null && parsedMessage.trim().isNotEmpty) {
+        throw Exception(parsedMessage.trim());
       }
+      throw Exception(
+        _friendlyHttpErrorMessage(
+          statusCode: response.statusCode,
+          body: body,
+          fallbackMessage: 'RAG stream request failed',
+        ),
+      );
     }
 
     final lineStream = response.stream
@@ -1364,6 +1500,7 @@ class BackendApiService {
       '/api/notifications/fcm-token',
       method: 'POST',
       body: {'token': token, 'platform': platform},
+      requireAuthToken: true,
       // Recaptcha context removed as it cannot be a string
     );
   }
@@ -1374,6 +1511,7 @@ class BackendApiService {
       '/api/notifications/fcm-token',
       method: 'DELETE',
       body: {'token': token},
+      requireAuthToken: true,
       // Recaptcha context removed
     );
   }

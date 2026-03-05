@@ -1,3 +1,4 @@
+import 'package:collection/collection.dart';
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
@@ -25,24 +26,35 @@ import '../services/supabase_service.dart';
 import '../controllers/ai_chat_animation_controller.dart';
 import '../widgets/ai_chat_message_bubble.dart';
 import '../widgets/onboarding_overlay.dart';
+import '../widgets/paywall_dialog.dart';
 import 'ai_question_paper_quiz_screen.dart';
 import 'viewer/pdf_viewer_screen.dart';
+import 'viewer/youtube_player_screen.dart';
+import '../utils/youtube_link_utils.dart';
 
 class RagSource {
   final String fileId;
   final String title;
+  final String sourceType;
   final int? startPage;
   final int? endPage;
+  final String? timestamp;
   final double? score;
   final String? fileUrl;
+  final String? videoUrl;
+  final bool isPrimary;
 
   RagSource({
     required this.fileId,
     required this.title,
+    this.sourceType = 'pdf',
     this.startPage,
     this.endPage,
+    this.timestamp,
     this.score,
     this.fileUrl,
+    this.videoUrl,
+    this.isPrimary = false,
   });
 
   factory RagSource.fromJson(Map<String, dynamic> json) {
@@ -52,10 +64,18 @@ class RagSource {
     return RagSource(
       fileId: json['file_id']?.toString() ?? '',
       title: json['title']?.toString() ?? 'Source',
+      sourceType:
+          json['source_type']?.toString().toLowerCase() ??
+          ((json['video_url']?.toString().isNotEmpty == true)
+              ? 'youtube'
+              : 'pdf'),
       startPage: start is int ? start : int.tryParse(start?.toString() ?? ''),
       endPage: end is int ? end : int.tryParse(end?.toString() ?? ''),
+      timestamp: json['timestamp']?.toString(),
       score: (json['score'] is num) ? (json['score'] as num).toDouble() : null,
       fileUrl: json['file_url']?.toString(),
+      videoUrl: json['video_url']?.toString(),
+      isPrimary: json['is_primary'] == true,
     );
   }
 }
@@ -64,6 +84,7 @@ class AIChatMessage {
   final bool isUser;
   String content;
   List<RagSource> sources;
+  RagSource? primarySource;
   bool cached;
   bool noLocal;
   double? retrievalScore;
@@ -76,6 +97,7 @@ class AIChatMessage {
     required this.isUser,
     required this.content,
     this.sources = const [],
+    this.primarySource,
     this.cached = false,
     this.noLocal = false,
     this.retrievalScore,
@@ -161,6 +183,8 @@ class _AIChatScreenState extends State<AIChatScreen>
     with TickerProviderStateMixin {
   static const String _aiCoachMarksSeenKey = 'ai_chat_coach_marks_v1_seen';
   static final String _internalDomainSuffix = '.${AppConfig.webDomain}';
+  static const int _tokensPerCredit = 2000;
+  static const int _minLowTokenThreshold = 4000;
 
   final BackendApiService _api = BackendApiService();
   final AuthService _auth = AuthService();
@@ -175,6 +199,7 @@ class _AIChatScreenState extends State<AIChatScreen>
   late final AiChatAnimationControllerBundle _animations;
 
   bool _isLoading = false;
+  bool _isSendAttemptInProgress = false;
   final List<AIChatMessage> _messages = [];
   final List<_ChatAttachment> _attachments = [];
   final List<_ChatAttachment> _stickyAttachments = [];
@@ -196,6 +221,15 @@ class _AIChatScreenState extends State<AIChatScreen>
       <_LongResponseTracker>{};
   bool _notifyOnLongResponses = true;
   bool _showCoachMarks = false;
+  bool _showAiTokenLowBanner = false;
+  bool _userDismissedTokenBanner = false;
+  bool _isAiTokenStatusLoading = false;
+  DateTime? _lastAiTokenTopUpSnackBarAt;
+  bool _aiTokenStatusLoaded = false;
+  int _aiTokenRemainingTokens = 0;
+  int _aiTokenBudgetTokens = 0;
+  int _aiTokenLowThreshold = _minLowTokenThreshold;
+  _QuestionPaperRequestConfig? _cachedQuestionPaperConfig;
 
   final GlobalKey _coachHistoryKey = GlobalKey(debugLabel: 'ai_chat_history');
   final GlobalKey _coachAttachKey = GlobalKey(debugLabel: 'ai_chat_attach');
@@ -260,6 +294,7 @@ class _AIChatScreenState extends State<AIChatScreen>
 
     _aiNotificationService.initialize();
     _prepareCoachMarks();
+    _refreshAiTokenStatus();
 
     // Defer splash animation until after stored sessions load
     _loadStoredSessions();
@@ -536,13 +571,18 @@ class _AIChatScreenState extends State<AIChatScreen>
   }
 
   Future<_QuestionPaperRequestConfig?> _resolveQuestionPaperConfig() async {
+    final cached = _cachedQuestionPaperConfig;
+    if (cached != null) return cached;
+
     final fromContextSemester = widget.resourceContext?.semester?.trim() ?? '';
     final fromContextBranch = widget.resourceContext?.branch?.trim() ?? '';
     if (fromContextSemester.isNotEmpty && fromContextBranch.isNotEmpty) {
-      return _QuestionPaperRequestConfig(
+      final resolved = _QuestionPaperRequestConfig(
         semester: fromContextSemester,
         branch: fromContextBranch,
       );
+      _cachedQuestionPaperConfig = resolved;
+      return resolved;
     }
 
     final email = _auth.userEmail?.trim().toLowerCase();
@@ -553,22 +593,24 @@ class _AIChatScreenState extends State<AIChatScreen>
         final branch =
             (info?['branch'] ?? info?['department'])?.toString().trim() ?? '';
         if (semester.isNotEmpty && branch.isNotEmpty) {
-          return _QuestionPaperRequestConfig(
+          final resolved = _QuestionPaperRequestConfig(
             semester: semester,
             branch: branch,
           );
+          _cachedQuestionPaperConfig = resolved;
+          return resolved;
         }
       } catch (e) {
-        debugPrint(
-          'Question-paper profile lookup failed, using defaults: $e',
-        );
+        debugPrint('Question-paper profile lookup failed, using defaults: $e');
       }
     }
 
-    return const _QuestionPaperRequestConfig(
+    const fallback = _QuestionPaperRequestConfig(
       semester: '1',
       branch: 'General',
     );
+    _cachedQuestionPaperConfig = fallback;
+    return fallback;
   }
 
   Future<void> _scrollToBottom({
@@ -720,17 +762,29 @@ class _AIChatScreenState extends State<AIChatScreen>
 
   LocalAiChatMessage _toLocalMessage(AIChatMessage message) {
     final quizPayload = message.quizActionPaper?.toJson();
+    final orderedSources = _mergePrimarySource(
+      message.primarySource,
+      message.sources,
+    );
     return LocalAiChatMessage(
       isUser: message.isUser,
       content: message.content,
-      sources: message.sources
+      sources: orderedSources
           .map(
             (source) => {
               'file_id': source.fileId,
               'title': source.title,
+              'source_type': source.sourceType,
+              'is_primary':
+                  message.primarySource != null &&
+                  source.fileId.isNotEmpty &&
+                  message.primarySource!.fileId.isNotEmpty &&
+                  source.fileId == message.primarySource!.fileId,
               'pages': {'start': source.startPage, 'end': source.endPage},
+              'timestamp': source.timestamp,
               'score': source.score,
               'file_url': source.fileUrl,
+              'video_url': source.videoUrl,
             },
           )
           .toList(),
@@ -755,12 +809,14 @@ class _AIChatScreenState extends State<AIChatScreen>
         debugPrint('Failed to restore quiz action from history: $e');
       }
     }
+    final sources = message.sources
+        .map((source) => RagSource.fromJson(source))
+        .toList();
     return AIChatMessage(
       isUser: message.isUser,
       content: message.content,
-      sources: message.sources
-          .map((source) => RagSource.fromJson(source))
-          .toList(),
+      sources: sources,
+      primarySource: sources.firstWhereOrNull((s) => s.isPrimary),
       cached: message.cached,
       noLocal: message.noLocal,
       retrievalScore: message.retrievalScore,
@@ -775,6 +831,28 @@ class _AIChatScreenState extends State<AIChatScreen>
     if (value is num) return value.toDouble();
     if (value is String) return double.tryParse(value);
     return null;
+  }
+
+  RagSource? _parsePrimarySource(dynamic raw) {
+    if (raw is! Map) return null;
+    return RagSource.fromJson(Map<String, dynamic>.from(raw));
+  }
+
+  List<RagSource> _mergePrimarySource(
+    RagSource? primary,
+    List<RagSource> sources,
+  ) {
+    if (primary == null) return sources;
+    final merged = <RagSource>[primary];
+    for (final source in sources) {
+      // Only skip if both fileIds are non-empty and equal
+      if (primary.fileId.isNotEmpty &&
+          source.fileId.isNotEmpty &&
+          source.fileId == primary.fileId)
+        continue;
+      merged.add(source);
+    }
+    return merged;
   }
 
   Future<RagSource?> _pickSourceForOcrAction(List<RagSource> sources) async {
@@ -1473,6 +1551,15 @@ class _AIChatScreenState extends State<AIChatScreen>
     final full = _tryDecodeJson(cleaned);
     if (full is Map<String, dynamic>) return full;
     if (full is Map) return Map<String, dynamic>.from(full);
+    if (full is List) {
+      final questions = full
+          .whereType<Map>()
+          .map(Map<String, dynamic>.from)
+          .toList();
+      if (questions.isNotEmpty) {
+        return <String, dynamic>{'questions': questions};
+      }
+    }
 
     final firstObjectStart = cleaned.indexOf('{');
     if (firstObjectStart != -1) {
@@ -1643,9 +1730,7 @@ class _AIChatScreenState extends State<AIChatScreen>
     final questions = _extractQuestionObjectsFromPartialJson(source);
     if (questions.isEmpty) return null;
 
-    final recovered = <String, dynamic>{
-      'questions': questions,
-    };
+    final recovered = <String, dynamic>{'questions': questions};
     final title = _extractJsonStringField(source, 'title');
     final subject = _extractJsonStringField(source, 'subject');
     final instructions = _extractJsonStringArrayField(source, 'instructions');
@@ -1669,9 +1754,23 @@ class _AIChatScreenState extends State<AIChatScreen>
       if (idx >= 0 && idx < options.length) return idx;
     }
 
+    final letterInText = RegExp(
+      r'\b(?:option\s*)?([A-Da-d])\b',
+    ).firstMatch(answerText);
+    if (letterInText != null) {
+      final letter = letterInText.group(1)?.toUpperCase() ?? '';
+      if (letter.isNotEmpty) {
+        final idx = letter.codeUnitAt(0) - 65;
+        if (idx >= 0 && idx < options.length) return idx;
+      }
+    }
+
     final numeric = int.tryParse(answerText);
     if (numeric != null && numeric > 0 && numeric <= options.length) {
       return numeric - 1;
+    }
+    if (numeric != null && numeric >= 0 && numeric < options.length) {
+      return numeric;
     }
 
     final normalizedAnswer = answerText.toLowerCase();
@@ -1681,6 +1780,44 @@ class _AIChatScreenState extends State<AIChatScreen>
       }
     }
     return 0;
+  }
+
+  List<String> _parseOptionsFromRawQuestion(Map<String, dynamic> raw) {
+    final rawOptions = raw['options'];
+    if (rawOptions is List) {
+      return rawOptions
+          .map((item) => item.toString().trim())
+          .where((item) => item.isNotEmpty)
+          .toList();
+    }
+
+    if (rawOptions is Map) {
+      final mapped = Map<String, dynamic>.from(rawOptions);
+      final letterKeys = <String>['A', 'B', 'C', 'D'];
+      final fromLetters = <String>[];
+      for (final key in letterKeys) {
+        final value = mapped[key] ?? mapped[key.toLowerCase()];
+        final option = value?.toString().trim() ?? '';
+        if (option.isNotEmpty) {
+          fromLetters.add(option);
+        }
+      }
+      if (fromLetters.length >= 2) return fromLetters;
+
+      final generic = mapped.values
+          .map((value) => value?.toString().trim() ?? '')
+          .where((value) => value.isNotEmpty)
+          .toList();
+      if (generic.length >= 2) return generic;
+    }
+
+    final fallbackKeys = ['option_a', 'option_b', 'option_c', 'option_d'];
+    final fallback = <String>[];
+    for (final key in fallbackKeys) {
+      final option = raw[key]?.toString().trim() ?? '';
+      if (option.isNotEmpty) fallback.add(option);
+    }
+    return fallback;
   }
 
   List<AiQuestionPaperQuestion> _parsePlainTextMcqs(String raw) {
@@ -1791,6 +1928,212 @@ class _AIChatScreenState extends State<AIChatScreen>
     return 'pdf';
   }
 
+  String _normalizeExternalUrl(String rawUrl) {
+    return normalizeExternalUrl(rawUrl);
+  }
+
+  Uri? _buildExternalLaunchUri(String rawUrl) {
+    return buildExternalUri(rawUrl);
+  }
+
+  Future<void> _openExternalSourceLink({
+    required Uri uri,
+    required String sourceTitle,
+  }) async {
+    if (!mounted) return;
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (launched || !mounted) return;
+    final fallbackLaunched = await launchUrl(uri);
+    if (fallbackLaunched || !mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Could not open $sourceTitle')));
+  }
+
+  int _toSafeInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.round();
+    return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  int _resolveEffectiveAiBudget(Map<String, dynamic> profile) {
+    final budgetFromApi = _toSafeInt(profile['ai_token_budget']);
+    final baseBudgetFromApi = _toSafeInt(profile['ai_token_base_budget']);
+    final premiumMultiplierFromApi = math.max(
+      1,
+      _toSafeInt(profile['ai_token_premium_multiplier']),
+    );
+    final budgetMultiplierFromApi = math.max(
+      1,
+      _toSafeInt(profile['ai_token_budget_multiplier']),
+    );
+
+    final tier = profile['subscription_tier']?.toString().toLowerCase();
+    final subscriptionEnd = DateTime.tryParse(
+      profile['subscription_end_date']?.toString() ?? '',
+    );
+    final isPremiumActive =
+        (tier == 'pro' || tier == 'max') &&
+        subscriptionEnd != null &&
+        subscriptionEnd.toUtc().isAfter(DateTime.now().toUtc());
+
+    final safeBaseBudget = baseBudgetFromApi > 0
+        ? baseBudgetFromApi
+        : (budgetFromApi > 0 && budgetMultiplierFromApi > 1
+              ? (budgetFromApi / budgetMultiplierFromApi).round()
+              : (budgetFromApi > 0 ? budgetFromApi : 40160));
+    final resolvedMultiplier = budgetMultiplierFromApi > 1
+        ? budgetMultiplierFromApi
+        : (isPremiumActive ? premiumMultiplierFromApi : 1);
+    final derivedBudget = math.max(1, safeBaseBudget * resolvedMultiplier);
+
+    if (budgetFromApi <= 0) return derivedBudget;
+    return math.max(budgetFromApi, derivedBudget);
+  }
+
+  String _formatCreditsFromTokens(int tokenCount) {
+    if (tokenCount <= 0) return '0';
+    final credits = tokenCount / _tokensPerCredit;
+    return math.max(1, credits.round()).toString();
+  }
+
+  bool _looksLikeTokenLimitError(String message) {
+    final lowered = message.toLowerCase();
+    return (lowered.contains('token') &&
+            (lowered.contains('limit') ||
+                lowered.contains('quota') ||
+                lowered.contains('insufficient') ||
+                lowered.contains('exceed') ||
+                lowered.contains('remaining') ||
+                lowered.contains('balance'))) ||
+        (lowered.contains('credit') &&
+            (lowered.contains('limit') || lowered.contains('insufficient')));
+  }
+
+  Future<void> _refreshAiTokenStatus({bool forceRefresh = false}) async {
+    if (_isAiTokenStatusLoading || !_auth.isSignedIn) return;
+    _isAiTokenStatusLoading = true;
+    try {
+      final profile = await _supabase.getCurrentUserProfile(
+        forceRefresh: forceRefresh,
+        maxAttempts: forceRefresh ? 2 : 1,
+      );
+      if (!mounted || profile.isEmpty) return;
+
+      final rawBudget = _toSafeInt(profile['ai_token_budget']);
+      final budget = _resolveEffectiveAiBudget(profile);
+      final used = _toSafeInt(profile['ai_token_used']).clamp(0, budget);
+      var remaining = _toSafeInt(profile['ai_token_remaining']);
+      final derivedRemaining = budget > 0
+          ? (budget - used).clamp(0, budget).toInt()
+          : 0;
+      if (remaining <= 0 || remaining > budget || budget > rawBudget) {
+        remaining = derivedRemaining;
+      }
+      final threshold = math.max(
+        _minLowTokenThreshold,
+        budget > 0 ? (budget * 0.1).round() : _minLowTokenThreshold,
+      );
+
+      final prevBudget = _aiTokenBudgetTokens;
+      final prevRemaining = _aiTokenRemainingTokens;
+      setState(() {
+        _aiTokenStatusLoaded = true;
+        _aiTokenBudgetTokens = budget;
+        _aiTokenRemainingTokens = remaining
+            .clamp(0, math.max(0, math.max(remaining, budget)))
+            .toInt();
+        _aiTokenLowThreshold = threshold;
+        _showAiTokenLowBanner =
+            _aiTokenBudgetTokens > 0 &&
+            _aiTokenRemainingTokens <= _aiTokenLowThreshold;
+        // Reset banner dismissal only if tokens increased or budget changed
+        if ((_aiTokenRemainingTokens > prevRemaining) ||
+            (_aiTokenBudgetTokens != prevBudget)) {
+          _userDismissedTokenBanner = false;
+        }
+      });
+    } catch (e) {
+      debugPrint('Failed to refresh AI token status: $e');
+    } finally {
+      _isAiTokenStatusLoading = false;
+    }
+  }
+
+  Future<void> _openAiTopUpDialog() async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (_) => PaywallDialog(
+        onSuccess: () {
+          if (!mounted) return;
+          setState(() => _userDismissedTokenBanner = false);
+          _refreshAiTokenStatus(forceRefresh: true);
+        },
+      ),
+    );
+    if (!mounted) return;
+    await _refreshAiTokenStatus(forceRefresh: true);
+  }
+
+  void _showAiTokenTopUpSnackBar(String message) {
+    if (!mounted) return;
+    final now = DateTime.now();
+    final lastShownAt = _lastAiTokenTopUpSnackBarAt;
+    if (lastShownAt != null &&
+        now.difference(lastShownAt) < const Duration(seconds: 2)) {
+      return;
+    }
+    _lastAiTokenTopUpSnackBarAt = now;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(message),
+        action: SnackBarAction(
+          label: 'Upgrade Now',
+          onPressed: _openAiTopUpDialog,
+        ),
+      ),
+    );
+  }
+
+  void _handlePotentialTokenLimitError(String message) {
+    if (!_looksLikeTokenLimitError(message)) return;
+    if (mounted) {
+      setState(() {
+        _showAiTokenLowBanner = true;
+      });
+    }
+    _showAiTokenTopUpSnackBar(
+      'AI token limit reached or low. Top up to continue chatting.',
+    );
+    _refreshAiTokenStatus(forceRefresh: true);
+  }
+
+  String? _normalizeAcademicFilterValue(
+    String raw, {
+    bool semesterOnly = false,
+  }) {
+    final cleaned = raw.trim();
+    if (cleaned.isEmpty) return null;
+    final lowered = cleaned.toLowerCase();
+    const generic = <String>{
+      'general',
+      'all',
+      'any',
+      'none',
+      'na',
+      'n/a',
+      '-',
+      '--',
+    };
+    if (generic.contains(lowered)) return null;
+    if (!semesterOnly) return cleaned;
+    final match = RegExp(r'\b([1-8])\b').firstMatch(cleaned);
+    return match?.group(1);
+  }
+
   List<Map<String, dynamic>> _serializeStickyAttachments() {
     return _stickyAttachments
         .map(
@@ -1856,12 +2199,26 @@ class _AIChatScreenState extends State<AIChatScreen>
   }) async {
     try {
       final subject = inferredSubject.trim();
+      final normalizedSemester = _normalizeAcademicFilterValue(
+        semester,
+        semesterOnly: true,
+      );
+      final normalizedBranch = _normalizeAcademicFilterValue(branch);
       List<dynamic> scoped = <dynamic>[];
       if (subject.isNotEmpty) {
         scoped = await _supabase.getResources(
           collegeId: widget.collegeId,
-          semester: semester,
-          branch: branch,
+          semester: normalizedSemester,
+          branch: normalizedBranch,
+          subject: subject,
+          limit: 8,
+        );
+      }
+
+      if (scoped.isEmpty && subject.isNotEmpty && normalizedSemester != null) {
+        scoped = await _supabase.getResources(
+          collegeId: widget.collegeId,
+          semester: normalizedSemester,
           subject: subject,
           limit: 8,
         );
@@ -1870,8 +2227,16 @@ class _AIChatScreenState extends State<AIChatScreen>
       if (scoped.isEmpty && subject.isNotEmpty) {
         scoped = await _supabase.getResources(
           collegeId: widget.collegeId,
-          semester: semester,
-          branch: branch,
+          subject: subject,
+          limit: 8,
+        );
+      }
+
+      if (scoped.isEmpty && subject.isNotEmpty) {
+        scoped = await _supabase.getResources(
+          collegeId: widget.collegeId,
+          semester: normalizedSemester,
+          branch: normalizedBranch,
           searchQuery: subject,
           limit: 8,
         );
@@ -1880,8 +2245,8 @@ class _AIChatScreenState extends State<AIChatScreen>
       if (scoped.isEmpty) {
         scoped = await _supabase.getResources(
           collegeId: widget.collegeId,
-          semester: semester,
-          branch: branch,
+          semester: normalizedSemester,
+          branch: normalizedBranch,
           limit: 8,
         );
       }
@@ -2061,11 +2426,13 @@ Return STRICT JSON only (no markdown). Schema:
           .toList();
 
       for (final raw in rawQuestions) {
-        final questionText = raw['question']?.toString().trim() ?? '';
-        final options = ((raw['options'] as List?) ?? const [])
-            .map((opt) => opt.toString().trim())
-            .where((opt) => opt.isNotEmpty)
-            .toList();
+        final questionText =
+            raw['question']?.toString().trim() ??
+            raw['question_text']?.toString().trim() ??
+            raw['text']?.toString().trim() ??
+            raw['prompt']?.toString().trim() ??
+            '';
+        final options = _parseOptionsFromRawQuestion(raw);
         if (questionText.isEmpty || options.length < 2) continue;
         if (_isPlaceholderQuestion(question: questionText, options: options)) {
           continue;
@@ -2081,12 +2448,20 @@ Return STRICT JSON only (no markdown). Schema:
               )
             : AiQuestionPaperSource(note: sourceRaw?.toString() ?? '');
 
+        final answerCandidate =
+            raw['answer'] ??
+            raw['correct_answer'] ??
+            raw['correctOption'] ??
+            raw['correct_option'] ??
+            raw['correctIndex'] ??
+            raw['correct_index'];
+
         questions.add(
           AiQuestionPaperQuestion(
             question: questionText,
             options: options,
             correctIndex: _resolveAnswerIndex(
-              answer: raw['answer'],
+              answer: answerCandidate,
               options: options,
             ),
             explanation: raw['explanation']?.toString() ?? '',
@@ -2122,6 +2497,47 @@ Return STRICT JSON only (no markdown). Schema:
         '(Sem ${paper.semester}, ${paper.branch}).\n'
         'Questions: ${paper.questions.length} | Context docs analyzed: ${paper.pyqCount}\n\n'
         'Tap "Start Quiz" to attempt the full-screen quiz.';
+  }
+
+  bool _looksLikeQuizJsonPayload(String rawResponse) {
+    final normalized = rawResponse.toLowerCase();
+    return (normalized.contains('"questions"') ||
+            normalized.contains('"mcq"') ||
+            normalized.contains('"quiz"')) &&
+        (normalized.contains('"options"') ||
+            normalized.contains('"choices"') ||
+            normalized.contains('"answer"'));
+  }
+
+  Future<AiQuestionPaper?> _maybePromoteQuizFromAssistantResponse({
+    required String rawResponse,
+    required String userPrompt,
+    required bool hasAttachmentContext,
+    required int contextResourceCount,
+  }) async {
+    if (rawResponse.trim().isEmpty) return null;
+
+    final promptLooksQuiz = _isQuestionPaperIntent(
+      prompt: userPrompt,
+      hasAttachments: hasAttachmentContext,
+    );
+    final responseLooksQuiz = _looksLikeQuizJsonPayload(rawResponse);
+    if (!promptLooksQuiz && !responseLooksQuiz) return null;
+
+    final config = await _resolveQuestionPaperConfig();
+    if (config == null) return null;
+
+    final subjectHint = _extractTopicFromPrompt(userPrompt);
+    final parsed = _parseQuestionPaper(
+      rawResponse: rawResponse,
+      semester: config.semester,
+      branch: config.branch,
+      fallbackSubject: subjectHint,
+      contextResourceCount: contextResourceCount,
+    );
+    if (parsed == null) return null;
+    if (_isLowQualityQuestionPaper(parsed)) return null;
+    return parsed;
   }
 
   Future<void> _handleQuestionPaperGeneration({
@@ -2205,6 +2621,11 @@ Return STRICT JSON only (no markdown). Schema:
         final noLocal =
             _responseIndicatesNoLocal(response) ||
             _looksLikeNoContextAnswer(answer);
+        debugPrint(
+          'QuizGen attempt=${attempt + 1} noLocal=$noLocal '
+          'attachments=${mergedAttachments.length} '
+          'answerLen=${answer.length}',
+        );
         if (noLocal && hasPdfAttachments && !forceOcr) {
           forceOcr = true;
           continue;
@@ -2216,7 +2637,13 @@ Return STRICT JSON only (no markdown). Schema:
           fallbackSubject: inferredSubject,
           contextResourceCount: totalAttachmentCount,
         );
-        if (candidate == null) continue;
+        if (candidate == null) {
+          debugPrint(
+            'QuizGen parse failed attempt=${attempt + 1}. '
+            'Preview=${answer.replaceAll('\n', ' ').substring(0, answer.length > 240 ? 240 : answer.length)}',
+          );
+          continue;
+        }
         if (_isLowQualityQuestionPaper(candidate)) {
           debugPrint(
             'Discarded low-quality question paper response '
@@ -2228,6 +2655,7 @@ Return STRICT JSON only (no markdown). Schema:
       }
       if (aiInvoked) {
         _supabase.markAiTokenBalanceStale();
+        _refreshAiTokenStatus(forceRefresh: true);
       }
 
       if (paper == null) {
@@ -2320,6 +2748,7 @@ Return STRICT JSON only (no markdown). Schema:
         filters: contextFilters,
       );
       _supabase.markAiTokenBalanceStale();
+      _refreshAiTokenStatus(forceRefresh: true);
       final answer = _sanitizeAssistantAnswerText(
         _extractRagAnswer(response).trim(),
       );
@@ -2395,271 +2824,328 @@ Return STRICT JSON only (no markdown). Schema:
   }
 
   Future<void> _sendMessage() async {
-    final text = _controller.text.trim();
-    final turnAttachments = List<_ChatAttachment>.from(_attachments);
-    final hasAttachmentContext =
-        turnAttachments.isNotEmpty || _stickyAttachments.isNotEmpty;
-    if ((text.isEmpty && !hasAttachmentContext) ||
-        _isLoading ||
-        _isUploadingAttachment) {
-      return;
-    }
-
-    if (!_auth.isSignedIn) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please sign in to use AI chat.')),
-      );
-      return;
-    }
-
-    if (turnAttachments.isNotEmpty) {
-      _rememberAttachmentsForContext(turnAttachments);
-    }
-
-    final effectiveAttachments = turnAttachments.isNotEmpty
-        ? turnAttachments
-        : List<_ChatAttachment>.from(_stickyAttachments);
-
-    final hasAttachments = effectiveAttachments.isNotEmpty;
-    final userPrompt = text.isEmpty
-        ? 'Please analyze the attached files and help me study.'
-        : text;
-    final localContextRequired =
-        hasAttachments ||
-        _isStudioChat ||
-        _promptRequiresLocalContext(userPrompt);
-    final attachmentPayload = effectiveAttachments
-        .map(
-          (item) => <String, dynamic>{
-            'name': item.name,
-            'url': item.url,
-            'type': item.isPdf ? 'pdf' : 'image',
-          },
-        )
-        .toList();
-    final sendPrompt = _buildRagPrompt(
-      userPrompt: userPrompt,
-      hasAttachments: hasAttachments,
-      preferLocalOnly: localContextRequired,
-    );
-    final history = _buildStructuredHistory(pendingUserPrompt: userPrompt);
-    final contextFilters = _buildContextFilters();
-    final shouldForceVisionOcr = attachmentPayload.isNotEmpty;
-    final userVisible = turnAttachments.isEmpty
-        ? userPrompt
-        : '$userPrompt\n\n${turnAttachments.length} attachments added.';
-    final isQuestionPaperRequest = _isQuestionPaperIntent(
-      prompt: userPrompt,
-      hasAttachments: hasAttachments,
-    );
-    final isSummaryExportRequest = _isSummaryExportIntent(
-      prompt: userPrompt,
-      hasAttachments: hasAttachments,
-    );
-
-    if (isSummaryExportRequest) {
-      await _handleSummaryExport(
-        userPrompt: userPrompt,
-        userVisible: userVisible,
-        attachmentPayload: attachmentPayload,
-      );
-      return;
-    }
-
-    if (isQuestionPaperRequest) {
-      final config = await _resolveQuestionPaperConfig();
-      if (config == null) return;
-      await _handleQuestionPaperGeneration(
-        userPrompt: userPrompt,
-        userVisible: userVisible,
-        attachmentPayload: attachmentPayload,
-        config: config,
-      );
-      return;
-    }
-
-    final tracker = _startLongResponseTracker('AI response generation');
-
-    setState(() {
-      _messages.add(AIChatMessage(isUser: true, content: userVisible));
-      _isLoading = true;
-      _controller.clear();
-      _attachments.clear();
-    });
-    await _persistCurrentSession();
-    await _scrollToBottom();
-
-    AIChatMessage? aiMessageForError;
-    var malformedChunkCount = 0;
-    var aiInvoked = false;
-
+    if (_isSendAttemptInProgress) return;
+    _isSendAttemptInProgress = true;
+    if (mounted) setState(() {});
     try {
-      _resetTypingRenderer();
-      final aiMessage = AIChatMessage(isUser: false, content: '');
-      aiMessageForError = aiMessage;
+      await (() async {
+        final text = _controller.text.trim();
+        final turnAttachments = List<_ChatAttachment>.from(_attachments);
+        final hasAttachmentContext =
+            turnAttachments.isNotEmpty || _stickyAttachments.isNotEmpty;
+        if ((text.isEmpty && !hasAttachmentContext) ||
+            _isLoading ||
+            _isUploadingAttachment) {
+          return;
+        }
 
-      setState(() {
-        _messages.add(aiMessage);
-      });
-      await _scrollToBottom();
+        if (!_auth.isSignedIn) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Please sign in to use AI chat.')),
+          );
+          return;
+        }
 
-      final stream = _api.queryRagStream(
-        question: sendPrompt,
-        collegeId: widget.collegeId,
-        sessionId: _activeSessionId,
-        minScore: localContextRequired ? 0.08 : null,
-        fileId: widget.resourceContext?.fileId,
-        allowWeb: !localContextRequired,
-        useOcr: shouldForceVisionOcr,
-        forceOcr: shouldForceVisionOcr,
-        ocrProvider: shouldForceVisionOcr ? 'google_vision' : null,
-        attachments: attachmentPayload,
-        history: history,
-        filters: contextFilters,
-      );
-      aiInvoked = true;
+        if (!_aiTokenStatusLoaded) {
+          await _refreshAiTokenStatus();
+        }
+        if (_aiTokenStatusLoaded &&
+            _aiTokenBudgetTokens > 0 &&
+            _aiTokenRemainingTokens <= 0) {
+          setState(() => _showAiTokenLowBanner = true);
+          _showAiTokenTopUpSnackBar(
+            'Your AI tokens are exhausted. Please top up to continue.',
+          );
+          return;
+        }
 
-      var receivedContent = false;
-      await for (final chunkStr in stream) {
-        if (!mounted) break;
+        if (turnAttachments.isNotEmpty) {
+          _rememberAttachmentsForContext(turnAttachments);
+        }
+
+        final effectiveAttachments = turnAttachments.isNotEmpty
+            ? turnAttachments
+            : List<_ChatAttachment>.from(_stickyAttachments);
+
+        final hasAttachments = effectiveAttachments.isNotEmpty;
+        final userPrompt = text.isEmpty
+            ? 'Please analyze the attached files and help me study.'
+            : text;
+        final localContextRequired =
+            hasAttachments ||
+            _isStudioChat ||
+            _promptRequiresLocalContext(userPrompt);
+        final attachmentPayload = effectiveAttachments
+            .map(
+              (item) => <String, dynamic>{
+                'name': item.name,
+                'url': item.url,
+                'type': item.isPdf ? 'pdf' : 'image',
+              },
+            )
+            .toList();
+        final sendPrompt = _buildRagPrompt(
+          userPrompt: userPrompt,
+          hasAttachments: hasAttachments,
+          preferLocalOnly: localContextRequired,
+        );
+        final history = _buildStructuredHistory(pendingUserPrompt: userPrompt);
+        final contextFilters = _buildContextFilters();
+        final shouldForceVisionOcr = attachmentPayload.isNotEmpty;
+        final userVisible = turnAttachments.isEmpty
+            ? userPrompt
+            : '$userPrompt\n\n${turnAttachments.length} attachments added.';
+        final isQuestionPaperRequest = _isQuestionPaperIntent(
+          prompt: userPrompt,
+          hasAttachments: hasAttachments,
+        );
+        final isSummaryExportRequest = _isSummaryExportIntent(
+          prompt: userPrompt,
+          hasAttachments: hasAttachments,
+        );
+
+        if (isSummaryExportRequest) {
+          await _handleSummaryExport(
+            userPrompt: userPrompt,
+            userVisible: userVisible,
+            attachmentPayload: attachmentPayload,
+          );
+          return;
+        }
+
+        if (isQuestionPaperRequest) {
+          final config = await _resolveQuestionPaperConfig();
+          if (config == null) return;
+          await _handleQuestionPaperGeneration(
+            userPrompt: userPrompt,
+            userVisible: userVisible,
+            attachmentPayload: attachmentPayload,
+            config: config,
+          );
+          return;
+        }
+
+        final tracker = _startLongResponseTracker('AI response generation');
+
+        setState(() {
+          _messages.add(AIChatMessage(isUser: true, content: userVisible));
+          _isLoading = true;
+          _controller.clear();
+          _attachments.clear();
+        });
+        await _persistCurrentSession();
+        await _scrollToBottom();
+
+        AIChatMessage? aiMessageForError;
+        var malformedChunkCount = 0;
+        var aiInvoked = false;
+
         try {
-          final chunk = jsonDecode(chunkStr);
-          final type = chunk['type'];
+          _resetTypingRenderer();
+          final aiMessage = AIChatMessage(isUser: false, content: '');
+          aiMessageForError = aiMessage;
 
-          if (type == 'metadata') {
-            final data = chunk['data'] as Map<String, dynamic>? ?? {};
-            final sourcesRaw = (data['sources'] as List?) ?? const [];
-            final sources = sourcesRaw
-                .whereType<Map>()
-                .map((s) => RagSource.fromJson(Map<String, dynamic>.from(s)))
-                .toList();
+          setState(() {
+            _messages.add(aiMessage);
+          });
+          await _scrollToBottom();
 
-            setState(() {
-              aiMessage.sources = sources;
-              aiMessage.noLocal = data['no_local'] == true;
-              aiMessage.retrievalScore = _toNullableDouble(
-                data['retrieval_score'],
-              );
-              aiMessage.llmConfidenceScore = _toNullableDouble(
-                data['llm_confidence_score'],
-              );
-              aiMessage.combinedConfidence = _toNullableDouble(
-                data['combined_confidence'],
-              );
-              aiMessage.ocrFailureAffectsRetrieval =
-                  data['ocr_failure_affects_retrieval'] == true;
-            });
-          } else if (type == 'chunk') {
-            final textChunk = chunk['text']?.toString() ?? '';
-            if (textChunk.trim().isNotEmpty) {
-              receivedContent = true;
-            }
-            _enqueueTypedChunk(aiMessage, textChunk);
-          } else if (type == 'error') {
-            _enqueueTypedChunk(aiMessage, '\n\nError: ${chunk['message']}');
-          } else if (type == 'done') {
-            // Done
-          } else {
-            final textChunk =
-                chunk['text']?.toString() ??
-                chunk['answer']?.toString() ??
-                chunk['response']?.toString() ??
-                '';
-            if (textChunk.trim().isNotEmpty) {
-              receivedContent = true;
-              _enqueueTypedChunk(aiMessage, textChunk);
-            }
-            final sourcesRaw = (chunk['sources'] as List?) ?? const [];
-            if (sourcesRaw.isNotEmpty) {
-              final sources = sourcesRaw
-                  .whereType<Map>()
-                  .map((s) => RagSource.fromJson(Map<String, dynamic>.from(s)))
-                  .toList();
-              if (sources.isNotEmpty) {
+          final stream = _api.queryRagStream(
+            question: sendPrompt,
+            collegeId: widget.collegeId,
+            sessionId: _activeSessionId,
+            minScore: localContextRequired ? 0.08 : null,
+            fileId: widget.resourceContext?.fileId,
+            allowWeb: !localContextRequired,
+            useOcr: shouldForceVisionOcr,
+            forceOcr: shouldForceVisionOcr,
+            ocrProvider: shouldForceVisionOcr ? 'google_vision' : null,
+            attachments: attachmentPayload,
+            history: history,
+            filters: contextFilters,
+          );
+          aiInvoked = true;
+
+          var receivedContent = false;
+          await for (final chunkStr in stream) {
+            if (!mounted) break;
+            try {
+              final chunk = jsonDecode(chunkStr);
+              final type = chunk['type'];
+
+              if (type == 'metadata') {
+                final data = chunk['data'] as Map<String, dynamic>? ?? {};
+                final sourcesRaw = (data['sources'] as List?) ?? const [];
+                final sources = sourcesRaw
+                    .whereType<Map>()
+                    .map(
+                      (s) => RagSource.fromJson(Map<String, dynamic>.from(s)),
+                    )
+                    .toList();
+                final primarySource = _parsePrimarySource(
+                  data['primary_source'],
+                );
+                final orderedSources = _mergePrimarySource(
+                  primarySource,
+                  sources,
+                );
+
                 setState(() {
-                  aiMessage.sources = sources;
-                  aiMessage.noLocal = chunk['no_local'] == true;
+                  aiMessage.primarySource = primarySource;
+                  aiMessage.sources = orderedSources;
+                  aiMessage.noLocal = data['no_local'] == true;
                   aiMessage.retrievalScore = _toNullableDouble(
-                    chunk['retrieval_score'],
+                    data['retrieval_score'],
                   );
                   aiMessage.llmConfidenceScore = _toNullableDouble(
-                    chunk['llm_confidence_score'],
+                    data['llm_confidence_score'],
                   );
                   aiMessage.combinedConfidence = _toNullableDouble(
-                    chunk['combined_confidence'],
+                    data['combined_confidence'],
                   );
                   aiMessage.ocrFailureAffectsRetrieval =
-                      chunk['ocr_failure_affects_retrieval'] == true;
+                      data['ocr_failure_affects_retrieval'] == true;
                 });
+              } else if (type == 'chunk') {
+                final textChunk = chunk['text']?.toString() ?? '';
+                if (textChunk.trim().isNotEmpty) {
+                  receivedContent = true;
+                }
+                _enqueueTypedChunk(aiMessage, textChunk);
+              } else if (type == 'error') {
+                _enqueueTypedChunk(aiMessage, '\n\nError: ${chunk['message']}');
+              } else if (type == 'done') {
+                // Done
+              } else {
+                final textChunk =
+                    chunk['text']?.toString() ??
+                    chunk['answer']?.toString() ??
+                    chunk['response']?.toString() ??
+                    '';
+                if (textChunk.trim().isNotEmpty) {
+                  receivedContent = true;
+                  _enqueueTypedChunk(aiMessage, textChunk);
+                }
+                final sourcesRaw = (chunk['sources'] as List?) ?? const [];
+                if (sourcesRaw.isNotEmpty) {
+                  final sources = sourcesRaw
+                      .whereType<Map>()
+                      .map(
+                        (s) => RagSource.fromJson(Map<String, dynamic>.from(s)),
+                      )
+                      .toList();
+                  final primarySource = _parsePrimarySource(
+                    chunk['primary_source'],
+                  );
+                  final orderedSources = _mergePrimarySource(
+                    primarySource,
+                    sources,
+                  );
+                  if (sources.isNotEmpty) {
+                    setState(() {
+                      aiMessage.primarySource = primarySource;
+                      aiMessage.sources = orderedSources;
+                      aiMessage.noLocal = chunk['no_local'] == true;
+                      aiMessage.retrievalScore = _toNullableDouble(
+                        chunk['retrieval_score'],
+                      );
+                      aiMessage.llmConfidenceScore = _toNullableDouble(
+                        chunk['llm_confidence_score'],
+                      );
+                      aiMessage.combinedConfidence = _toNullableDouble(
+                        chunk['combined_confidence'],
+                      );
+                      aiMessage.ocrFailureAffectsRetrieval =
+                          chunk['ocr_failure_affects_retrieval'] == true;
+                    });
+                  }
+                }
+              }
+            } catch (e, st) {
+              final fallbackText = chunkStr.trim();
+              if (fallbackText.isNotEmpty) {
+                receivedContent = true;
+                _enqueueTypedChunk(aiMessage, fallbackText);
+              } else {
+                debugPrint('Chunk parse error: $e\nStack: $st');
+                malformedChunkCount++;
               }
             }
           }
-        } catch (e, st) {
-          final fallbackText = chunkStr.trim();
-          if (fallbackText.isNotEmpty) {
-            receivedContent = true;
-            _enqueueTypedChunk(aiMessage, fallbackText);
-          } else {
-            debugPrint('Chunk parse error: $e\nStack: $st');
-            malformedChunkCount++;
-          }
-        }
-      }
 
-      if (malformedChunkCount > 0) {
-        debugPrint(
-          'Stream finished with $malformedChunkCount malformed chunks.',
-        );
-      }
-      _streamTypingDone = true;
-      _completeTypingDrainIfDrained();
-      await _waitForTypingDrain();
-      if (receivedContent) {
-        setState(() {
-          aiMessage.content = _sanitizeAssistantAnswerText(aiMessage.content);
-        });
-      }
-
-      await _persistCurrentSession();
-      if (aiInvoked) {
-        _supabase.markAiTokenBalanceStale();
-      }
-    } catch (e) {
-      _streamTypingDone = true;
-      _completeTypingDrainIfDrained();
-      await _waitForTypingDrain();
-      if (mounted) {
-        setState(() {
-          if (aiMessageForError != null) {
-            aiMessageForError.content +=
-                '\n\n${e.toString().replaceFirst('Exception: ', '')}';
-          } else {
-            _messages.add(
-              AIChatMessage(
-                isUser: false,
-                content: e.toString().replaceFirst('Exception: ', ''),
-              ),
+          if (malformedChunkCount > 0) {
+            debugPrint(
+              'Stream finished with $malformedChunkCount malformed chunks.',
             );
           }
-        });
-        await _persistCurrentSession();
-      }
+          _streamTypingDone = true;
+          _completeTypingDrainIfDrained();
+          await _waitForTypingDrain();
+          if (receivedContent) {
+            final sanitized = _sanitizeAssistantAnswerText(aiMessage.content);
+            final promotedQuiz = await _maybePromoteQuizFromAssistantResponse(
+              rawResponse: sanitized,
+              userPrompt: userPrompt,
+              hasAttachmentContext: hasAttachments,
+              contextResourceCount: attachmentPayload.length,
+            );
+            if (!mounted) return;
+            setState(() {
+              if (promotedQuiz != null) {
+                aiMessage.quizActionPaper = promotedQuiz;
+                aiMessage.content = _buildQuestionPaperSummary(promotedQuiz);
+              } else {
+                aiMessage.content = sanitized;
+              }
+            });
+          }
+
+          await _persistCurrentSession();
+          if (aiInvoked) {
+            _supabase.markAiTokenBalanceStale();
+            _refreshAiTokenStatus(forceRefresh: true);
+          }
+        } catch (e) {
+          final errorMessage = e.toString().replaceFirst('Exception: ', '');
+          _handlePotentialTokenLimitError(errorMessage);
+          _streamTypingDone = true;
+          _completeTypingDrainIfDrained();
+          await _waitForTypingDrain();
+          if (mounted) {
+            setState(() {
+              if (aiMessageForError != null) {
+                aiMessageForError.content += '\n\n$errorMessage';
+              } else {
+                _messages.add(
+                  AIChatMessage(isUser: false, content: errorMessage),
+                );
+              }
+            });
+            await _persistCurrentSession();
+          }
+        } finally {
+          _resetTypingRenderer();
+          if (mounted) {
+            setState(() => _isLoading = false);
+            await _scrollToBottom();
+          }
+          await _finishLongResponseTracker(
+            tracker: tracker,
+            notificationTitle: 'AI Response Ready',
+            notificationBody: 'Your AI answer is ready in StudyShare.',
+          );
+        }
+      })();
     } finally {
-      _resetTypingRenderer();
-      if (mounted) {
-        setState(() => _isLoading = false);
-        await _scrollToBottom();
-      }
-      await _finishLongResponseTracker(
-        tracker: tracker,
-        notificationTitle: 'AI Response Ready',
-        notificationBody: 'Your AI answer is ready in StudyShare.',
-      );
+      _isSendAttemptInProgress = false;
+      if (mounted) setState(() {});
     }
   }
 
   Future<void> _pickAttachment() async {
-    if (_isUploadingAttachment || _isLoading) return;
+    if (_isUploadingAttachment || _isLoading || _isSendAttemptInProgress) {
+      return;
+    }
 
     final picked = await FilePicker.platform.pickFiles(
       allowMultiple: false,
@@ -2751,6 +3237,92 @@ Return STRICT JSON only (no markdown). Schema:
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('No prompt available to regenerate.')),
+    );
+  }
+
+  Widget _buildAiTokenLowBanner(bool isDark) {
+    final exhausted =
+        _aiTokenStatusLoaded &&
+        _aiTokenBudgetTokens > 0 &&
+        _aiTokenRemainingTokens <= 0;
+    final remainingCredits = _formatCreditsFromTokens(
+      math.max(0, _aiTokenRemainingTokens),
+    );
+    final message = exhausted
+        ? 'AI tokens exhausted. Top up to continue.'
+        : 'Low AI balance: ~$remainingCredits credits left. Consider top-up.';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: exhausted
+            ? AppTheme.error.withValues(alpha: isDark ? 0.2 : 0.12)
+            : AppTheme.warning.withValues(alpha: isDark ? 0.2 : 0.12),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: exhausted
+              ? AppTheme.error.withValues(alpha: 0.6)
+              : AppTheme.warning.withValues(alpha: 0.6),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            exhausted
+                ? Icons.error_outline_rounded
+                : Icons.info_outline_rounded,
+            size: 16,
+            color: exhausted ? AppTheme.error : AppTheme.warning,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: GoogleFonts.inter(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white : const Color(0xFF0F172A),
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: _openAiTopUpDialog,
+            style: TextButton.styleFrom(
+              minimumSize: const Size(0, 28),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              backgroundColor: AppTheme.primary.withValues(alpha: 0.12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+            child: Text(
+              'Upgrade Now',
+              style: GoogleFonts.inter(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.primary,
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Dismiss',
+            onPressed: () => setState(() {
+              _showAiTokenLowBanner = false;
+              _userDismissedTokenBanner = true;
+            }),
+            icon: Icon(
+              Icons.close_rounded,
+              size: 15,
+              color: isDark ? Colors.white70 : Colors.black54,
+            ),
+            constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+            padding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+          ),
+        ],
+      ),
     );
   }
 
@@ -3042,51 +3614,108 @@ Return STRICT JSON only (no markdown). Schema:
                   : AppTheme.lightTextSecondary,
             ),
           ),
+          if (msg.primarySource != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              'Primary source: ${msg.primarySource!.title}',
+              style: GoogleFonts.inter(
+                fontSize: isCompact ? 10.5 : 11,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.amber[200] : Colors.indigo[700],
+              ),
+            ),
+          ],
           const SizedBox(height: 6),
           Wrap(
             spacing: 8,
             runSpacing: 8,
-            children: msg.sources.map((s) {
-              final label = s.startPage != null && s.endPage != null
-                  ? '${s.title} (p${s.startPage}-${s.endPage})'
-                  : s.title;
+            children: msg.sources.asMap().entries.map((entry) {
+              final s = entry.value;
+              final isPrimary =
+                  msg.primarySource != null &&
+                  msg.primarySource!.fileId.trim().isNotEmpty &&
+                  s.fileId.trim().isNotEmpty &&
+                  s.fileId == msg.primarySource!.fileId;
+              final isYoutubeSource =
+                  s.sourceType == 'youtube' ||
+                  (s.videoUrl?.toLowerCase().contains('youtu') ?? false) ||
+                  (s.fileUrl?.toLowerCase().contains('youtu') ?? false);
+              final launchTarget = (s.videoUrl?.trim().isNotEmpty == true)
+                  ? s.videoUrl!.trim()
+                  : (s.fileUrl?.trim() ?? '');
+              final normalizedLaunchTarget = _normalizeExternalUrl(
+                launchTarget,
+              );
+              final label = isYoutubeSource
+                  ? (s.timestamp != null && s.timestamp!.trim().isNotEmpty
+                        ? '${s.title} (${s.timestamp})'
+                        : s.title)
+                  : (s.startPage != null && s.endPage != null
+                        ? '${s.title} (p${s.startPage}-${s.endPage})'
+                        : s.title);
               return InkWell(
-                onTap: s.fileUrl == null
+                onTap: normalizedLaunchTarget.isEmpty
                     ? null
                     : () async {
-                        final uri = Uri.tryParse(s.fileUrl!);
-                        if (uri != null) {
-                          final host = uri.host.toLowerCase();
-                          final isInternal =
-                              host == AppConfig.webDomain ||
-                              host.endsWith(_internalDomainSuffix);
-                          if (isInternal) {
-                            if (!mounted) return;
+                        final uri = _buildExternalLaunchUri(
+                          normalizedLaunchTarget,
+                        );
+                        if (!mounted) return;
+                        if (isYoutubeSource) {
+                          final youtubeLink = parseYoutubeLink(
+                            normalizedLaunchTarget,
+                          );
+                          if (youtubeLink != null) {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (_) => PdfViewerScreen(
-                                  pdfUrl: s.fileUrl!,
+                                builder: (_) => YoutubePlayerScreen(
+                                  videoUrl: youtubeLink.watchUri.toString(),
                                   title: s.title,
-                                  resourceId: s.fileId,
+                                  resourceId: s.fileId.trim().isEmpty
+                                      ? null
+                                      : s.fileId,
                                   collegeId: widget.collegeId,
+                                  subject: widget.resourceContext?.subject,
+                                  semester: widget.resourceContext?.semester,
+                                  branch: widget.resourceContext?.branch,
                                 ),
                               ),
                             );
-                          } else if (await canLaunchUrl(uri)) {
-                            if (!mounted) return;
-                            await launchUrl(
-                              uri,
-                              mode: LaunchMode.externalApplication,
+                          } else if (uri != null) {
+                            await _openExternalSourceLink(
+                              uri: uri,
+                              sourceTitle: s.title,
                             );
                           } else {
-                            if (!mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                content: Text('Could not open ${s.title}'),
+                                content: Text(
+                                  'Invalid source URL for ${s.title}',
+                                ),
                               ),
                             );
                           }
+                        } else if (uri != null) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => PdfViewerScreen(
+                                pdfUrl: normalizedLaunchTarget,
+                                title: s.title,
+                                resourceId: s.fileId,
+                                collegeId: widget.collegeId,
+                              ),
+                            ),
+                          );
+                        } else if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Invalid source URL for ${s.title}',
+                              ),
+                            ),
+                          );
                         }
                       },
                 borderRadius: BorderRadius.circular(12),
@@ -3097,18 +3726,28 @@ Return STRICT JSON only (no markdown). Schema:
                   ),
                   decoration: BoxDecoration(
                     color: isDark
-                        ? Colors.white10
-                        : Colors.black.withValues(alpha: 0.04),
+                        ? (isPrimary
+                              ? Colors.amber.withValues(alpha: 0.16)
+                              : Colors.white10)
+                        : (isPrimary
+                              ? Colors.indigo.withValues(alpha: 0.12)
+                              : Colors.black.withValues(alpha: 0.04)),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                      color: isDark ? Colors.white12 : Colors.black12,
+                      color: isPrimary
+                          ? (isDark
+                                ? Colors.amber.withValues(alpha: 0.45)
+                                : Colors.indigo.withValues(alpha: 0.35))
+                          : (isDark ? Colors.white12 : Colors.black12),
                     ),
                   ),
                   child: Text(
-                    label,
+                    isPrimary ? '[Primary] $label' : label,
                     style: GoogleFonts.inter(
                       fontSize: isCompact ? 10 : 10.5,
-                      color: isDark ? Colors.white70 : Colors.black87,
+                      color: isPrimary
+                          ? (isDark ? Colors.amber[100] : Colors.indigo[800])
+                          : (isDark ? Colors.white70 : Colors.black87),
                     ),
                   ),
                 ),
@@ -3701,6 +4340,11 @@ Return STRICT JSON only (no markdown). Schema:
                     ),
                     child: Column(
                       children: [
+                        if (_showAiTokenLowBanner && !_userDismissedTokenBanner)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: _buildAiTokenLowBanner(isDark),
+                          ),
                         if (_attachments.isNotEmpty)
                           Align(
                             alignment: Alignment.centerLeft,
@@ -3854,7 +4498,9 @@ Return STRICT JSON only (no markdown). Schema:
                                 key: _coachAttachKey,
                                 tooltip: 'Attach image or PDF',
                                 onPressed:
-                                    (_isLoading || _isUploadingAttachment)
+                                    (_isLoading ||
+                                        _isUploadingAttachment ||
+                                        _isSendAttemptInProgress)
                                     ? null
                                     : _pickAttachment,
                                 padding: EdgeInsets.zero,
@@ -3901,14 +4547,19 @@ Return STRICT JSON only (no markdown). Schema:
                                 width: sendButtonSize,
                                 height: sendButtonSize,
                                 decoration: BoxDecoration(
-                                  color: (_isLoading || _isUploadingAttachment)
+                                  color:
+                                      (_isLoading ||
+                                          _isUploadingAttachment ||
+                                          _isSendAttemptInProgress)
                                       ? Colors.grey
                                       : AppTheme.primary,
                                   shape: BoxShape.circle,
                                 ),
                                 child: IconButton(
                                   onPressed:
-                                      (_isLoading || _isUploadingAttachment)
+                                      (_isLoading ||
+                                          _isUploadingAttachment ||
+                                          _isSendAttemptInProgress)
                                       ? null
                                       : _sendMessage,
                                   padding: EdgeInsets.zero,
