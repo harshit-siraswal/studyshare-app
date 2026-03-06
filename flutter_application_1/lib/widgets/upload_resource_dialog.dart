@@ -13,6 +13,7 @@ import 'package:http/http.dart' as http;
 import 'success_overlay.dart';
 import '../utils/contribution_badge.dart';
 import '../utils/youtube_link_utils.dart';
+import '../data/academic_subjects_data.dart';
 
 class UploadResourceDialog extends StatefulWidget {
   final String collegeId;
@@ -56,7 +57,6 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
   late TextEditingController _titleController;
 
   // Compact config data
-  static const semesters = ['1', '2', '3', '4', '5', '6', '7', '8'];
   static const _allowedFileExtensions = [
     'pdf',
     'doc',
@@ -68,71 +68,8 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     'txt',
   ];
   static const int _premiumUnlockThreshold = 10;
-  static const branches = {
-    'CSE': 'cse',
-    'ECE': 'ece',
-    'EEE': 'eee',
-    'ME': 'me',
-    'CE': 'ce',
-    'AIML': 'aiml',
-    'DS': 'ds',
-    'IT': 'it',
-  };
-  static const subjects = {
-    'cse': [
-      "Data Structures",
-      "Algorithms",
-      "DBMS",
-      "Operating Systems",
-      "Computer Networks",
-      "Software Engineering",
-    ],
-    'ece': [
-      "Digital Electronics",
-      "Signals & Systems",
-      "Communication Systems",
-      "VLSI",
-      "Microprocessors",
-    ],
-    'eee': [
-      "Power Systems",
-      "Control Systems",
-      "Electrical Machines",
-      "Power Electronics",
-    ],
-    'me': [
-      "Thermodynamics",
-      "Fluid Mechanics",
-      "Machine Design",
-      "Manufacturing",
-    ],
-    'ce': [
-      "Structural Analysis",
-      "Surveying",
-      "Construction Management",
-      "Geotechnical Engineering",
-    ],
-    'aiml': [
-      "Machine Learning",
-      "Deep Learning",
-      "NLP",
-      "Computer Vision",
-      "Data Mining",
-    ],
-    'ds': [
-      "Statistics",
-      "Data Mining",
-      "Big Data Analytics",
-      "Machine Learning",
-      "Data Visualization",
-    ],
-    'it': [
-      "Web Development",
-      "Database Systems",
-      "Networking",
-      "Cloud Computing",
-      "Cybersecurity",
-    ],
+  static final Map<String, String> branches = <String, String>{
+    for (final option in branchOptions) option.shortLabel: option.value,
   };
   static const Set<String> _teacherSourceRoles = {
     'admin',
@@ -140,7 +77,8 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     'teacher',
   };
 
-  List<String> get availableSubjects => subjects[_branch] ?? [];
+  List<String> get availableSubjects =>
+      getSubjectsForBranchAndSemester(_branch, _semester);
 
   @override
   void initState() {
@@ -660,9 +598,12 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                         Expanded(
                           child: _buildChipSelector(
                             'Sem',
-                            semesters,
+                            semesterOptions,
                             _semester,
-                            (v) => setState(() => _semester = v),
+                            (v) => setState(() {
+                              _semester = v;
+                              _subject = '';
+                            }),
                             isDark,
                           ),
                         ),

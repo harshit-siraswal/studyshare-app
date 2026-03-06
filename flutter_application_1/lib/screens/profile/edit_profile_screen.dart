@@ -8,7 +8,7 @@ import '../../config/theme.dart';
 import '../../services/backend_api_service.dart';
 import '../../services/cloudinary_service.dart';
 import '../../data/departments_data.dart';
-import '../../data/syllabus_subjects_data.dart';
+import '../../data/academic_subjects_data.dart';
 import '../../models/user.dart';
 
 class EditProfileScreen extends StatefulWidget {
@@ -38,18 +38,7 @@ class EditProfileScreen extends StatefulWidget {
 }
 
 class _EditProfileScreenState extends State<EditProfileScreen> {
-  static final RegExp _aiTokenRegex = RegExp(r'\bai\b');
-  static final RegExp _mlTokenRegex = RegExp(r'\bml\b');
-  static const List<String> _semesterOptions = <String>[
-    '1',
-    '2',
-    '3',
-    '4',
-    '5',
-    '6',
-    '7',
-    '8',
-  ];
+  static const List<String> _semesterOptions = semesterOptions;
   final _api = BackendApiService();
   late final TextEditingController _nameController;
   late final TextEditingController _bioController;
@@ -121,79 +110,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     String? branch, {
     bool keepExistingSelection = false,
   }) {
-    final normalizedBranch = (branch ?? '').trim().toLowerCase();
-    final branchByDepartmentName = <String, Branch>{};
-    for (final dep in _departments) {
-      final normalizedDepartmentName = dep.name.trim().toLowerCase();
-      final normalizedDepartmentFull = dep.full.trim().toLowerCase();
-      final matchedBranch = _matchBranchEnum(normalizedDepartmentName);
-      if (matchedBranch != null) {
-        branchByDepartmentName[normalizedDepartmentName] = matchedBranch;
-        branchByDepartmentName[normalizedDepartmentFull] = matchedBranch;
-      }
-    }
-    final branchEnum =
-        branchByDepartmentName[normalizedBranch] ??
-        _matchBranchEnum(normalizedBranch);
-
-    final subjects = <String>[
-      ...(branchEnum == null
-          ? const <String>[]
-          : (syllabusSubjects[branchEnum] ?? const <String>[])),
-    ].map((s) => s.trim()).where((s) => s.isNotEmpty).toSet().toList()..sort();
-
-    _availableSubjects = subjects;
+    final subjects = getSubjectsForBranchAndSemester(branch, _selectedSemester);
+    _availableSubjects = _uniqueNonEmptyOptions(subjects);
     final typedSubject = _subjectController.text.trim();
     if (typedSubject.isNotEmpty) {
       _selectedSubject = typedSubject;
     } else if (!keepExistingSelection) {
       _selectedSubject = null;
     }
-  }
-
-  Branch? _matchBranchEnum(String normalizedBranch) {
-    final cleaned = normalizedBranch
-        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
-        .trim();
-    for (final value in Branch.values) {
-      final enumName = value.name.trim().toLowerCase();
-      if (enumName == cleaned) {
-        return value;
-      }
-    }
-
-    if (cleaned.contains('computer') && cleaned.contains('science')) {
-      return Branch.cse;
-    }
-    if (cleaned.contains('electronics') && cleaned.contains('communication')) {
-      return Branch.ece;
-    }
-    if (cleaned.contains('electrical')) {
-      return Branch.eee;
-    }
-    if (cleaned.contains('mechanical')) {
-      return Branch.me;
-    }
-    if (cleaned.contains('civil')) {
-      return Branch.ce;
-    }
-    if (cleaned.contains('information') && cleaned.contains('tech')) {
-      return Branch.it;
-    }
-    if (cleaned.contains('data') && cleaned.contains('science')) {
-      return Branch.ds;
-    }
-    final hasAiToken = _aiTokenRegex.hasMatch(cleaned);
-    final hasMlToken = _mlTokenRegex.hasMatch(cleaned);
-    // Keep OR semantics here because departments may mention either AI or ML.
-    if (cleaned.contains('artificial') ||
-        cleaned.contains('machine learning') ||
-        hasAiToken ||
-        hasMlToken) {
-      return Branch.aiml;
-    }
-
-    return null;
   }
 
   Future<void> _loadDepartments() async {
@@ -210,11 +134,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           _departments = deps;
           _departmentsEmpty = false;
           if (_selectedBranch != null) {
-            final normalizedBranch = _selectedBranch!.trim().toLowerCase();
+            final normalizedBranchCode = normalizeBranchCode(_selectedBranch);
             final matched = deps.firstWhere(
               (d) =>
-                  d.name.trim().toLowerCase() == normalizedBranch ||
-                  d.full.trim().toLowerCase() == normalizedBranch,
+                  normalizeBranchCode(d.name) == normalizedBranchCode ||
+                  normalizeBranchCode(d.full) == normalizedBranchCode,
               orElse: () => const DepartmentData(
                 name: '',
                 full: '',
@@ -224,22 +148,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             if (matched.name.isNotEmpty) {
               _selectedBranch = matched.name;
             } else {
-              final inferred = _matchBranchEnum(normalizedBranch);
-              if (inferred != null) {
-                final inferredMatch = deps.firstWhere(
-                  (d) => d.name.trim().toLowerCase() == inferred.name,
-                  orElse: () => const DepartmentData(
-                    name: '',
-                    full: '',
-                    color: Color(0x00000000),
-                  ),
-                );
-                _selectedBranch = inferredMatch.name.isNotEmpty
-                    ? inferredMatch.name
-                    : null;
-              } else {
-                _selectedBranch = null;
-              }
+              _selectedBranch = null;
             }
           }
           _refreshSubjectOptionsForBranch(
@@ -349,6 +258,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       final normalizedSubject = _normalizedSelection(
         _subjectController.text.trim(),
       );
+      final normalizedBranch = normalizeBranchCode(_selectedBranch);
       final normalizedAdminKey = _adminKeyController.text.trim();
       final canSubmitAdminKey =
           widget.role == AppRoles.teacher || widget.role == AppRoles.admin;
@@ -359,7 +269,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         bio: _bioController.text.trim(),
         profilePhotoUrl: photoUrl,
         semester: _selectedSemester,
-        branch: _selectedBranch,
+        branch: normalizedBranch.isEmpty ? _selectedBranch : normalizedBranch,
         subject: normalizedSubject,
         adminKey: canSubmitAdminKey && normalizedAdminKey.isNotEmpty
             ? normalizedAdminKey
@@ -524,7 +434,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         .toList(),
                     onChanged: _saving
                         ? null
-                        : (val) => setState(() => _selectedSemester = val),
+                        : (val) => setState(() {
+                            _selectedSemester = val;
+                            _refreshSubjectOptionsForBranch(
+                              _selectedBranch,
+                              keepExistingSelection: true,
+                            );
+                          }),
                   ),
                 ),
                 const SizedBox(width: 16),

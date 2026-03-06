@@ -5,7 +5,7 @@ import '../../config/theme.dart';
 import '../../models/user.dart';
 import '../../services/supabase_service.dart';
 import '../viewer/pdf_viewer_screen.dart';
-import '../../data/syllabus_subjects_data.dart'; // Import the new data file
+import '../../data/academic_subjects_data.dart';
 
 class SyllabusScreen extends StatefulWidget {
   final String collegeId;
@@ -38,7 +38,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
   String? _selectedSubject;
 
   // Available Options
-  final List<String> _semesters = ['1', '2', '3', '4', '5', '6', '7', '8'];
+  final List<String> _semesters = semesterOptions;
   List<String> _availableSubjects = [];
 
   @override
@@ -100,26 +100,10 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
   }
 
   List<String> _getSubjectsForBranch() {
-    // Map 'CSE' -> 'cse' for lookup
-    final branchKey = widget.department.trim().toLowerCase();
-
-    Branch? branch;
-    try {
-      branch = Branch.values.byName(branchKey);
-    } on ArgumentError {
-      branch = null;
-    }
-    if (branch == null) return [];
-
-    final subjects = syllabusSubjects[branch] ?? [];
-    final unique =
-        subjects
-            .map((item) => item.trim())
-            .where((item) => item.isNotEmpty)
-            .toSet()
-            .toList()
-          ..sort();
-    return unique;
+    return getSubjectsForBranchAndSemester(
+      widget.department,
+      _selectedSemester,
+    );
   }
 
   Future<void> _fetchSyllabus() async {
@@ -131,9 +115,12 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
     });
 
     try {
+      final normalizedDepartment = normalizeBranchCode(widget.department);
       final items = await _supabaseService.getSyllabus(
         collegeId: widget.collegeId,
-        department: widget.department,
+        department: normalizedDepartment.isEmpty
+            ? widget.department
+            : normalizedDepartment,
         semester: _selectedSemester,
         subject: _selectedSubject,
       );
