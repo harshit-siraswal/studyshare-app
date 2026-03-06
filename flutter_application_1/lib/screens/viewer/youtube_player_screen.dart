@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import '../../config/app_config.dart';
 import '../../config/theme.dart';
 import '../../utils/youtube_link_utils.dart';
 import '../../widgets/ai_study_tools_sheet.dart';
@@ -33,31 +36,99 @@ class YoutubePlayerScreen extends StatefulWidget {
 }
 
 class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
+  static const Duration _inAppLoadTimeout = Duration(seconds: 28);
+  static final Uri _youtubeOriginUri = Uri.parse(
+    'https://${AppConfig.webDomain}/',
+  );
+
   ParsedYoutubeLink? _youtubeLink;
   WebViewController? _webViewController;
   bool _isLoading = true;
   bool _hasError = false;
-  bool _didTryWatchFallback = false;
+  bool _didAutoFallbackToExternal = false;
   int _currentStartSeconds = 0;
   String _errorMessage = 'Unable to load video.';
+  Timer? _loadTimeoutTimer;
 
   bool _isTrustedYoutubeHost(String host) {
     final normalized = host.toLowerCase();
     return normalized == 'youtube.com' ||
         normalized == 'www.youtube.com' ||
         normalized == 'm.youtube.com' ||
+        normalized == 'music.youtube.com' ||
         normalized == 'youtu.be' ||
         normalized == 'www.youtu.be' ||
+        normalized == 'consent.youtube.com' ||
         normalized == 'youtube-nocookie.com' ||
-        normalized == 'www.youtube-nocookie.com';
+        normalized == 'www.youtube-nocookie.com' ||
+        normalized == 'google.com' ||
+        normalized == 'www.google.com' ||
+        normalized == 'accounts.google.com';
   }
 
   bool _isAllowedYoutubeNavigation(String rawUrl) {
     final uri = Uri.tryParse(rawUrl);
     if (uri == null) return false;
     if (uri.scheme == 'about') return true;
+    if (uri.scheme == 'intent' ||
+        uri.scheme == 'vnd.youtube' ||
+        uri.scheme == 'youtube') {
+      return true;
+    }
     if (uri.scheme != 'https') return false;
     return _isTrustedYoutubeHost(uri.host);
+  }
+
+  void _scheduleLoadTimeout() {
+    _loadTimeoutTimer?.cancel();
+    _loadTimeoutTimer = Timer(_inAppLoadTimeout, () {
+      if (!mounted || !_isLoading || _youtubeLink == null) return;
+      debugPrint('YouTube WebView timed out; falling back to external launch.');
+      unawaited(_autoFallbackToExternal('webview_timeout'));
+    });
+  }
+
+  void _cancelLoadTimeout() {
+    _loadTimeoutTimer?.cancel();
+    _loadTimeoutTimer = null;
+  }
+
+  Uri _buildEmbedUri(String videoId, {int startSeconds = 0}) {
+    return buildYoutubeEmbedUri(
+      videoId,
+      startSeconds: startSeconds,
+      origin: _youtubeOriginUri.origin,
+    );
+  }
+
+  Map<String, String> _youtubeRequestHeaders() {
+    return <String, String>{
+      'Referer': _youtubeOriginUri.toString(),
+      'Origin': _youtubeOriginUri.origin,
+      'X-Requested-With': AppConfig.androidBundleId,
+    };
+  }
+
+  Future<void> _inspectLoadedPageForEmbedErrors() async {
+    final controller = _webViewController;
+    if (controller == null || _didAutoFallbackToExternal) return;
+    try {
+      final jsResult = await controller.runJavaScriptReturningResult(
+        "(() => (document?.body?.innerText || '').slice(0, 2000).toLowerCase())();",
+      );
+      final pageText = jsResult.toString().toLowerCase();
+      final hasEmbedConfigError =
+          pageText.contains('watch video on youtube') ||
+          pageText.contains('video player configuration error') ||
+          pageText.contains('error 153') ||
+          pageText.contains('playback on other websites has been disabled');
+      if (hasEmbedConfigError) {
+        unawaited(_autoFallbackToExternal('youtube_embed_error_153'));
+      }
+    } catch (_) {
+      // Some pages disallow script evaluation during load; ignore and rely on
+      // WebView/network callbacks and timeout fallback.
+    }
   }
 
   @override
@@ -66,8 +137,14 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
     _setupPlayer();
   }
 
+  @override
+  void dispose() {
+    _cancelLoadTimeout();
+    super.dispose();
+  }
+
   void _setupPlayer() {
-    _didTryWatchFallback = false;
+    _didAutoFallbackToExternal = false;
     final parsed = parseYoutubeLink(widget.videoUrl);
     if (parsed == null) {
       setState(() {
@@ -89,6 +166,17 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
             if (_isAllowedYoutubeNavigation(request.url)) {
               return NavigationDecision.navigate;
             }
+            final blockedUri = Uri.tryParse(request.url);
+            if (blockedUri != null &&
+                (blockedUri.scheme == 'intent' ||
+                    blockedUri.scheme == 'vnd.youtube' ||
+                    blockedUri.scheme == 'youtube')) {
+              debugPrint(
+                'YouTube WebView emitted app-intent URL; opening externally: '
+                '${request.url}',
+              );
+              unawaited(_autoFallbackToExternal('intent_navigation'));
+            }
             debugPrint(
               'Blocked unexpected YouTube WebView URL: ${request.url}',
             );
@@ -98,31 +186,51 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
             if (mounted) {
               setState(() => _isLoading = true);
             }
+            _scheduleLoadTimeout();
           },
           onPageFinished: (_) {
+            _cancelLoadTimeout();
             if (mounted) {
               setState(() => _isLoading = false);
             }
+            unawaited(_inspectLoadedPageForEmbedErrors());
           },
           onWebResourceError: (error) {
-            if (error.isForMainFrame == true &&
-                !_didTryWatchFallback &&
-                _youtubeLink != null) {
-              _didTryWatchFallback = true;
-              _webViewController?.loadRequest(_youtubeLink!.watchUri);
-              return;
+            debugPrint(
+              'YouTube WebView error(main=${error.isForMainFrame}, '
+              'code=${error.errorCode}, type=${error.errorType}, '
+              'url=${error.url}, desc=${error.description})',
+            );
+            final description = error.description.toLowerCase();
+            final hasTlsOrCertIssue =
+                description.contains('ssl') ||
+                description.contains('cert') ||
+                description.contains('trust anchor') ||
+                description.contains('net::err');
+
+            if (hasTlsOrCertIssue) {
+              unawaited(_autoFallbackToExternal('webview_tls_or_cert_error'));
             }
+
             if (error.isForMainFrame == true && mounted) {
+              _cancelLoadTimeout();
               setState(() {
                 _isLoading = false;
                 _hasError = true;
                 _errorMessage = error.description;
               });
+              unawaited(
+                _autoFallbackToExternal('main_frame_web_resource_error'),
+              );
             }
           },
         ),
       )
-      ..loadRequest(parsed.embedUri);
+      ..loadRequest(
+        _buildEmbedUri(parsed.videoId, startSeconds: parsed.startSeconds),
+        headers: _youtubeRequestHeaders(),
+      );
+    _scheduleLoadTimeout();
     _webViewController = controller;
   }
 
@@ -154,21 +262,62 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
       _currentStartSeconds = bounded;
       _hasError = false;
       _isLoading = true;
-      _didTryWatchFallback = false;
     });
-    final embedUri = buildYoutubeEmbedUri(link.videoId, startSeconds: bounded);
-    await _webViewController!.loadRequest(embedUri);
+    final embedUri = _buildEmbedUri(link.videoId, startSeconds: bounded);
+    _scheduleLoadTimeout();
+    await _webViewController!.loadRequest(
+      embedUri,
+      headers: _youtubeRequestHeaders(),
+    );
   }
 
-  Future<void> _openInYoutube() async {
-    final link = _youtubeLink;
-    if (link == null) return;
-    if (await launchUrl(link.appUri, mode: LaunchMode.externalApplication)) {
+  void _setExternalFallbackState(String message) {
+    _cancelLoadTimeout();
+    if (!mounted) {
+      _isLoading = false;
+      _hasError = true;
+      _errorMessage = message;
+      _webViewController = null;
       return;
+    }
+    setState(() {
+      _isLoading = false;
+      _hasError = true;
+      _errorMessage = message;
+      _webViewController = null;
+    });
+  }
+
+  Future<bool> _launchYoutubeExternally() async {
+    final link = _youtubeLink;
+    if (link == null) return false;
+    if (await launchUrl(link.appUri, mode: LaunchMode.externalApplication)) {
+      return true;
     }
     if (await launchUrl(link.watchUri, mode: LaunchMode.externalApplication)) {
-      return;
+      return true;
     }
+    return false;
+  }
+
+  Future<void> _autoFallbackToExternal(String reason) async {
+    if (_didAutoFallbackToExternal) return;
+    _didAutoFallbackToExternal = true;
+    debugPrint('Auto external YouTube fallback triggered: $reason');
+    _setExternalFallbackState(
+      'In-app playback is unavailable on this network/device.',
+    );
+    final opened = await _launchYoutubeExternally();
+    if (opened || !mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Could not open YouTube automatically.')),
+    );
+  }
+
+  Future<void> _openInYoutube({bool showFailureSnackBar = true}) async {
+    final opened = await _launchYoutubeExternally();
+    if (opened) return;
+    if (!showFailureSnackBar) return;
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,

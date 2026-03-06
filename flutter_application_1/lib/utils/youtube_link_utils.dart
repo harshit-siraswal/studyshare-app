@@ -47,12 +47,20 @@ Uri buildYoutubeWatchUri(String videoId, {int startSeconds = 0}) {
 }
 
 /// Builds canonical YouTube embed URI.
-Uri buildYoutubeEmbedUri(String videoId, {int startSeconds = 0}) {
+Uri buildYoutubeEmbedUri(
+  String videoId, {
+  int startSeconds = 0,
+  String? origin,
+}) {
   final embedQuery = <String, String>{
     'playsinline': '1',
     'rel': '0',
     'modestbranding': '1',
   };
+  final normalizedOrigin = origin?.trim();
+  if (normalizedOrigin != null && normalizedOrigin.isNotEmpty) {
+    embedQuery['origin'] = normalizedOrigin;
+  }
   if (startSeconds > 0) {
     embedQuery['start'] = startSeconds.toString();
   }
@@ -69,6 +77,14 @@ String normalizeExternalUrl(String rawUrl) {
   final decoded = _maybeDecodeEmbeddedUrl(normalized);
   if (decoded != null && decoded.trim().isNotEmpty) {
     normalized = decoded.trim();
+  }
+
+  final redirected = _extractRedirectUrlCandidate(normalized);
+  if (redirected != null && redirected.isNotEmpty) {
+    final nested = normalizeExternalUrl(redirected);
+    if (nested.isNotEmpty && nested != normalized) {
+      normalized = nested;
+    }
   }
 
   final lowered = normalized.toLowerCase();
@@ -269,4 +285,41 @@ String? _maybeDecodeEmbeddedUrl(String value) {
   } catch (_) {
     return null;
   }
+}
+
+String? _extractRedirectUrlCandidate(String value) {
+  if (!value.contains('?')) return null;
+
+  Uri? uri = Uri.tryParse(value);
+  if (uri == null || (uri.host.isEmpty && !value.startsWith('/'))) {
+    final withLeadingSlash = value.startsWith('/') ? value : '/$value';
+    uri = Uri.tryParse('https://placeholder.invalid$withLeadingSlash');
+  } else if (uri.host.isEmpty && value.startsWith('/')) {
+    uri = Uri.tryParse('https://placeholder.invalid$value');
+  }
+
+  if (uri == null) return null;
+
+  const redirectKeys = <String>[
+    'url',
+    'q',
+    'u',
+    'target',
+    'dest',
+    'destination',
+    'redirect',
+    'redirect_url',
+    'source',
+  ];
+
+  for (final key in redirectKeys) {
+    final candidate = uri.queryParameters[key]?.trim();
+    if (candidate == null || candidate.isEmpty) continue;
+    final decoded = _maybeDecodeEmbeddedUrl(candidate)?.trim() ?? candidate;
+    if (decoded.isNotEmpty) {
+      return decoded;
+    }
+  }
+
+  return null;
 }
