@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:share_plus/share_plus.dart';
@@ -65,6 +67,8 @@ class AiStudyToolsSheet extends StatefulWidget {
   final String? branch;
   final String resourceType;
   final String? videoUrl;
+  final int initialTabIndex;
+  final String? autoGenerateType;
   final AiOutputLocalService localStore;
   final SummaryPdfService summaryPdfService;
 
@@ -79,6 +83,8 @@ class AiStudyToolsSheet extends StatefulWidget {
     this.branch,
     this.resourceType = 'notes',
     this.videoUrl,
+    this.initialTabIndex = 0,
+    this.autoGenerateType,
     AiOutputLocalService? localStore,
     SummaryPdfService? summaryPdfService,
   }) : localStore = localStore ?? AiOutputLocalService(),
@@ -113,6 +119,8 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   bool _showAnswers = false;
   final Map<int, String> _selectedAnswers = {};
   final Set<int> _flippedCardIndexes = <int>{};
+  late final PageController _flashcardPageController;
+  int _activeFlashcardIndex = 0;
 
   final Map<String, bool> _cachedMap = {};
   final Map<String, bool> _savedLocallyMap = {};
@@ -135,18 +143,63 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _flashcardPageController = PageController(viewportFraction: 0.9);
+    final safeInitialIndex = widget.initialTabIndex.clamp(0, 3).toInt();
+    _tabController = TabController(
+      length: 4,
+      vsync: this,
+      initialIndex: safeInitialIndex,
+    );
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) return;
       if (mounted) setState(() {});
     });
-    _loadSavedOutputs();
+    _loadSavedOutputs().then((_) {
+      if (!mounted) return;
+      _handleInitialAutoGeneration();
+    });
   }
 
   @override
   void dispose() {
+    _flashcardPageController.dispose();
     _tabController.dispose();
     super.dispose();
+  }
+
+  void _resetFlashcardDeckToStart() {
+    _activeFlashcardIndex = 0;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_flashcardPageController.hasClients) return;
+      _flashcardPageController.jumpToPage(0);
+    });
+  }
+
+  void _handleInitialAutoGeneration() {
+    final rawType = widget.autoGenerateType?.trim().toLowerCase();
+    if (rawType == null || rawType.isEmpty) return;
+    if (rawType == 'chat') return;
+    if (rawType != 'summary' && rawType != 'quiz' && rawType != 'flashcards') {
+      return;
+    }
+    if (_hasOutput(rawType)) return;
+    _generate(rawType, regenerate: false);
+  }
+
+  Future<void> _animateToFlashcardIndex(int targetIndex) async {
+    final cards = _flashcards;
+    if (cards == null || cards.isEmpty) return;
+    final maxIndex = cards.length - 1;
+    final bounded = targetIndex.clamp(0, maxIndex).toInt();
+    if (!_flashcardPageController.hasClients) {
+      setState(() => _activeFlashcardIndex = bounded);
+      return;
+    }
+    await _flashcardPageController.animateToPage(
+      bounded,
+      duration: const Duration(milliseconds: 420),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   Future<void> _loadSavedOutputs() async {
@@ -176,6 +229,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         _summary = loadedSummary;
         _quiz = loadedQuiz;
         _flashcards = loadedFlashcards;
+        _activeFlashcardIndex = 0;
         if (loadedSummary != null && loadedSummary.trim().isNotEmpty) {
           _savedLocallyMap['summary'] = true;
         }
@@ -186,6 +240,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
           _savedLocallyMap['flashcards'] = true;
         }
       });
+      if (loadedFlashcards != null && loadedFlashcards.isNotEmpty) {
+        _resetFlashcardDeckToStart();
+      }
     } catch (e) {
       // Silently ignore load errors - user can regenerate content
       debugPrint('Failed to load saved outputs: $e');
@@ -390,9 +447,11 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         setState(() {
           _flashcards = parsed;
           _flippedCardIndexes.clear();
+          _activeFlashcardIndex = 0;
           _cachedMap['flashcards'] = response['cached'] == true;
           _savedLocallyMap['flashcards'] = false;
         });
+        _resetFlashcardDeckToStart();
       }
       _supabaseService.markAiTokenBalanceStale();
     } catch (e) {
@@ -1478,110 +1537,249 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
       );
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-      itemCount: _flashcards!.length,
-      itemBuilder: (context, idx) {
-        final card = _flashcards![idx];
-        final flipped = _flippedCardIndexes.contains(idx);
+    final cards = _flashcards!;
+    final currentIndex = _activeFlashcardIndex
+        .clamp(0, cards.length - 1)
+        .toInt();
 
-        return GestureDetector(
-          onTap: () {
-            setState(() {
-              if (flipped) {
-                _flippedCardIndexes.remove(idx);
-              } else {
-                _flippedCardIndexes.add(idx);
-              }
-            });
-          },
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 220),
-            margin: const EdgeInsets.only(bottom: 12),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              gradient: LinearGradient(
-                colors: flipped
-                    ? [const Color(0xFF0EA5E9), _studioBlue]
-                    : [const Color(0xFF60A5FA), _studioBlueDark],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: (flipped ? _studioBlue : _studioBlueDark).withValues(
-                    alpha: 0.28,
-                  ),
-                  blurRadius: 16,
-                  offset: const Offset(0, 8),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Text(
-                        'Card ${idx + 1}',
-                        style: GoogleFonts.inter(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                        ),
-                      ),
+    return Column(
+      children: [
+        Expanded(
+          child: PageView.builder(
+            controller: _flashcardPageController,
+            physics: const BouncingScrollPhysics(),
+            itemCount: cards.length,
+            onPageChanged: (idx) {
+              if (!mounted) return;
+              setState(() => _activeFlashcardIndex = idx);
+            },
+            itemBuilder: (context, idx) {
+              final card = cards[idx];
+              final flipped = _flippedCardIndexes.contains(idx);
+
+              return AnimatedBuilder(
+                animation: _flashcardPageController,
+                builder: (context, child) {
+                  final page = _flashcardPageController.hasClients
+                      ? (_flashcardPageController.page ??
+                            _flashcardPageController.initialPage.toDouble())
+                      : _flashcardPageController.initialPage.toDouble();
+                  final delta = (idx - page).clamp(-1.2, 1.2).toDouble();
+                  final scale = (1 - (delta.abs() * 0.08)).clamp(0.86, 1.0);
+                  final rotateY = delta * 0.25;
+                  final translateY = delta.abs() * 16;
+
+                  return Transform(
+                    alignment: Alignment.center,
+                    transform: Matrix4.identity()
+                      ..setEntry(3, 2, 0.0012)
+                      ..translateByDouble(0.0, translateY, 0.0, 1.0)
+                      ..rotateY(rotateY)
+                      ..scaleByDouble(scale, scale, 1.0, 1.0),
+                    child: child,
+                  );
+                },
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 10, 8, 14),
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        if (flipped) {
+                          _flippedCardIndexes.remove(idx);
+                        } else {
+                          _flippedCardIndexes.add(idx);
+                        }
+                      });
+                    },
+                    child: TweenAnimationBuilder<double>(
+                      tween: Tween<double>(end: flipped ? 1.0 : 0.0),
+                      duration: const Duration(milliseconds: 440),
+                      curve: Curves.easeInOutCubic,
+                      builder: (context, value, _) {
+                        final progress = value.clamp(0.0, 1.0);
+                        final isBackFace = progress >= 0.5;
+                        final rotation = progress * math.pi;
+
+                        final frontStart = const Color(0xFF60A5FA);
+                        final frontEnd = _studioBlueDark;
+                        final backStart = const Color(0xFF0284C7);
+                        final backEnd = _studioBlue;
+
+                        final gradientStart =
+                            Color.lerp(frontStart, backStart, progress) ??
+                            frontStart;
+                        final gradientEnd =
+                            Color.lerp(frontEnd, backEnd, progress) ?? frontEnd;
+                        final glowColor =
+                            Color.lerp(
+                              _studioBlueDark,
+                              _studioBlue,
+                              progress,
+                            ) ??
+                            _studioBlueDark;
+
+                        return Transform(
+                          alignment: Alignment.center,
+                          transform: Matrix4.identity()
+                            ..setEntry(3, 2, 0.0012)
+                            ..rotateY(rotation),
+                          child: Container(
+                            padding: const EdgeInsets.all(18),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(24),
+                              gradient: LinearGradient(
+                                colors: [gradientStart, gradientEnd],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.22),
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: glowColor.withValues(alpha: 0.30),
+                                  blurRadius: 26,
+                                  spreadRadius: 1,
+                                  offset: const Offset(0, 14),
+                                ),
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.12),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: Transform(
+                              alignment: Alignment.center,
+                              transform: Matrix4.identity()
+                                ..rotateY(isBackFace ? math.pi : 0),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 5,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withValues(
+                                            alpha: 0.2,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            14,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          'Card ${idx + 1}',
+                                          style: GoogleFonts.inter(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.white,
+                                          ),
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      Transform.rotate(
+                                        angle: progress * math.pi,
+                                        child: Icon(
+                                          Icons.flip_rounded,
+                                          size: 20,
+                                          color: Colors.white.withValues(
+                                            alpha: 0.92,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    isBackFace ? 'Answer' : 'Question',
+                                    key: ValueKey<String>(
+                                      'flashcard_face_${idx}_$isBackFace',
+                                    ),
+                                    style: GoogleFonts.inter(
+                                      fontSize: 11,
+                                      letterSpacing: 0.8,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.white.withValues(
+                                        alpha: 0.92,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Expanded(
+                                    child: Center(
+                                      child: Text(
+                                        isBackFace ? card.back : card.front,
+                                        key: ValueKey<String>(
+                                          'flashcard_text_${idx}_'
+                                          '${isBackFace ? 'back' : 'front'}',
+                                        ),
+                                        textAlign: TextAlign.center,
+                                        style: GoogleFonts.inter(
+                                          fontSize: 17,
+                                          height: 1.45,
+                                          fontWeight: FontWeight.w700,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Tap to flip | Swipe for next card',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 11.5,
+                                      color: Colors.white.withValues(
+                                        alpha: 0.9,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      },
                     ),
-                    const Spacer(),
-                    Icon(
-                      flipped ? Icons.flip_to_back : Icons.flip_to_front,
-                      size: 18,
-                      color: Colors.white.withValues(alpha: 0.9),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  flipped ? 'Answer' : 'Question',
-                  style: GoogleFonts.inter(
-                    fontSize: 11,
-                    letterSpacing: 0.6,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white.withValues(alpha: 0.9),
                   ),
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  flipped ? card.back : card.front,
-                  style: GoogleFonts.inter(
-                    fontSize: 15,
-                    height: 1.5,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  'Tap card to flip',
-                  style: GoogleFonts.inter(
-                    fontSize: 11,
-                    color: Colors.white.withValues(alpha: 0.9),
-                  ),
-                ),
-              ],
-            ),
+              );
+            },
           ),
-        );
-      },
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: Row(
+            children: [
+              IconButton.filledTonal(
+                onPressed: currentIndex <= 0
+                    ? null
+                    : () => _animateToFlashcardIndex(currentIndex - 1),
+                icon: const Icon(Icons.chevron_left_rounded),
+              ),
+              const Spacer(),
+              Text(
+                '${currentIndex + 1} / ${cards.length}',
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? Colors.white70 : const Color(0xFF334155),
+                ),
+              ),
+              const Spacer(),
+              IconButton.filledTonal(
+                onPressed: currentIndex >= cards.length - 1
+                    ? null
+                    : () => _animateToFlashcardIndex(currentIndex + 1),
+                icon: const Icon(Icons.chevron_right_rounded),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 

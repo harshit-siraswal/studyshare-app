@@ -1,5 +1,4 @@
 import 'dart:async' show unawaited;
-import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter/material.dart';
 import 'package:flutter_linkify/flutter_linkify.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -13,6 +12,7 @@ import '../services/supabase_service.dart';
 import '../services/auth_service.dart';
 import '../models/department_account.dart';
 import '../screens/notices/notice_detail_screen.dart';
+import '../utils/youtube_link_utils.dart';
 
 class NoticeCard extends StatefulWidget {
   final Map<String, dynamic> notice;
@@ -114,290 +114,333 @@ class _NoticeCardState extends State<NoticeCard> {
     final commentCount = rawCount is int
         ? rawCount
         : int.tryParse(rawCount?.toString() ?? '');
+    final boardTop = widget.isDark
+        ? const Color(0xFF3A2F22)
+        : const Color(0xFFC79863);
+    final boardBottom = widget.isDark
+        ? const Color(0xFF2A2118)
+        : const Color(0xFFAA7C4C);
+    final paperTop = widget.isDark
+        ? cardColor.withValues(alpha: 0.95)
+        : const Color(0xFFFFF7E6);
+    final paperBottom = widget.isDark
+        ? cardColor.withValues(alpha: 0.82)
+        : const Color(0xFFF6E5BC);
+    final paperBorder = widget.isDark
+        ? borderColor.withValues(alpha: 0.85)
+        : const Color(0xFFD8BE88);
+
+    void openDetail() {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => NoticeDetailScreen(
+            notice: widget.notice,
+            account: widget.account,
+            collegeId:
+                widget.collegeId ??
+                widget.notice['college_id']?.toString() ??
+                '',
+          ),
+        ),
+      );
+    }
 
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      margin: const EdgeInsets.symmetric(vertical: 6),
       decoration: BoxDecoration(
-        color: cardColor,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: borderColor),
-        boxShadow: [
-          if (!widget.isDark)
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: <Color>[boardTop, boardBottom],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: widget.isDark
+              ? Colors.white.withValues(alpha: 0.06)
+              : const Color(0xFF8F6438).withValues(alpha: 0.35),
+        ),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: Colors.black.withValues(alpha: widget.isDark ? 0.25 : 0.14),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          ),
         ],
       ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: () {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => NoticeDetailScreen(
-                  notice: widget.notice,
-                  account: widget.account,
-                  collegeId:
-                      widget.collegeId ??
-                      widget.notice['college_id']?.toString() ??
-                      '',
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: <Widget>[
+          Positioned(top: 8, left: 22, child: _buildTapePiece(rotation: -0.18)),
+          Positioned(top: 8, right: 22, child: _buildTapePiece(rotation: 0.18)),
+          Positioned(
+            top: -8,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: const LinearGradient(
+                    colors: <Color>[Color(0xFFE34F47), Color(0xFFC8302A)],
+                  ),
+                  boxShadow: <BoxShadow>[
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.22),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.push_pin_rounded,
+                  size: 12,
+                  color: Colors.white,
                 ),
               ),
-            );
-          },
-          borderRadius: BorderRadius.circular(16),
-          child: Stack(
-            children: [
-              Positioned(
-                left: 0,
-                top: 0,
-                bottom: 0,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 18, 10, 10),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: openDetail,
+                borderRadius: BorderRadius.circular(14),
                 child: Container(
-                  width: 4,
                   decoration: BoxDecoration(
-                    color: widget.account.color,
-                    borderRadius: const BorderRadius.horizontal(
-                      left: Radius.circular(16),
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: <Color>[paperTop, paperBottom],
+                    ),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: paperBorder),
+                    boxShadow: <BoxShadow>[
+                      BoxShadow(
+                        color: Colors.black.withValues(
+                          alpha: widget.isDark ? 0.18 : 0.08,
+                        ),
+                        blurRadius: 12,
+                        offset: const Offset(0, 6),
+                      ),
+                    ],
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: widget.account.color,
+                                borderRadius: BorderRadius.circular(18),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  widget.account.avatarLetter,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: <Widget>[
+                                  Row(
+                                    children: <Widget>[
+                                      Flexible(
+                                        child: Text(
+                                          widget.account.name,
+                                          style: GoogleFonts.inter(
+                                            fontSize: 13.5,
+                                            fontWeight: FontWeight.w600,
+                                            color: textColor,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Icon(
+                                        Icons.verified_rounded,
+                                        size: 12,
+                                        color: AppTheme.primary,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 2,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: widget.isDark
+                                              ? Colors.white10
+                                              : Colors.black.withValues(
+                                                  alpha: 0.05,
+                                                ),
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          widget.account.handle,
+                                          style: GoogleFonts.inter(
+                                            fontSize: 10,
+                                            color: secondaryColor,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    children: <Widget>[
+                                      Text(
+                                        timeAgo,
+                                        style: GoogleFonts.inter(
+                                          fontSize: 11,
+                                          color: secondaryColor,
+                                        ),
+                                      ),
+                                      if (priority == 'urgent') ...[
+                                        const SizedBox(width: 8),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: AppTheme.error.withValues(
+                                              alpha: 0.16,
+                                            ),
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            'URGENT',
+                                            style: GoogleFonts.inter(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.w700,
+                                              color: AppTheme.error,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          title,
+                          style: GoogleFonts.inter(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                            color: textColor,
+                            height: 1.2,
+                          ),
+                        ),
+                        if (content.isNotEmpty) ...[
+                          const SizedBox(height: 8),
+                          Linkify(
+                            onOpen: (link) => _openNoticeLink(link.url),
+                            text: content,
+                            style: GoogleFonts.inter(
+                              fontSize: 13.5,
+                              color: secondaryColor,
+                              height: 1.35,
+                            ),
+                            linkStyle: GoogleFonts.inter(
+                              fontSize: 13.5,
+                              color: AppTheme.primary,
+                              decoration: TextDecoration.underline,
+                              height: 1.35,
+                            ),
+                            maxLines: 4,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        Row(
+                          children: <Widget>[
+                            _buildActionButton(
+                              icon: Icons.mode_comment_outlined,
+                              count: commentCount != null
+                                  ? '$commentCount'
+                                  : 'Comment',
+                              color: secondaryColor,
+                              onTap: openDetail,
+                            ),
+                            const Spacer(),
+                            InkWell(
+                              onTap: _isLoading ? null : _toggleSaved,
+                              borderRadius: BorderRadius.circular(20),
+                              child: Padding(
+                                padding: const EdgeInsets.all(8),
+                                child: Icon(
+                                  _isSaved
+                                      ? Icons.bookmark_rounded
+                                      : Icons.bookmark_border_rounded,
+                                  size: 20,
+                                  color: _isSaved
+                                      ? AppTheme.primary
+                                      : secondaryColor,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            _buildActionButton(
+                              icon: Icons.share_outlined,
+                              count: 'Share',
+                              color: secondaryColor,
+                              onTap: _shareAsImage,
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // Header
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Container(
-                          width: 38,
-                          height: 38,
-                          decoration: BoxDecoration(
-                            color: widget.account.color,
-                            borderRadius: BorderRadius.circular(19),
-                          ),
-                          child: Center(
-                            child: Text(
-                              widget.account.avatarLetter,
-                              style: GoogleFonts.inter(
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Flexible(
-                                    child: Text(
-                                      widget.account.name,
-                                      style: GoogleFonts.inter(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w600,
-                                        color: textColor,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Icon(
-                                    Icons.verified_rounded,
-                                    size: 12,
-                                    color: AppTheme.primary,
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: widget.isDark
-                                          ? Colors.white10
-                                          : Colors.black.withValues(
-                                              alpha: 0.06,
-                                            ),
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    child: Text(
-                                      widget.account.handle,
-                                      style: GoogleFonts.inter(
-                                        fontSize: 10,
-                                        color: secondaryColor,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Row(
-                                children: [
-                                  Text(
-                                    timeAgo,
-                                    style: GoogleFonts.inter(
-                                      fontSize: 11,
-                                      color: secondaryColor,
-                                    ),
-                                  ),
-                                  if (priority == 'urgent') ...[
-                                    const SizedBox(width: 8),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 2,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: AppTheme.error.withValues(
-                                          alpha: 0.15,
-                                        ),
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      child: Text(
-                                        'URGENT',
-                                        style: GoogleFonts.inter(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w600,
-                                          color: AppTheme.error,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
-                    // Title
-                    Text(
-                      title,
-                      style: GoogleFonts.inter(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: textColor,
-                      ),
-                    ),
-                    if (content.isNotEmpty) ...[
-                      const SizedBox(height: 8),
-                      Linkify(
-                        onOpen: (link) async {
-                          try {
-                            final uri = Uri.tryParse(link.url);
-                            if (uri != null) {
-                              final launched = await launchUrl(
-                                uri,
-                                mode: LaunchMode.externalApplication,
-                              );
-                              if (!launched && mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      'Could not open: ${link.url}',
-                                    ),
-                                  ),
-                                );
-                              }
-                            }
-                          } catch (e) {
-                            debugPrint('Failed to launch URL: $e');
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Unable to open link'),
-                                ),
-                              );
-                            }
-                          }
-                        },
-                        text: content,
-                        style: GoogleFonts.inter(
-                          fontSize: 14,
-                          color: secondaryColor,
-                          height: 1.4,
-                        ),
-                        linkStyle: GoogleFonts.inter(
-                          fontSize: 14,
-                          color: AppTheme.primary,
-                          decoration: TextDecoration.underline,
-                          height: 1.4,
-                        ),
-                        maxLines: 4,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-
-                    const SizedBox(height: 12),
-
-                    // Actions
-                    Row(
-                      children: [
-                        _buildActionButton(
-                          icon: Icons.mode_comment_outlined,
-                          count: commentCount != null
-                              ? '$commentCount'
-                              : 'Comment',
-                          color: secondaryColor,
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => NoticeDetailScreen(
-                                  notice: widget.notice,
-                                  account: widget.account,
-                                  collegeId:
-                                      widget.collegeId ??
-                                      widget.notice['college_id']?.toString() ??
-                                      '',
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                        const Spacer(),
-                        // Bookmark Button
-                        InkWell(
-                          onTap: _isLoading ? null : _toggleSaved,
-                          borderRadius: BorderRadius.circular(20),
-                          child: Padding(
-                            padding: const EdgeInsets.all(8.0),
-                            child: Icon(
-                              _isSaved
-                                  ? Icons.bookmark_rounded
-                                  : Icons.bookmark_border_rounded,
-                              size: 20,
-                              color: _isSaved
-                                  ? AppTheme.primary
-                                  : secondaryColor,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        _buildActionButton(
-                          icon: Icons.share_outlined,
-                          count: 'Share',
-                          color: secondaryColor,
-                          onTap: _shareAsImage,
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
+  Widget _buildTapePiece({required double rotation}) {
+    final tapeColor = widget.isDark
+        ? const Color(0x55E7D7AF)
+        : const Color(0x99F4E7C9);
+    return Transform.rotate(
+      angle: rotation,
+      child: Container(
+        width: 44,
+        height: 14,
+        decoration: BoxDecoration(
+          color: tapeColor,
+          borderRadius: BorderRadius.circular(3),
+          border: Border.all(
+            color: widget.isDark
+                ? Colors.white.withValues(alpha: 0.08)
+                : Colors.white.withValues(alpha: 0.35),
           ),
         ),
       ),
@@ -413,8 +456,19 @@ class _NoticeCardState extends State<NoticeCard> {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(20),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: widget.isDark
+              ? Colors.white.withValues(alpha: 0.06)
+              : Colors.black.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: widget.isDark
+                ? Colors.white.withValues(alpha: 0.10)
+                : Colors.black.withValues(alpha: 0.08),
+          ),
+        ),
         child: Row(
           children: [
             Icon(icon, size: 16, color: color),
@@ -442,6 +496,37 @@ class _NoticeCardState extends State<NoticeCard> {
       return '${date.day}/${date.month}/${date.year}';
     } catch (e) {
       return '';
+    }
+  }
+
+  /// Share the notice as a PNG image instead of plain text.
+  Future<void> _openNoticeLink(String rawUrl) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final uri = buildExternalUri(rawUrl);
+      if (uri == null) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('Could not open: $rawUrl')),
+        );
+        return;
+      }
+
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!mounted) return;
+      if (!launched) {
+        messenger.showSnackBar(
+          SnackBar(content: Text('Could not open: $rawUrl')),
+        );
+      }
+    } catch (e) {
+      debugPrint('Failed to launch URL: $e');
+      if (!mounted) return;
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Unable to open link')),
+      );
     }
   }
 
@@ -551,9 +636,12 @@ class _NoticeCardState extends State<NoticeCard> {
       try {
         await file.writeAsBytes(bytes);
 
-        await Share.shareXFiles([
-          XFile(file.path),
-        ], text: 'Check out this notice on StudyShare!');
+        await SharePlus.instance.share(
+          ShareParams(
+            files: [XFile(file.path)],
+            text: 'Check out this notice on StudyShare!',
+          ),
+        );
       } finally {
         // Delay deletion to avoid Android race condition
         unawaited(
@@ -575,6 +663,3 @@ class _NoticeCardState extends State<NoticeCard> {
     }
   }
 }
-
-
-
