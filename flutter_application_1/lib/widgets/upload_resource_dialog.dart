@@ -304,9 +304,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
         final userInfo = await supabaseService.getUserInfo(widget.userEmail);
         if (userInfo != null) {
           final role = userInfo['role']?.toString().toLowerCase();
-          final adminKey = userInfo['admin_key']?.toString().trim() ?? '';
-          if (adminKey.isNotEmpty ||
-              (role != null && _teacherSourceRoles.contains(role))) {
+          if (role != null && _teacherSourceRoles.contains(role)) {
             uploaderSource = 'teacher';
           }
         }

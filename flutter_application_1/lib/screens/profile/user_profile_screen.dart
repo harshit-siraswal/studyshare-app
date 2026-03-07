@@ -10,7 +10,9 @@ import '../../models/resource.dart';
 import '../../models/user.dart';
 import 'following_screen.dart';
 import '../../widgets/full_screen_image_viewer.dart';
+import '../../widgets/user_badge.dart';
 import 'edit_profile_screen.dart';
+import '../../utils/admin_access.dart';
 
 class UserProfileScreen extends StatefulWidget {
   final String userEmail;
@@ -45,11 +47,11 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   String? _fetchedBio;
   String? _fetchedDisplayName;
   String _viewerRole = AppRoles.readOnly;
-  String? _viewerAdminKey;
   String? _viewerCollegeId;
   String? _profileCollegeId;
   bool _banLoading = false;
   bool _isBanned = false;
+  bool _viewerCanBanUsers = false;
 
   @override
   void initState() {
@@ -66,40 +68,49 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     try {
       final currentUserEmail = _authService.userEmail;
 
-      // 1. Parallelize independent fetches with type-safe variable awaiting
       final statsFuture = _supabaseService.getUserStats(widget.userEmail);
-      final followersFuture = _supabaseService.getFollowersCount(
-        widget.userEmail,
-      );
-      final followingFuture = _supabaseService.getFollowingCount(
-        widget.userEmail,
-      );
       final resourcesFuture = _supabaseService.getUserResources(
         widget.userEmail,
       );
       final userInfoFuture = _supabaseService.getUserInfo(widget.userEmail);
-      final currentProfileFuture = _supabaseService.getCurrentUserProfile();
+      final currentProfileFuture = _supabaseService.getCurrentUserProfile(
+        maxAttempts: 1,
+      );
       final statusFuture = currentUserEmail != null
           ? _supabaseService.getFollowStatus(currentUserEmail, widget.userEmail)
           : Future.value(FollowStatus.notFollowing);
 
-      final stats = await statsFuture;
-      final followers = await followersFuture;
-      final following = await followingFuture;
-      final resources = await resourcesFuture;
-      final userInfo = await userInfoFuture;
-      final currentProfile = await currentProfileFuture;
-      final status = await statusFuture;
-      final viewerAdminKey = currentProfile['admin_key']?.toString().trim();
+      final results = await Future.wait<dynamic>([
+        statsFuture,
+        resourcesFuture,
+        userInfoFuture,
+        currentProfileFuture,
+        statusFuture,
+      ]);
+
+      final stats =
+          (results[0] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
+      final resources = (results[1] as List?)?.cast<Resource>() ?? <Resource>[];
+      final userInfo = results[2] as Map<String, dynamic>?;
+      final currentProfile =
+          (results[3] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
+      final status = results[4] as FollowStatus;
+
+      final followers = (stats['followers'] as num?)?.toInt() ?? 0;
+      final following = (stats['following'] as num?)?.toInt() ?? 0;
+      final uploads =
+          ((stats['uploads'] ?? stats['contributions']) as num?)?.toInt() ?? 0;
+
       final viewerCollegeId = currentProfile['college_id']?.toString().trim();
       final profileCollegeId =
           userInfo?['college_id']?.toString().trim() ??
           userInfo?['collegeId']?.toString().trim();
-      final viewerRole = _resolveProfileRole(currentProfile);
+      final viewerRole = resolveEffectiveProfileRole(currentProfile);
+      final viewerCanBanUsers = canBanUsersProfile(currentProfile);
       final isBanned = _resolveBanStatus(userInfo);
       if (mounted) {
         setState(() {
-          _uploadCount = stats['uploads'] ?? stats['contributions'] ?? 0;
+          _uploadCount = uploads;
           _followersCount = followers;
           _followingCount = following;
           _userResources = resources;
@@ -110,7 +121,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           _fetchedBio = userInfo?['bio']?.toString();
           _fetchedDisplayName = userInfo?['display_name']?.toString();
           _viewerRole = viewerRole;
-          _viewerAdminKey = viewerAdminKey;
+          _viewerCanBanUsers = viewerCanBanUsers;
           _viewerCollegeId = viewerCollegeId;
           _profileCollegeId = profileCollegeId;
           _isBanned = isBanned;
@@ -156,7 +167,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       !_isSelfProfile &&
       !_isBanned &&
       _isTeacherOrAdminViewer &&
-      (_viewerAdminKey?.trim().isNotEmpty ?? false);
+      _viewerCanBanUsers;
 
   bool _resolveBanStatus(Map<String, dynamic>? userInfo) {
     if (userInfo == null) return false;
@@ -199,33 +210,6 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       }
     }
     return false;
-  }
-
-  // Role elevation rules: ADMIN and TEACHER map directly to AppRoles.admin and
-  // AppRoles.teacher. When hasAdminKey is true, specific rawRole values
-  // (MODERATOR, COLLEGE_USER/STUDENT, READ_ONLY, and default fallback) are
-  // elevated to AppRoles.teacher; otherwise they map to their non-elevated
-  // AppRoles variants.
-  String _resolveProfileRole(Map<String, dynamic> profile) {
-    final rawRole = profile['role']?.toString().trim().toUpperCase() ?? '';
-    final hasAdminKey =
-        (profile['admin_key']?.toString().trim().isNotEmpty ?? false);
-
-    switch (rawRole) {
-      case 'ADMIN':
-        return AppRoles.admin;
-      case 'MODERATOR':
-        return hasAdminKey ? AppRoles.teacher : AppRoles.moderator;
-      case 'TEACHER':
-        return AppRoles.teacher;
-      case 'COLLEGE_USER':
-      case 'STUDENT':
-        return hasAdminKey ? AppRoles.teacher : AppRoles.collegeUser;
-      case 'READ_ONLY':
-        return hasAdminKey ? AppRoles.teacher : AppRoles.readOnly;
-      default:
-        return hasAdminKey ? AppRoles.teacher : AppRoles.collegeUser;
-    }
   }
 
   @override
@@ -444,6 +428,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                     color: textColor,
                                   ),
                                 ),
+                                const SizedBox(width: 6),
+                                UserBadge(email: widget.userEmail, size: 18),
                               ],
                             ),
                             const SizedBox(height: 4),
@@ -721,7 +707,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   }
 
   Future<void> _handleBanUser() async {
-    if (!_canBanViewedUser || _viewerAdminKey == null) return;
+    if (!_canBanViewedUser) return;
 
     final reasonController = TextEditingController();
     final reason = await showDialog<String?>(
@@ -778,7 +764,6 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     try {
       final response = await _backendApiService.banUserAsAdmin(
         email: widget.userEmail,
-        adminKey: _viewerAdminKey!,
         reason: reason.isEmpty ? null : reason,
         collegeId: (_viewerCollegeId?.isNotEmpty ?? false)
             ? _viewerCollegeId

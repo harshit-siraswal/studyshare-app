@@ -6,6 +6,7 @@ import '../../models/user.dart';
 import '../../services/supabase_service.dart';
 import '../viewer/pdf_viewer_screen.dart';
 import '../../data/academic_subjects_data.dart';
+import '../../utils/admin_access.dart';
 
 class SyllabusScreen extends StatefulWidget {
   final String collegeId;
@@ -52,18 +53,12 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
       final profile = await _supabaseService.getCurrentUserProfile(
         maxAttempts: 1,
       );
-      final role = await _supabaseService.getCurrentUserRole();
-      final hasAdminKey =
-          profile['admin_key']?.toString().trim().isNotEmpty == true;
-      // TODO: uploadSyllabus must enforce admin_key verification server-side;
-      // client-side key presence must never be the sole authorization gate.
       if (mounted) {
         setState(() {
           _isTeacherOrAdmin =
-              role == AppRoles.teacher ||
-              role == AppRoles.admin ||
-              role == AppRoles.moderator ||
-              hasAdminKey;
+              canUploadSyllabusProfile(profile) ||
+              isTeacherOrAdminProfile(profile) ||
+              resolveEffectiveProfileRole(profile) == AppRoles.moderator;
         });
       }
     } catch (e, st) {

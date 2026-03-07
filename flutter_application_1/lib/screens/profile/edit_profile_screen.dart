@@ -1,15 +1,15 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:file_picker/file_picker.dart';
 import 'package:image_cropper/image_cropper.dart';
-import 'dart:io';
 import 'package:path/path.dart' as p;
+
 import '../../config/theme.dart';
+import '../../data/academic_subjects_data.dart';
 import '../../services/backend_api_service.dart';
 import '../../services/cloudinary_service.dart';
-import '../../data/departments_data.dart';
-import '../../data/academic_subjects_data.dart';
-import '../../models/user.dart';
 
 class EditProfileScreen extends StatefulWidget {
   final String initialName;
@@ -18,8 +18,7 @@ class EditProfileScreen extends StatefulWidget {
   final String? initialSemester;
   final String? initialBranch;
   final String? initialSubject;
-  final String role; // Need to know if they are a TEACHER
-  final String? initialAdminKey;
+  final String role;
 
   const EditProfileScreen({
     super.key,
@@ -30,7 +29,6 @@ class EditProfileScreen extends StatefulWidget {
     this.initialBranch,
     this.initialSubject,
     required this.role,
-    this.initialAdminKey,
   });
 
   @override
@@ -39,20 +37,18 @@ class EditProfileScreen extends StatefulWidget {
 
 class _EditProfileScreenState extends State<EditProfileScreen> {
   static const List<String> _semesterOptions = semesterOptions;
+
   final _api = BackendApiService();
   late final TextEditingController _nameController;
   late final TextEditingController _bioController;
-  late final TextEditingController _adminKeyController;
   late final TextEditingController _subjectController;
+
   String? _selectedSemester;
   String? _selectedBranch;
   String? _selectedSubject;
   List<String> _availableSubjects = [];
-  List<DepartmentData> _departments = [];
-  bool _loadingDepartments = true;
   PlatformFile? _pickedImage;
   bool _saving = false;
-  bool _departmentsEmpty = false;
 
   List<String> _uniqueNonEmptyOptions(Iterable<String> options) {
     final seen = <String>{};
@@ -87,98 +83,64 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return _semesterOptions.contains(normalized) ? normalized : null;
   }
 
+  String? _normalizedBranch(String? value) {
+    final normalized = normalizeBranchCode(value);
+    if (normalized.isEmpty) return null;
+    final knownBranch = branchOptions.any(
+      (option) => option.value == normalized,
+    );
+    return knownBranch ? normalized : null;
+  }
+
   @override
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.initialName);
     _bioController = TextEditingController(text: widget.initialBio ?? '');
-    _adminKeyController = TextEditingController(
-      text: widget.initialAdminKey ?? '',
-    );
     _selectedSemester = _normalizedSemester(widget.initialSemester);
-    _selectedBranch = _normalizedSelection(widget.initialBranch);
+    _selectedBranch = _normalizedBranch(widget.initialBranch);
     _selectedSubject = _normalizedSelection(widget.initialSubject);
     _subjectController = TextEditingController(text: _selectedSubject ?? '');
     _refreshSubjectOptionsForBranch(
       _selectedBranch,
       keepExistingSelection: true,
+      preserveCustomInput: true,
     );
-    _loadDepartments();
   }
 
   void _refreshSubjectOptionsForBranch(
     String? branch, {
     bool keepExistingSelection = false,
+    bool preserveCustomInput = false,
   }) {
     final subjects = getSubjectsForBranchAndSemester(branch, _selectedSemester);
     _availableSubjects = _uniqueNonEmptyOptions(subjects);
-    final typedSubject = _subjectController.text.trim();
-    if (typedSubject.isNotEmpty) {
-      _selectedSubject = typedSubject;
-    } else if (!keepExistingSelection) {
-      _selectedSubject = null;
-    }
-  }
 
-  Future<void> _loadDepartments() async {
-    try {
-      final deps = await DepartmentsProvider.getDepartments();
-      if (!mounted) return;
-      setState(() {
-        if (deps.isEmpty) {
-          _departments = [];
-          _departmentsEmpty = true;
-          _selectedBranch = null;
-          _refreshSubjectOptionsForBranch(null);
-        } else {
-          _departments = deps;
-          _departmentsEmpty = false;
-          if (_selectedBranch != null) {
-            final normalizedBranchCode = normalizeBranchCode(_selectedBranch);
-            final matched = deps.firstWhere(
-              (d) =>
-                  normalizeBranchCode(d.name) == normalizedBranchCode ||
-                  normalizeBranchCode(d.full) == normalizedBranchCode,
-              orElse: () => const DepartmentData(
-                name: '',
-                full: '',
-                color: Color(0x00000000),
-              ),
-            );
-            if (matched.name.isNotEmpty) {
-              _selectedBranch = matched.name;
-            } else {
-              _selectedBranch = null;
-            }
-          }
-          _refreshSubjectOptionsForBranch(
-            _selectedBranch,
-            keepExistingSelection: true,
-          );
-        }
-        _loadingDepartments = false;
-      });
-    } catch (e, st) {
-      debugPrint('Error loading departments: $e\n$st');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to load departments.')),
-      );
-      setState(() {
-        _departments = [];
-        _departmentsEmpty = true;
-        _selectedBranch = null;
-        _refreshSubjectOptionsForBranch(null);
-        _loadingDepartments = false;
-      });
+    final currentSubject = _normalizedSelection(_subjectController.text);
+    if (currentSubject == null) {
+      _selectedSubject = null;
+      if (!preserveCustomInput) {
+        _subjectController.clear();
+      }
+      return;
     }
+
+    final canKeepCurrentSubject =
+        keepExistingSelection &&
+        (preserveCustomInput || _availableSubjects.contains(currentSubject));
+    if (canKeepCurrentSubject) {
+      _selectedSubject = currentSubject;
+      return;
+    }
+
+    _selectedSubject = null;
+    _subjectController.clear();
   }
 
   @override
   void dispose() {
     _nameController.dispose();
     _bioController.dispose();
-    _adminKeyController.dispose();
     _subjectController.dispose();
     super.dispose();
   }
@@ -188,15 +150,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       type: FileType.image,
       withData: true,
     );
-    if (result != null && result.files.isNotEmpty) {
-      final file = result.files.first;
-      if (file.path != null) {
-        await _cropImage(file.path!);
-      } else {
-        // Fallback for web or if path is null
-        setState(() => _pickedImage = file);
-      }
+    if (result == null || result.files.isEmpty) return;
+
+    final file = result.files.first;
+    if (file.path != null) {
+      await _cropImage(file.path!);
+      return;
     }
+
+    setState(() => _pickedImage = file);
   }
 
   Future<void> _cropImage(String sourcePath) async {
@@ -215,26 +177,26 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         ],
       );
 
-      if (croppedFile != null) {
-        final file = File(croppedFile.path);
-        final bytes = await file.readAsBytes();
-        if (!mounted) return;
-        setState(() {
-          _pickedImage = PlatformFile(
-            name: p.basename(croppedFile.path),
-            size: bytes.length,
-            path: croppedFile.path,
-            bytes: bytes,
-          );
-        });
-      }
+      if (croppedFile == null) return;
+
+      final file = File(croppedFile.path);
+      final bytes = await file.readAsBytes();
+      if (!mounted) return;
+
+      setState(() {
+        _pickedImage = PlatformFile(
+          name: p.basename(croppedFile.path),
+          size: bytes.length,
+          path: croppedFile.path,
+          bytes: bytes,
+        );
+      });
     } catch (e) {
       debugPrint('Error cropping image: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Failed to crop image')));
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Failed to crop image')));
     }
   }
 
@@ -255,41 +217,36 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       if (_pickedImage != null) {
         photoUrl = await CloudinaryService.uploadFile(_pickedImage!);
       }
+
+      final normalizedSemester = _normalizedSemester(_selectedSemester);
+      final normalizedBranch = _normalizedBranch(_selectedBranch);
       final normalizedSubject = _normalizedSelection(
         _subjectController.text.trim(),
       );
-      final normalizedBranch = normalizeBranchCode(_selectedBranch);
-      final normalizedAdminKey = _adminKeyController.text.trim();
-      final canSubmitAdminKey =
-          widget.role == AppRoles.teacher || widget.role == AppRoles.admin;
 
       if (!mounted) return;
-      final res = await _api.updateProfile(
+      final response = await _api.updateProfile(
         displayName: name,
         bio: _bioController.text.trim(),
         profilePhotoUrl: photoUrl,
-        semester: _selectedSemester,
-        branch: normalizedBranch.isEmpty ? _selectedBranch : normalizedBranch,
-        subject: normalizedSubject,
-        adminKey: canSubmitAdminKey && normalizedAdminKey.isNotEmpty
-            ? normalizedAdminKey
-            : null,
+        semester: normalizedSemester ?? '',
+        branch: normalizedBranch ?? '',
+        subject: normalizedSubject ?? '',
         context: context,
       );
 
       if (!mounted) return;
-      Navigator.pop(context, res['profile']);
+      Navigator.pop(context, response['profile']);
     } catch (e) {
-      debugPrint('Error updating profile: $e'); // Log full error
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Failed to update profile'),
-          ), // Generic message
-        );
-      }
+      debugPrint('Error updating profile: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Failed to update profile')));
     } finally {
-      if (mounted) setState(() => _saving = false);
+      if (mounted) {
+        setState(() => _saving = false);
+      }
     }
   }
 
@@ -306,6 +263,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return null;
   }
 
+  String _subjectHintText(List<String> subjectOptions) {
+    if (_selectedBranch == null) {
+      return 'Select branch first';
+    }
+    if (subjectOptions.isEmpty) {
+      return 'No subjects found';
+    }
+    return 'Select subject';
+  }
+
+  String nameInitial(String name) =>
+      name.isNotEmpty ? name[0].toUpperCase() : 'U';
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -314,15 +284,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       _selectedSemester,
       _semesterOptions,
     );
-    final branchOptions = _uniqueNonEmptyOptions(
-      _departments.map((dep) => dep.name),
-    );
-    final branchValue = _safeDropdownValue(_selectedBranch, branchOptions);
+    final branchValues = branchOptions.map((option) => option.value).toList();
+    final branchValue = _safeDropdownValue(_selectedBranch, branchValues);
     final subjectOptions = _uniqueNonEmptyOptions(_availableSubjects);
-    final subjectValue = _safeDropdownValue(
-      _subjectController.text.trim(),
-      subjectOptions,
-    );
+    final subjectValue = _safeDropdownValue(_selectedSubject, subjectOptions);
 
     return Scaffold(
       backgroundColor: bg,
@@ -428,14 +393,16 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                     ),
                     items: _semesterOptions
                         .map(
-                          (sem) =>
-                              DropdownMenuItem(value: sem, child: Text(sem)),
+                          (semester) => DropdownMenuItem(
+                            value: semester,
+                            child: Text(semester),
+                          ),
                         )
                         .toList(),
                     onChanged: _saving
                         ? null
-                        : (val) => setState(() {
-                            _selectedSemester = val;
+                        : (value) => setState(() {
+                            _selectedSemester = value;
                             _refreshSubjectOptionsForBranch(
                               _selectedBranch,
                               keepExistingSelection: true,
@@ -445,42 +412,48 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 ),
                 const SizedBox(width: 16),
                 Expanded(
-                  child: _loadingDepartments
-                      ? const Center(child: CircularProgressIndicator())
-                      : DropdownButtonFormField<String>(
-                          key: ValueKey(
-                            'branch-${branchOptions.join('|')}-${branchValue ?? ''}',
-                          ),
-                          isExpanded: true,
-                          value: branchValue,
-                          decoration: InputDecoration(
-                            labelText: 'Branch',
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
+                  child: DropdownButtonFormField<String>(
+                    key: ValueKey('branch-${branchValue ?? ''}'),
+                    isExpanded: true,
+                    value: branchValue,
+                    decoration: InputDecoration(
+                      labelText: 'Branch',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    selectedItemBuilder: (context) => branchOptions
+                        .map(
+                          (option) => Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              option.shortLabel,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          items: _departmentsEmpty
-                              ? [
-                                  const DropdownMenuItem(
-                                    value: null,
-                                    child: Text("No departments available"),
-                                  ),
-                                ]
-                              : branchOptions
-                                    .map(
-                                      (depName) => DropdownMenuItem(
-                                        value: depName,
-                                        child: Text(depName),
-                                      ),
-                                    )
-                                    .toList(),
-                          onChanged: _saving || _departmentsEmpty
-                              ? null
-                              : (val) => setState(() {
-                                  _selectedBranch = val;
-                                  _refreshSubjectOptionsForBranch(val);
-                                }),
-                        ),
+                        )
+                        .toList(),
+                    items: branchOptions
+                        .map(
+                          (option) => DropdownMenuItem(
+                            value: option.value,
+                            child: Text(
+                              option.label,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: _saving
+                        ? null
+                        : (value) => setState(() {
+                            _selectedBranch = value;
+                            _refreshSubjectOptionsForBranch(
+                              value,
+                              keepExistingSelection: true,
+                            );
+                          }),
+                  ),
                 ),
               ],
             ),
@@ -497,13 +470,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
-              hint: Text(
-                _selectedBranch == null
-                    ? 'Select branch first'
-                    : (subjectOptions.isEmpty
-                          ? 'No subjects found'
-                          : 'Select subject'),
-              ),
+              hint: Text(_subjectHintText(subjectOptions)),
               items: subjectOptions
                   .map(
                     (subject) =>
@@ -538,28 +505,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 });
               },
             ),
-            if (widget.role == AppRoles.teacher ||
-                widget.role == AppRoles.admin) ...[
-              const SizedBox(height: 16),
-              TextField(
-                controller: _adminKeyController,
-                enabled: !_saving,
-                obscureText: true,
-                decoration: InputDecoration(
-                  labelText: 'Admin Key (Optional)',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  prefixIcon: const Icon(Icons.key),
-                ),
-              ),
-            ],
           ],
         ),
       ),
     );
   }
-
-  String nameInitial(String name) =>
-      name.isNotEmpty ? name[0].toUpperCase() : 'U';
 }

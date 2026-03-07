@@ -149,8 +149,14 @@ class BackendApiService {
     Map<String, dynamic>? body,
     Duration timeout = _requestTimeout,
     bool requireAuthToken = false,
+    String? bearerOverride,
   }) async {
-    String? token = await _getIdToken();
+    final trimmedBearerOverride = bearerOverride?.trim();
+    final usesBearerOverride =
+        trimmedBearerOverride != null && trimmedBearerOverride.isNotEmpty;
+    String? token = usesBearerOverride
+        ? trimmedBearerOverride
+        : await _getIdToken();
     if (requireAuthToken && (token == null || token.isEmpty)) {
       throw Exception('Authentication required');
     }
@@ -167,7 +173,8 @@ class BackendApiService {
 
     var res = await _sendRequest(method, uri, headers, effectiveBody, timeout);
 
-    if (res.statusCode == 401 || res.statusCode == 403) {
+    if (!usesBearerOverride &&
+        (res.statusCode == 401 || res.statusCode == 403)) {
       final refreshedToken = await _getIdToken(forceRefresh: true);
       final shouldRetry =
           refreshedToken != null &&
@@ -531,24 +538,35 @@ class BackendApiService {
     String? branch,
     String? semester,
     String? subject,
-    String? adminKey,
     required BuildContext context,
   }) async {
-    return _requestJson(
-      '/api/users/profile',
-      method: 'PUT',
-      body: {
-        'display_name': ?displayName,
-        'username': ?username,
-        'bio': ?bio,
-        'profile_photo_url': ?profilePhotoUrl,
-        'college': ?college,
-        'branch': ?branch,
-        'semester': ?semester,
-        'subject': ?subject,
-        'admin_key': ?adminKey,
-      },
-    );
+    final body = <String, dynamic>{};
+    if (displayName != null) {
+      body['display_name'] = displayName.trim();
+    }
+    if (username != null) {
+      body['username'] = username.trim();
+    }
+    if (bio != null) {
+      body['bio'] = bio.trim();
+    }
+    if (profilePhotoUrl != null) {
+      body['profile_photo_url'] = profilePhotoUrl.trim();
+    }
+    if (college != null) {
+      body['college'] = college.trim();
+    }
+    if (branch != null) {
+      body['branch'] = branch.trim();
+    }
+    if (semester != null) {
+      body['semester'] = semester.trim();
+    }
+    if (subject != null) {
+      body['subject'] = subject.trim();
+    }
+
+    return _requestJson('/api/users/profile', method: 'PUT', body: body);
   }
 
   // ----------------------------
@@ -719,119 +737,51 @@ class BackendApiService {
   Future<void> updateResourceStatus({
     required String resourceId,
     required String status,
-    required String adminKey,
+    String? bearerToken,
     required BuildContext context,
   }) async {
-    final uri = Uri.parse(
-      '$_baseUrl/api/admin/resources/${Uri.encodeComponent(resourceId)}/status',
+    await _requestJson(
+      '/api/admin/resources/${Uri.encodeComponent(resourceId)}/status',
+      method: 'PATCH',
+      body: {'status': status},
+      bearerOverride: bearerToken,
+      requireAuthToken: true,
     );
-    final res = await _httpClient
-        .patch(
-          uri,
-          headers: {
-            'Content-Type': 'application/json',
-            // Admin endpoints authenticate via bearer admin key/hash.
-            'Authorization': 'Bearer $adminKey',
-          },
-          body: jsonEncode({'status': status}),
-        )
-        .timeout(_requestTimeout);
-
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      String message = 'Failed to update resource status';
-      try {
-        final data = jsonDecode(res.body) as Map<String, dynamic>;
-        message =
-            data['message']?.toString() ?? data['error']?.toString() ?? message;
-      } catch (_) {
-        if (res.body.trim().isNotEmpty) {
-          message = res.body;
-        }
-      }
-      throw Exception(message);
-    }
   }
 
   Future<void> deleteResourceAsAdmin({
     required String resourceId,
-    required String adminKey,
+    String? bearerToken,
   }) async {
-    final uri = Uri.parse(
-      '$_baseUrl/api/admin/resources/${Uri.encodeComponent(resourceId)}',
+    await _requestJson(
+      '/api/admin/resources/${Uri.encodeComponent(resourceId)}',
+      method: 'DELETE',
+      bearerOverride: bearerToken,
+      requireAuthToken: true,
     );
-    final res = await _httpClient
-        .delete(
-          uri,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $adminKey',
-          },
-        )
-        .timeout(_requestTimeout);
-
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      String message = 'Failed to delete resource';
-      try {
-        final data = jsonDecode(res.body) as Map<String, dynamic>;
-        message =
-            data['message']?.toString() ?? data['error']?.toString() ?? message;
-      } catch (_) {
-        if (res.body.trim().isNotEmpty) {
-          message = res.body;
-        }
-      }
-      throw Exception(message);
-    }
   }
 
   Future<Map<String, dynamic>> banUserAsAdmin({
     required String email,
-    required String adminKey,
+    String? bearerToken,
     String? reason,
     String? collegeId,
   }) async {
-    final uri = Uri.parse('$_baseUrl/api/admin/users-ban');
-    final res = await _httpClient
-        .post(
-          uri,
-          headers: {
-            'Content-Type': 'application/json',
-            // Keep parity with admin-studyspace: bearer admin key/hash auth.
-            'Authorization': 'Bearer $adminKey',
-          },
-          body: jsonEncode({
-            'email': email.trim().toLowerCase(),
-            'reason': ?reason,
-            'collegeId': ?collegeId,
-          }),
-        )
-        .timeout(_requestTimeout);
-
-    Map<String, dynamic> data = <String, dynamic>{};
-    try {
-      final parsed = jsonDecode(res.body);
-      if (parsed is Map<String, dynamic>) {
-        data = parsed;
-      } else if (parsed is Map) {
-        data = Map<String, dynamic>.from(parsed);
-      }
-    } catch (_) {
-      // Preserve best-effort message fallback below.
-    }
-
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      final message =
-          data['message']?.toString() ??
-          data['error']?.toString() ??
-          (res.body.trim().isNotEmpty ? res.body : 'Failed to ban user');
-      throw Exception(message);
-    }
-
-    return data;
+    return _requestJson(
+      '/api/admin/users-ban',
+      method: 'POST',
+      body: {
+        'email': email.trim().toLowerCase(),
+        'reason': ?reason,
+        'collegeId': ?collegeId,
+      },
+      bearerOverride: bearerToken,
+      requireAuthToken: true,
+    );
   }
 
   Future<List<Map<String, dynamic>>> listAdminResources({
-    required String adminKey,
+    String? bearerToken,
     String? collegeId,
     String? status,
     String? semester,
@@ -853,40 +803,15 @@ class BackendApiService {
         'subject': subject.trim(),
     };
 
-    final uri = Uri.parse(
-      '$_baseUrl/api/admin/resources',
-    ).replace(queryParameters: queryParams);
-    final res = await _httpClient
-        .get(
-          uri,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer $adminKey',
-          },
-        )
-        .timeout(_requestTimeout);
-
-    Map<String, dynamic> data = <String, dynamic>{};
-    try {
-      final parsed = jsonDecode(res.body);
-      if (parsed is Map<String, dynamic>) {
-        data = parsed;
-      } else if (parsed is Map) {
-        data = Map<String, dynamic>.from(parsed);
-      }
-    } catch (_) {
-      // Preserve best-effort fallback below.
-    }
-
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      final message =
-          data['message']?.toString() ??
-          data['error']?.toString() ??
-          (res.body.trim().isNotEmpty
-              ? res.body
-              : 'Failed to load admin resources');
-      throw Exception(message);
-    }
+    final data = await _requestJson(
+      Uri(
+        path: '/api/admin/resources',
+        queryParameters: queryParams,
+      ).toString(),
+      method: 'GET',
+      bearerOverride: bearerToken,
+      requireAuthToken: true,
+    );
 
     final resourcesRaw = data['resources'];
     if (resourcesRaw is! List) return const [];
@@ -897,7 +822,7 @@ class BackendApiService {
   }
 
   Future<Map<String, dynamic>> uploadSyllabusAsAdmin({
-    required String adminKey,
+    String? bearerToken,
     required String collegeId,
     required String semester,
     required String branch,
@@ -906,46 +831,24 @@ class BackendApiService {
     required String pdfUrl,
     String? academicYear,
   }) async {
-    final uri = Uri.parse('$_baseUrl/api/admin');
-    final res = await _httpClient
-        .post(
-          uri,
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            'action': 'upload_syllabus',
-            'keyHash': adminKey,
-            'collegeId': collegeId,
-            'semester': semester,
-            'branch': branch,
-            'subject': subject,
-            'title': title,
-            'pdfUrl': pdfUrl,
-            'academicYear': ?academicYear,
-          }),
-        )
-        .timeout(_requestTimeout);
-
-    Map<String, dynamic> data = <String, dynamic>{};
-    try {
-      final parsed = jsonDecode(res.body);
-      if (parsed is Map<String, dynamic>) {
-        data = parsed;
-      } else if (parsed is Map) {
-        data = Map<String, dynamic>.from(parsed);
-      }
-    } catch (_) {
-      // Preserve best-effort fallback below.
-    }
-
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      final message =
-          data['message']?.toString() ??
-          data['error']?.toString() ??
-          (res.body.trim().isNotEmpty ? res.body : 'Failed to upload syllabus');
-      throw Exception(message);
-    }
-
-    return data;
+    return _requestJson(
+      '/api/admin',
+      method: 'POST',
+      body: {
+        'action': 'upload_syllabus',
+        if (bearerToken != null && bearerToken.trim().isNotEmpty)
+          'keyHash': bearerToken.trim(),
+        'collegeId': collegeId,
+        'semester': semester,
+        'branch': branch,
+        'subject': subject,
+        'title': title,
+        'pdfUrl': pdfUrl,
+        'academicYear': ?academicYear,
+      },
+      bearerOverride: bearerToken,
+      requireAuthToken: true,
+    );
   }
 
   // ----------------------------

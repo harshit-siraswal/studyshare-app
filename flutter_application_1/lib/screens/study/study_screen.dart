@@ -10,7 +10,6 @@ import 'package:badges/badges.dart' as badges;
 import 'package:flutter_app_badger/flutter_app_badger.dart';
 import '../../config/theme.dart';
 import '../../models/resource.dart';
-import '../../models/user.dart';
 import '../../services/supabase_service.dart';
 import '../../services/download_service.dart';
 import '../../services/subscription_service.dart';
@@ -23,8 +22,9 @@ import '../profile/explore_students_screen.dart';
 import 'resource_search_screen.dart';
 import '../../services/home_widget_service.dart';
 import '../../widgets/study/department_card_3d.dart';
-
+import '../../data/academic_subjects_data.dart';
 import '../../data/departments_data.dart'; // Added for DepartmentData and DepartmentsProvider
+import '../../utils/admin_access.dart';
 
 class StudyScreen extends StatefulWidget {
   final String collegeId;
@@ -75,17 +75,19 @@ class _StudyScreenState extends State<StudyScreen>
   bool _isModerating = false;
 
   // User Profile Data
-  String _userRole = 'READ_ONLY';
   String _userSemester = '1';
   String _userBranch = '';
   String? _profileSemesterFilter;
   String? _profileBranchFilter;
   String? _profileSubjectFilter;
-  String? _userAdminKey;
+  String? _activeModerationSemesterFilter;
+  String? _activeModerationBranchFilter;
+  String? _activeModerationSubjectFilter;
   bool _didRetryInitialEmptyLoad = false;
   bool _resourcesRelevantOnly = true;
   bool _moderationRelevantOnly = true;
   bool _isResourceScopeToggleLoading = false;
+  bool _canManageAdminResources = false;
 
   // Filters
   String? _selectedSemester;
@@ -107,31 +109,6 @@ class _StudyScreenState extends State<StudyScreen>
     final fromWidget = widget.userEmail.trim();
     if (fromWidget.isNotEmpty) return fromWidget;
     return (_supabaseService.currentUserEmail ?? '').trim();
-  }
-
-  bool get _isTeacherOrAdmin =>
-      _userRole == AppRoles.teacher || _userRole == AppRoles.admin;
-
-  String _resolveProfileRole(Map<String, dynamic> profile) {
-    final rawRole = profile['role']?.toString().trim().toUpperCase() ?? '';
-    final hasAdminKey =
-        (profile['admin_key']?.toString().trim().isNotEmpty ?? false);
-
-    switch (rawRole) {
-      case 'ADMIN':
-        return AppRoles.admin;
-      case 'MODERATOR':
-        return hasAdminKey ? AppRoles.teacher : AppRoles.moderator;
-      case 'TEACHER':
-        return AppRoles.teacher;
-      case 'COLLEGE_USER':
-      case 'STUDENT':
-        return hasAdminKey ? AppRoles.teacher : AppRoles.collegeUser;
-      case 'READ_ONLY':
-        return hasAdminKey ? AppRoles.teacher : AppRoles.readOnly;
-      default:
-        return hasAdminKey ? AppRoles.teacher : AppRoles.collegeUser;
-    }
   }
 
   Future<void> _loadUnreadNotificationCount() async {
@@ -197,33 +174,28 @@ class _StudyScreenState extends State<StudyScreen>
     });
   }
 
-  Future<void> _loadUserProfile() async {
+  Future<void> _loadUserProfile({bool forceRefresh = false}) async {
     try {
-      final profile = await _supabaseService.getCurrentUserProfile();
+      final profile = await _supabaseService.getCurrentUserProfile(
+        forceRefresh: forceRefresh,
+        maxAttempts: forceRefresh ? 2 : 1,
+      );
       if (profile.isEmpty) return;
-      final role = _resolveProfileRole(profile);
-      final semester = profile['semester']?.toString();
-      final branch = profile['branch']?.toString();
-      final subject = profile['subject']?.toString();
+      final semester = _normalizeFilterValue(profile['semester']?.toString());
+      final branch = _normalizeFilterValue(profile['branch']?.toString());
+      final subject = _normalizeFilterValue(profile['subject']?.toString());
+      final normalizedBranchCode = normalizeBranchCode(branch);
+      final canManageAdminResources = canManageAdminResourcesProfile(profile);
       if (mounted) {
         setState(() {
-          _profileSemesterFilter = (semester == null || semester.isEmpty)
-              ? null
-              : semester;
-          _profileBranchFilter = (branch == null || branch.isEmpty)
-              ? null
-              : branch;
-          _profileSubjectFilter = (subject == null || subject.isEmpty)
-              ? null
-              : subject;
-          _userRole = role;
-          _userSemester = (semester == null || semester.isEmpty)
-              ? '1'
-              : semester;
-          _userBranch = (branch == null || branch.isEmpty)
-              ? _userBranch
-              : branch;
-          _userAdminKey = profile['admin_key']?.toString();
+          _profileSemesterFilter = semester;
+          _profileBranchFilter = branch;
+          _profileSubjectFilter = subject;
+          _userSemester = semester ?? '1';
+          _userBranch = normalizedBranchCode.isEmpty
+              ? (branch ?? _userBranch)
+              : normalizedBranchCode;
+          _canManageAdminResources = canManageAdminResources;
         });
       }
     } catch (e) {
@@ -253,39 +225,41 @@ class _StudyScreenState extends State<StudyScreen>
 
   Future<void> _loadFollowingFeed() async {
     if (mounted) {
-      setState(() => _isLoadingFollowing = true);
+      setState(() {
+        _isLoadingFollowing = true;
+        _isLoadingMoreModeration = false;
+      });
     }
 
     try {
-      if (_isTeacherOrAdmin) {
-        final adminKey = _userAdminKey?.trim() ?? '';
-        if (adminKey.isEmpty) {
-          if (!mounted) return;
-          setState(() {
-            _followingResources = [];
-            _isLoadingFollowing = false;
-            _hasMoreModeration = false;
-            _isLoadingMoreModeration = false;
-          });
-          return;
+      await _loadUserProfile(forceRefresh: true);
+
+      if (_canManageAdminResources) {
+        const requestPage = 1;
+        final scopeCandidates = _buildModerationScopeCandidates();
+        var selectedScope = scopeCandidates.first;
+        List<Resource> resources = const <Resource>[];
+
+        for (final scope in scopeCandidates) {
+          final scopedResources = await _loadAdminResourcesForScope(
+            page: requestPage,
+            semester: scope.semester,
+            branch: scope.branch,
+            subject: scope.subject,
+          );
+          selectedScope = scope;
+          resources = scopedResources;
+          if (scopedResources.isNotEmpty || !_moderationRelevantOnly) {
+            break;
+          }
         }
 
-        const requestPage = 1;
-        final resourcesPayload = await _apiService.listAdminResources(
-          adminKey: adminKey,
-          collegeId: widget.collegeId,
-          semester: _resolvedModerationSemesterFilter(),
-          branch: _resolvedModerationBranchFilter(),
-          subject: _resolvedModerationSubjectFilter(),
-          page: requestPage,
-          pageSize: _moderationPageSize,
-        );
-        final resources = resourcesPayload
-            .map((json) => Resource.fromJson(json))
-            .toList();
         if (!mounted) return;
         setState(() {
           _moderationPage = requestPage;
+          _activeModerationSemesterFilter = selectedScope.semester;
+          _activeModerationBranchFilter = selectedScope.branch;
+          _activeModerationSubjectFilter = selectedScope.subject;
           _followingResources = resources;
           _hasMoreModeration = resources.length >= _moderationPageSize;
           _isLoadingMoreModeration = false;
@@ -330,31 +304,22 @@ class _StudyScreenState extends State<StudyScreen>
   }
 
   Future<void> _loadMoreModerationResources() async {
-    if (!_isTeacherOrAdmin ||
+    if (!_canManageAdminResources ||
         _isLoadingMoreModeration ||
         _isLoadingFollowing ||
         !_hasMoreModeration) {
       return;
     }
 
-    final adminKey = _userAdminKey?.trim() ?? '';
-    if (adminKey.isEmpty) return;
-
     final nextPage = _moderationPage + 1;
     setState(() => _isLoadingMoreModeration = true);
     try {
-      final resourcesPayload = await _apiService.listAdminResources(
-        adminKey: adminKey,
-        collegeId: widget.collegeId,
+      final resources = await _loadAdminResourcesForScope(
+        page: nextPage,
         semester: _resolvedModerationSemesterFilter(),
         branch: _resolvedModerationBranchFilter(),
         subject: _resolvedModerationSubjectFilter(),
-        page: nextPage,
-        pageSize: _moderationPageSize,
       );
-      final resources = resourcesPayload
-          .map((json) => Resource.fromJson(json))
-          .toList();
 
       if (!mounted) return;
       setState(() {
@@ -417,6 +382,82 @@ class _StudyScreenState extends State<StudyScreen>
     return trimmed;
   }
 
+  String? _normalizeBranchCodeFilter(String? value) {
+    final normalized = normalizeBranchCode(value);
+    return normalized.isEmpty ? null : normalized;
+  }
+
+  List<({String? semester, String? branch, String? subject})>
+  _buildModerationScopeCandidates() {
+    if (!_moderationRelevantOnly) {
+      return const <({String? semester, String? branch, String? subject})>[
+        (semester: null, branch: null, subject: null),
+      ];
+    }
+
+    final semester = _normalizeFilterValue(_profileSemesterFilter);
+    final subject = _normalizeFilterValue(_profileSubjectFilter);
+    final rawBranch = _normalizeFilterValue(_profileBranchFilter);
+    final normalizedBranch = _normalizeBranchCodeFilter(rawBranch);
+    final branchVariants = <String?>[
+      rawBranch,
+      if (normalizedBranch != null && normalizedBranch != rawBranch)
+        normalizedBranch,
+      null,
+    ];
+
+    final seen = <String>{};
+    final scopes = <({String? semester, String? branch, String? subject})>[];
+
+    void addScope(String? sem, String? branch, String? subj) {
+      final resolvedSemester = _normalizeFilterValue(sem);
+      final resolvedBranch = _normalizeFilterValue(branch);
+      final resolvedSubject = _normalizeFilterValue(subj);
+      final signature = [
+        resolvedSemester ?? '*',
+        resolvedBranch ?? '*',
+        resolvedSubject ?? '*',
+      ].join('|');
+      if (!seen.add(signature)) return;
+      scopes.add((
+        semester: resolvedSemester,
+        branch: resolvedBranch,
+        subject: resolvedSubject,
+      ));
+    }
+
+    for (final branch in branchVariants) {
+      addScope(semester, branch, subject);
+    }
+    for (final branch in branchVariants) {
+      addScope(semester, branch, null);
+    }
+    for (final branch in branchVariants) {
+      addScope(null, branch, null);
+    }
+    addScope(null, null, null);
+
+    return scopes;
+  }
+
+  Future<List<Resource>> _loadAdminResourcesForScope({
+    required int page,
+    String? semester,
+    String? branch,
+    String? subject,
+  }) async {
+    final resourcesPayload = await _apiService.listAdminResources(
+      collegeId: widget.collegeId,
+      semester: semester,
+      branch: branch,
+      subject: subject,
+      page: page,
+      pageSize: _moderationPageSize,
+    );
+
+    return resourcesPayload.map((json) => Resource.fromJson(json)).toList();
+  }
+
   String? _resolvedResourceSemesterFilter() {
     if (_resourcesRelevantOnly) {
       return _normalizeFilterValue(_profileSemesterFilter);
@@ -440,17 +481,23 @@ class _StudyScreenState extends State<StudyScreen>
 
   String? _resolvedModerationSemesterFilter() {
     if (!_moderationRelevantOnly) return null;
-    return _profileSemesterFilter;
+    return _normalizeFilterValue(
+      _activeModerationSemesterFilter ?? _profileSemesterFilter,
+    );
   }
 
   String? _resolvedModerationBranchFilter() {
     if (!_moderationRelevantOnly) return null;
-    return _profileBranchFilter;
+    return _normalizeFilterValue(
+      _activeModerationBranchFilter ?? _profileBranchFilter,
+    );
   }
 
   String? _resolvedModerationSubjectFilter() {
     if (!_moderationRelevantOnly) return null;
-    return _profileSubjectFilter;
+    return _normalizeFilterValue(
+      _activeModerationSubjectFilter ?? _profileSubjectFilter,
+    );
   }
 
   Future<void> _loadResources({bool refresh = false}) async {
@@ -671,7 +718,7 @@ class _StudyScreenState extends State<StudyScreen>
 
   @override
   Widget build(BuildContext context) {
-    final isTeacher = _isTeacherOrAdmin;
+    final isTeacher = _canManageAdminResources;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
@@ -836,7 +883,7 @@ class _StudyScreenState extends State<StudyScreen>
         padding: const EdgeInsets.all(4),
         tabs: [
           const Tab(text: 'For You'),
-          Tab(text: _isTeacherOrAdmin ? 'Moderation' : 'Following'),
+          Tab(text: _canManageAdminResources ? 'Moderation' : 'Following'),
           const Tab(text: 'Syllabus'),
         ],
       ),
@@ -1083,7 +1130,7 @@ class _StudyScreenState extends State<StudyScreen>
   }
 
   Widget _buildFollowingGrid() {
-    final isTeacher = _isTeacherOrAdmin;
+    final isTeacher = _canManageAdminResources;
     final showLoadMore =
         isTeacher && (_hasMoreModeration || _isLoadingMoreModeration);
 
@@ -1154,11 +1201,11 @@ class _StudyScreenState extends State<StudyScreen>
 
   Future<void> _moderateResource(String resourceId, String newStatus) async {
     if (_isModerating) return;
-    if (_userAdminKey == null || _userAdminKey!.isEmpty) {
+    if (!_canManageAdminResources) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Missing Admin Key. Update your profile.'),
+          content: Text('You do not have permission to moderate resources.'),
         ),
       );
       return;
@@ -1170,7 +1217,6 @@ class _StudyScreenState extends State<StudyScreen>
       await _apiService.updateResourceStatus(
         resourceId: resourceId,
         status: newStatus,
-        adminKey: _userAdminKey!,
         context: context,
       );
 
@@ -1204,11 +1250,11 @@ class _StudyScreenState extends State<StudyScreen>
 
   Future<void> _deleteResource(Resource resource) async {
     if (_isModerating) return;
-    if (_userAdminKey == null || _userAdminKey!.isEmpty) {
+    if (!_canManageAdminResources) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Missing Admin Key. Update your profile.'),
+          content: Text('You do not have permission to delete resources.'),
         ),
       );
       return;
@@ -1240,10 +1286,7 @@ class _StudyScreenState extends State<StudyScreen>
       if (!mounted) return;
       setState(() => _isModerating = true);
 
-      await _apiService.deleteResourceAsAdmin(
-        resourceId: resource.id,
-        adminKey: _userAdminKey!,
-      );
+      await _apiService.deleteResourceAsAdmin(resourceId: resource.id);
 
       if (!mounted) return;
       await _loadFollowingFeed();

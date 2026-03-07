@@ -19,6 +19,9 @@ import 'explore_students_screen.dart';
 import 'saved_posts_screen.dart';
 import '../../models/user.dart';
 import '../../widgets/animated_counter.dart';
+import '../../data/academic_subjects_data.dart';
+import '../../utils/ai_token_budget_utils.dart';
+import '../../utils/admin_access.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String collegeName;
@@ -53,7 +56,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _profileSemester;
   String? _profileBranch;
   String? _profileSubject;
-  String? _profileAdminKey;
   String _profileRole = AppRoles.readOnly;
   int _aiTokenBudget = 0;
   int _aiTokenUsed = 0;
@@ -130,57 +132,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _profileSemester = profile['semester']?.toString();
         _profileBranch = profile['branch']?.toString();
         _profileSubject = profile['subject']?.toString();
-        _profileAdminKey = profile['admin_key']?.toString();
-        final budgetFromApi = _toSafeInt(profile['ai_token_budget']);
+        final tokenSnapshot =
+            await AiTokenBudgetSnapshot.fromProfileWithLocalPremium(profile);
         final usedFromApi = _toSafeInt(profile['ai_token_used']);
         final remainingFromApi = _toSafeInt(profile['ai_token_remaining']);
-        final baseBudgetFromApi = _toSafeInt(profile['ai_token_base_budget']);
-        final premiumMultiplierFromApi = math.max(
-          1,
-          _toSafeInt(profile['ai_token_premium_multiplier']),
-        );
-        final currentMultiplier = math.max(
-          1,
-          _toSafeInt(profile['ai_token_budget_multiplier']),
-        );
-        final tier = profile['subscription_tier']?.toString().toLowerCase();
-        final subscriptionEnd = DateTime.tryParse(
-          profile['subscription_end_date']?.toString() ?? '',
-        );
-        final isPremiumActive =
-            (tier == 'pro' || tier == 'max') &&
-            subscriptionEnd != null &&
-            subscriptionEnd.toUtc().isAfter(DateTime.now().toUtc());
-        final safeBaseBudget = baseBudgetFromApi > 0
-            ? baseBudgetFromApi
-            : (budgetFromApi > 0 && currentMultiplier > 1
-                  ? (budgetFromApi / currentMultiplier).round()
-                  : (budgetFromApi > 0 ? budgetFromApi : 40160));
-        final resolvedMultiplier = currentMultiplier > 1
-            ? currentMultiplier
-            : (isPremiumActive ? premiumMultiplierFromApi : 1);
-        final derivedBudget = math.max(1, safeBaseBudget * resolvedMultiplier);
-        final resolvedBudget = budgetFromApi > 0
-            ? math.max(budgetFromApi, derivedBudget)
-            : derivedBudget;
+        final resolvedBudget = tokenSnapshot.currentBudget;
         final resolvedUsed = usedFromApi.clamp(0, resolvedBudget);
-        final derivedRemaining = (resolvedBudget - resolvedUsed).clamp(
-          0,
-          resolvedBudget,
-        );
-        final resolvedRemaining =
-            (remainingFromApi <= 0 ||
-                remainingFromApi > resolvedBudget ||
-                resolvedBudget > budgetFromApi)
-            ? derivedRemaining
-            : remainingFromApi.clamp(0, resolvedBudget);
+        final resolvedRemaining = remainingFromApi > 0
+            ? remainingFromApi.clamp(0, resolvedBudget)
+            : (resolvedBudget - resolvedUsed).clamp(0, resolvedBudget);
 
         _aiTokenBudget = resolvedBudget;
         _aiTokenUsed = resolvedUsed;
         _aiTokenRemaining = resolvedRemaining;
-        _aiTokenBaseBudget = safeBaseBudget > 0 ? safeBaseBudget : 40160;
-        _aiTokenBudgetMultiplier = resolvedMultiplier;
-        _aiTokenPremiumMultiplier = premiumMultiplierFromApi;
+        _aiTokenBaseBudget = tokenSnapshot.baseBudget;
+        _aiTokenBudgetMultiplier = tokenSnapshot.budgetMultiplier;
+        _aiTokenPremiumMultiplier = tokenSnapshot.premiumMultiplier;
         _aiTokenCycleDays = math.max(
           1,
           _toSafeInt(profile['ai_token_cycle_days']) > 0
@@ -193,28 +160,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         _aiTokenCycleEndsAt = DateTime.tryParse(
           profile['ai_token_cycle_ends_at']?.toString() ?? '',
         );
-        final roleRaw = profile['role']?.toString().trim().toUpperCase() ?? '';
-        final hasAdminKey =
-            _profileAdminKey != null && _profileAdminKey!.trim().isNotEmpty;
-        if (roleRaw == AppRoles.admin ||
-            roleRaw == AppRoles.teacher ||
-            roleRaw == AppRoles.moderator ||
-            roleRaw == AppRoles.collegeUser ||
-            roleRaw == AppRoles.readOnly) {
-          if (hasAdminKey &&
-              roleRaw != AppRoles.admin &&
-              roleRaw != AppRoles.teacher) {
-            _profileRole = AppRoles.teacher;
-          } else {
-            _profileRole = roleRaw;
-          }
-        } else if (hasAdminKey) {
-          _profileRole = AppRoles.teacher;
-        } else if (roleRaw == 'STUDENT') {
-          _profileRole = AppRoles.collegeUser;
-        } else {
-          _profileRole = AppRoles.readOnly;
-        }
+        _profileRole = resolveEffectiveProfileRole(profile);
         if (_contributionsFuture == null || forceRefresh) {
           _refreshContributionsFuture();
         }
@@ -286,11 +232,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       suffix = 'K';
     }
 
-    final absScaled = scaled.abs();
-    final decimals = absScaled >= 100 ? 0 : (absScaled >= 10 ? 1 : 2);
-    final compact = scaled
-        .toStringAsFixed(decimals)
-        .replaceFirst(RegExp(r'\.?0+$'), '');
+    final compact = scaled.round().toString();
     return '$compact$suffix';
   }
 
@@ -325,6 +267,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String _formatCreditRange(int minTokens, int maxTokens) {
     return '${_formatCreditCompact(minTokens)} - '
         '${_formatCreditCompact(maxTokens)} credits';
+  }
+
+  String _profileBranchLabel() {
+    final branch = _profileBranch?.trim() ?? '';
+    if (branch.isEmpty) return '';
+    return getBranchShortLabel(branch);
   }
 
   Future<void> _handleLogout() async {
@@ -592,7 +540,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             initialBranch: _profileBranch,
                             initialSubject: _profileSubject,
                             role: _profileRole,
-                            initialAdminKey: _profileAdminKey,
                           ),
                         ),
                       );
@@ -750,7 +697,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             [
                               if (_profileBranch != null &&
                                   _profileBranch!.isNotEmpty)
-                                _profileBranch,
+                                _profileBranchLabel(),
                               if (_profileSemester != null &&
                                   _profileSemester!.isNotEmpty)
                                 'Sem $_profileSemester',
@@ -1077,8 +1024,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final cycleLabel =
         '${_aiTokenCycleDays > 0 ? _aiTokenCycleDays : 30} day cycle';
     final usagePercent = budget > 0
-        ? ((used / budget) * 100).toStringAsFixed(1)
-        : '0.0';
+        ? ((used / budget) * 100).toStringAsFixed(0)
+        : '0';
 
     await showModalBottomSheet<void>(
       context: context,

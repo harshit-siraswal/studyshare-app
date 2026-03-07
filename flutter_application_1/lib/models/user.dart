@@ -1,3 +1,5 @@
+import '../utils/admin_access.dart';
+
 class AppRoles {
   AppRoles._(); // Prevent instantiation
 
@@ -27,7 +29,6 @@ class AppUser {
   final String? semester;
   final String? branch;
   final String? subject;
-  final String? adminKey;
   final String role; // READ_ONLY, COLLEGE_USER, MODERATOR, ADMIN, TEACHER
   final DateTime createdAt;
 
@@ -42,7 +43,6 @@ class AppUser {
     this.semester,
     this.branch,
     this.subject,
-    this.adminKey,
     this.role = AppRoles.readOnly,
     required this.createdAt,
   });
@@ -71,25 +71,7 @@ class AppUser {
       semester: json['semester']?.toString(),
       branch: json['branch']?.toString(),
       subject: json['subject']?.toString(),
-      adminKey: json['admin_key']?.toString(),
-      role: () {
-        final raw = json['role']?.toString().trim().toUpperCase() ?? '';
-        final hasAdminKey =
-            (json['admin_key']?.toString().trim().isNotEmpty ?? false);
-        if (AppRoles.validRoles.contains(raw)) {
-          if (hasAdminKey && raw != AppRoles.admin && raw != AppRoles.teacher) {
-            return AppRoles.teacher;
-          }
-          return raw;
-        }
-        if (raw == 'STUDENT') {
-          return hasAdminKey ? AppRoles.teacher : AppRoles.collegeUser;
-        }
-        if (hasAdminKey) {
-          return AppRoles.teacher;
-        }
-        return AppRoles.readOnly;
-      }(),
+      role: resolveEffectiveProfileRole(json),
       createdAt: () {
         if (json['created_at'] == null) {
           throw FormatException(
@@ -119,7 +101,6 @@ class AppUser {
       'semester': semester,
       'branch': branch,
       'subject': subject,
-      'admin_key': adminKey,
       'role': role,
       'created_at': createdAt.toIso8601String(),
     };

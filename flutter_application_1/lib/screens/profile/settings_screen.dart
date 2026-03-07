@@ -25,7 +25,6 @@ class SettingsScreen extends StatefulWidget {
   final String userRole;
   final String? semester;
   final String? branch;
-  final String? adminKey;
   final AuthService authService;
   final SubscriptionService subscriptionService;
 
@@ -40,7 +39,6 @@ class SettingsScreen extends StatefulWidget {
     this.userRole = 'READ_ONLY',
     this.semester,
     this.branch,
-    this.adminKey,
     AuthService? authService,
     SubscriptionService? subscriptionService,
   }) : authService = authService ?? AuthService(),
@@ -596,6 +594,3 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 }
-
-
-

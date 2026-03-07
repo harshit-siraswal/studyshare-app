@@ -6,6 +6,7 @@ import '../models/resource.dart';
 import '../models/user.dart';
 import 'backend_api_service.dart';
 import '../models/department_account.dart';
+import '../utils/admin_access.dart';
 
 class RoomLimitException implements Exception {
   final String message;
@@ -193,14 +194,8 @@ class SupabaseService {
   }
 
   String _resolveEffectiveRole(Map<String, dynamic> profile) {
-    final normalizedRole = _normalizeRoleValue(profile['role']?.toString());
-    final adminKey = profile['admin_key']?.toString().trim() ?? '';
-    if (adminKey.isNotEmpty &&
-        normalizedRole != AppRoles.admin &&
-        normalizedRole != AppRoles.teacher) {
-      return AppRoles.teacher;
-    }
-    return normalizedRole;
+    final resolvedRole = resolveEffectiveProfileRole(profile);
+    return _normalizeRoleValue(resolvedRole);
   }
 
   bool _isDuplicateKeyError(Object error) {
@@ -445,6 +440,90 @@ class SupabaseService {
       debugPrint('Error fetching users by ids: $e');
       return [];
     }
+  }
+
+  String _firstNonEmptyValue(Map<String, dynamic> map, List<String> keys) {
+    for (final key in keys) {
+      final raw = map[key];
+      if (raw == null) continue;
+      final text = raw.toString().trim();
+      if (text.isNotEmpty) return text;
+    }
+    return '';
+  }
+
+  Future<Map<String, Map<String, dynamic>>> _fetchUsersByEmails(
+    Iterable<String> rawEmails,
+  ) async {
+    final emails = rawEmails
+        .map(_normalizeEmail)
+        .where((email) => email.isNotEmpty)
+        .toSet()
+        .toList();
+    if (emails.isEmpty) return const {};
+
+    try {
+      final rows = await _client
+          .from('users')
+          .select('email, display_name, username, profile_photo_url, photo_url')
+          .inFilter('email', emails);
+      final map = <String, Map<String, dynamic>>{};
+      for (final row in (rows as List).whereType<Map>()) {
+        final entry = Map<String, dynamic>.from(row);
+        final email = _normalizeEmail(entry['email']?.toString());
+        if (email.isEmpty) continue;
+        map[email] = entry;
+      }
+      return map;
+    } catch (e) {
+      debugPrint('Error fetching users by emails: $e');
+      return const {};
+    }
+  }
+
+  void _applyProfileToRecord({
+    required Map<String, dynamic> record,
+    required String emailKey,
+    required String outputNameKey,
+    required String outputPhotoKey,
+    required Map<String, Map<String, dynamic>> usersByEmail,
+    List<String> existingNameKeys = const [],
+    List<String> existingPhotoKeys = const [],
+  }) {
+    final email = _normalizeEmail(record[emailKey]?.toString());
+    if (email.isEmpty) return;
+    final user = usersByEmail[email];
+    if (user == null) return;
+
+    final resolvedName = _firstNonEmptyValue(record, [
+      outputNameKey,
+      ...existingNameKeys,
+    ]);
+    if (resolvedName.isEmpty) {
+      final fallbackName = _firstNonEmptyValue(user, const [
+        'display_name',
+        'username',
+      ]);
+      if (fallbackName.isNotEmpty) {
+        record[outputNameKey] = fallbackName;
+      }
+    }
+
+    final resolvedPhoto = _firstNonEmptyValue(record, [
+      outputPhotoKey,
+      ...existingPhotoKeys,
+    ]);
+    if (resolvedPhoto.isNotEmpty) {
+      record[outputPhotoKey] = resolvedPhoto;
+      return;
+    }
+
+    final fallbackPhoto = _firstNonEmptyValue(user, const [
+      'profile_photo_url',
+      'photo_url',
+    ]);
+    if (fallbackPhoto.isEmpty) return;
+    record[outputPhotoKey] = fallbackPhoto;
   }
 
   // ============ COLLEGES ============
@@ -1461,14 +1540,18 @@ class SupabaseService {
   /// Get complete user stats
   Future<Map<String, dynamic>> getUserStats(String userEmail) async {
     try {
-      final followers = await getFollowersCount(userEmail);
-      final following = await getFollowingCount(userEmail);
-
-      final contributions = await _client
-          .from('resources')
-          .count(CountOption.exact)
-          .eq('uploaded_by_email', userEmail)
-          .eq('status', 'approved'); // Only count approved resources?
+      final results = await Future.wait<dynamic>([
+        getFollowersCount(userEmail),
+        getFollowingCount(userEmail),
+        _client
+            .from('resources')
+            .count(CountOption.exact)
+            .eq('uploaded_by_email', userEmail)
+            .eq('status', 'approved'),
+      ]);
+      final followers = (results[0] as num?)?.toInt() ?? 0;
+      final following = (results[1] as num?)?.toInt() ?? 0;
+      final contributions = (results[2] as num?)?.toInt() ?? 0;
 
       return {
         'followers': followers,
@@ -1762,7 +1845,35 @@ class SupabaseService {
           .select('*')
           .eq('room_id', roomId)
           .order('created_at', ascending: true);
-      return List<Map<String, dynamic>>.from(response);
+      final members = List<Map<String, dynamic>>.from(response);
+      final usersByEmail = await _fetchUsersByEmails(
+        members.map((member) => member['user_email']?.toString() ?? ''),
+      );
+
+      for (final member in members) {
+        _applyProfileToRecord(
+          record: member,
+          emailKey: 'user_email',
+          outputNameKey: 'display_name',
+          outputPhotoKey: 'profile_photo_url',
+          usersByEmail: usersByEmail,
+          existingNameKeys: const ['user_name', 'full_name', 'name'],
+          existingPhotoKeys: const ['photo_url', 'avatar_url'],
+        );
+
+        final resolvedPhoto = _firstNonEmptyValue(member, const [
+          'profile_photo_url',
+          'photo_url',
+          'avatar_url',
+        ]);
+        if (resolvedPhoto.isNotEmpty) {
+          member['profile_photo_url'] = resolvedPhoto;
+          member['photo_url'] = resolvedPhoto;
+          member['avatar_url'] = resolvedPhoto;
+        }
+      }
+
+      return members;
     } catch (e) {
       debugPrint('Error fetching room members: $e');
       return [];
@@ -1871,12 +1982,56 @@ class SupabaseService {
           .order(orderColumn, ascending: false)
           .range(0, limit - 1);
 
-      return (response as List).map((e) {
+      final posts = (response as List).map((e) {
         final data = Map<String, dynamic>.from(e);
         // Fix count format
         data['comment_count'] = _normalizeCount(data['comment_count']);
         return data;
       }).toList();
+
+      final usersByEmail = await _fetchUsersByEmails(
+        posts.map(
+          (post) =>
+              post['author_email']?.toString() ??
+              post['user_email']?.toString() ??
+              '',
+        ),
+      );
+
+      for (final post in posts) {
+        if ((post['author_email']?.toString().trim().isEmpty ?? true) &&
+            (post['user_email']?.toString().trim().isNotEmpty ?? false)) {
+          post['author_email'] = post['user_email'];
+        }
+
+        final hasAuthorEmail =
+            post['author_email']?.toString().trim().isNotEmpty ?? false;
+        _applyProfileToRecord(
+          record: post,
+          emailKey: hasAuthorEmail ? 'author_email' : 'user_email',
+          outputNameKey: 'author_name',
+          outputPhotoKey: 'author_photo_url',
+          usersByEmail: usersByEmail,
+          existingNameKeys: const ['user_name', 'display_name'],
+          existingPhotoKeys: const [
+            'profile_photo_url',
+            'photo_url',
+            'avatar_url',
+          ],
+        );
+        final resolvedPhoto = _firstNonEmptyValue(post, const [
+          'author_photo_url',
+          'profile_photo_url',
+          'photo_url',
+          'avatar_url',
+        ]);
+        if (resolvedPhoto.isNotEmpty) {
+          post['author_photo_url'] = resolvedPhoto;
+          post['profile_photo_url'] = resolvedPhoto;
+        }
+      }
+
+      return posts;
     } catch (e) {
       debugPrint('Error fetching room posts: $e');
       return [];
@@ -1909,6 +2064,47 @@ class SupabaseService {
     }
 
     try {
+      final usersByEmail = await _fetchUsersByEmails(
+        allComments.map(
+          (comment) =>
+              comment['author_email']?.toString() ??
+              comment['user_email']?.toString() ??
+              '',
+        ),
+      );
+
+      for (final comment in allComments) {
+        if ((comment['author_email']?.toString().trim().isEmpty ?? true) &&
+            (comment['user_email']?.toString().trim().isNotEmpty ?? false)) {
+          comment['author_email'] = comment['user_email'];
+        }
+
+        _applyProfileToRecord(
+          record: comment,
+          emailKey: 'author_email',
+          outputNameKey: 'author_name',
+          outputPhotoKey: 'author_photo_url',
+          usersByEmail: usersByEmail,
+          existingNameKeys: const ['user_name', 'display_name'],
+          existingPhotoKeys: const [
+            'profile_photo_url',
+            'photo_url',
+            'avatar_url',
+          ],
+        );
+
+        final resolvedPhoto = _firstNonEmptyValue(comment, const [
+          'author_photo_url',
+          'profile_photo_url',
+          'photo_url',
+          'avatar_url',
+        ]);
+        if (resolvedPhoto.isNotEmpty) {
+          comment['author_photo_url'] = resolvedPhoto;
+          comment['profile_photo_url'] = resolvedPhoto;
+        }
+      }
+
       // Build thread structure (Client-side threading)
       final Map<String, List<Map<String, dynamic>>> commentMap = {};
       final List<Map<String, dynamic>> topLevelComments = [];
@@ -2876,79 +3072,63 @@ class SupabaseService {
     required String fileUrl,
     String? description,
   }) async {
-    String adminKey = '';
-    try {
-      final profile = await getCurrentUserProfile(maxAttempts: 1);
-      adminKey = profile['admin_key']?.toString().trim() ?? '';
-    } catch (profileError) {
-      debugPrint(
-        'Unable to load profile for admin syllabus upload path; '
-        'using direct insert fallback: $profileError',
-      );
-    }
+    const maxAttempts = 2;
+    var attempt = 0;
+    while (attempt < maxAttempts) {
+      attempt++;
+      try {
+        await _api.uploadSyllabusAsAdmin(
+          collegeId: collegeId,
+          semester: semester,
+          branch: department,
+          subject: subject,
+          title: title,
+          pdfUrl: fileUrl,
+        );
+        return;
+      } catch (adminUploadError) {
+        final isAuthError = _isAdminUploadAuthError(adminUploadError);
+        final isTransientError = _isAdminUploadTransientError(adminUploadError);
+        final isServerError = _isAdminUploadServerError(adminUploadError);
 
-    if (adminKey.isNotEmpty) {
-      const maxAttempts = 2;
-      var attempt = 0;
-      while (attempt < maxAttempts) {
-        attempt++;
-        try {
-          await _api.uploadSyllabusAsAdmin(
-            adminKey: adminKey,
-            collegeId: collegeId,
-            semester: semester,
-            branch: department,
-            subject: subject,
-            title: title,
-            pdfUrl: fileUrl,
-          );
-          return;
-        } catch (adminUploadError) {
-          final isAuthError = _isAdminUploadAuthError(adminUploadError);
-          final isTransientError = _isAdminUploadTransientError(
-            adminUploadError,
-          );
-          final isServerError = _isAdminUploadServerError(adminUploadError);
-
-          if (isAuthError) {
-            debugPrint(
-              'Admin syllabus upload auth failure (invalid/expired admin key); '
-              'falling back to direct insert: $adminUploadError',
-            );
-            break;
-          }
-
-          if (isTransientError && attempt < maxAttempts) {
-            debugPrint(
-              'Transient admin syllabus upload error on attempt '
-              '$attempt/$maxAttempts; retrying: $adminUploadError',
-            );
-            await Future.delayed(const Duration(milliseconds: 600));
-            continue;
-          }
-
-          if (isTransientError) {
-            debugPrint(
-              'Transient admin syllabus upload error after retries; '
-              'falling back to direct insert: $adminUploadError',
-            );
-            break;
-          }
-
-          if (isServerError) {
-            debugPrint(
-              'Admin syllabus upload server-side error; '
-              'not falling back automatically: $adminUploadError',
-            );
-            rethrow;
-          }
-
+        if (isAuthError) {
           debugPrint(
-            'Admin syllabus upload failed with non-fallback error; rethrowing: '
-            '$adminUploadError',
+            'Admin syllabus upload auth failure; '
+            'falling back to direct insert: $adminUploadError',
+          );
+          break;
+        }
+
+        if (isTransientError && attempt < maxAttempts) {
+          debugPrint(
+            'Transient admin syllabus upload error on attempt '
+            '$attempt/$maxAttempts; retrying: $adminUploadError',
+          );
+          await Future.delayed(const Duration(milliseconds: 600));
+          continue;
+        }
+
+        if (isTransientError) {
+          debugPrint(
+            'Transient admin syllabus upload error after retries; '
+            'falling back to direct insert: $adminUploadError',
+          );
+          break;
+        }
+
+        if (isServerError) {
+          debugPrint(
+            'Admin syllabus upload server-side error; '
+            'not falling back automatically: $adminUploadError',
           );
           rethrow;
         }
+
+        debugPrint(
+          'Admin syllabus upload failed with non-fallback error; rethrowing: '
+          '$adminUploadError',
+        );
+        rethrow;
       }
     }
 
@@ -3585,6 +3765,39 @@ class SupabaseService {
     try {
       // Fetch flat comments
       final rawComments = await _api.getNoticeComments(noticeId);
+      final usersByEmail = await _fetchUsersByEmails(
+        rawComments.map((comment) => comment['user_email']?.toString() ?? ''),
+      );
+
+      for (final comment in rawComments) {
+        _applyProfileToRecord(
+          record: comment,
+          emailKey: 'user_email',
+          outputNameKey: 'user_name',
+          outputPhotoKey: 'user_photo_url',
+          usersByEmail: usersByEmail,
+          existingNameKeys: const ['display_name', 'author_name', 'name'],
+          existingPhotoKeys: const [
+            'author_photo_url',
+            'profile_photo_url',
+            'photo_url',
+            'avatar_url',
+          ],
+        );
+
+        final resolvedPhoto = _firstNonEmptyValue(comment, const [
+          'user_photo_url',
+          'author_photo_url',
+          'profile_photo_url',
+          'photo_url',
+          'avatar_url',
+        ]);
+        if (resolvedPhoto.isNotEmpty) {
+          comment['user_photo_url'] = resolvedPhoto;
+          comment['author_photo_url'] = resolvedPhoto;
+          comment['profile_photo_url'] = resolvedPhoto;
+        }
+      }
 
       // Build thread structure (Client-side threading)
       final Map<String, List<Map<String, dynamic>>> commentMap = {};
