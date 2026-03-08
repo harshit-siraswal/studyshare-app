@@ -50,12 +50,13 @@ class Resource {
     final resolvedStatus = rawStatus.isNotEmpty
         ? rawStatus
         : (json['is_approved'] == true ? 'approved' : 'pending');
+    final resolvedFileUrl = _resolveFileUrl(json);
 
     return Resource(
       id: json['id'] ?? '',
       title: json['title'] ?? '',
       type: json['type'] ?? 'notes',
-      fileUrl: json['file_url'] ?? json['url'] ?? '',
+      fileUrl: resolvedFileUrl,
       thumbnailUrl: json['thumbnail_url'],
       semester: json['semester'],
       branch: json['branch'],
@@ -77,6 +78,28 @@ class Resource {
           json['is_teacher_upload'] == true,
       createdAt: _parseCreatedAt(json),
     );
+  }
+
+  static String _resolveFileUrl(Map<String, dynamic> json) {
+    const candidateKeys = <String>[
+      'file_url',
+      'fileUrl',
+      'pdf_url',
+      'pdfUrl',
+      'video_url',
+      'videoUrl',
+      'attachment_url',
+      'attachmentUrl',
+      'public_url',
+      'publicUrl',
+      'url',
+    ];
+
+    for (final key in candidateKeys) {
+      final value = json[key]?.toString().trim() ?? '';
+      if (value.isNotEmpty) return value;
+    }
+    return '';
   }
 
   static DateTime _parseCreatedAt(Map<String, dynamic> json) {
@@ -121,7 +144,11 @@ class Resource {
   int get score => upvotes - downvotes;
 
   /// Check if resource is a PDF
-  bool get isPdf => fileUrl.toLowerCase().endsWith('.pdf');
+  bool get isPdf {
+    final path =
+        Uri.tryParse(fileUrl)?.path.toLowerCase() ?? fileUrl.toLowerCase();
+    return path.endsWith('.pdf');
+  }
 
   /// Check if resource is a video
   bool get isVideo {

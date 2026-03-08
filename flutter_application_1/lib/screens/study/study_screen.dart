@@ -53,6 +53,8 @@ class _StudyScreenState extends State<StudyScreen>
   final SubscriptionService _subscriptionService = SubscriptionService();
   final DownloadService _downloadService = DownloadService();
   final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _followingSearchController =
+      TextEditingController();
   final ScrollController _scrollController = ScrollController();
   late TabController _tabController;
 
@@ -64,6 +66,7 @@ class _StudyScreenState extends State<StudyScreen>
   bool _isLoadingMore = false;
   late Future<List<DepartmentData>> _departmentsFuture;
   Timer? _voteRefreshDebounce;
+  Timer? _retryTimer;
 
   // Following resources
   List<Resource> _followingResources = [];
@@ -88,6 +91,9 @@ class _StudyScreenState extends State<StudyScreen>
   bool _moderationRelevantOnly = true;
   bool _isResourceScopeToggleLoading = false;
   bool _canManageAdminResources = false;
+  String _followingSearchQuery = '';
+  List<Resource>? _cachedFilteredFollowingResources;
+  String _lastFollowingFilterQuery = '';
 
   // Filters
   String? _selectedSemester;
@@ -183,7 +189,9 @@ class _StudyScreenState extends State<StudyScreen>
       if (profile.isEmpty) return;
       final semester = _normalizeFilterValue(profile['semester']?.toString());
       final branch = _normalizeFilterValue(profile['branch']?.toString());
-      final subject = _normalizeFilterValue(profile['subject']?.toString());
+      final subject = isTeacherOrAdminProfile(profile)
+          ? _normalizeFilterValue(profile['subject']?.toString())
+          : null;
       final normalizedBranchCode = normalizeBranchCode(branch);
       final canManageAdminResources = canManageAdminResourcesProfile(profile);
       if (mounted) {
@@ -205,11 +213,42 @@ class _StudyScreenState extends State<StudyScreen>
 
   @override
   void dispose() {
+    _retryTimer?.cancel();
+    _retryTimer = null;
     _voteRefreshDebounce?.cancel();
     _searchController.dispose();
+    _followingSearchController.dispose();
     _scrollController.dispose();
     _tabController.dispose();
     super.dispose();
+  }
+
+  List<Resource> get _filteredFollowingResources {
+    final query = _followingSearchQuery.trim().toLowerCase();
+    if (query.isEmpty) {
+      _cachedFilteredFollowingResources = null;
+      _lastFollowingFilterQuery = '';
+      return _followingResources;
+    }
+
+    if (_cachedFilteredFollowingResources != null &&
+        _lastFollowingFilterQuery == query) {
+      return _cachedFilteredFollowingResources!;
+    }
+
+    _cachedFilteredFollowingResources = _followingResources.where((resource) {
+      final haystacks = <String>[
+        resource.title,
+        resource.description ?? '',
+        resource.subject ?? '',
+        resource.branch ?? '',
+        resource.semester ?? '',
+        resource.uploadedByName ?? '',
+      ];
+      return haystacks.any((value) => value.toLowerCase().contains(query));
+    }).toList();
+    _lastFollowingFilterQuery = query;
+    return _cachedFilteredFollowingResources!;
   }
 
   void _handleResourceVoteChanged() {
@@ -541,7 +580,9 @@ class _StudyScreenState extends State<StudyScreen>
           resources.isEmpty &&
           !_hasActiveFilters) {
         _didRetryInitialEmptyLoad = true;
-        Future.delayed(const Duration(milliseconds: 900), () {
+        _retryTimer?.cancel();
+        _retryTimer = Timer(const Duration(milliseconds: 900), () {
+          _retryTimer = null;
           if (!mounted) return;
           _loadResources(refresh: true);
         });
@@ -564,7 +605,9 @@ class _StudyScreenState extends State<StudyScreen>
 
       if (!_didRetryInitialEmptyLoad && !refresh && !_hasActiveFilters) {
         _didRetryInitialEmptyLoad = true;
-        Future.delayed(const Duration(milliseconds: 900), () {
+        _retryTimer?.cancel();
+        _retryTimer = Timer(const Duration(milliseconds: 900), () {
+          _retryTimer = null;
           if (!mounted) return;
           _loadResources(refresh: true);
         });
@@ -748,38 +791,11 @@ class _StudyScreenState extends State<StudyScreen>
                         Expanded(
                           child: CustomRefreshIndicator(
                             onRefresh: () => _loadResources(refresh: true),
-                            builder: (context, child, controller) {
-                              return Stack(
-                                children: [
-                                  if (controller.value > 0.0)
-                                    Positioned(
-                                      top: 25 * controller.value,
-                                      left: 0,
-                                      right: 0,
-                                      child: Center(
-                                        child: SizedBox(
-                                          height: 80,
-                                          width: 80,
-                                          child: Opacity(
-                                            opacity: controller.value.clamp(
-                                              0.0,
-                                              1.0,
-                                            ),
-                                            child: Lottie.asset(
-                                              'assets/lottie/refresh.json',
-                                              animate: controller.isLoading,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  Transform.translate(
-                                    offset: Offset(0, 100 * controller.value),
-                                    child: child,
-                                  ),
-                                ],
-                              );
-                            },
+                            builder: (context, child, controller) =>
+                                _buildRefreshIndicatorContent(
+                                  controller,
+                                  child,
+                                ),
                             child: _isLoading
                                 ? _buildLoadingSkeleton()
                                 : _resources.isEmpty
@@ -794,47 +810,26 @@ class _StudyScreenState extends State<StudyScreen>
                     Column(
                       children: [
                         if (isTeacher) _buildModerationScopeStrip(),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+                          child: _buildFollowingSearchBar(),
+                        ),
                         Expanded(
                           child: CustomRefreshIndicator(
                             onRefresh: _loadFollowingFeed,
-                            builder: (context, child, controller) {
-                              return Stack(
-                                children: [
-                                  if (controller.value > 0.0)
-                                    Positioned(
-                                      top: 25 * controller.value,
-                                      left: 0,
-                                      right: 0,
-                                      child: Center(
-                                        child: SizedBox(
-                                          height: 80,
-                                          width: 80,
-                                          child: Opacity(
-                                            opacity: controller.value.clamp(
-                                              0.0,
-                                              1.0,
-                                            ),
-                                            child: Lottie.asset(
-                                              'assets/lottie/refresh.json',
-                                              animate: controller.isLoading,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  Transform.translate(
-                                    offset: Offset(0, 100 * controller.value),
-                                    child: child,
-                                  ),
-                                ],
-                              );
-                            },
+                            builder: (context, child, controller) =>
+                                _buildRefreshIndicatorContent(
+                                  controller,
+                                  child,
+                                ),
                             child: _isLoadingFollowing
                                 ? _buildLoadingSkeleton()
                                 : _followingResources.isEmpty
                                 ? (isTeacher
                                       ? _buildModerationEmptyState()
                                       : _buildFollowingEmptyState())
+                                : _filteredFollowingResources.isEmpty
+                                ? _buildFollowingSearchEmptyState(isTeacher)
                                 : _buildFollowingGrid(),
                           ),
                         ),
@@ -972,6 +967,58 @@ class _StudyScreenState extends State<StudyScreen>
             },
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildFollowingSearchBar() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      height: 52,
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: isDark ? Colors.white12 : const Color(0xFFE2E8F0),
+        ),
+      ),
+      child: TextField(
+        controller: _followingSearchController,
+        onChanged: (value) {
+          setState(() => _followingSearchQuery = value);
+        },
+        style: GoogleFonts.inter(
+          fontSize: 14,
+          color: isDark ? Colors.white : const Color(0xFF0F172A),
+        ),
+        decoration: InputDecoration(
+          hintText: _canManageAdminResources
+              ? 'Search moderation queue...'
+              : 'Search following feed...',
+          hintStyle: GoogleFonts.inter(
+            fontSize: 14,
+            color: isDark ? Colors.white54 : const Color(0xFF64748B),
+          ),
+          prefixIcon: const Icon(
+            Icons.search_rounded,
+            color: AppTheme.textMuted,
+          ),
+          suffixIcon: _followingSearchQuery.trim().isEmpty
+              ? null
+              : IconButton(
+                  onPressed: () {
+                    _followingSearchController.clear();
+                    setState(() => _followingSearchQuery = '');
+                  },
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                ),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 14,
+          ),
+        ),
       ),
     );
   }
@@ -1129,10 +1176,44 @@ class _StudyScreenState extends State<StudyScreen>
     );
   }
 
+  Widget _buildFollowingSearchEmptyState(bool isTeacher) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.search_off_rounded,
+            size: 58,
+            color: AppTheme.textMuted.withValues(alpha: 0.45),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            'No matches found',
+            style: GoogleFonts.inter(fontSize: 16, color: AppTheme.textMuted),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            isTeacher
+                ? 'Try a different search for the moderation queue.'
+                : 'Try a different search for your following feed.',
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              color: AppTheme.textMuted.withValues(alpha: 0.72),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildFollowingGrid() {
     final isTeacher = _canManageAdminResources;
+    final isFiltering = _followingSearchQuery.trim().isNotEmpty;
     final showLoadMore =
-        isTeacher && (_hasMoreModeration || _isLoadingMoreModeration);
+        isTeacher &&
+        !isFiltering &&
+        (_hasMoreModeration || _isLoadingMoreModeration);
+    final visibleResources = _filteredFollowingResources;
 
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(
@@ -1141,9 +1222,9 @@ class _StudyScreenState extends State<StudyScreen>
         16,
         100,
       ), // Bottom padding for floating nav
-      itemCount: _followingResources.length + (showLoadMore ? 1 : 0),
+      itemCount: visibleResources.length + (showLoadMore ? 1 : 0),
       itemBuilder: (context, index) {
-        if (showLoadMore && index == _followingResources.length) {
+        if (showLoadMore && index == visibleResources.length) {
           return Padding(
             padding: const EdgeInsets.only(top: 8, bottom: 12),
             child: Center(
@@ -1162,7 +1243,7 @@ class _StudyScreenState extends State<StudyScreen>
           );
         }
 
-        final resource = _followingResources[index];
+        final resource = visibleResources[index];
         final status = resource.status.toLowerCase();
         final bool isApproved = status == 'approved';
         final bool isPending = status == 'pending';
@@ -1214,7 +1295,7 @@ class _StudyScreenState extends State<StudyScreen>
     setState(() => _isModerating = true);
 
     try {
-      await _apiService.updateResourceStatus(
+      await _supabaseService.updateResourceStatusWithFallback(
         resourceId: resourceId,
         status: newStatus,
         context: context,
@@ -1239,9 +1320,7 @@ class _StudyScreenState extends State<StudyScreen>
       debugPrint('Error moderating resource: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to moderate resource. Please try again.'),
-        ),
+        SnackBar(content: Text('Failed to moderate resource: $e')),
       );
     } finally {
       if (mounted) setState(() => _isModerating = false);
@@ -1286,7 +1365,10 @@ class _StudyScreenState extends State<StudyScreen>
       if (!mounted) return;
       setState(() => _isModerating = true);
 
-      await _apiService.deleteResourceAsAdmin(resourceId: resource.id);
+      await _supabaseService.deleteResourceAsAdminWithFallback(
+        resourceId: resource.id,
+      );
+      await _downloadService.deleteResource(resource.id);
 
       if (!mounted) return;
       await _loadFollowingFeed();
@@ -1297,11 +1379,9 @@ class _StudyScreenState extends State<StudyScreen>
     } catch (e) {
       debugPrint('Error deleting resource: $e');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to delete resource. Please try again.'),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to delete resource: $e')));
     } finally {
       if (mounted) setState(() => _isModerating = false);
     }
@@ -1353,7 +1433,7 @@ class _StudyScreenState extends State<StudyScreen>
         final departments = snapshot.data!;
 
         return SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 132),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1757,258 +1837,275 @@ class _StudyScreenState extends State<StudyScreen>
       ),
       child: Column(
         children: [
-          const SizedBox(height: 10),
-          Container(
-            width: 44,
-            height: 5,
-            decoration: BoxDecoration(
-              color: isDark ? Colors.white24 : Colors.black12,
-              borderRadius: BorderRadius.circular(999),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 16, 8),
-            child: Row(
-              children: [
-                const SizedBox(width: 56),
-                Expanded(
-                  child: Text(
-                    'Sort & filter',
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.inter(
-                      fontSize: 24,
-                      fontWeight: FontWeight.w700,
-                      color: isDark ? Colors.white : const Color(0xFF111827),
-                    ),
-                  ),
-                ),
-                TextButton(
-                  onPressed: () {
-                    setState(() {
-                      _selectedSemester = null;
-                      _selectedBranch = null;
-                      _selectedSubject = null;
-                      _selectedType = null;
-                      _selectedSort = 'Recent';
-                      _resourcesRelevantOnly = true;
-                      _subjects = [];
-                    });
-                    syncSheet();
-                    _loadResources(refresh: true);
-                  },
-                  child: Text(
-                    'Clear',
-                    style: GoogleFonts.inter(
-                      color: isDark ? Colors.white70 : Colors.black54,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          _buildFilterHeader(setModalState, isDark, syncSheet),
           Divider(
             height: 1,
             color: isDark ? Colors.white10 : const Color(0xFFE5E7EB),
           ),
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
-              child: Column(
-                children: [
-                  if (_resourcesRelevantOnly)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Text(
-                          'Relevant scope uses profile semester/branch/subject. '
-                          'Switch to All to apply manual academic filters.',
-                          style: GoogleFonts.inter(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                            color: isDark ? Colors.white60 : Colors.black54,
-                          ),
-                        ),
-                      ),
-                    ),
-                  _buildSheetSelectionRow(
-                    label: 'Sort by',
-                    value: _selectedSort,
-                    isDark: isDark,
-                    onTap: () {
-                      _showPickerSheet(
-                        title: 'Sort by',
-                        items: _sortOptions,
-                        selectedValue: _selectedSort,
-                        isDark: isDark,
-                        onSelected: (value) {
-                          setState(() => _selectedSort = value);
-                          syncSheet();
-                          _loadResources(refresh: true);
-                        },
-                      );
-                    },
-                  ),
-                  Divider(
-                    height: 1,
-                    color: isDark ? Colors.white10 : const Color(0xFFE5E7EB),
-                  ),
-                  _buildSheetSelectionRow(
-                    label: 'Type',
-                    value: _selectedType ?? 'All',
-                    isDark: isDark,
-                    onTap: () {
-                      _showPickerSheet(
-                        title: 'Type',
-                        items: _types,
-                        selectedValue: _selectedType ?? 'All',
-                        isDark: isDark,
-                        onSelected: (value) {
-                          setState(() {
-                            _selectedType = value == 'All' ? null : value;
-                          });
-                          syncSheet();
-                          _loadResources(refresh: true);
-                        },
-                      );
-                    },
-                  ),
-                  Divider(
-                    height: 1,
-                    color: isDark ? Colors.white10 : const Color(0xFFE5E7EB),
-                  ),
-                  _buildSheetSelectionRow(
-                    label: 'Semester',
-                    value: _resourcesRelevantOnly
-                        ? (_profileSemesterFilter ?? 'Profile not set')
-                        : (_selectedSemester ?? 'All'),
-                    isDark: isDark,
-                    enabled: !_resourcesRelevantOnly,
-                    onTap: _resourcesRelevantOnly
-                        ? null
-                        : () {
-                            _showPickerSheet(
-                              title: 'Semester',
-                              items: _semesters.isEmpty ? ['All'] : _semesters,
-                              selectedValue: _selectedSemester ?? 'All',
-                              isDark: isDark,
-                              onSelected: (value) {
-                                setState(() {
-                                  _selectedSemester = value == 'All'
-                                      ? null
-                                      : value;
-                                });
-                                syncSheet();
-                                _loadResources(refresh: true);
-                              },
-                            );
-                          },
-                  ),
-                  Divider(
-                    height: 1,
-                    color: isDark ? Colors.white10 : const Color(0xFFE5E7EB),
-                  ),
-                  _buildSheetSelectionRow(
-                    label: 'Branch',
-                    value: _resourcesRelevantOnly
-                        ? (_profileBranchFilter ?? 'Profile not set')
-                        : (_selectedBranch ?? 'All'),
-                    isDark: isDark,
-                    enabled: !_resourcesRelevantOnly,
-                    onTap: _resourcesRelevantOnly
-                        ? null
-                        : () {
-                            _showPickerSheet(
-                              title: 'Branch',
-                              items: _branches.isEmpty ? ['All'] : _branches,
-                              selectedValue: _selectedBranch ?? 'All',
-                              isDark: isDark,
-                              onSelected: (value) {
-                                setState(() {
-                                  _selectedBranch = value == 'All'
-                                      ? null
-                                      : value;
-                                  _selectedSubject = null;
-                                });
-                                syncSheet();
-                                _loadSubjects();
-                                _loadResources(refresh: true);
-                              },
-                            );
-                          },
-                  ),
-                  Divider(
-                    height: 1,
-                    color: isDark ? Colors.white10 : const Color(0xFFE5E7EB),
-                  ),
-                  _buildSheetSelectionRow(
-                    label: 'Subject',
-                    value: _resourcesRelevantOnly
-                        ? (_profileSubjectFilter ?? 'Profile not set')
-                        : (_selectedSubject ??
-                              (_selectedBranch == null
-                                  ? 'Select branch first'
-                                  : 'All')),
-                    isDark: isDark,
-                    enabled:
-                        !_resourcesRelevantOnly &&
-                        _selectedBranch != null &&
-                        _selectedBranch != 'All',
-                    onTap:
-                        (_resourcesRelevantOnly ||
-                            _selectedBranch == null ||
-                            _selectedBranch == 'All')
-                        ? null
-                        : () {
-                            _showPickerSheet(
-                              title: 'Subject',
-                              items: _subjects.isEmpty ? ['All'] : _subjects,
-                              selectedValue: _selectedSubject ?? 'All',
-                              isDark: isDark,
-                              onSelected: (value) {
-                                setState(() {
-                                  _selectedSubject = value == 'All'
-                                      ? null
-                                      : value;
-                                });
-                                syncSheet();
-                                _loadResources(refresh: true);
-                              },
-                            );
-                          },
-                  ),
-                  Divider(
-                    height: 1,
-                    color: isDark ? Colors.white10 : const Color(0xFFE5E7EB),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-            child: ElevatedButton(
-              onPressed: () => Navigator.pop(context),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-                foregroundColor: Colors.white,
-                minimumSize: const Size(double.infinity, 52),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                elevation: 0,
-              ),
-              child: Text(
-                'Show results',
-                style: GoogleFonts.inter(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ),
+          _buildFilterBody(isDark, syncSheet),
+          _buildFilterFooter(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildFilterHeader(
+    StateSetter setModalState,
+    bool isDark,
+    VoidCallback syncSheet,
+  ) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(height: 10),
+        Container(
+          width: 44,
+          height: 5,
+          decoration: BoxDecoration(
+            color: isDark ? Colors.white24 : Colors.black12,
+            borderRadius: BorderRadius.circular(999),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 16, 8),
+          child: Row(
+            children: [
+              const SizedBox(width: 56),
+              Expanded(
+                child: Text(
+                  'Sort & filter',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? Colors.white : const Color(0xFF111827),
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    _selectedSemester = null;
+                    _selectedBranch = null;
+                    _selectedSubject = null;
+                    _selectedType = null;
+                    _selectedSort = 'Recent';
+                    _resourcesRelevantOnly = true;
+                    _subjects = [];
+                  });
+                  syncSheet();
+                  _loadResources(refresh: true);
+                },
+                child: Text(
+                  'Clear',
+                  style: GoogleFonts.inter(
+                    color: isDark ? Colors.white70 : Colors.black54,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFilterBody(bool isDark, VoidCallback syncSheet) {
+    return Expanded(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+        child: Column(
+          children: [
+            if (_resourcesRelevantOnly)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Relevant scope uses profile semester/branch/subject. '
+                    'Switch to All to apply manual academic filters.',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: isDark ? Colors.white60 : Colors.black54,
+                    ),
+                  ),
+                ),
+              ),
+            _buildSortRow(isDark, syncSheet),
+            _divider(isDark),
+            _buildTypeRow(isDark, syncSheet),
+            _divider(isDark),
+            _buildAcademicFilterRows(isDark, syncSheet),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Divider _divider(bool isDark) => Divider(
+    height: 1,
+    color: isDark ? Colors.white10 : const Color(0xFFE5E7EB),
+  );
+
+  Widget _buildSortRow(bool isDark, VoidCallback syncSheet) {
+    return _buildSheetSelectionRow(
+      label: 'Sort by',
+      value: _selectedSort,
+      isDark: isDark,
+      onTap: () {
+        _showPickerSheet(
+          title: 'Sort by',
+          items: _sortOptions,
+          selectedValue: _selectedSort,
+          isDark: isDark,
+          onSelected: (value) {
+            setState(() => _selectedSort = value);
+            syncSheet();
+            _loadResources(refresh: true);
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildTypeRow(bool isDark, VoidCallback syncSheet) {
+    return _buildSheetSelectionRow(
+      label: 'Type',
+      value: _selectedType ?? 'All',
+      isDark: isDark,
+      onTap: () {
+        _showPickerSheet(
+          title: 'Type',
+          items: _types,
+          selectedValue: _selectedType ?? 'All',
+          isDark: isDark,
+          onSelected: (value) {
+            setState(() {
+              _selectedType = value == 'All' ? null : value;
+            });
+            syncSheet();
+            _loadResources(refresh: true);
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildAcademicFilterRows(bool isDark, VoidCallback syncSheet) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildSheetSelectionRow(
+          label: 'Semester',
+          value: _resourcesRelevantOnly
+              ? (_profileSemesterFilter ?? 'Profile not set')
+              : (_selectedSemester ?? 'All'),
+          isDark: isDark,
+          enabled: !_resourcesRelevantOnly,
+          onTap: _resourcesRelevantOnly
+              ? null
+              : () {
+                  _showPickerSheet(
+                    title: 'Semester',
+                    items: _semesters.isEmpty ? ['All'] : _semesters,
+                    selectedValue: _selectedSemester ?? 'All',
+                    isDark: isDark,
+                    onSelected: (value) {
+                      setState(() {
+                        _selectedSemester = value == 'All' ? null : value;
+                      });
+                      syncSheet();
+                      _loadResources(refresh: true);
+                    },
+                  );
+                },
+        ),
+        _divider(isDark),
+        _buildSheetSelectionRow(
+          label: 'Branch',
+          value: _resourcesRelevantOnly
+              ? (_profileBranchFilter ?? 'Profile not set')
+              : (_selectedBranch ?? 'All'),
+          isDark: isDark,
+          enabled: !_resourcesRelevantOnly,
+          onTap: _resourcesRelevantOnly
+              ? null
+              : () {
+                  _showPickerSheet(
+                    title: 'Branch',
+                    items: _branches.isEmpty ? ['All'] : _branches,
+                    selectedValue: _selectedBranch ?? 'All',
+                    isDark: isDark,
+                    onSelected: (value) {
+                      setState(() {
+                        _selectedBranch = value == 'All' ? null : value;
+                        _selectedSubject = null;
+                      });
+                      syncSheet();
+                      _loadSubjects();
+                      _loadResources(refresh: true);
+                    },
+                  );
+                },
+        ),
+        _divider(isDark),
+        _buildSheetSelectionRow(
+          label: 'Subject',
+          value: _resourcesRelevantOnly
+              ? (_profileSubjectFilter ?? 'Profile not set')
+              : (_selectedSubject ??
+                    (_selectedBranch == null ? 'Select branch first' : 'All')),
+          isDark: isDark,
+          enabled:
+              !_resourcesRelevantOnly &&
+              _selectedBranch != null &&
+              _selectedBranch != 'All',
+          onTap:
+              (_resourcesRelevantOnly ||
+                  _selectedBranch == null ||
+                  _selectedBranch == 'All')
+              ? null
+              : () {
+                  _showPickerSheet(
+                    title: 'Subject',
+                    items: _subjects.isEmpty ? ['All'] : _subjects,
+                    selectedValue: _selectedSubject ?? 'All',
+                    isDark: isDark,
+                    onSelected: (value) {
+                      setState(() {
+                        _selectedSubject = value == 'All' ? null : value;
+                      });
+                      syncSheet();
+                      _loadResources(refresh: true);
+                    },
+                  );
+                },
+        ),
+        _divider(isDark),
+      ],
+    );
+  }
+
+  Widget _buildFilterFooter() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+      child: ElevatedButton(
+        onPressed: () => Navigator.pop(context),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: AppTheme.primary,
+          foregroundColor: Colors.white,
+          minimumSize: const Size(double.infinity, 52),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          elevation: 0,
+        ),
+        child: Text(
+          'Show results',
+          style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w700),
+        ),
       ),
     );
   }
@@ -2192,6 +2289,39 @@ class _StudyScreenState extends State<StudyScreen>
           },
         ),
       ),
+    );
+  }
+
+  Widget _buildRefreshIndicatorContent(
+    IndicatorController controller,
+    Widget child,
+  ) {
+    return Stack(
+      children: [
+        if (controller.value > 0.0)
+          Positioned(
+            top: 25 * controller.value,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: SizedBox(
+                height: 80,
+                width: 80,
+                child: Opacity(
+                  opacity: controller.value.clamp(0.0, 1.0),
+                  child: Lottie.asset(
+                    'assets/lottie/refresh.json',
+                    animate: controller.isLoading,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        Transform.translate(
+          offset: Offset(0, 100 * controller.value),
+          child: child,
+        ),
+      ],
     );
   }
 

@@ -98,33 +98,24 @@ Future<bool> _requestPermissions() async {
   if (kIsWeb) return true; // Skip on web
 
   if (Platform.isAndroid) {
-    final androidInfo = await DeviceInfoPlugin().androidInfo;
-    final sdkInt = androidInfo.version.sdkInt;
-
-    Map<Permission, PermissionStatus> statuses = {};
-
-    if (sdkInt >= 33) {
-      // Android 13+: Request granular media permissions
-      statuses = await [
-        Permission.photos,
-        Permission.videos,
-        Permission.audio,
-      ].request();
-    } else {
-      // Android 12 and below: Request storage permission
-      statuses = await [Permission.storage].request();
-    }
-
-    // Check results
-    bool allGranted = true;
-
-    statuses.forEach((permission, status) {
-      if (!status.isGranted) {
-        allGranted = false;
+    // Do not block app startup on broad media/storage permissions.
+    // Those are requested at the exact feature entry points (picker/share).
+    // Only notifications are requested here and failures are non-blocking.
+    try {
+      final androidInfo = await DeviceInfoPlugin().androidInfo;
+      if (androidInfo.version.sdkInt >= 33) {
+        await Permission.notification.request();
       }
-    });
-
-    return allGranted;
+    } on PlatformException catch (e) {
+      debugPrint(
+        'Notification permission request failed (PlatformException): ${e.message ?? e}',
+      );
+    } on Exception catch (e) {
+      debugPrint(
+        'Notification permission request error (${e.runtimeType}): $e',
+      );
+    }
+    return true;
   }
 
   return true; // iOS or other platforms, handled by plist or similar
@@ -206,6 +197,22 @@ class _AppRootState extends State<AppRoot> {
   String? _initializationErrorMessage;
   String? _lastRegisteredFcmToken;
   static const String _fcmOwnerEmailKey = 'fcm_token_owner_email';
+  static const Set<String> _trustedExternalHosts = {
+    'studyshare.me',
+    'www.studyshare.me',
+    'youtube.com',
+    'www.youtube.com',
+    'm.youtube.com',
+    'youtu.be',
+  };
+
+  bool _isTrustedNotificationUri(Uri uri) {
+    if (uri.scheme != 'https') return false;
+    final host = uri.host.toLowerCase();
+    if (host.isEmpty) return false;
+    return _trustedExternalHosts.contains(host) ||
+        host.endsWith('.studyshare.me');
+  }
 
   ThemeMode get _bootThemeMode {
     final savedTheme = _prefs?.getString('theme_mode');
@@ -508,6 +515,25 @@ class _AppRootState extends State<AppRoot> {
                 } else {
                   // External navigation
                   final uri = Uri.parse(actionUrl);
+                  if (!_isTrustedNotificationUri(uri)) {
+                    debugPrint(
+                      'Blocked untrusted notification URL: ${uri.toString()}',
+                    );
+                    // Show user feedback for blocked URL
+                    final currentContext = appNavigatorKey.currentContext;
+                    if (currentContext != null) {
+                      final l10n = AppLocalizations.of(currentContext);
+                      ScaffoldMessenger.of(currentContext).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            l10n?.blockedUntrustedUrl ?? 'Blocked untrusted URL',
+                          ),
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
+                    }
+                    return;
+                  }
                   if (await canLaunchUrl(uri)) {
                     await launchUrl(uri, mode: LaunchMode.externalApplication);
                   } else {

@@ -9,11 +9,13 @@ import '../../providers/theme_provider.dart';
 import '../../models/resource.dart';
 import '../../widgets/resource_card.dart';
 import '../../utils/contribution_badge.dart';
+import '../../utils/profile_photo_utils.dart';
 import 'bookmarks_screen.dart';
 import 'following_screen.dart';
 import 'edit_profile_screen.dart';
 import '../../widgets/paywall_dialog.dart';
 import '../../services/subscription_service.dart';
+import '../../services/download_service.dart';
 import 'settings_screen.dart';
 import 'explore_students_screen.dart';
 import 'saved_posts_screen.dart';
@@ -112,7 +114,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _contributionsFuture = Future.value(const <Resource>[]);
       return;
     }
-    _contributionsFuture = _supabaseService.getUserResources(email);
+    _contributionsFuture = _supabaseService.getUserResources(
+      email,
+      approvedOnly: false,
+    );
   }
 
   Future<void> _loadProfile({bool forceRefresh = false}) async {
@@ -124,16 +129,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
         maxAttempts: forceRefresh ? 2 : 1,
         forceRefresh: forceRefresh,
       );
+      final tokenSnapshot =
+          await AiTokenBudgetSnapshot.fromProfileWithLocalPremium(profile);
+      final supportsSubjectField = isTeacherOrAdminProfile(profile);
       if (!mounted) return;
       setState(() {
         _profileDisplayName = profile['display_name']?.toString();
-        _profilePhotoUrl = profile['profile_photo_url']?.toString();
+        _profilePhotoUrl = resolveProfilePhotoUrl(profile);
         _profileBio = profile['bio']?.toString();
         _profileSemester = profile['semester']?.toString();
         _profileBranch = profile['branch']?.toString();
-        _profileSubject = profile['subject']?.toString();
-        final tokenSnapshot =
-            await AiTokenBudgetSnapshot.fromProfileWithLocalPremium(profile);
+        _profileSubject = supportsSubjectField
+            ? profile['subject']?.toString()
+            : null;
         final usedFromApi = _toSafeInt(profile['ai_token_used']);
         final remainingFromApi = _toSafeInt(profile['ai_token_remaining']);
         final resolvedBudget = tokenSnapshot.currentBudget;
@@ -290,6 +298,63 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         );
       }
+    }
+  }
+
+  Future<void> _deleteContribution(Resource resource) async {
+    final userEmail = _userEmail;
+    if (userEmail.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to identify your account.')),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete Contribution?'),
+        content: Text(
+          'This will permanently delete "${resource.title}" from your contributions.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await _supabaseService.deleteOwnedResource(
+        resource: resource,
+        ownerEmail: userEmail,
+      );
+      await DownloadService().deleteResource(
+        resource.id,
+        ownerEmail: userEmail,
+      );
+      _supabaseService.invalidateResourceListCache();
+      if (!mounted) return;
+      setState(() => _refreshContributionsFuture());
+      await _loadStats();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Contribution deleted successfully.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to delete contribution: $e')),
+      );
     }
   }
 
@@ -1705,28 +1770,106 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildUpgradeCard() {
+    final freeVisibleTokens = visibleAiTokensFromRaw(
+      _aiTokenBaseBudget > 0
+          ? _aiTokenBaseBudget * _aiTokenBudgetMultiplier
+          : _aiTokenBudget,
+    );
+    final premiumVisibleTokens =
+        freeVisibleTokens * math.max(1, _aiTokenPremiumMultiplier);
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF8E1),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFFFD54F)),
+        gradient: const LinearGradient(
+          colors: <Color>[Color(0xFFFFFBEB), Color(0xFFFFF1C2)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFF5C542)),
+        boxShadow: <BoxShadow>[
+          BoxShadow(
+            color: const Color(0xFFF59E0B).withValues(alpha: 0.14),
+            blurRadius: 22,
+            offset: const Offset(0, 10),
+          ),
+        ],
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Unlock Pro Features!',
-            style: GoogleFonts.inter(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: Colors.black87,
-            ),
+          Row(
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.workspace_premium_rounded,
+                  color: Color(0xFFB45309),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Upgrade Now',
+                      style: GoogleFonts.inter(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Offline downloads, premium badge, and bigger AI limits.',
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        color: Colors.black54,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 8),
-          Text(
-            'Analytics & Offline Downloads',
-            style: GoogleFonts.inter(fontSize: 14, color: Colors.black54),
+          const SizedBox(height: 16),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.72),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: _buildUpgradeTokenStat(
+                    label: 'Free',
+                    value: '$freeVisibleTokens AI tokens',
+                  ),
+                ),
+                Container(
+                  width: 1,
+                  height: 34,
+                  color: Colors.black.withValues(alpha: 0.08),
+                ),
+                Expanded(
+                  child: _buildUpgradeTokenStat(
+                    label: 'Premium',
+                    value: '$premiumVisibleTokens AI tokens',
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 16),
           ElevatedButton(
@@ -1752,12 +1895,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(30),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
             ),
-            child: const Text('Upgrade Now'),
+            child: const Text('See Plans'),
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildUpgradeTokenStat({
+    required String label,
+    required String value,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.inter(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: const Color(0xFF92400E),
+            letterSpacing: 0.3,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            fontWeight: FontWeight.w800,
+            color: const Color(0xFF111827),
+          ),
+        ),
+      ],
     );
   }
 
@@ -1831,6 +2003,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return FutureBuilder<List<Resource>>(
       future: _contributionsFuture ??= _supabaseService.getUserResources(
         _userEmail,
+        approvedOnly: false,
       ),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
@@ -1871,7 +2044,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
             final resource = resources[index];
             return ResourceCard(
               resource: resource,
-              userEmail: _authService.userEmail!,
+              userEmail: _userEmail,
+              showStatusBadge: true,
+              onDelete: () => _deleteContribution(resource),
               onVoteChanged: () {
                 // Optionally refresh stats or local state if needed
                 setState(() {});

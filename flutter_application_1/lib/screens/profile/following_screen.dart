@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import '../../config/theme.dart';
 import '../../services/supabase_service.dart';
+import '../../utils/profile_photo_utils.dart';
+import '../../widgets/user_avatar.dart';
 import 'user_profile_screen.dart';
 
 class FollowingScreen extends StatefulWidget {
@@ -63,8 +64,10 @@ class _FollowingScreenState extends State<FollowingScreen>
   }
 
   void _handleTabSelection() {
-    if (_tabController.indexIsChanging) {
-      setState(() {}); // Rebuild to update count
+    if (!_tabController.indexIsChanging) {
+      // Rebuild after the tab animation completes so the count badge in the
+      // AppBar reflects _getCurrentListCount() for the newly selected tab.
+      setState(() {});
     }
   }
 
@@ -512,8 +515,7 @@ class _FollowingScreenState extends State<FollowingScreen>
         return Icons.people_outline;
       case 'following':
         return Icons.person_add_outlined;
-      case 'subscriptions':
-        return Icons.star_outline;
+      // 'subscriptions' case reserved for future use (not passed by _buildUserList today).
       default:
         return Icons.people_outline;
     }
@@ -525,31 +527,17 @@ class _FollowingScreenState extends State<FollowingScreen>
         return 'No followers yet';
       case 'following':
         return 'Not following anyone yet';
-      case 'subscriptions':
-        return 'No subscriptions yet';
+      // 'subscriptions' case reserved for future use (not passed by _buildUserList today).
       default:
         return 'No people found';
     }
-  }
-
-  Widget _buildInitials(String name) {
-    return Center(
-      child: Text(
-        name.isNotEmpty ? name[0].toUpperCase() : '?',
-        style: GoogleFonts.inter(
-          fontSize: 18,
-          fontWeight: FontWeight.bold,
-          color: Colors.white,
-        ),
-      ),
-    );
   }
 
   Widget _buildUserCard(Map<String, dynamic> user, bool isDark) {
     final name = _getUserDisplayName(user);
     final email = user['email'] ?? '';
     final hasNewPost = user['has_new_post'] == true;
-    final photoUrl = user['photo_url'] ?? user['profile_photo_url'];
+    final photoUrl = resolveProfilePhotoUrl(user);
 
     return GestureDetector(
       onTap: () => _openUserProfile(email, name, photoUrl),
@@ -573,33 +561,7 @@ class _FollowingScreenState extends State<FollowingScreen>
             // Avatar with new post indicator
             Stack(
               children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: hasNewPost
-                          ? [AppTheme.primary, AppTheme.accent]
-                          : [
-                              AppTheme.primary.withValues(alpha: 0.7),
-                              AppTheme.secondary,
-                            ],
-                    ),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(14),
-                    child: (photoUrl != null && photoUrl.toString().isNotEmpty)
-                        ? CachedNetworkImage(
-                            imageUrl: photoUrl,
-                            fit: BoxFit.cover,
-                            placeholder: (context, url) => _buildInitials(name),
-                            errorWidget: (context, url, error) =>
-                                _buildInitials(name),
-                          )
-                        : _buildInitials(name),
-                  ),
-                ),
+                UserAvatar(displayName: name, photoUrl: photoUrl, radius: 24),
                 if (hasNewPost)
                   Positioned(
                     right: 0,

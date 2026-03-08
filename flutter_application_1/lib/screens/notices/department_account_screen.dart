@@ -101,6 +101,7 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
       }
     } catch (e) {
       debugPrint('Department follow update failed: $e');
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(_followErrorMessage(e))));
@@ -347,7 +348,7 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
             Icon(
               Icons.notifications_none_rounded,
               size: 48,
-              color: secondaryColor.withOpacity(0.5),
+              color: secondaryColor.withValues(alpha: 0.5),
             ),
             const SizedBox(height: 16),
             Text(

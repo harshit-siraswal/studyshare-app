@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../services/subscription_service.dart';
 import '../services/auth_service.dart';
 import '../services/supabase_service.dart';
+import '../utils/ai_token_budget_utils.dart';
 import 'success_overlay.dart';
 
 class PaywallDialog extends StatefulWidget {
@@ -22,10 +23,15 @@ class _PaywallDialogState extends State<PaywallDialog> {
   final AuthService _auth = AuthService();
   final SupabaseService _supabaseService = SupabaseService();
   bool _isLoading = false;
+  bool _isRechargeLoading = false;
   String _selectedPlan = 'quarterly';
   String? _expandedPlanId = 'quarterly';
   int _baseMonthlyTokens = 40160;
-  int _premiumTokenMultiplier = 5;
+  int _premiumTokenMultiplier = 10;
+  double _baseBudgetInr = 1;
+  int _selectedRechargeRupees = 49;
+  final TextEditingController _customRechargeController =
+      TextEditingController();
 
   static const Map<String, _PlanUiData> _planUi = {
     'monthly': _PlanUiData(
@@ -53,16 +59,31 @@ class _PaywallDialogState extends State<PaywallDialog> {
     ),
   };
 
-  bool get _isPurchaseEnabled =>
-      _expandedPlanId != null && _expandedPlanId == _selectedPlan;
+  bool get _isPurchaseEnabled => _planUi.containsKey(_selectedPlan);
 
   int get _premiumMonthlyTokens =>
       _baseMonthlyTokens * math.max(1, _premiumTokenMultiplier);
+
+  int get _freeVisibleTokens => visibleAiTokensFromRaw(_baseMonthlyTokens);
+
+  int get _premiumVisibleTokens =>
+      _freeVisibleTokens * math.max(1, _premiumTokenMultiplier);
+
+  int get _tokensPerRupee => math.max(
+    1,
+    (_baseMonthlyTokens / math.max(0.01, _baseBudgetInr)).round(),
+  );
 
   @override
   void initState() {
     super.initState();
     _loadTokenPreviewData();
+  }
+
+  @override
+  void dispose() {
+    _customRechargeController.dispose();
+    super.dispose();
   }
 
   void _handlePlanTap(String planId) {
@@ -85,17 +106,14 @@ class _PaywallDialogState extends State<PaywallDialog> {
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
+  double _toSafeDouble(dynamic value, {double fallback = 1}) {
+    if (value is num) return value.toDouble();
+    return double.tryParse(value?.toString() ?? '') ?? fallback;
+  }
+
   String _formatTokenCount(int value) {
-    final digits = value.toString();
-    final buffer = StringBuffer();
-    for (var i = 0; i < digits.length; i++) {
-      final remaining = digits.length - i;
-      buffer.write(digits[i]);
-      if (remaining > 1 && remaining % 3 == 1) {
-        buffer.write(',');
-      }
-    }
-    return buffer.toString();
+    if (value <= 0) return '0';
+    return math.max(1, visibleAiTokensFromRaw(value)).toString();
   }
 
   Future<void> _loadTokenPreviewData() async {
@@ -105,30 +123,17 @@ class _PaywallDialogState extends State<PaywallDialog> {
       );
       if (!mounted || profile.isEmpty) return;
 
-      final budget = _toSafeInt(profile['ai_token_budget']);
-      final currentMultiplier = math.max(
-        1,
-        _toSafeInt(profile['ai_token_budget_multiplier']),
-      );
-      final configuredPremiumMultiplier = math.max(
-        1,
-        _toSafeInt(profile['ai_token_premium_multiplier']),
-      );
-      final premiumMultiplier = configuredPremiumMultiplier > 1
-          ? configuredPremiumMultiplier
-          : 5;
-
-      var baseBudget = budget;
-      if (budget > 0 && currentMultiplier > 1) {
-        baseBudget = (budget / currentMultiplier).round();
-      }
-      if (baseBudget <= 0) {
-        baseBudget = _baseMonthlyTokens;
-      }
+      final tokenSnapshot =
+          await AiTokenBudgetSnapshot.fromProfileWithLocalPremium(
+            profile,
+            defaultBudget: _baseMonthlyTokens,
+          );
+      final budgetInr = _toSafeDouble(profile['ai_budget_inr'], fallback: 1);
 
       setState(() {
-        _baseMonthlyTokens = math.max(1, baseBudget);
-        _premiumTokenMultiplier = premiumMultiplier;
+        _baseMonthlyTokens = math.max(1, tokenSnapshot.freeBudget);
+        _premiumTokenMultiplier = tokenSnapshot.premiumMultiplier;
+        _baseBudgetInr = budgetInr > 0 ? budgetInr : 1;
       });
     } catch (_) {
       // Keep defaults if profile fetch fails.
@@ -138,8 +143,20 @@ class _PaywallDialogState extends State<PaywallDialog> {
   List<String> _benefitsWithTokenLine(_PlanUiData plan) {
     final tokenLine =
         '${_formatTokenCount(_premiumMonthlyTokens)} AI tokens every 30 days '
-        '(${_premiumTokenMultiplier}x free)';
+        '(${_premiumTokenMultiplier}x the free plan)';
     return <String>[tokenLine, ...plan.benefits];
+  }
+
+  int _resolveRechargeRupees() {
+    final custom = int.tryParse(_customRechargeController.text.trim());
+    if (custom != null && custom > 0) {
+      return custom;
+    }
+    return _selectedRechargeRupees;
+  }
+
+  int _estimatedRechargeTokens(int rupees) {
+    return math.max(1, rupees * _tokensPerRupee);
   }
 
   Future<void> _startPayment() async {
@@ -214,6 +231,72 @@ class _PaywallDialogState extends State<PaywallDialog> {
     }
   }
 
+  Future<void> _startAiRechargePayment() async {
+    if (_isRechargeLoading || _isLoading) return;
+
+    final email = _auth.userEmail;
+    if (email == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please sign in to continue.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final rechargeRupees = _resolveRechargeRupees();
+    if (rechargeRupees < 10 || rechargeRupees > 5000) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Recharge amount must be between ₹10 and ₹5000.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isRechargeLoading = true);
+    final phone = _auth.currentUser?.phoneNumber ?? '9999999999';
+
+    final result = await _subService.buyAiTokenRecharge(
+      context,
+      email,
+      phone,
+      rechargeRupees: rechargeRupees,
+    );
+
+    if (!mounted) return;
+    setState(() => _isRechargeLoading = false);
+
+    if (result) {
+      Navigator.pop(context);
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => SuccessOverlay(
+          variant: SuccessOverlayVariant.premiumUpgrade,
+          title: 'AI Tokens Added',
+          message:
+              'Recharge successful. ${_formatTokenCount(_estimatedRechargeTokens(rechargeRupees))} AI tokens credited.',
+          badgeLabel: 'AI Recharge',
+          onDismiss: () {
+            Navigator.pop(context);
+            widget.onSuccess();
+          },
+        ),
+      );
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('AI recharge failed. Please try again.'),
+        backgroundColor: Colors.red,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -223,21 +306,26 @@ class _PaywallDialogState extends State<PaywallDialog> {
     final bodyText = isDark
         ? Colors.white.withValues(alpha: 0.76)
         : Colors.black.withValues(alpha: 0.62);
-    final premiumTokenLabel = _formatTokenCount(_premiumMonthlyTokens);
+    final freePlanTokenLabel = _freeVisibleTokens.toString();
+    final premiumTokenLabel = _premiumVisibleTokens.toString();
     final purchaseCta = _selectedPlan == 'quarterly'
         ? 'Buy \u20b9149 Plan'
         : 'Buy \u20b949 Plan';
     final helperText = _isPurchaseEnabled
-        ? 'Includes $premiumTokenLabel AI tokens every 30 days.'
-        : 'Tap price to view benefits, then purchase.';
+        ? 'Free users get $freePlanTokenLabel AI tokens every 30 days. '
+              'Premium includes $premiumTokenLabel AI tokens every 30 days.'
+        : 'Select a plan to continue.';
 
     return Dialog(
       backgroundColor: bg,
       insetPadding: const EdgeInsets.all(16),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(32)),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 400),
-        child: Padding(
+        constraints: BoxConstraints(
+          maxWidth: 400,
+          maxHeight: MediaQuery.of(context).size.height * 0.88,
+        ),
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -271,6 +359,46 @@ class _PaywallDialogState extends State<PaywallDialog> {
                   height: 1.5,
                 ),
               ),
+              const SizedBox(height: 14),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.05)
+                      : primaryColor.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: isDark
+                        ? Colors.white12
+                        : primaryColor.withValues(alpha: 0.24),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Student-friendly AI pricing',
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: scheme.onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Free plan: $freePlanTokenLabel AI tokens every 30 days.\n'
+                      'Premium: $premiumTokenLabel AI tokens every 30 days. Need more? Use micro top-ups from \u20b919.',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: bodyText,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(height: 32),
               _buildPlanCard(
                 plan: _planUi['monthly']!,
@@ -284,6 +412,13 @@ class _PaywallDialogState extends State<PaywallDialog> {
                 isDark: isDark,
               ),
               const SizedBox(height: 20),
+              _buildAiRechargeSection(
+                isDark: isDark,
+                primaryColor: primaryColor,
+                titleColor: scheme.onSurface,
+                subtitleColor: bodyText,
+              ),
+              const SizedBox(height: 16),
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
@@ -358,6 +493,38 @@ class _PaywallDialogState extends State<PaywallDialog> {
                         ),
                 ),
               ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: (_isRechargeLoading || _isLoading)
+                      ? null
+                      : _startAiRechargePayment,
+                  style: OutlinedButton.styleFrom(
+                    side: BorderSide(
+                      color: primaryColor.withValues(alpha: 0.6),
+                    ),
+                    foregroundColor: primaryColor,
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                  ),
+                  child: _isRechargeLoading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text(
+                          'Recharge AI Tokens',
+                          style: GoogleFonts.inter(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                ),
+              ),
               const SizedBox(height: 16),
               GestureDetector(
                 onTap: () => Navigator.pop(context),
@@ -383,6 +550,96 @@ class _PaywallDialogState extends State<PaywallDialog> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildAiRechargeSection({
+    required bool isDark,
+    required Color primaryColor,
+    required Color titleColor,
+    required Color subtitleColor,
+  }) {
+    final rechargeRupees = _resolveRechargeRupees();
+    final estimatedTokens = _estimatedRechargeTokens(rechargeRupees);
+    final quickPacks = const <int>[19, 29, 49, 99, 149, 199];
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.04)
+            : primaryColor.withValues(alpha: 0.05),
+        border: Border.all(
+          color: isDark ? Colors.white12 : primaryColor.withValues(alpha: 0.2),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Student AI Recharge',
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+              color: titleColor,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Low-cost micro top-ups for students. Pick a pack below to see the AI tokens you will receive.',
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: subtitleColor,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: quickPacks.map((pack) {
+              final selected = _selectedRechargeRupees == pack;
+              return ChoiceChip(
+                label: Text('\u20b9$pack'),
+                selected: selected,
+                onSelected: (value) {
+                  if (!value) return;
+                  setState(() {
+                    _selectedRechargeRupees = pack;
+                    _customRechargeController.clear();
+                  });
+                },
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _customRechargeController,
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              labelText: 'Custom recharge amount (\u20b910 - \u20b95000)',
+              isDense: true,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              prefixText: '\u20b9',
+            ),
+            onChanged: (_) => setState(() {}),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'You will receive about ${_formatTokenCount(estimatedTokens)} AI tokens.',
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: primaryColor,
+            ),
+          ),
+        ],
       ),
     );
   }

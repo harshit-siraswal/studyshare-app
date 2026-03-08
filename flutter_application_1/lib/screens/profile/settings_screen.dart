@@ -10,6 +10,7 @@ import 'saved_posts_screen.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import '../../config/app_config.dart';
 import '../../services/subscription_service.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../../widgets/paywall_dialog.dart';
@@ -58,7 +59,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _notificationsEnabled = true;
   bool _isLoading = true;
   bool _isPremium = false;
-  String _appVersion = '1.0.0';
+  String _appVersion = '...';
 
   @override
   void initState() {

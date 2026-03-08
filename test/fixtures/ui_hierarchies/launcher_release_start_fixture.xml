@@ -1,0 +1,24 @@
+<!--
+  Fixture: launcher_release_start_fixture.xml
+  Purpose: Pretty-printed UIAutomator hierarchy for launcher home screen after release start.
+  Source: tmp_window_release_start.xml
+  Usage: Use for UI tests and validation of launcher layout after app release start.
+-->
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<hierarchy rotation="0">
+  <node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="com.google.android.apps.nexuslauncher" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[0,0][1080,2400]" drawing-order="0" hint="">
+    <node index="0" text="" resource-id="" class="android.widget.LinearLayout" package="com.google.android.apps.nexuslauncher" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[0,0][1080,2400]" drawing-order="1" hint="">
+      <node index="0" text="" resource-id="android:id/content" class="android.widget.FrameLayout" package="com.google.android.apps.nexuslauncher" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[0,0][1080,2400]" drawing-order="2" hint="">
+        <node index="0" text="" resource-id="com.google.android.apps.nexuslauncher:id/launcher" class="android.widget.FrameLayout" package="com.google.android.apps.nexuslauncher" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[0,0][1080,2400]" drawing-order="1" hint="">
+          <node index="0" text="" resource-id="com.google.android.apps.nexuslauncher:id/drag_layer" class="android.widget.FrameLayout" package="com.google.android.apps.nexuslauncher" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[0,0][1080,2400]" drawing-order="1" hint="">
+            <node index="0" text="" resource-id="com.google.android.apps.nexuslauncher:id/scrim_view" class="android.view.View" package="com.google.android.apps.nexuslauncher" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[0,0][1080,2400]" drawing-order="6" hint="" />
+            <node index="1" text="" resource-id="com.google.android.apps.nexuslauncher:id/workspace" class="android.widget.ScrollView" package="com.google.android.apps.nexuslauncher" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="true" long-clickable="false" password="false" selected="false" bounds="[0,0][1080,2400]" drawing-order="2" hint="">
+              <!-- Workspace children omitted for brevity -->
+            </node>
+            <!-- Additional drag_layer children omitted for brevity -->
+          </node>
+        </node>
+      </node>
+    </node>
+  </node>
+</hierarchy>

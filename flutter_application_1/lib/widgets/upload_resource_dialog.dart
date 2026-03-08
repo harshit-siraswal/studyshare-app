@@ -312,8 +312,9 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
         debugPrint('Error fetching user role for upload: $e');
       }
 
-      // Create resource in Supabase via Backend API
-      await backendApi.createResource({
+      // Create resource with backend-first fallback so uploads still work
+      // when the API deployment is behind the app.
+      await supabaseService.createResourceWithFallback({
         'college_id': widget.collegeId,
         'title': _title.trim(),
         'type': _typeIndex == 1 ? 'video' : _resourceType,
@@ -322,6 +323,9 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
         'subject': _subject,
         'source': uploaderSource,
         'file_url': filePath ?? resolvedVideoUrl,
+        'url': filePath ?? resolvedVideoUrl,
+        if (_typeIndex == 1) 'video_url': resolvedVideoUrl,
+        if (_typeIndex == 0) 'pdf_url': filePath,
         'description': _description.trim(),
         'chapter': _chapter.trim().isEmpty ? null : _chapter.trim(),
         'topic': _topic.trim().isEmpty ? null : _topic.trim(),

@@ -891,7 +891,7 @@ class SupabaseService {
       final ctx = _ctx;
       if (ctx == null) throw Exception('Security context not initialized');
 
-      await _api.sendFollowRequest(targetEmail, ctx);
+      await _api.sendFollowRequest(targetEmail, context: ctx);
     } catch (e) {
       debugPrint('Error sending follow request: $e');
       rethrow;
@@ -905,16 +905,18 @@ class SupabaseService {
   ) async {
     try {
       if (followerEmail == followingEmail) return;
+      final ctx = _ctx;
 
       final status = await _api.checkFollowStatus(followingEmail);
       final isPending = status['status'] == 'pending';
-      final requestId = status['requestId']?.toString();
+      final requestId =
+          status['requestId']?.toString() ?? status['request_id']?.toString();
 
       if (!isPending || requestId == null || requestId.isEmpty) {
         throw Exception('No pending follow request to cancel');
       }
 
-      await _api.cancelFollowRequest(requestId);
+      await _api.cancelFollowRequest(int.parse(requestId), context: ctx);
     } catch (e) {
       debugPrint('Error cancelling follow request: $e');
       rethrow;
@@ -925,8 +927,7 @@ class SupabaseService {
   Future<void> acceptFollowRequest(int requestId) async {
     try {
       final ctx = _ctx;
-      // Context is optional for some generic ops but good for captures if needed,
-      // primarily _api handles context internally if passed.
+      if (ctx == null) throw Exception('Security context not initialized');
       await _api.acceptFollowRequest(requestId, context: ctx);
 
       // Backend handles notifications and DB updates now.
@@ -940,6 +941,7 @@ class SupabaseService {
   Future<void> rejectFollowRequest(int requestId) async {
     try {
       final ctx = _ctx;
+      if (ctx == null) throw Exception('Security context not initialized');
       await _api.rejectFollowRequest(requestId, context: ctx);
     } catch (e) {
       debugPrint('Error rejecting follow request: $e');
@@ -1104,13 +1106,112 @@ class SupabaseService {
     try {
       final res = await _client
           .from('users')
-          .select('id, email, display_name, profile_photo_url, username, bio')
+          .select(
+            'id, email, display_name, profile_photo_url, username, bio, semester, branch, subject',
+          )
           .eq('email', email)
           .maybeSingle();
       return res;
     } catch (e) {
       debugPrint('Error fetching user info: $e');
       return null;
+    }
+  }
+
+  Future<Map<String, dynamic>> updateCurrentUserProfileDirect({
+    String? displayName,
+    String? bio,
+    String? profilePhotoUrl,
+    String? semester,
+    String? branch,
+    String? subject,
+  }) async {
+    final email = _currentSessionEmail();
+    if (email.isEmpty) {
+      throw Exception('Please sign in to update your profile.');
+    }
+
+    final updates = <String, dynamic>{
+      'updated_at': DateTime.now().toIso8601String(),
+      if (displayName != null) 'display_name': displayName.trim(),
+      if (bio != null) 'bio': bio.trim(),
+      if (profilePhotoUrl != null) 'profile_photo_url': profilePhotoUrl.trim(),
+      if (semester != null) 'semester': semester.trim(),
+      if (branch != null) 'branch': branch.trim(),
+      if (subject != null) 'subject': subject.trim(),
+    };
+
+    var selectColumns = <String>[
+      'id',
+      'email',
+      'display_name',
+      'profile_photo_url',
+      'username',
+      'bio',
+      'semester',
+      'branch',
+      'subject',
+    ];
+
+    Future<Map<String, dynamic>?> runUpdate() async {
+      return await _client
+          .from('users')
+          .update(updates)
+          .eq('email', email)
+          .select(selectColumns.join(', '))
+          .maybeSingle();
+    }
+
+    Future<Map<String, dynamic>?> runSelect() async {
+      return await _client
+          .from('users')
+          .select(selectColumns.join(', '))
+          .eq('email', email)
+          .maybeSingle();
+    }
+
+    while (true) {
+      try {
+        var profile = await runUpdate();
+        if (profile == null) {
+          final upsertPayload = <String, dynamic>{'email': email, ...updates};
+          await _client
+              .from('users')
+              .upsert(upsertPayload, onConflict: 'email')
+              .select();
+          profile = await runSelect();
+        }
+
+        final resolvedProfile =
+            profile ?? <String, dynamic>{'email': email, ...updates};
+        invalidateCurrentUserProfileCache();
+        return resolvedProfile;
+      } catch (e) {
+        String? missingColumn;
+        for (final candidate in const [
+          'subject',
+          'semester',
+          'branch',
+          'bio',
+        ]) {
+          if (_isMissingColumnError(e, candidate)) {
+            missingColumn = candidate;
+            break;
+          }
+        }
+
+        if (missingColumn == null) {
+          debugPrint('Direct profile update failed: $e');
+          rethrow;
+        }
+
+        updates.remove(missingColumn);
+        selectColumns.remove(missingColumn);
+        if (selectColumns.isEmpty) {
+          debugPrint('Direct profile update failed: $e');
+          rethrow;
+        }
+      }
     }
   }
 
@@ -1222,16 +1323,24 @@ class SupabaseService {
     required String content,
     String department = 'general',
     String? imageUrl,
+    String? fileUrl,
   }) async {
+    final normalizedImageUrl = imageUrl?.trim() ?? '';
+    final normalizedFileUrl = fileUrl?.trim() ?? '';
+    final canUseBackendApi =
+        normalizedFileUrl.isEmpty || normalizedFileUrl == normalizedImageUrl;
+
     try {
-      await _api.createNotice(
-        collegeId: collegeId,
-        title: title,
-        content: content,
-        department: department,
-        imageUrl: imageUrl,
-      );
-      return;
+      if (canUseBackendApi) {
+        await _api.createNotice(
+          collegeId: collegeId,
+          title: title,
+          content: content,
+          department: department,
+          imageUrl: normalizedImageUrl.isEmpty ? null : normalizedImageUrl,
+        );
+        return;
+      }
     } catch (e) {
       debugPrint('Backend notice post failed, retrying via Supabase: $e');
     }
@@ -1254,8 +1363,8 @@ class SupabaseService {
       'department': department,
       'created_by': email,
       'created_by_name': displayName,
-      if (imageUrl != null && imageUrl.isNotEmpty) 'image_url': imageUrl,
-      if (imageUrl != null && imageUrl.isNotEmpty) 'file_url': imageUrl,
+      if (normalizedImageUrl.isNotEmpty) 'image_url': normalizedImageUrl,
+      if (normalizedFileUrl.isNotEmpty) 'file_url': normalizedFileUrl,
     };
 
     try {
@@ -3171,6 +3280,97 @@ class SupabaseService {
     }
   }
 
+  Map<String, dynamic> _buildDirectResourcePayload(Map<String, dynamic> input) {
+    final payload = Map<String, dynamic>.from(input);
+    final type = (payload['type']?.toString() ?? 'notes').trim();
+    final normalizedType = type.toLowerCase();
+    final fileUrl =
+        <dynamic>[
+              payload['file_url'],
+              payload['fileUrl'],
+              payload['pdf_url'],
+              payload['pdfUrl'],
+              payload['video_url'],
+              payload['videoUrl'],
+              payload['url'],
+            ]
+            .map((value) => value?.toString().trim() ?? '')
+            .firstWhere((value) => value.isNotEmpty, orElse: () => '');
+
+    if (fileUrl.isNotEmpty) {
+      payload['file_url'] = fileUrl;
+      payload['url'] ??= fileUrl;
+      if (normalizedType == 'video') {
+        payload['video_url'] ??= fileUrl;
+      } else {
+        payload['pdf_url'] ??= fileUrl;
+      }
+    }
+
+    payload.removeWhere((key, value) {
+      if (value == null) return true;
+      if (value is String && value.trim().isEmpty) return true;
+      return false;
+    });
+
+    return payload;
+  }
+
+  Future<void> createResourceWithFallback(
+    Map<String, dynamic> input, {
+    required BuildContext context,
+  }) async {
+    final payload = _buildDirectResourcePayload(input);
+
+    try {
+      await _api.createResource(payload, context: context);
+      invalidateResourceListCache();
+      return;
+    } catch (backendError) {
+      debugPrint(
+        'Backend resource create failed; falling back to direct insert: '
+        '$backendError',
+      );
+    }
+
+    final directPayload = Map<String, dynamic>.from(payload);
+    try {
+      await _client.from('resources').insert(directPayload);
+      invalidateResourceListCache();
+      return;
+    } catch (primaryError) {
+      final legacyPayload =
+          <String, dynamic>{
+            'college_id': payload['college_id'],
+            'title': payload['title'],
+            'type': payload['type'],
+            'semester': payload['semester'],
+            'branch': payload['branch'],
+            'subject': payload['subject'],
+            'description': payload['description'],
+            'uploaded_by_email': payload['uploaded_by_email'],
+            'uploaded_by_name': payload['uploaded_by_name'],
+            'file_url': payload['file_url'],
+            'url': payload['url'] ?? payload['file_url'],
+          }..removeWhere((key, value) {
+            if (value == null) return true;
+            if (value is String && value.trim().isEmpty) return true;
+            return false;
+          });
+
+      try {
+        await _client.from('resources').insert(legacyPayload);
+        invalidateResourceListCache();
+        return;
+      } catch (legacyError) {
+        debugPrint(
+          'Direct resource insert failed: $primaryError | $legacyError',
+        );
+        rethrow;
+      }
+    }
+  }
+
   Future<List<Resource>> getPendingResourcesForTeacher({
     required String collegeId,
     String? branch,
@@ -3203,6 +3403,89 @@ class SupabaseService {
       debugPrint('Error fetching pending resources: $e');
       return [];
     }
+  }
+
+  Future<void> updateResourceStatusWithFallback({
+    required String resourceId,
+    required String status,
+    required BuildContext context,
+  }) async {
+    try {
+      await _api.updateResourceStatus(
+        resourceId: resourceId,
+        status: status,
+        context: context,
+      );
+      invalidateResourceListCache();
+      return;
+    } catch (backendError) {
+      debugPrint(
+        'Backend resource moderation failed; falling back to direct update: '
+        '$backendError',
+      );
+    }
+
+    await _client
+        .from('resources')
+        .update(<String, dynamic>{
+          'status': status,
+          'is_approved': status.trim().toLowerCase() == 'approved',
+        })
+        .eq('id', resourceId);
+    invalidateResourceListCache();
+  }
+
+  Future<void> deleteResourceAsAdminWithFallback({
+    required String resourceId,
+  }) async {
+    try {
+      await _api.deleteResourceAsAdmin(resourceId: resourceId);
+      invalidateResourceListCache();
+      return;
+    } catch (backendError) {
+      debugPrint(
+        'Backend admin resource delete failed; falling back to direct delete: '
+        '$backendError',
+      );
+    }
+
+    await _client.from('resources').delete().eq('id', resourceId);
+    invalidateResourceListCache();
+  }
+
+  Future<void> deleteOwnedResource({
+    required Resource resource,
+    String? ownerEmail,
+  }) async {
+    final normalizedOwner = _normalizeEmail(ownerEmail);
+    final activeOwner = normalizedOwner.isNotEmpty
+        ? normalizedOwner
+        : _currentSessionEmail();
+    if (activeOwner.isEmpty) {
+      throw Exception('No signed-in user found to delete this contribution.');
+    }
+
+    final row = await _client
+        .from('resources')
+        .select('id, uploaded_by_email')
+        .eq('id', resource.id)
+        .maybeSingle();
+
+    if (row == null) {
+      invalidateResourceListCache();
+      return;
+    }
+
+    final rowMap = Map<String, dynamic>.from(row);
+    final rowOwner = _normalizeEmail(
+      rowMap['uploaded_by_email']?.toString() ?? resource.uploadedByEmail,
+    );
+    if (rowOwner.isNotEmpty && rowOwner != activeOwner) {
+      throw Exception('You can delete only your own contributions.');
+    }
+
+    await _client.from('resources').delete().eq('id', resource.id);
+    invalidateResourceListCache();
   }
 
   // ============ DEPARTMENT FOLLOWERS ============
@@ -3954,14 +4237,16 @@ class SupabaseService {
     int limit = 50,
     int offset = 0,
   }) async {
-    if (userEmail.isEmpty) return [];
+    final rawEmail = userEmail.trim();
+    final normalizedEmail = _normalizeEmail(userEmail);
+    if (normalizedEmail.isEmpty) return [];
     if (limit <= 0) return [];
 
     try {
       var query = _client
           .from('resources')
           .select()
-          .eq('uploaded_by_email', userEmail);
+          .eq('uploaded_by_email', rawEmail);
 
       if (approvedOnly) {
         query = query.eq('status', 'approved');
@@ -3971,11 +4256,41 @@ class SupabaseService {
           .order('created_at', ascending: false)
           .range(offset, offset + limit - 1);
 
-      return (response as List)
+      final rows = (response as List)
           .map((item) => Resource.fromJson(item as Map<String, dynamic>))
           .toList();
+      if (rows.isNotEmpty) {
+        return rows;
+      }
     } catch (e) {
-      debugPrint('Error fetching user resources: $e');
+      debugPrint('Exact-email user resource query failed, trying fallback: $e');
+    }
+
+    try {
+      final fetchWindow = (limit * 8).clamp(80, 240).toInt();
+      var query = _client.from('resources').select();
+      if (approvedOnly) {
+        query = query.eq('status', 'approved');
+      }
+
+      final raw = await query
+          .order('created_at', ascending: false)
+          .range(0, offset + fetchWindow - 1);
+
+      return (raw as List)
+          .whereType<Map>()
+          .map((row) => Map<String, dynamic>.from(row))
+          .where(
+            (row) =>
+                normalizedEmail ==
+                _normalizeEmail(row['uploaded_by_email']?.toString()),
+          )
+          .skip(offset)
+          .take(limit)
+          .map(Resource.fromJson)
+          .toList();
+    } catch (fallbackError) {
+      debugPrint('Error fetching user resources: $fallbackError');
       return [];
     }
   }

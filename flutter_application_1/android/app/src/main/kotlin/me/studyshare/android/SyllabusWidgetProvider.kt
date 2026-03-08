@@ -33,10 +33,27 @@ class SyllabusWidgetProvider : HomeWidgetProvider() {
     ) {
         for (appWidgetId in appWidgetIds) {
             val views = RemoteViews(context.packageName, R.layout.syllabus_widget_layout).apply {
-                val syllabusTitle = widgetData.getString("syllabus_title", "Syllabus")
-                val syllabusData = widgetData.getString("syllabus_data", "No recent syllabus items.")
-                setTextViewText(R.id.widget_title, syllabusTitle)
-                setTextViewText(R.id.widget_message, syllabusData)
+                val syllabusTitle = widgetData.getString(
+                    "syllabus_title",
+                    "Syllabus Tracker",
+                )
+                val syllabusSubtitle = widgetData.getString(
+                    "syllabus_subtitle",
+                    "Your academic scope",
+                )
+                val syllabusEmpty = widgetData.getString(
+                    "syllabus_empty_message",
+                    "No syllabus items yet. Open the app to browse more.",
+                )
+                WidgetLayoutBinder.bind(
+                    views = this,
+                    dataPrefix = "syllabus",
+                    title = syllabusTitle ?: "Syllabus Tracker",
+                    subtitle = syllabusSubtitle ?: "Your academic scope",
+                    emptyMessage = syllabusEmpty
+                        ?: "No syllabus items yet. Open the app to browse more.",
+                    widgetData = widgetData,
+                )
                 setOnClickPendingIntent(
                     R.id.widget_container,
                     launchPendingIntent(context, appWidgetId)

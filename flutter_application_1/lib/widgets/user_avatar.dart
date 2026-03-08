@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../config/theme.dart';
+import '../utils/profile_photo_utils.dart';
 
 class UserAvatar extends StatelessWidget {
   final String? photoUrl;
@@ -20,11 +21,12 @@ class UserAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final initials = _getInitials(displayName);
-    final hasImage = photoUrl != null && photoUrl!.isNotEmpty;
+    final normalizedPhotoUrl = normalizeProfilePhotoUrl(photoUrl);
+    final hasImage = normalizedPhotoUrl != null;
     
     final avatarWidget = hasImage
         ? CachedNetworkImage(
-            imageUrl: photoUrl!,
+            imageUrl: normalizedPhotoUrl!,
             imageBuilder: (context, imageProvider) => CircleAvatar(
               radius: radius,
               backgroundImage: imageProvider,
@@ -65,6 +67,7 @@ class UserAvatar extends StatelessWidget {
       ),
     );
   }
+
   String _getInitials(String name) {
     final trimmed = name.trim();
     if (trimmed.isEmpty) return 'U';

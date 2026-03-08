@@ -3,7 +3,10 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../config/theme.dart';
 import '../../services/supabase_service.dart';
 import '../../services/auth_service.dart';
+import '../../utils/profile_photo_utils.dart';
+import '../../widgets/user_avatar.dart';
 import '../chatroom/post_detail_screen.dart';
+import '../../widgets/user_badge.dart';
 import 'package:intl/intl.dart';
 
 class SavedPostsScreen extends StatefulWidget {
@@ -151,14 +154,23 @@ class _SavedPostsScreenState extends State<SavedPostsScreen> {
     final content = (post['content'] ?? '').toString();
     final authorName = (post['author_name'] ?? post['authorName'] ?? 'Unknown')
         .toString();
+    final authorEmail = (post['author_email'] ?? post['authorEmail'] ?? '')
+        .toString()
+        .trim();
+    final authorPhotoUrl = _resolvePhotoUrl(post, const [
+      'author_photo_url',
+      'profile_photo_url',
+      'photo_url',
+      'avatar_url',
+    ]);
+    final hasAuthorPhoto = authorPhotoUrl.isNotEmpty;
     final createdRaw =
-        post['_saved_at'] ??
-        post['savedAt'] ??
-        post['created_at'] ??
-        post['postedAt'] ??
-        '';
-    final createdAt =
-        DateTime.tryParse(createdRaw.toString()) ?? DateTime.now();
+      post['_saved_at'] ??
+      post['savedAt'] ??
+      post['created_at'] ??
+      post['postedAt'] ??
+      '';
+    final createdAt = DateTime.tryParse(createdRaw.toString());
     final timeAgo = _formatTimeAgo(createdAt);
 
     // Extract title if present (first line)
@@ -234,26 +246,28 @@ class _SavedPostsScreenState extends State<SavedPostsScreen> {
           children: [
             Row(
               children: [
-                CircleAvatar(
+                UserAvatar(
                   radius: 12,
-                  backgroundColor: AppTheme.primary,
-                  child: Text(
-                    authorName.isNotEmpty ? authorName[0].toUpperCase() : '?',
-                    style: GoogleFonts.inter(
-                      color: Colors.white,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
+                  displayName: authorName,
+                  photoUrl: hasAuthorPhoto ? authorPhotoUrl : null,
                 ),
                 const SizedBox(width: 8),
-                Text(
-                  authorName,
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? Colors.white70 : Colors.black87,
-                  ),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      authorName,
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white70 : Colors.black87,
+                      ),
+                    ),
+                    if (authorEmail.isNotEmpty) ...[
+                      const SizedBox(width: 4),
+                      UserBadge(email: authorEmail, size: 12),
+                    ],
+                  ],
                 ),
                 const Spacer(),
                 Text(
@@ -294,7 +308,8 @@ class _SavedPostsScreenState extends State<SavedPostsScreen> {
     );
   }
 
-  String _formatTimeAgo(DateTime date) {
+  String _formatTimeAgo(DateTime? date) {
+    if (date == null) return 'Unknown date';
     final now = DateTime.now();
     final difference = now.difference(date);
 
@@ -309,5 +324,9 @@ class _SavedPostsScreenState extends State<SavedPostsScreen> {
     } else {
       return 'Just now';
     }
+  }
+
+  String _resolvePhotoUrl(Map<String, dynamic> source, List<String> keys) {
+    return resolveProfilePhotoUrl(source, preferredKeys: keys) ?? '';
   }
 }

@@ -18,9 +18,17 @@ import '../../models/department_account.dart';
 import '../profile/user_profile_screen.dart';
 import '../../widgets/comment_input_box.dart';
 import '../../services/cloudinary_service.dart';
+import '../../services/subscription_service.dart';
 import '../../utils/sticker_comment_codec.dart';
 import '../../widgets/full_screen_image_viewer.dart';
 import '../../widgets/emoji_reactions.dart';
+import '../../widgets/notice_share_preview.dart';
+import '../../widgets/user_badge.dart';
+import '../../widgets/user_avatar.dart';
+import '../../widgets/paywall_dialog.dart';
+import '../../utils/profile_photo_utils.dart';
+import '../../utils/youtube_link_utils.dart';
+import '../viewer/pdf_viewer_screen.dart';
 import 'department_account_screen.dart';
 
 class NoticeDetailScreen extends StatefulWidget {
@@ -42,12 +50,14 @@ class NoticeDetailScreen extends StatefulWidget {
 class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
   final SupabaseService _supabaseService = SupabaseService();
   final AuthService _authService = AuthService();
+  final SubscriptionService _subscriptionService = SubscriptionService();
   final TextEditingController _commentController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _commentFocusNode = FocusNode();
 
   List<Map<String, dynamic>> _comments = [];
   List<String> _mediaUrls = [];
+  String? _documentUrl;
   bool _isLoading = true;
   bool _isPosting = false;
   bool _isSaved = false;
@@ -104,25 +114,58 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
   }
 
   void _extractMedia() {
-    final List<String> urls = [];
-    // Check for single image
-    if (widget.notice['image_url'] != null &&
-        widget.notice['image_url'].toString().isNotEmpty) {
-      urls.add(widget.notice['image_url']);
+    final List<String> imageUrls = [];
+    String? documentUrl;
+
+    void consumeCandidate(
+      Object? rawValue, {
+      bool preferImage = false,
+    }) {
+      final candidate = rawValue?.toString().trim() ?? '';
+      if (candidate.isEmpty) return;
+
+      if (_isPdfAttachmentUrl(candidate)) {
+        documentUrl ??= candidate;
+        return;
+      }
+
+      if (preferImage || _looksLikeImageAttachmentUrl(candidate)) {
+        imageUrls.add(candidate);
+      }
     }
-    // Check for media array
+
+    consumeCandidate(widget.notice['image_url'], preferImage: true);
+    consumeCandidate(widget.notice['file_url']);
+
     if (widget.notice['media_urls'] != null) {
       if (widget.notice['media_urls'] is List) {
         for (var url in widget.notice['media_urls']) {
-          if (url != null && url.toString().isNotEmpty) {
-            urls.add(url.toString());
-          }
+          consumeCandidate(url);
         }
       }
     }
+
     setState(() {
-      _mediaUrls = urls.toSet().toList(); // Remove duplicates
+      _mediaUrls = imageUrls.toSet().toList();
+      _documentUrl = documentUrl;
     });
+  }
+
+  bool _isPdfAttachmentUrl(String url) {
+    final parsed = Uri.tryParse(url);
+    final path = parsed?.path.toLowerCase() ?? url.toLowerCase();
+    if (path.endsWith('.pdf')) return true;
+    final format = parsed?.queryParameters['format'];
+    return format != null && format.toLowerCase() == 'pdf';
+  }
+
+  bool _looksLikeImageAttachmentUrl(String url) {
+    final path = Uri.tryParse(url)?.path.toLowerCase() ?? url.toLowerCase();
+    return path.endsWith('.jpg') ||
+        path.endsWith('.jpeg') ||
+        path.endsWith('.png') ||
+        path.endsWith('.webp') ||
+        path.endsWith('.gif');
   }
 
   Future<void> _checkSavedStatus() async {
@@ -203,13 +246,30 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     _commentFocusNode.unfocus();
   }
 
-  void _openUserProfile(String email, String displayName) {
+  String _resolveUserPhotoUrl(Map<String, dynamic> payload) {
+    return resolveProfilePhotoUrl(
+          payload,
+          preferredKeys: const <String>[
+            'user_photo_url',
+            'author_photo_url',
+            'profile_photo_url',
+            'photo_url',
+            'avatar_url',
+          ],
+        ) ??
+        '';
+  }
+
+  void _openUserProfile(String email, String displayName, {String? photoUrl}) {
     if (email.isEmpty) return;
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) =>
-            UserProfileScreen(userEmail: email, userName: displayName),
+        builder: (context) => UserProfileScreen(
+          userEmail: email,
+          userName: displayName,
+          userPhotoUrl: photoUrl,
+        ),
       ),
     );
   }
@@ -286,10 +346,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
   void _showError(String message) {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: AppTheme.error,
-        ),
+        SnackBar(content: Text(message), backgroundColor: AppTheme.error),
       );
     }
   }
@@ -323,101 +380,32 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     );
   }
 
+  void _openDocumentAttachment() {
+    final documentUrl = _documentUrl?.trim() ?? '';
+    if (documentUrl.isEmpty) return;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => PdfViewerScreen(
+          pdfUrl: documentUrl,
+          title: '${widget.notice['title'] ?? 'Notice'} Attachment',
+        ),
+      ),
+    );
+  }
+
   Future<void> _shareAsImage() async {
     final controller = ScreenshotController();
 
     // Create a generated image
     try {
       final bytes = await controller.captureFromWidget(
-        Material(
-          color: Colors.white,
-          child: Container(
-            width: 400,
-            padding: const EdgeInsets.all(24),
-            color: Colors.white,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header
-                Row(
-                  children: [
-                    CircleAvatar(
-                      backgroundColor: widget.account.color,
-                      radius: 20,
-                      child: Text(
-                        widget.account.avatarLetter,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.account.name,
-                          style: GoogleFonts.inter(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 16,
-                            color: Colors.black,
-                          ),
-                        ),
-                        Text(
-                          'StudyShare Notice',
-                          style: GoogleFonts.inter(
-                            color: Colors.grey,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 20),
-                // Title
-                Text(
-                  widget.notice['title'] ?? 'Untitled',
-                  style: GoogleFonts.inter(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                // Content
-                Text(
-                  widget.notice['content'] ?? '',
-                  style: GoogleFonts.inter(
-                    fontSize: 16,
-                    color: const Color(0xFF334155),
-                    height: 1.5,
-                  ),
-                ),
-                const SizedBox(height: 30),
-                const Divider(),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'via StudyShare',
-                      style: GoogleFonts.inter(
-                        color: AppTheme.primary,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    Text(
-                      _formatTimeAgo(widget.notice['created_at']),
-                      style: GoogleFonts.inter(color: Colors.grey),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
+        NoticeSharePreview(
+          notice: widget.notice,
+          account: widget.account,
+          brandLabel: 'StudyShare',
+          timestampLabel: _formatTimeAgo(widget.notice['created_at']),
         ),
         delay: const Duration(milliseconds: 50),
         pixelRatio: 2.0,
@@ -427,9 +415,12 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
       final file = await File('${tempDir.path}/notice_share.png').create();
       await file.writeAsBytes(bytes);
 
-      await Share.shareXFiles([
-        XFile(file.path),
-      ], text: 'Check out this notice on StudyShare!');
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path)],
+          text: 'Check out this notice on StudyShare!',
+        ),
+      );
     } catch (e) {
       debugPrint('Failed to generate image: $e');
       _showError('Failed to generate image');
@@ -476,148 +467,171 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
       ),
       body: Hero(
         tag: 'notice_card_${widget.notice['id']}',
-        flightShuttleBuilder: (flightContext, animation, flightDirection, fromHeroContext, toHeroContext) {
-          return Material(
-            color: Colors.transparent,
-            child: toHeroContext.widget,
-          );
-        },
+        flightShuttleBuilder:
+            (
+              flightContext,
+              animation,
+              flightDirection,
+              fromHeroContext,
+              toHeroContext,
+            ) {
+              return Material(
+                color: Colors.transparent,
+                child: toHeroContext.widget,
+              );
+            },
         child: Material(
           color: isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
           child: Column(
-        children: [
-          Expanded(
-            child: ListView(
-              controller: _scrollController,
-              padding: const EdgeInsets.all(16),
-              children: [
-                // Notice Header (Author Info)
-                _buildAuthorHeader(textColor, secondaryColor, createdAt),
-                const SizedBox(height: 20),
+            children: [
+              Expanded(
+                child: ListView(
+                  controller: _scrollController,
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    // Notice Header (Author Info)
+                    _buildAuthorHeader(textColor, secondaryColor, createdAt),
+                    const SizedBox(height: 20),
 
-                // Title
-                Text(
-                  title,
-                  style: GoogleFonts.inter(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: textColor,
-                    height: 1.3,
-                  ),
-                ),
-                const SizedBox(height: 12),
-
-                // Content Body
-                SelectableLinkify(
-                  onOpen: (link) async {
-                    try {
-                      final uri = Uri.tryParse(link.url);
-                      if (uri == null) {
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Could not open: ${link.url}')),
-                          );
-                        }
-                        return;
-                      }
-                      final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
-                      if (!launched && mounted) {
-                        _showError('Could not open link');
-                      }
-                    } catch (e) {
-                      debugPrint('Failed to launch URL: $e');
-                      if (mounted) {
-                        _showError('Unable to open link');
-                      }
-                    }
-                  },
-                  text: content,
-                  style: GoogleFonts.inter(
-                    fontSize: 16,
-                    color: isDark
-                        ? const Color(0xFFE2E8F0)
-                        : const Color(0xFF334155),
-                    height: 1.6,
-                  ),
-                  linkStyle: GoogleFonts.inter(
-                    fontSize: 16,
-                    color: AppTheme.primary,
-                    decoration: TextDecoration.underline,
-                    height: 1.6,
-                  ),
-                ),
-                const SizedBox(height: 20),
-
-                // Media Gallery
-                if (_mediaUrls.isNotEmpty) ...[
-                  _buildMediaGallery(),
-                  const SizedBox(height: 24),
-                ],
-
-                Divider(
-                  color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
-                ),
-                const SizedBox(height: 16),
-
-                // Comments Section Header
-                Text(
-                  'Comments (${_comments.length} threads)',
-                  style: GoogleFonts.inter(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: textColor,
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // Comments List
-                if (_isLoading)
-                  const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(20),
-                      child: CircularProgressIndicator(),
-                    ),
-                  )
-                else if (_comments.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 40),
-                    child: Center(
-                      child: Column(
-                        children: [
-                          Icon(
-                            Icons.chat_bubble_outline,
-                            size: 48,
-                            color: secondaryColor.withValues(alpha: 0.5),
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'No comments yet.\nBe the first to start the discussion!',
-                            textAlign: TextAlign.center,
-                            style: GoogleFonts.inter(color: secondaryColor),
-                          ),
-                        ],
+                    // Title
+                    Text(
+                      title,
+                      style: GoogleFonts.inter(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: textColor,
+                        height: 1.3,
                       ),
                     ),
-                  )
-                else
-                  ..._comments.map(
-                    (c) =>
-                        _buildCommentTree(c, isDark, textColor, secondaryColor),
-                  ),
+                    const SizedBox(height: 12),
 
-                const SizedBox(height: 20),
-              ],
-            ),
-          ),
+                    // Content Body
+                    SelectableLinkify(
+                      onOpen: (link) async {
+                        try {
+                          final uri = buildExternalUri(link.url);
+                          if (uri == null) {
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Could not open: ${link.url}'),
+                                ),
+                              );
+                            }
+                            return;
+                          }
+                          final launched = await launchUrl(
+                            uri,
+                            mode: LaunchMode.externalApplication,
+                          );
+                          if (!launched && mounted) {
+                            _showError('Could not open link');
+                          }
+                        } catch (e) {
+                          debugPrint('Failed to launch URL: $e');
+                          if (mounted) {
+                            _showError('Unable to open link');
+                          }
+                        }
+                      },
+                      text: content,
+                      style: GoogleFonts.inter(
+                        fontSize: 16,
+                        color: isDark
+                            ? const Color(0xFFE2E8F0)
+                            : const Color(0xFF334155),
+                        height: 1.6,
+                      ),
+                      linkStyle: GoogleFonts.inter(
+                        fontSize: 16,
+                        color: AppTheme.primary,
+                        decoration: TextDecoration.underline,
+                        height: 1.6,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
 
-          // Comment Input Area
-          SafeArea(
-            top: false,
-            child: _buildInputArea(isDark, textColor, secondaryColor),
+                    if (_documentUrl?.isNotEmpty ?? false) ...[
+                      _buildDocumentAttachmentCard(isDark),
+                      const SizedBox(height: 16),
+                    ],
+
+                    // Media Gallery
+                    if (_mediaUrls.isNotEmpty) ...[
+                      _buildMediaGallery(),
+                      const SizedBox(height: 24),
+                    ],
+
+                    Divider(
+                      color: isDark
+                          ? AppTheme.darkBorder
+                          : AppTheme.lightBorder,
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Comments Section Header
+                    Text(
+                      'Comments (${_comments.length} threads)',
+                      style: GoogleFonts.inter(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: textColor,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Comments List
+                    if (_isLoading)
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(20),
+                          child: CircularProgressIndicator(),
+                        ),
+                      )
+                    else if (_comments.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 40),
+                        child: Center(
+                          child: Column(
+                            children: [
+                              Icon(
+                                Icons.chat_bubble_outline,
+                                size: 48,
+                                color: secondaryColor.withValues(alpha: 0.5),
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                'No comments yet.\nBe the first to start the discussion!',
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.inter(color: secondaryColor),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      ..._comments.map(
+                        (c) => _buildCommentTree(
+                          c,
+                          isDark,
+                          textColor,
+                          secondaryColor,
+                        ),
+                      ),
+
+                    const SizedBox(height: 20),
+                  ],
+                ),
+              ),
+
+              // Comment Input Area
+              SafeArea(
+                top: false,
+                child: _buildInputArea(isDark, textColor, secondaryColor),
+              ),
+            ],
           ),
-        ],
-      ),
-      ),
+        ),
       ),
     );
   }
@@ -744,6 +758,100 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     );
   }
 
+  Widget _buildDocumentAttachmentCard(bool isDark) {
+    final documentUrl = _documentUrl?.trim() ?? '';
+    if (documentUrl.isEmpty) return const SizedBox.shrink();
+
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        onTap: _openDocumentAttachment,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: isDark
+                  ? <Color>[AppTheme.darkGradientStart, AppTheme.darkGradientEnd]
+                  : <Color>[Colors.white, AppTheme.lightGradientEnd],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isDark ? Colors.white12 : const Color(0xFFE2E8F0),
+            ),
+            boxShadow: <BoxShadow>[
+              if (!isDark)
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 18,
+                  offset: const Offset(0, 10),
+                ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  color: AppTheme.error.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(
+                  Icons.picture_as_pdf_rounded,
+                  color: AppTheme.error,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Attached PDF',
+                      style: GoogleFonts.inter(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        color: isDark ? Colors.white : Colors.black,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Tap to read the notice attachment inside StudyShare.',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: AppTheme.textMuted,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  'Open',
+                  style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildCommentTree(
     Map<String, dynamic> comment,
     bool isDark,
@@ -799,6 +907,8 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     final createdAt = comment['created_at'];
     final commentId = comment['id']?.toString() ?? '';
     final userEmail = comment['user_email'] ?? '';
+    final userPhotoUrl = _resolveUserPhotoUrl(comment);
+    final hasUserPhoto = userPhotoUrl.isNotEmpty;
     final dismissKey = commentId.isNotEmpty
         ? commentId
         : '${createdAt?.toString() ?? DateTime.now().microsecondsSinceEpoch}-${senderName.hashCode}';
@@ -848,20 +958,12 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                   : () => _openUserProfile(
                       userEmail.toString(),
                       senderName.toString(),
+                      photoUrl: hasUserPhoto ? userPhotoUrl : null,
                     ),
-              child: CircleAvatar(
+              child: UserAvatar(
                 radius: 16,
-                backgroundColor: AppTheme.primary.withValues(alpha: 0.2),
-                child: Text(
-                  senderName.toString().isNotEmpty
-                      ? senderName.toString()[0].toUpperCase()
-                      : '?',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppTheme.primary,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+                displayName: senderName.toString(),
+                photoUrl: hasUserPhoto ? userPhotoUrl : null,
               ),
             ),
             const SizedBox(width: 12),
@@ -877,14 +979,27 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                             : () => _openUserProfile(
                                 userEmail.toString(),
                                 senderName.toString(),
+                                photoUrl: hasUserPhoto ? userPhotoUrl : null,
                               ),
-                        child: Text(
-                          senderName.toString(),
-                          style: GoogleFonts.inter(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 14,
-                            color: textColor,
-                          ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              senderName.toString(),
+                              style: GoogleFonts.inter(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
+                                color: textColor,
+                              ),
+                            ),
+                            if (userEmail.toString().trim().isNotEmpty) ...[
+                              const SizedBox(width: 4),
+                              UserBadge(
+                                email: userEmail.toString().trim(),
+                                size: 14,
+                              ),
+                            ],
+                          ],
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -936,6 +1051,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                           onTap: () => _openUserProfile(
                             userEmail.toString(),
                             senderName.toString(),
+                            photoUrl: hasUserPhoto ? userPhotoUrl : null,
                           ),
                           child: Text(
                             'View Profile',
@@ -1019,6 +1135,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
 
   Future<void> _handleStickerSelection(File stickerFile) async {
     if (_isReadOnly) return;
+    if (!await _ensurePremiumStickerAccess()) return;
 
     setState(() => _isPosting = true);
 
@@ -1059,6 +1176,30 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     }
   }
 
+  Future<bool> _ensurePremiumStickerAccess() async {
+    final hasPremium = await _subscriptionService.isPremium();
+    if (hasPremium) return true;
+    if (!mounted) return false;
+
+    final messenger = ScaffoldMessenger.of(context);
+    await showDialog(
+      context: context,
+      builder: (_) => PaywallDialog(
+        onSuccess: () {
+          if (!mounted) return;
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('Premium unlocked! Sticker feature enabled.'),
+            ),
+          );
+        },
+      ),
+    );
+
+    if (!mounted) return false;
+    return _subscriptionService.isPremium();
+  }
+
   Widget _buildInputArea(bool isDark, Color textColor, Color secondaryColor) {
     return CommentInputBox(
       controller: _commentController,
@@ -1069,6 +1210,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
       onCancelReply: _cancelReply,
       onSubmit: _postComment,
       onStickerSelected: _handleStickerSelection,
+      onStickerAccessCheck: _ensurePremiumStickerAccess,
       hintText: _replyToName != null
           ? 'Write your reply...'
           : 'Add a comment...',
@@ -1112,6 +1254,3 @@ class _MediaViewerScreen extends StatelessWidget {
     );
   }
 }
-
-
-

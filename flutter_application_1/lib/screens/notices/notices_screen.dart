@@ -5,13 +5,12 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import '../../config/theme.dart';
+import '../../services/auth_service.dart';
 import '../../services/supabase_service.dart';
 import 'department_account_screen.dart' as dept_screen;
 import '../../widgets/notice_card.dart';
 import '../../models/department_account.dart';
-import '../../models/user.dart';
 import '../../widgets/branded_loader.dart';
-import '../../widgets/post_notice_dialog.dart';
 import '../../services/home_widget_service.dart';
 import '../../models/notice.dart';
 import 'package:intl/intl.dart';
@@ -19,8 +18,13 @@ import 'dart:math' as math;
 
 class NoticesScreen extends StatefulWidget {
   final String collegeId;
+  final int refreshToken;
 
-  const NoticesScreen({super.key, required this.collegeId});
+  const NoticesScreen({
+    super.key,
+    required this.collegeId,
+    this.refreshToken = 0,
+  });
 
   @override
   State<NoticesScreen> createState() => _NoticesScreenState();
@@ -29,10 +33,10 @@ class NoticesScreen extends StatefulWidget {
 class _NoticesScreenState extends State<NoticesScreen>
     with SingleTickerProviderStateMixin {
   final SupabaseService _supabaseService = SupabaseService();
+  final AuthService _authService = AuthService();
 
   List<Map<String, dynamic>> _filteredNotices = [];
   bool _isLoading = true;
-  bool _isTeacherOrAdmin = false;
 
   late TabController _tabController;
 
@@ -255,6 +259,11 @@ class _NoticesScreenState extends State<NoticesScreen>
 
   Set<String> _followedDepartments = {};
 
+  String get _activeUserEmail {
+    return (_authService.userEmail ?? _supabaseService.currentUserEmail ?? '')
+        .trim();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -262,27 +271,21 @@ class _NoticesScreenState extends State<NoticesScreen>
     _loadNotices();
     _loadFollowedDepartments();
     _loadDepartmentFollowerCounts();
-    _checkTeacherRole();
   }
 
-  Future<void> _checkTeacherRole() async {
-    try {
-      final role = await _supabaseService.getCurrentUserRole();
-      if (mounted) {
-        setState(() {
-          _isTeacherOrAdmin =
-              role == AppRoles.teacher ||
-              role == AppRoles.admin ||
-              role == AppRoles.moderator;
-        });
-      }
-    } catch (e) {
-      debugPrint('Failed to check teacher role: $e');
-      if (mounted) {
-        setState(() {
-          _isTeacherOrAdmin = false;
-        });
-      }
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant NoticesScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.refreshToken != oldWidget.refreshToken) {
+      _loadNotices();
+      _loadFollowedDepartments();
+      _loadDepartmentFollowerCounts();
     }
   }
 
@@ -310,8 +313,8 @@ class _NoticesScreenState extends State<NoticesScreen>
   }
 
   Future<void> _loadFollowedDepartments() async {
-    final email = _supabaseService.currentUserEmail;
-    if (email == null) return;
+    final email = _activeUserEmail;
+    if (email.isEmpty) return;
 
     try {
       final followedIds = await _supabaseService.getFollowedDepartmentIds(
@@ -329,8 +332,8 @@ class _NoticesScreenState extends State<NoticesScreen>
   }
 
   Future<void> _toggleDepartmentFollow(String deptId) async {
-    final email = _supabaseService.currentUserEmail;
-    if (email == null) {
+    final email = _activeUserEmail;
+    if (email.isEmpty) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Please log in to follow')));
@@ -640,17 +643,6 @@ class _NoticesScreenState extends State<NoticesScreen>
           ],
         ),
       ),
-      floatingActionButton: _isTeacherOrAdmin
-          ? FloatingActionButton(
-              onPressed: () => _showPostNoticeDialog(isDark),
-              backgroundColor: AppTheme.primary,
-              child: const Icon(
-                Icons.add_rounded,
-                color: Colors.white,
-                size: 28,
-              ),
-            )
-          : null,
     );
   }
 
@@ -962,16 +954,5 @@ class _NoticesScreenState extends State<NoticesScreen>
       return 'Follow is not available right now. Please sign in again.';
     }
     return 'Failed to update follow status.';
-  }
-
-  Future<void> _showPostNoticeDialog(bool isDark) async {
-    final posted = await showPostNoticeDialog(
-      context: context,
-      collegeId: widget.collegeId,
-      isDark: isDark,
-    );
-    if (posted == true && mounted) {
-      _loadNotices();
-    }
   }
 }

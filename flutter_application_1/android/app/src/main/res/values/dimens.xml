@@ -1,7 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <dimen name="widget_padding">16dp</dimen>
-    <dimen name="widget_title_text_size">16sp</dimen>
+    <dimen name="widget_padding">18dp</dimen>
+    <dimen name="widget_title_text_size">18sp</dimen>
+    <dimen name="widget_subtitle_text_size">12sp</dimen>
+    <dimen name="widget_item_text_size">13sp</dimen>
     <dimen name="widget_message_text_size">14sp</dimen>
+    <dimen name="widget_chip_text_size">12sp</dimen>
+    <dimen name="widget_hint_text_size">12sp</dimen>
     <dimen name="widget_title_margin_bottom">8dp</dimen>
 </resources>

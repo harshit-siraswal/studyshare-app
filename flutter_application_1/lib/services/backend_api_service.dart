@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import '../config/app_config.dart';
+import 'recaptcha_service.dart';
 
 /// Backend API client (same pattern as Studyspace/src/lib/api.ts).
 ///
@@ -150,6 +151,9 @@ class BackendApiService {
     Duration timeout = _requestTimeout,
     bool requireAuthToken = false,
     String? bearerOverride,
+    BuildContext? securityContext,
+    bool includeRecaptchaToken = false,
+    String recaptchaAction = 'mobile_write',
   }) async {
     final trimmedBearerOverride = bearerOverride?.trim();
     final usesBearerOverride =
@@ -170,6 +174,22 @@ class BackendApiService {
     Map<String, dynamic>? effectiveBody = body == null
         ? null
         : Map<String, dynamic>.from(body);
+
+    if (includeRecaptchaToken) {
+      final normalizedMethod = method.toUpperCase();
+      if (normalizedMethod == 'GET') {
+        throw Exception('Security verification is only supported for writes');
+      }
+      if (securityContext == null || !securityContext.mounted) {
+        throw Exception('Security verification context missing');
+      }
+      final recaptchaToken = await RecaptchaService.getToken(
+        securityContext,
+        action: recaptchaAction,
+      );
+      effectiveBody ??= <String, dynamic>{};
+      effectiveBody['recaptchaToken'] = recaptchaToken;
+    }
 
     var res = await _sendRequest(method, uri, headers, effectiveBody, timeout);
 
@@ -566,7 +586,14 @@ class BackendApiService {
       body['subject'] = subject.trim();
     }
 
-    return _requestJson('/api/users/profile', method: 'PUT', body: body);
+    return _requestJson(
+      '/api/users/profile',
+      method: 'PUT',
+      body: body,
+      securityContext: context,
+      includeRecaptchaToken: true,
+      recaptchaAction: 'profile_update',
+    );
   }
 
   // ----------------------------
@@ -836,8 +863,6 @@ class BackendApiService {
       method: 'POST',
       body: {
         'action': 'upload_syllabus',
-        if (bearerToken != null && bearerToken.trim().isNotEmpty)
-          'keyHash': bearerToken.trim(),
         'collegeId': collegeId,
         'semester': semester,
         'branch': branch,
@@ -886,35 +911,44 @@ class BackendApiService {
 
   // Follows
   Future<void> sendFollowRequest(
-    String targetEmail,
-    BuildContext context,
-  ) async {
+    String targetEmail, {
+    required BuildContext context,
+  }) async {
     await _requestJson(
       '/api/follow/request', // Corrected from /api/follows/requests
       method: 'POST',
       body: {
         'targetEmail': targetEmail,
       }, // Changed targetId to targetEmail per API
+      securityContext: context,
+      includeRecaptchaToken: true,
+      recaptchaAction: 'follow_request',
     );
   }
 
   Future<void> acceptFollowRequest(
     int requestId, {
-    BuildContext? context,
+    required BuildContext context,
   }) async {
     await _requestJson(
       '/api/follow/approve/${requestId.toString()}', // Corrected endpoint
       method: 'POST',
+      securityContext: context,
+      includeRecaptchaToken: true,
+      recaptchaAction: 'follow_approve',
     );
   }
 
   Future<void> rejectFollowRequest(
     int requestId, {
-    BuildContext? context,
+    required BuildContext context,
   }) async {
     await _requestJson(
       '/api/follow/reject/${requestId.toString()}', // Corrected endpoint
       method: 'POST',
+      securityContext: context,
+      includeRecaptchaToken: true,
+      recaptchaAction: 'follow_reject',
     );
   }
 
@@ -1461,13 +1495,22 @@ class BackendApiService {
     await _requestJson(
       '/api/follow/${Uri.encodeComponent(email)}',
       method: 'DELETE',
+      securityContext: context,
+      includeRecaptchaToken: context != null,
+      recaptchaAction: 'follow_unfollow',
     );
   }
 
-  Future<void> cancelFollowRequest(String requestId) async {
+  Future<void> cancelFollowRequest(
+    int requestId, {
+    BuildContext? context,
+  }) async {
     await _requestJson(
-      '/api/follow/request/${Uri.encodeComponent(requestId)}',
+      '/api/follow/request/${Uri.encodeComponent(requestId.toString())}',
       method: 'DELETE',
+      securityContext: context,
+      includeRecaptchaToken: context != null,
+      recaptchaAction: 'follow_cancel',
     );
   }
 }

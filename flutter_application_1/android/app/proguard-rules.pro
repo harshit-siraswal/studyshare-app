@@ -64,6 +64,12 @@
 -keep class com.google.android.gms.common.** { *; }
 
 # ============================================
+# Razorpay (critical for release checkout flow)
+# ============================================
+-keep class com.razorpay.** { *; }
+-dontwarn com.razorpay.**
+
+# ============================================
 # Retrofit (if used by any dependencies)
 # ============================================
 -keep class retrofit2.** { *; }

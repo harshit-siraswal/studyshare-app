@@ -5,6 +5,7 @@ import '../../config/theme.dart';
 import '../../models/notification_model.dart';
 import '../../services/backend_api_service.dart';
 import '../../services/supabase_service.dart';
+import '../../widgets/user_avatar.dart';
 import '../profile/user_profile_screen.dart';
 import '../viewer/pdf_viewer_screen.dart';
 import '../notices/notice_detail_screen.dart';
@@ -596,26 +597,10 @@ class _NotificationScreenState extends State<NotificationScreen>
     if (n.actorAvatar != null && n.actorAvatar!.isNotEmpty) {
       return Stack(
         children: [
-          CircleAvatar(
+          UserAvatar(
             radius: 24,
-            backgroundColor: Colors.grey[300],
-            child: ClipOval(
-              child: Image.network(
-                n.actorAvatar!,
-                fit: BoxFit.cover,
-                width: 48,
-                height: 48,
-                errorBuilder: (context, error, stackTrace) => Text(
-                  n.actorName?.isNotEmpty == true
-                      ? n.actorName![0].toUpperCase()
-                      : '?',
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ),
+            displayName: n.actorName ?? 'User',
+            photoUrl: n.actorAvatar,
           ),
           Positioned(
             right: 0,
@@ -764,14 +749,14 @@ class _NotificationScreenState extends State<NotificationScreen>
       }
 
       if (accept) {
-        await _api.acceptFollowRequest(requestId);
+        await _api.acceptFollowRequest(requestId, context: context);
         if (mounted) {
           ScaffoldMessenger.of(
             context,
           ).showSnackBar(const SnackBar(content: Text('Request accepted')));
         }
       } else {
-        await _api.rejectFollowRequest(requestId);
+        await _api.rejectFollowRequest(requestId, context: context);
         if (mounted) {
           ScaffoldMessenger.of(
             context,

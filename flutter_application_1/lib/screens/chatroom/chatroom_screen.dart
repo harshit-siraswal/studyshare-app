@@ -24,8 +24,13 @@ import '../profile/user_profile_screen.dart';
 import '../../widgets/user_badge.dart';
 import 'post_detail_screen.dart';
 import '../../services/cloudinary_service.dart';
+import '../../services/subscription_service.dart';
 import '../../config/app_config.dart';
 import '../../models/user.dart';
+import '../../widgets/paywall_dialog.dart';
+import '../../widgets/user_avatar.dart';
+import '../../utils/profile_photo_utils.dart';
+import '../../utils/youtube_link_utils.dart';
 
 class ChatRoomScreen extends StatefulWidget {
   final String roomId;
@@ -52,6 +57,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   final SupabaseService _supabaseService = SupabaseService();
   final AuthService _authService = AuthService();
   final BackendApiService _backendApiService = BackendApiService();
+  final SubscriptionService _subscriptionService = SubscriptionService();
   bool _isTeacherOrAdmin = false;
 
   bool get _isReadOnly {
@@ -791,9 +797,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         : '$titleText\n$bodyText';
 
     final authorName = post['author_name'] ?? 'User';
-    final authorInitial = authorName.toString().isNotEmpty
-        ? authorName.toString()[0].toUpperCase()
-        : 'U';
     final createdAt =
         DateTime.tryParse(post['created_at']?.toString() ?? '') ??
         DateTime.now();
@@ -833,23 +836,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
           children: [
             Builder(
               builder: (context) {
-                final String? photoUrl = post['author_photo_url']?.toString();
-                final bool hasPhoto =
-                    photoUrl != null && photoUrl.trim().isNotEmpty;
-                Widget buildAvatarPlaceholder() {
-                  return CircleAvatar(
-                    radius: 18,
-                    backgroundColor: const Color(0xFF1D4ED8),
-                    child: Text(
-                      authorInitial,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  );
-                }
+                final photoUrl = _resolvePhotoUrl(post, const [
+                  'author_photo_url',
+                  'profile_photo_url',
+                  'photo_url',
+                  'avatar_url',
+                ]);
+                final bool hasPhoto = photoUrl.isNotEmpty;
 
                 return GestureDetector(
                   onTap: () {
@@ -859,38 +852,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                         builder: (context) => UserProfileScreen(
                           userEmail: post['author_email'] ?? '',
                           userName: authorName,
-                          userPhotoUrl: photoUrl,
+                          userPhotoUrl: hasPhoto ? photoUrl : null,
                         ),
                       ),
                     );
                   },
-                  child: ClipOval(
-                    child: SizedBox(
-                      width: 36,
-                      height: 36,
-                      child: hasPhoto
-                          ? Image.network(
-                              photoUrl,
-                              fit: BoxFit.cover,
-                              cacheWidth: 72,
-                              cacheHeight: 72,
-                              loadingBuilder:
-                                  (context, child, loadingProgress) {
-                                    if (loadingProgress == null) {
-                                      return child;
-                                    }
-                                    return buildAvatarPlaceholder();
-                                  },
-                              errorBuilder: (context, error, stackTrace) {
-                                debugPrint(
-                                  'Avatar image load failed for $photoUrl: '
-                                  '$error',
-                                );
-                                return buildAvatarPlaceholder();
-                              },
-                            )
-                          : buildAvatarPlaceholder(),
-                    ),
+                  child: UserAvatar(
+                    radius: 18,
+                    displayName: authorName,
+                    photoUrl: hasPhoto ? photoUrl : null,
                   ),
                 );
               },
@@ -1008,16 +978,28 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                     SelectableLinkify(
                       text: bodyText,
                       onOpen: (link) async {
-                        final uri = Uri.tryParse(link.url);
-                        if (uri == null) return;
+                        final uri = buildExternalUri(link.url);
+                        if (uri == null) {
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Could not open: ${link.url}'),
+                            ),
+                          );
+                          return;
+                        }
                         try {
-                          if (await canLaunchUrl(uri)) {
-                            await launchUrl(
-                              uri,
-                              mode: LaunchMode.externalApplication,
+                          final launched = await launchUrl(
+                            uri,
+                            mode: LaunchMode.externalApplication,
+                          );
+                          if (!launched) {
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Could not open: ${link.url}'),
+                              ),
                             );
-                          } else {
-                            debugPrint('Cannot launch URL: $uri');
                           }
                         } catch (e) {
                           debugPrint('Failed to launch URL: $e');
@@ -1332,6 +1314,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                           ? null
                           : () async {
                               if (contentController.text.trim().isEmpty) return;
+                              if (selectedGif != null) {
+                                final hasGifAccess =
+                                    await _ensurePremiumGifAccess();
+                                if (!hasGifAccess) return;
+                              }
                               setModalState(() => isPosting = true);
                               try {
                                 String? imageUrl;
@@ -1531,8 +1518,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                         color: AppTheme.primary,
                       ),
                       onPressed: () async {
-                        // Allow stickers for everyone as requested
-                        if (!mounted) return;
+                        final hasGifAccess = await _ensurePremiumGifAccess();
+                        if (!mounted || !hasGifAccess) return;
                         final gif = await GiphyPicker.pickGif(
                           context: context,
                           apiKey: AppConfig.giphyApiKey,
@@ -1607,6 +1594,30 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         ),
       ),
     );
+  }
+
+  Future<bool> _ensurePremiumGifAccess() async {
+    final hasPremium = await _subscriptionService.isPremium();
+    if (hasPremium) return true;
+    if (!mounted) return false;
+
+    final messenger = ScaffoldMessenger.of(context);
+    await showDialog(
+      context: context,
+      builder: (_) => PaywallDialog(
+        onSuccess: () {
+          if (!mounted) return;
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('Premium unlocked! GIF feature enabled.'),
+            ),
+          );
+        },
+      ),
+    );
+
+    if (!mounted) return false;
+    return _subscriptionService.isPremium();
   }
 
   void _showRoomInfo() {
@@ -2049,6 +2060,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                           final isActive =
                               email.isNotEmpty &&
                               activeUsers.contains(email.toLowerCase());
+                          final memberPhotoUrl = _resolvePhotoUrl(
+                            member,
+                            const [
+                              'profile_photo_url',
+                              'photo_url',
+                              'avatar_url',
+                            ],
+                          );
+                          final hasMemberPhoto = memberPhotoUrl.isNotEmpty;
 
                           return Container(
                             padding: const EdgeInsets.all(12),
@@ -2065,22 +2085,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                             ),
                             child: Row(
                               children: [
-                                CircleAvatar(
+                                UserAvatar(
                                   radius: 18,
-                                  backgroundColor: AppTheme.primary.withValues(
-                                    alpha: 0.15,
-                                  ),
-                                  child: Text(
-                                    _memberDisplayName(member).isNotEmpty
-                                        ? _memberDisplayName(
-                                            member,
-                                          )[0].toUpperCase()
-                                        : '?',
-                                    style: GoogleFonts.inter(
-                                      fontWeight: FontWeight.w700,
-                                      color: AppTheme.primary,
-                                    ),
-                                  ),
+                                  displayName: _memberDisplayName(member),
+                                  photoUrl: hasMemberPhoto
+                                      ? memberPhotoUrl
+                                      : null,
                                 ),
                                 const SizedBox(width: 12),
                                 Expanded(
@@ -2320,6 +2330,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         },
       ),
     );
+  }
+
+  String _resolvePhotoUrl(Map<String, dynamic> data, List<String> keys) {
+    return resolveProfilePhotoUrl(data, preferredKeys: keys) ?? '';
   }
 
   String _memberDisplayName(Map<String, dynamic> member) {

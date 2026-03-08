@@ -25,8 +25,10 @@ import '../services/summary_pdf_service.dart';
 import '../services/supabase_service.dart';
 import '../controllers/ai_chat_animation_controller.dart';
 import '../widgets/ai_chat_message_bubble.dart';
+import '../widgets/ai_formatted_text.dart';
 import '../widgets/onboarding_overlay.dart';
 import '../widgets/paywall_dialog.dart';
+import '../utils/ai_token_budget_utils.dart';
 import 'ai_question_paper_quiz_screen.dart';
 import 'viewer/pdf_viewer_screen.dart';
 import 'viewer/youtube_player_screen.dart';
@@ -183,7 +185,6 @@ class _AIChatScreenState extends State<AIChatScreen>
     with TickerProviderStateMixin {
   static const String _aiCoachMarksSeenKey = 'ai_chat_coach_marks_v1_seen';
   static final String _internalDomainSuffix = '.${AppConfig.webDomain}';
-  static const int _tokensPerCredit = 2000;
   static const int _minLowTokenThreshold = 4000;
 
   final BackendApiService _api = BackendApiService();
@@ -200,6 +201,9 @@ class _AIChatScreenState extends State<AIChatScreen>
 
   bool _isLoading = false;
   bool _isSendAttemptInProgress = false;
+  DateTime? _lastSendTriggeredAt;
+  String? _lastSendFingerprint;
+  DateTime? _lastSendFingerprintAt;
   final List<AIChatMessage> _messages = [];
   final List<_ChatAttachment> _attachments = [];
   final List<_ChatAttachment> _stickyAttachments = [];
@@ -225,6 +229,9 @@ class _AIChatScreenState extends State<AIChatScreen>
   bool _userDismissedTokenBanner = false;
   bool _isAiTokenStatusLoading = false;
   DateTime? _lastAiTokenTopUpSnackBarAt;
+  String? _lastAiTokenTopUpSnackBarMessage;
+  DateTime? _lastSourceLinkSnackBarAt;
+  bool _isOpeningSourceLink = false;
   bool _aiTokenStatusLoaded = false;
   int _aiTokenRemainingTokens = 0;
   int _aiTokenBudgetTokens = 0;
@@ -1933,7 +1940,18 @@ class _AIChatScreenState extends State<AIChatScreen>
   }
 
   Uri? _buildExternalLaunchUri(String rawUrl) {
-    return buildExternalUri(rawUrl);
+    final direct = buildExternalUri(rawUrl);
+    if (direct != null) return direct;
+
+    final trimmed = rawUrl.trim();
+    if (trimmed.startsWith('/')) {
+      final base = Uri.tryParse(AppConfig.apiUrl);
+      if (base != null && base.host.isNotEmpty) {
+        final resolved = base.resolve(trimmed).toString();
+        return buildExternalUri(resolved);
+      }
+    }
+    return null;
   }
 
   Future<void> _openExternalSourceLink({
@@ -1956,45 +1974,10 @@ class _AIChatScreenState extends State<AIChatScreen>
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
-  int _resolveEffectiveAiBudget(Map<String, dynamic> profile) {
-    final budgetFromApi = _toSafeInt(profile['ai_token_budget']);
-    final baseBudgetFromApi = _toSafeInt(profile['ai_token_base_budget']);
-    final premiumMultiplierFromApi = math.max(
-      1,
-      _toSafeInt(profile['ai_token_premium_multiplier']),
-    );
-    final budgetMultiplierFromApi = math.max(
-      1,
-      _toSafeInt(profile['ai_token_budget_multiplier']),
-    );
-
-    final tier = profile['subscription_tier']?.toString().toLowerCase();
-    final subscriptionEnd = DateTime.tryParse(
-      profile['subscription_end_date']?.toString() ?? '',
-    );
-    final isPremiumActive =
-        (tier == 'pro' || tier == 'max') &&
-        subscriptionEnd != null &&
-        subscriptionEnd.toUtc().isAfter(DateTime.now().toUtc());
-
-    final safeBaseBudget = baseBudgetFromApi > 0
-        ? baseBudgetFromApi
-        : (budgetFromApi > 0 && budgetMultiplierFromApi > 1
-              ? (budgetFromApi / budgetMultiplierFromApi).round()
-              : (budgetFromApi > 0 ? budgetFromApi : 40160));
-    final resolvedMultiplier = budgetMultiplierFromApi > 1
-        ? budgetMultiplierFromApi
-        : (isPremiumActive ? premiumMultiplierFromApi : 1);
-    final derivedBudget = math.max(1, safeBaseBudget * resolvedMultiplier);
-
-    if (budgetFromApi <= 0) return derivedBudget;
-    return math.max(budgetFromApi, derivedBudget);
-  }
-
-  String _formatCreditsFromTokens(int tokenCount) {
-    if (tokenCount <= 0) return '0';
-    final credits = tokenCount / _tokensPerCredit;
-    return math.max(1, credits.round()).toString();
+  Future<int> _resolveEffectiveAiBudget(Map<String, dynamic> profile) async {
+    final snapshot =
+        await AiTokenBudgetSnapshot.fromProfileWithLocalPremium(profile);
+    return snapshot.currentBudget;
   }
 
   bool _looksLikeTokenLimitError(String message) {
@@ -2020,14 +2003,13 @@ class _AIChatScreenState extends State<AIChatScreen>
       );
       if (!mounted || profile.isEmpty) return;
 
-      final rawBudget = _toSafeInt(profile['ai_token_budget']);
-      final budget = _resolveEffectiveAiBudget(profile);
+      final budget = await _resolveEffectiveAiBudget(profile);
       final used = _toSafeInt(profile['ai_token_used']).clamp(0, budget);
       var remaining = _toSafeInt(profile['ai_token_remaining']);
       final derivedRemaining = budget > 0
           ? (budget - used).clamp(0, budget).toInt()
           : 0;
-      if (remaining <= 0 || remaining > budget || budget > rawBudget) {
+      if (remaining < 0 || remaining > budget) {
         remaining = derivedRemaining;
       }
       final threshold = math.max(
@@ -2080,22 +2062,89 @@ class _AIChatScreenState extends State<AIChatScreen>
     if (!mounted) return;
     final now = DateTime.now();
     final lastShownAt = _lastAiTokenTopUpSnackBarAt;
+    final isSameMessage = _lastAiTokenTopUpSnackBarMessage == message;
     if (lastShownAt != null &&
-        now.difference(lastShownAt) < const Duration(seconds: 2)) {
+        isSameMessage &&
+        now.difference(lastShownAt) < const Duration(seconds: 5)) {
       return;
     }
     _lastAiTokenTopUpSnackBarAt = now;
+    _lastAiTokenTopUpSnackBarMessage = message;
     final messenger = ScaffoldMessenger.of(context);
     messenger.hideCurrentSnackBar();
     messenger.showSnackBar(
       SnackBar(
         content: Text(message),
         action: SnackBarAction(
-          label: 'Upgrade Now',
+          label: 'Buy Tokens',
           onPressed: _openAiTopUpDialog,
         ),
       ),
     );
+  }
+
+  bool _shouldSuppressRapidDuplicateSend({
+    required String userPrompt,
+    required List<_ChatAttachment> activeAttachments,
+  }) {
+    final now = DateTime.now();
+    final lastTriggeredAt = _lastSendTriggeredAt;
+    _lastSendTriggeredAt = now;
+
+    if (lastTriggeredAt != null &&
+        now.difference(lastTriggeredAt) < const Duration(milliseconds: 600)) {
+      return true;
+    }
+
+    final attachmentSignature = activeAttachments
+        .map((a) => '${a.name}|${a.url}|${a.isPdf}')
+        .join('||');
+    final fingerprint = '${userPrompt.trim()}::$attachmentSignature';
+    final lastFingerprint = _lastSendFingerprint;
+    final lastFingerprintAt = _lastSendFingerprintAt;
+    _lastSendFingerprint = fingerprint;
+    _lastSendFingerprintAt = now;
+
+    return lastFingerprint != null &&
+        lastFingerprintAt != null &&
+        lastFingerprint == fingerprint &&
+        now.difference(lastFingerprintAt) < const Duration(seconds: 2);
+  }
+
+  void _showSourceUrlErrorSnackBar(String sourceTitle) {
+    if (!mounted) return;
+    final now = DateTime.now();
+    final last = _lastSourceLinkSnackBarAt;
+    if (last != null && now.difference(last) < const Duration(seconds: 2)) {
+      return;
+    }
+    _lastSourceLinkSnackBarAt = now;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Invalid source URL for $sourceTitle')),
+    );
+  }
+
+  String _cleanUserVisibleErrorMessage(Object error) {
+    final raw = error.toString().replaceFirst('Exception: ', '').trim();
+    final lowered = raw.toLowerCase();
+    final hasHtmlPayload =
+        lowered.contains('<!doctype html') ||
+        lowered.contains('<html') ||
+        lowered.contains('</html>');
+    if (hasHtmlPayload) {
+      // Capture both 4xx and 5xx HTTP status codes
+      final codeMatch = RegExp(r'\b([45]\d{2})\b').firstMatch(raw);
+      final code = codeMatch?.group(1);
+      if (code != null) {
+        if (code.startsWith('5')) {
+          return 'Backend temporarily unavailable (HTTP $code). Please retry in a moment.';
+        } else if (code.startsWith('4')) {
+          return 'Request error (HTTP $code). Please check your request or credentials.';
+        }
+      }
+      return 'Backend temporarily unavailable. Please retry in a moment.';
+    }
+    return raw;
   }
 
   void _handlePotentialTokenLimitError(String message) {
@@ -2105,10 +2154,22 @@ class _AIChatScreenState extends State<AIChatScreen>
         _showAiTokenLowBanner = true;
       });
     }
-    _showAiTokenTopUpSnackBar(
-      'AI token limit reached or low. Top up to continue chatting.',
-    );
+    _showAiTokenTopUpSnackBar(_buildAiTokenShortageMessage());
     _refreshAiTokenStatus(forceRefresh: true);
+  }
+
+  String _buildAiTokenShortageMessage() {
+    final remaining = visibleAiTokensFromRaw(_aiTokenRemainingTokens);
+    final shortBy = math.max(
+      1,
+      visibleAiTokenShortfallFromRaw(_aiTokenRemainingTokens),
+    );
+
+    if (remaining <= 0) {
+      return 'You have 0 AI tokens left. Add at least $shortBy more token${shortBy == 1 ? '' : 's'} to continue.';
+    }
+
+    return 'You have $remaining AI token${remaining == 1 ? '' : 's'} left. Add $shortBy more token${shortBy == 1 ? '' : 's'} if generation stops.';
   }
 
   String? _normalizeAcademicFilterValue(
@@ -2548,9 +2609,11 @@ Return STRICT JSON only (no markdown). Schema:
   }) async {
     final tracker = _startLongResponseTracker('Question paper generation');
     final history = _buildStructuredHistory(pendingUserPrompt: userPrompt);
+    final aiMessage = AIChatMessage(isUser: false, content: '');
 
     setState(() {
       _messages.add(AIChatMessage(isUser: true, content: userVisible));
+      _messages.add(aiMessage);
       _isLoading = true;
       _controller.clear();
       _attachments.clear();
@@ -2660,15 +2723,10 @@ Return STRICT JSON only (no markdown). Schema:
 
       if (paper == null) {
         setState(() {
-          _messages.add(
-            AIChatMessage(
-              isUser: false,
-              content: lastAnswer.trim().isEmpty
-                  ? 'Failed to generate a valid question paper. Try again '
-                        'with more specific subject details or add notes.'
-                  : lastAnswer,
-            ),
-          );
+          aiMessage.content = lastAnswer.trim().isEmpty
+              ? 'Failed to generate a valid question paper. Try again with '
+                    'more specific subject details or add notes.'
+              : lastAnswer;
         });
         await _persistCurrentSession();
         return;
@@ -2676,26 +2734,16 @@ Return STRICT JSON only (no markdown). Schema:
       final generatedPaper = paper;
 
       setState(() {
-        _messages.add(
-          AIChatMessage(
-            isUser: false,
-            content: _buildQuestionPaperSummary(generatedPaper),
-            quizActionPaper: generatedPaper,
-          ),
-        );
+        aiMessage.content = _buildQuestionPaperSummary(generatedPaper);
+        aiMessage.quizActionPaper = generatedPaper;
       });
       await _persistCurrentSession();
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _messages.add(
-          AIChatMessage(
-            isUser: false,
-            content:
-                'Question paper generation failed: '
-                '${e.toString().replaceFirst('Exception: ', '')}',
-          ),
-        );
+        aiMessage.content =
+            'Question paper generation failed: '
+            '${e.toString().replaceFirst('Exception: ', '')}';
       });
       await _persistCurrentSession();
     } finally {
@@ -2853,9 +2901,7 @@ Return STRICT JSON only (no markdown). Schema:
             _aiTokenBudgetTokens > 0 &&
             _aiTokenRemainingTokens <= 0) {
           setState(() => _showAiTokenLowBanner = true);
-          _showAiTokenTopUpSnackBar(
-            'Your AI tokens are exhausted. Please top up to continue.',
-          );
+          _showAiTokenTopUpSnackBar(_buildAiTokenShortageMessage());
           return;
         }
 
@@ -2871,6 +2917,12 @@ Return STRICT JSON only (no markdown). Schema:
         final userPrompt = text.isEmpty
             ? 'Please analyze the attached files and help me study.'
             : text;
+        if (_shouldSuppressRapidDuplicateSend(
+          userPrompt: userPrompt,
+          activeAttachments: effectiveAttachments,
+        )) {
+          return;
+        }
         final localContextRequired =
             hasAttachments ||
             _isStudioChat ||
@@ -2926,9 +2978,14 @@ Return STRICT JSON only (no markdown). Schema:
         }
 
         final tracker = _startLongResponseTracker('AI response generation');
+        final aiMessage = AIChatMessage(isUser: false, content: '');
+        final AIChatMessage aiMessageForError = aiMessage;
+        var malformedChunkCount = 0;
+        var aiInvoked = false;
 
         setState(() {
           _messages.add(AIChatMessage(isUser: true, content: userVisible));
+          _messages.add(aiMessage);
           _isLoading = true;
           _controller.clear();
           _attachments.clear();
@@ -2936,19 +2993,8 @@ Return STRICT JSON only (no markdown). Schema:
         await _persistCurrentSession();
         await _scrollToBottom();
 
-        AIChatMessage? aiMessageForError;
-        var malformedChunkCount = 0;
-        var aiInvoked = false;
-
         try {
           _resetTypingRenderer();
-          final aiMessage = AIChatMessage(isUser: false, content: '');
-          aiMessageForError = aiMessage;
-
-          setState(() {
-            _messages.add(aiMessage);
-          });
-          await _scrollToBottom();
 
           final stream = _api.queryRagStream(
             question: sendPrompt,
@@ -3106,20 +3152,15 @@ Return STRICT JSON only (no markdown). Schema:
             _refreshAiTokenStatus(forceRefresh: true);
           }
         } catch (e) {
-          final errorMessage = e.toString().replaceFirst('Exception: ', '');
+          final errorMessage = _cleanUserVisibleErrorMessage(e);
           _handlePotentialTokenLimitError(errorMessage);
           _streamTypingDone = true;
           _completeTypingDrainIfDrained();
           await _waitForTypingDrain();
           if (mounted) {
             setState(() {
-              if (aiMessageForError != null) {
-                aiMessageForError.content += '\n\n$errorMessage';
-              } else {
-                _messages.add(
-                  AIChatMessage(isUser: false, content: errorMessage),
-                );
-              }
+              final separator = aiMessageForError.content.isEmpty ? '' : '\n\n';
+              aiMessageForError.content += '$separator$errorMessage';
             });
             await _persistCurrentSession();
           }
@@ -3245,12 +3286,19 @@ Return STRICT JSON only (no markdown). Schema:
         _aiTokenStatusLoaded &&
         _aiTokenBudgetTokens > 0 &&
         _aiTokenRemainingTokens <= 0;
-    final remainingCredits = _formatCreditsFromTokens(
+    final remainingCredits = visibleAiTokensFromRaw(
       math.max(0, _aiTokenRemainingTokens),
     );
+    final totalCredits = visibleAiTokensFromRaw(
+      math.max(0, _aiTokenBudgetTokens),
+    );
+    final shortBy = math.max(
+      1,
+      visibleAiTokenShortfallFromRaw(_aiTokenRemainingTokens),
+    );
     final message = exhausted
-        ? 'AI tokens exhausted. Top up to continue.'
-        : 'Low AI balance: ~$remainingCredits credits left. Consider top-up.';
+        ? 'You have 0 of $totalCredits AI tokens left. Add at least $shortBy more token${shortBy == 1 ? '' : 's'} to continue.'
+        : 'Low AI balance: $remainingCredits of $totalCredits AI tokens left.';
 
     return Container(
       width: double.infinity,
@@ -3298,7 +3346,7 @@ Return STRICT JSON only (no markdown). Schema:
               ),
             ),
             child: Text(
-              'Upgrade Now',
+              'Buy Tokens',
               style: GoogleFonts.inter(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
@@ -3391,7 +3439,6 @@ Return STRICT JSON only (no markdown). Schema:
     );
     final skeletonLine1Width = (bubbleMaxWidth * 0.6).clamp(110.0, 260.0);
     final skeletonLine2Width = (bubbleMaxWidth * 0.45).clamp(88.0, 220.0);
-
     final messageBody = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3536,7 +3583,12 @@ Return STRICT JSON only (no markdown). Schema:
             ],
           )
         else
-          Text(msg.content, style: messageTextStyle),
+          AiFormattedText(
+            text: msg.content,
+            baseStyle: messageTextStyle,
+            bulletColor: AppTheme.primary,
+            headingColor: textColor,
+          ),
         if (!msg.isUser && msg.ocrFailureAffectsRetrieval) ...[
           const SizedBox(height: 10),
           Container(
@@ -3657,65 +3709,59 @@ Return STRICT JSON only (no markdown). Schema:
                 onTap: normalizedLaunchTarget.isEmpty
                     ? null
                     : () async {
+                        if (_isOpeningSourceLink) return;
+                        _isOpeningSourceLink = true;
                         final uri = _buildExternalLaunchUri(
                           normalizedLaunchTarget,
                         );
-                        if (!mounted) return;
-                        if (isYoutubeSource) {
-                          final youtubeLink = parseYoutubeLink(
-                            normalizedLaunchTarget,
-                          );
-                          if (youtubeLink != null) {
+                        try {
+                          if (!mounted) return;
+                          if (isYoutubeSource) {
+                            final youtubeLink = parseYoutubeLink(
+                              normalizedLaunchTarget,
+                            );
+                            if (youtubeLink != null) {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => YoutubePlayerScreen(
+                                    videoUrl: youtubeLink.watchUri.toString(),
+                                    title: s.title,
+                                    resourceId: s.fileId.trim().isEmpty
+                                        ? null
+                                        : s.fileId,
+                                    collegeId: widget.collegeId,
+                                    subject: widget.resourceContext?.subject,
+                                    semester: widget.resourceContext?.semester,
+                                    branch: widget.resourceContext?.branch,
+                                  ),
+                                ),
+                              );
+                            } else if (uri != null) {
+                              await _openExternalSourceLink(
+                                uri: uri,
+                                sourceTitle: s.title,
+                              );
+                            } else {
+                              _showSourceUrlErrorSnackBar(s.title);
+                            }
+                          } else if (uri != null) {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (_) => YoutubePlayerScreen(
-                                  videoUrl: youtubeLink.watchUri.toString(),
+                                builder: (_) => PdfViewerScreen(
+                                  pdfUrl: uri.toString(),
                                   title: s.title,
-                                  resourceId: s.fileId.trim().isEmpty
-                                      ? null
-                                      : s.fileId,
+                                  resourceId: s.fileId,
                                   collegeId: widget.collegeId,
-                                  subject: widget.resourceContext?.subject,
-                                  semester: widget.resourceContext?.semester,
-                                  branch: widget.resourceContext?.branch,
                                 ),
                               ),
                             );
-                          } else if (uri != null) {
-                            await _openExternalSourceLink(
-                              uri: uri,
-                              sourceTitle: s.title,
-                            );
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'Invalid source URL for ${s.title}',
-                                ),
-                              ),
-                            );
+                          } else if (mounted) {
+                            _showSourceUrlErrorSnackBar(s.title);
                           }
-                        } else if (uri != null) {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => PdfViewerScreen(
-                                pdfUrl: normalizedLaunchTarget,
-                                title: s.title,
-                                resourceId: s.fileId,
-                                collegeId: widget.collegeId,
-                              ),
-                            ),
-                          );
-                        } else if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                'Invalid source URL for ${s.title}',
-                              ),
-                            ),
-                          );
+                        } finally {
+                          _isOpeningSourceLink = false;
                         }
                       },
                 borderRadius: BorderRadius.circular(12),

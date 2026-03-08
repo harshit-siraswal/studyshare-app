@@ -69,6 +69,18 @@ class _RecaptchaOverlayState extends State<_RecaptchaOverlay> {
   bool _isLoading = true;
   Timer? _timeoutTimer;
 
+  bool _isAllowedRecaptchaNavigation(String rawUrl) {
+    final uri = Uri.tryParse(rawUrl);
+    if (uri == null) return false;
+    if (uri.scheme == 'about') return true;
+    if (uri.scheme != 'https') return false;
+    final host = uri.host.toLowerCase();
+    return host == 'www.google.com' ||
+        host == 'www.gstatic.com' ||
+        host == 'www.recaptcha.net' ||
+        host == 'recaptcha.net';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -98,6 +110,16 @@ class _RecaptchaOverlayState extends State<_RecaptchaOverlay> {
       )
       ..setNavigationDelegate(
         NavigationDelegate(
+          onNavigationRequest: (request) {
+            if (_isAllowedRecaptchaNavigation(request.url)) {
+              return NavigationDecision.navigate;
+            }
+            widget.onError(
+              Exception('Blocked unexpected reCAPTCHA URL: ${request.url}'),
+            );
+            if (mounted) Navigator.of(context).pop();
+            return NavigationDecision.prevent;
+          },
           onWebResourceError: (error) {
             widget.onError(Exception(error.description));
             if (mounted) Navigator.of(context).pop();

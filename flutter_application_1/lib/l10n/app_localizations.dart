@@ -32,6 +32,11 @@ class AppLocalizations {
     'Unable to open that notice right now. Please try again.',
     name: 'noticeLoadFailed',
   );
+
+  String get blockedUntrustedUrl => Intl.message(
+    'Blocked untrusted URL',
+    name: 'blockedUntrustedUrl',
+  );
 }
 
 class _AppLocalizationsDelegate

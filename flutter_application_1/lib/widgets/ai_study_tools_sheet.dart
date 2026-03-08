@@ -13,6 +13,7 @@ import '../services/backend_api_service.dart';
 import '../services/summary_pdf_service.dart';
 import '../services/supabase_service.dart';
 import 'branded_loader.dart';
+import 'paywall_dialog.dart';
 
 class QuizQuestion {
   final String question;
@@ -455,8 +456,11 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
       }
       _supabaseService.markAiTokenBalanceStale();
     } catch (e) {
+      final message = e.toString().replaceFirst('Exception: ', '');
       setState(() {
-        _error = e.toString().replaceFirst('Exception: ', '');
+        _error = _looksLikeTokenLimitError(message)
+            ? 'Your AI tokens are exhausted for this cycle. Buy more AI tokens to continue.'
+            : message;
       });
     } finally {
       if (mounted) {
@@ -466,6 +470,42 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         });
       }
     }
+  }
+
+  bool _looksLikeTokenLimitError(String message, {String? errorCode}) {
+    // Prefer a structured error code from the backend when available.
+    if (errorCode != null) {
+      final code = errorCode.toUpperCase();
+      if (code == 'TOKEN_LIMIT_EXCEEDED' ||
+          code == 'INSUFFICIENT_TOKENS' ||
+          code == 'QUOTA_EXCEEDED') {
+        return true;
+      }
+    }
+    // Fallback: heuristic string matching.
+    final lowered = message.toLowerCase();
+    return (lowered.contains('token') &&
+            (lowered.contains('limit') ||
+                lowered.contains('quota') ||
+                lowered.contains('insufficient') ||
+                lowered.contains('exceed') ||
+                lowered.contains('remaining') ||
+                lowered.contains('balance'))) ||
+        (lowered.contains('credit') &&
+            (lowered.contains('limit') || lowered.contains('insufficient')));
+  }
+
+  Future<void> _openAiTokenPaywall() async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (_) => PaywallDialog(
+        onSuccess: () {
+          if (!mounted) return;
+          setState(() => _error = null);
+        },
+      ),
+    );
   }
 
   Future<void> _saveActiveOutput() async {
@@ -1130,7 +1170,12 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   }
 
   String _summaryPlain(String input) {
-    return input.replaceAll('**', '').trim();
+    // Strip markdown emphasis markers (_..._) while preserving underscores
+    // inside identifiers (e.g., snake_case).
+    return input
+        .replaceAll('**', '')
+        .replaceAll(RegExp(r'(?<=\s|^)_([^_]+)_(?=\s|$)'), r'$1')
+        .trim();
   }
 
   TextSpan _summaryTextSpan({
@@ -1139,7 +1184,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     required double fontSize,
     FontWeight baseWeight = FontWeight.w500,
   }) {
-    final regex = RegExp(r'(\*\*[^*]+\*\*)');
+    final regex = RegExp(r'(\*\*[^*]+\*\*|_[^_]+_|(?<!\*)\*[^*]+\*(?!\*))');
     final matches = regex.allMatches(text);
     if (matches.isEmpty) {
       return TextSpan(
@@ -1170,14 +1215,18 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         );
       }
       final chunk = match.group(0) ?? '';
+      final isBold = chunk.startsWith('**') && chunk.endsWith('**');
       spans.add(
         TextSpan(
-          text: _summaryPlain(chunk),
+          text: isBold
+              ? chunk.substring(2, chunk.length - 2)
+              : chunk.substring(1, chunk.length - 1),
           style: GoogleFonts.inter(
             fontSize: fontSize,
             height: 1.55,
             color: color,
-            fontWeight: FontWeight.w800,
+            fontWeight: isBold ? FontWeight.w800 : baseWeight,
+            fontStyle: isBold ? FontStyle.normal : FontStyle.italic,
           ),
         ),
       );
@@ -2064,6 +2113,27 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                         ),
                       ),
                     ),
+                    if (_looksLikeTokenLimitError(_error!)) ...[
+                      const SizedBox(width: 8),
+                      TextButton(
+                        onPressed: _openAiTokenPaywall,
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppTheme.error,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          backgroundColor: Colors.white.withValues(alpha: 0.45),
+                        ),
+                        child: Text(
+                          'Buy Tokens',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

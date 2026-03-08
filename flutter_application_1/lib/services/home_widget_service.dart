@@ -1,10 +1,13 @@
 import 'package:flutter/foundation.dart';
 import 'package:home_widget/home_widget.dart';
-import '../models/resource.dart';
+
+import '../data/academic_subjects_data.dart';
 import '../models/notice.dart';
+import '../models/resource.dart';
 
 class HomeWidgetService {
   static const String _defaultAndroidWidgetPackage = 'me.studyshare.android';
+  static const int _maxVisibleItems = 3;
 
   String _groupId = 'group.com.studyshare.app';
   String _noticesWidgetName = 'NoticesWidgetProvider';
@@ -35,7 +38,6 @@ class HomeWidgetService {
     if (noticesWidgetName != null) _noticesWidgetName = noticesWidgetName;
     if (syllabusWidgetName != null) _syllabusWidgetName = syllabusWidgetName;
 
-    // Re-apply groupId if already initialized (iOS only).
     if (_isInitialized &&
         groupId != null &&
         defaultTargetPlatform == TargetPlatform.iOS) {
@@ -98,31 +100,65 @@ class HomeWidgetService {
     }
   }
 
+  String _sanitizeWidgetLine(String raw, {int maxLength = 54}) {
+    // Defensive guard for invalid maxLength
+    if (maxLength < 0) maxLength = 0;
+    
+    final compact = raw.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (compact.isEmpty) return '';
+    if (compact.length <= maxLength) return compact;
+    
+    // Handle tiny maxLength values
+    if (maxLength <= 3) {
+      return compact.substring(0, maxLength);
+    }
+    
+    return '${compact.substring(0, maxLength - 3).trim()}...';
+  }
+
+  List<String> _buildWidgetLines(Iterable<String> values) {
+    return values
+        .map(_sanitizeWidgetLine)
+        .where((value) => value.isNotEmpty)
+        .take(_maxVisibleItems)
+        .toList();
+  }
+
+  Future<void> _saveWidgetLines(String prefix, List<String> lines) async {
+    // Parallelize all save operations for better performance
+    final saveFutures = <Future<bool?>>[];
+    for (var index = 0; index < _maxVisibleItems; index++) {
+      final value = index < lines.length ? lines[index] : '';
+      saveFutures.add(
+        HomeWidget.saveWidgetData<String>(
+          '${prefix}_item_${index + 1}',
+          value,
+        ),
+      );
+    }
+    await Future.wait(saveFutures);
+  }
+
   Future<bool> syncNotices(List<Notice> notices) async {
     if (!await _ensureInitialized()) {
       return false;
     }
     try {
-      final recentNotices = notices.take(3).toList();
-      String displayText = '';
-      if (recentNotices.isEmpty) {
-        displayText = 'No recent notices.';
-      } else {
-        final buffer = StringBuffer();
-        for (var n in recentNotices) {
-          buffer.writeln('• ${n.title}');
-        }
-        displayText = buffer.toString().trim();
-      }
+      final recentNotices = notices.take(_maxVisibleItems).toList();
+      final noticeLines = _buildWidgetLines(
+        recentNotices.map((notice) => notice.title),
+      );
+      final subtitle = noticeLines.isEmpty
+          ? 'Stay updated from your campus'
+          : '${noticeLines.length} latest update${noticeLines.length == 1 ? '' : 's'}';
 
+      await HomeWidget.saveWidgetData<String>('notices_title', 'Campus Notices');
+      await HomeWidget.saveWidgetData<String>('notices_subtitle', subtitle);
       await HomeWidget.saveWidgetData<String>(
-        'notices_data',
-        displayText.trim(),
+        'notices_empty_message',
+        'No recent notices yet. Tap to open StudyShare.',
       );
-      await HomeWidget.saveWidgetData<String>(
-        'notices_title',
-        'Recent Notices',
-      );
+      await _saveWidgetLines('notices', noticeLines);
       await _updateWidget(_noticesWidgetName);
       return true;
     } catch (e) {
@@ -140,27 +176,27 @@ class HomeWidgetService {
       return false;
     }
     try {
-      final relevantSyllabus = preFilteredSyllabusItems.take(3).toList();
-
-      String displayText = '';
-      if (relevantSyllabus.isEmpty) {
-        displayText = 'No syllabus for $branch Sem $semester.';
-      } else {
-        final buffer = StringBuffer();
-        for (var s in relevantSyllabus) {
-          buffer.writeln('• ${s.title}');
-        }
-        displayText = buffer.toString().trim();
-      }
-
-      await HomeWidget.saveWidgetData<String>(
-        'syllabus_data',
-        displayText.trim(),
+      final relevantSyllabus = preFilteredSyllabusItems
+          .take(_maxVisibleItems)
+          .toList();
+      final syllabusLines = _buildWidgetLines(
+        relevantSyllabus.map((item) => item.title),
       );
+      final branchLabel = getBranchShortLabel(branch);
+
       await HomeWidget.saveWidgetData<String>(
         'syllabus_title',
-        'Syllabus: $branch S$semester',
+        'Syllabus Tracker',
       );
+      await HomeWidget.saveWidgetData<String>(
+        'syllabus_subtitle',
+        '$branchLabel | Semester $semester',
+      );
+      await HomeWidget.saveWidgetData<String>(
+        'syllabus_empty_message',
+        'No syllabus items for $branchLabel semester $semester.',
+      );
+      await _saveWidgetLines('syllabus', syllabusLines);
       await _updateWidget(_syllabusWidgetName);
       return true;
     } catch (e) {

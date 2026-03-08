@@ -10,6 +10,8 @@ import '../../config/theme.dart';
 import '../../data/academic_subjects_data.dart';
 import '../../services/backend_api_service.dart';
 import '../../services/cloudinary_service.dart';
+import '../../services/supabase_service.dart';
+import '../../utils/admin_access.dart';
 
 class EditProfileScreen extends StatefulWidget {
   final String initialName;
@@ -39,6 +41,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   static const List<String> _semesterOptions = semesterOptions;
 
   final _api = BackendApiService();
+  final _supabaseService = SupabaseService();
   late final TextEditingController _nameController;
   late final TextEditingController _bioController;
   late final TextEditingController _subjectController;
@@ -49,6 +52,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   List<String> _availableSubjects = [];
   PlatformFile? _pickedImage;
   bool _saving = false;
+
+  bool get _supportsSubjectField {
+    final normalizedRole = normalizeProfileRoleValue(widget.role);
+    return normalizedRole == appRoleTeacher || normalizedRole == appRoleAdmin;
+  }
 
   List<String> _uniqueNonEmptyOptions(Iterable<String> options) {
     final seen = <String>{};
@@ -99,7 +107,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _bioController = TextEditingController(text: widget.initialBio ?? '');
     _selectedSemester = _normalizedSemester(widget.initialSemester);
     _selectedBranch = _normalizedBranch(widget.initialBranch);
-    _selectedSubject = _normalizedSelection(widget.initialSubject);
+    _selectedSubject = _supportsSubjectField
+        ? _normalizedSelection(widget.initialSubject)
+        : null;
     _subjectController = TextEditingController(text: _selectedSubject ?? '');
     _refreshSubjectOptionsForBranch(
       _selectedBranch,
@@ -220,29 +230,57 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
       final normalizedSemester = _normalizedSemester(_selectedSemester);
       final normalizedBranch = _normalizedBranch(_selectedBranch);
-      final normalizedSubject = _normalizedSelection(
-        _subjectController.text.trim(),
+      final normalizedSubject = _supportsSubjectField
+          ? _normalizedSelection(_subjectController.text.trim())
+          : null;
+      final submittedProfile = _submittedProfilePayload(
+        name: name,
+        photoUrl: photoUrl,
+        semester: normalizedSemester,
+        branch: normalizedBranch,
+        subject: normalizedSubject,
       );
 
-      if (!mounted) return;
-      final response = await _api.updateProfile(
-        displayName: name,
-        bio: _bioController.text.trim(),
-        profilePhotoUrl: photoUrl,
-        semester: normalizedSemester ?? '',
-        branch: normalizedBranch ?? '',
-        subject: normalizedSubject ?? '',
-        context: context,
-      );
+      Map<String, dynamic> updatedProfile;
+      try {
+        if (!mounted) return;
+        final response = await _api.updateProfile(
+          displayName: name,
+          bio: _bioController.text.trim(),
+          profilePhotoUrl: photoUrl,
+          semester: normalizedSemester ?? '',
+          branch: normalizedBranch ?? '',
+          subject: _supportsSubjectField ? (normalizedSubject ?? '') : null,
+          context: context,
+        );
+        updatedProfile = _coerceUpdatedProfile(
+          response,
+          fallbackProfile: submittedProfile,
+        );
+      } catch (backendError) {
+        debugPrint(
+          'Backend profile update failed, retrying direct Supabase update: '
+          '$backendError',
+        );
+        updatedProfile = await _supabaseService.updateCurrentUserProfileDirect(
+          displayName: name,
+          bio: _bioController.text.trim(),
+          profilePhotoUrl: photoUrl,
+          semester: normalizedSemester ?? '',
+          branch: normalizedBranch ?? '',
+          subject: _supportsSubjectField ? (normalizedSubject ?? '') : null,
+        );
+      }
 
       if (!mounted) return;
-      Navigator.pop(context, response['profile']);
+      _supabaseService.invalidateCurrentUserProfileCache();
+      Navigator.pop(context, updatedProfile);
     } catch (e) {
       debugPrint('Error updating profile: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Failed to update profile')));
+      ).showSnackBar(SnackBar(content: Text(_friendlyProfileError(e))));
     } finally {
       if (mounted) {
         setState(() => _saving = false);
@@ -276,6 +314,67 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   String nameInitial(String name) =>
       name.isNotEmpty ? name[0].toUpperCase() : 'U';
 
+  Map<String, dynamic> _submittedProfilePayload({
+    required String name,
+    required String? photoUrl,
+    required String? semester,
+    required String? branch,
+    required String? subject,
+  }) {
+    return <String, dynamic>{
+      'display_name': name,
+      'profile_photo_url': photoUrl,
+      'bio': _bioController.text.trim(),
+      'semester': semester ?? '',
+      'branch': branch ?? '',
+      if (_supportsSubjectField) 'subject': subject ?? '',
+    };
+  }
+
+  Map<String, dynamic> _coerceUpdatedProfile(
+    Map<String, dynamic>? response, {
+    required Map<String, dynamic> fallbackProfile,
+  }) {
+    if (response == null || response.isEmpty) {
+      return fallbackProfile;
+    }
+
+    final nestedProfile = response['profile'];
+    if (nestedProfile is Map) {
+      return Map<String, dynamic>.from(nestedProfile);
+    }
+
+    const profileKeys = <String>{
+      'display_name',
+      'profile_photo_url',
+      'bio',
+      'semester',
+      'branch',
+      'subject',
+      'email',
+      'id',
+      'username',
+    };
+    if (!response.keys.any(profileKeys.contains)) {
+      return fallbackProfile;
+    }
+
+    return <String, dynamic>{...fallbackProfile, ...response};
+  }
+
+  String _friendlyProfileError(Object error) {
+    final raw = error.toString().trim();
+    if (raw.isEmpty) {
+      return 'Failed to update profile.';
+    }
+
+    const prefix = 'Exception:';
+    final normalized = raw.startsWith(prefix)
+        ? raw.substring(prefix.length).trim()
+        : raw;
+    return normalized.isEmpty ? 'Failed to update profile.' : normalized;
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -286,8 +385,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     );
     final branchValues = branchOptions.map((option) => option.value).toList();
     final branchValue = _safeDropdownValue(_selectedBranch, branchValues);
-    final subjectOptions = _uniqueNonEmptyOptions(_availableSubjects);
-    final subjectValue = _safeDropdownValue(_selectedSubject, subjectOptions);
+    final subjectOptions = _supportsSubjectField
+        ? _uniqueNonEmptyOptions(_availableSubjects)
+        : const <String>[];
+    final subjectValue = _supportsSubjectField
+        ? _safeDropdownValue(_selectedSubject, subjectOptions)
+        : null;
 
     return Scaffold(
       backgroundColor: bg,
@@ -384,7 +487,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 Expanded(
                   child: DropdownButtonFormField<String>(
                     key: ValueKey('semester-${semesterValue ?? ''}'),
-                    value: semesterValue,
+                    initialValue: semesterValue,
                     decoration: InputDecoration(
                       labelText: 'Semester',
                       border: OutlineInputBorder(
@@ -415,7 +518,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   child: DropdownButtonFormField<String>(
                     key: ValueKey('branch-${branchValue ?? ''}'),
                     isExpanded: true,
-                    value: branchValue,
+                    initialValue: branchValue,
                     decoration: InputDecoration(
                       labelText: 'Branch',
                       border: OutlineInputBorder(
@@ -457,54 +560,58 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              key: ValueKey(
-                'subject-${subjectOptions.join('|')}-${subjectValue ?? ''}',
-              ),
-              value: subjectValue,
-              isExpanded: true,
-              decoration: InputDecoration(
-                labelText: 'Subject (suggested)',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
+            if (_supportsSubjectField) ...[
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                key: ValueKey(
+                  'subject-${subjectOptions.join('|')}-${subjectValue ?? ''}',
                 ),
-              ),
-              hint: Text(_subjectHintText(subjectOptions)),
-              items: subjectOptions
-                  .map(
-                    (subject) =>
-                        DropdownMenuItem(value: subject, child: Text(subject)),
-                  )
-                  .toList(),
-              onChanged:
-                  _saving || _selectedBranch == null || subjectOptions.isEmpty
-                  ? null
-                  : (value) {
-                      if (value == null) return;
-                      setState(() {
-                        _selectedSubject = value;
-                        _subjectController.text = value;
-                      });
-                    },
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _subjectController,
-              enabled: !_saving,
-              decoration: InputDecoration(
-                labelText: 'Subject',
-                hintText: 'Enter your subject',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
+                initialValue: subjectValue,
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: 'Subject (suggested)',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                 ),
+                hint: Text(_subjectHintText(subjectOptions)),
+                items: subjectOptions
+                    .map(
+                      (subject) => DropdownMenuItem(
+                        value: subject,
+                        child: Text(subject),
+                      ),
+                    )
+                    .toList(),
+                onChanged:
+                    _saving || _selectedBranch == null || subjectOptions.isEmpty
+                    ? null
+                    : (value) {
+                        if (value == null) return;
+                        setState(() {
+                          _selectedSubject = value;
+                          _subjectController.text = value;
+                        });
+                      },
               ),
-              onChanged: (value) {
-                setState(() {
-                  _selectedSubject = _normalizedSelection(value);
-                });
-              },
-            ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: _subjectController,
+                enabled: !_saving,
+                decoration: InputDecoration(
+                  labelText: 'Subject',
+                  hintText: 'Enter your subject',
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onChanged: (value) {
+                  setState(() {
+                    _selectedSubject = _normalizedSelection(value);
+                  });
+                },
+              ),
+            ],
           ],
         ),
       ),

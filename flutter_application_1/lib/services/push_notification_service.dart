@@ -52,7 +52,15 @@ class PushNotificationService {
         
         // Get FCM token
         _fcmToken = await _messaging.getToken();
-        debugPrint('[PushService] FCM Token: $_fcmToken');
+        if (_fcmToken != null && _fcmToken!.isNotEmpty) {
+          final tokenPreviewLength = _fcmToken!.length < 8
+              ? _fcmToken!.length
+              : 8;
+          debugPrint(
+            '[PushService] FCM token acquired '
+            '(${_fcmToken!.substring(0, tokenPreviewLength)}...)',
+          );
+        }
         
         if (_fcmToken != null) {
           onTokenRefresh(_fcmToken!);

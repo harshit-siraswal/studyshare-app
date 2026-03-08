@@ -1,25 +1,26 @@
-import 'dart:ui' show ImageFilter;
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
+
 import '../config/theme.dart';
+import '../data/academic_subjects_data.dart';
 import '../models/resource.dart';
-import '../services/supabase_service.dart';
+import '../screens/profile/user_profile_screen.dart';
 import '../screens/viewer/pdf_viewer_screen.dart';
+import '../screens/viewer/youtube_player_screen.dart';
 import '../services/download_service.dart';
 import '../services/subscription_service.dart';
-import '../widgets/paywall_dialog.dart';
-import '../screens/profile/user_profile_screen.dart';
-import '../screens/viewer/youtube_player_screen.dart';
+import '../services/supabase_service.dart';
 import '../utils/youtube_link_utils.dart';
+import '../widgets/paywall_dialog.dart';
 import 'user_badge.dart';
 
 class ResourceCard extends StatefulWidget {
   final Resource resource;
   final String userEmail;
   final bool showModerationControls;
+  final bool showStatusBadge;
   final VoidCallback? onApprove;
   final VoidCallback? onRetract;
   final VoidCallback? onReject;
@@ -31,6 +32,7 @@ class ResourceCard extends StatefulWidget {
     required this.resource,
     required this.userEmail,
     this.showModerationControls = false,
+    this.showStatusBadge = false,
     this.onApprove,
     this.onRetract,
     this.onReject,
@@ -45,6 +47,7 @@ class ResourceCard extends StatefulWidget {
 class _ResourceCardState extends State<ResourceCard> {
   final SupabaseService _supabaseService = SupabaseService();
   final DownloadService _downloadService = DownloadService();
+
   int _upvotes = 0;
   int _downvotes = 0;
   int? _userVote;
@@ -78,7 +81,9 @@ class _ResourceCardState extends State<ResourceCard> {
       widget.userEmail,
       widget.resource.id,
     );
-    if (mounted) setState(() => _isBookmarked = bookmarked);
+    if (mounted) {
+      setState(() => _isBookmarked = bookmarked);
+    }
   }
 
   Future<void> _refreshVoteState() async {
@@ -102,8 +107,9 @@ class _ResourceCardState extends State<ResourceCard> {
       widget.resource.id,
       widget.userEmail,
     );
-    if (!mounted) return;
-    setState(() => _isDownloaded = downloaded);
+    if (mounted) {
+      setState(() => _isDownloaded = downloaded);
+    }
   }
 
   Future<void> _toggleBookmark() async {
@@ -112,32 +118,33 @@ class _ResourceCardState extends State<ResourceCard> {
         widget.userEmail,
         widget.resource.id,
       );
-      if (mounted) {
-        setState(() => _isBookmarked = result);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(result ? 'Bookmarked!' : 'Removed'),
-            duration: const Duration(seconds: 1),
-          ),
-        );
-      }
+      if (!mounted) return;
+
+      setState(() => _isBookmarked = result);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result ? 'Bookmarked!' : 'Removed'),
+          duration: const Duration(seconds: 1),
+        ),
+      );
     } catch (e) {
       debugPrint('Bookmark toggle error: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Unable to update bookmark. Please try again.'),
-          ),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to update bookmark. Please try again.'),
+        ),
+      );
     }
   }
 
   Future<void> _vote(int direction) async {
     if (_isVoting) return;
+
     final oldVote = _userVote;
     final oldUpvotes = _upvotes;
     final oldDownvotes = _downvotes;
+
     setState(() => _isVoting = true);
     try {
       final newVote = _userVote == direction ? null : direction;
@@ -170,12 +177,13 @@ class _ResourceCardState extends State<ResourceCard> {
         );
       }
     } finally {
-      if (mounted) setState(() => _isVoting = false);
+      if (mounted) {
+        setState(() => _isVoting = false);
+      }
     }
   }
 
   Future<void> _handleDownload(BuildContext context) async {
-    // 1. Check if already downloaded
     if (await _downloadService.isDownloadedForUser(
       widget.resource.id,
       widget.userEmail,
@@ -200,31 +208,29 @@ class _ResourceCardState extends State<ResourceCard> {
       return;
     }
 
-    // 2. Check Premium
     final subService = SubscriptionService();
     final isPremium = await subService.isPremium();
-
     if (!isPremium) {
       showDialog(
         context: context,
         builder: (_) => PaywallDialog(
           onSuccess: () {
             if (!mounted) return;
-            setState(() {}); // refresh state to likely remove lock
-            _handleDownload(context); // retry download
+            setState(() {});
+            _handleDownload(context);
           },
         ),
       );
       return;
     }
 
-    // 3. Download
     if (widget.resource.fileUrl.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No file available to download')),
       );
       return;
     }
+
     try {
       ScaffoldMessenger.of(
         context,
@@ -235,17 +241,19 @@ class _ResourceCardState extends State<ResourceCard> {
         ownerEmail: widget.userEmail,
       );
       await _refreshDownloadState();
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text('Download Complete!')));
+      }
     } on DownloadCancelledException {
       return;
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+      }
     }
   }
 
@@ -260,6 +268,11 @@ class _ResourceCardState extends State<ResourceCard> {
   }
 
   void _showNoticeDialog() {
+    final fileUrl = widget.resource.fileUrl.trim();
+    final attachmentPath =
+        Uri.tryParse(fileUrl)?.path.toLowerCase() ?? fileUrl.toLowerCase();
+    final hasPdfAttachment = attachmentPath.endsWith('.pdf');
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -272,40 +285,88 @@ class _ResourceCardState extends State<ResourceCard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (widget.resource.fileUrl.isNotEmpty) // If notice has image
+              if (fileUrl.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: Image.network(
-                      widget.resource.fileUrl,
-                      fit: BoxFit.contain,
-                      loadingBuilder: (context, child, loadingProgress) {
-                        if (loadingProgress == null) return child;
-                        return const Center(child: CircularProgressIndicator());
-                      },
-                      errorBuilder: (ctx, err, trace) => Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(
-                              Icons.broken_image_outlined,
-                              size: 48,
-                              color: Colors.grey,
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Image not found',
-                              style: GoogleFonts.inter(
-                                color: Colors.grey,
-                                fontSize: 12,
+                  child: hasPdfAttachment
+                      ? Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () {
+                              Navigator.pop(context);
+                              Navigator.push(
+                                this.context,
+                                MaterialPageRoute(
+                                  builder: (_) => PdfViewerScreen(
+                                    pdfUrl: fileUrl,
+                                    title: widget.resource.title,
+                                    resourceId: widget.resource.id,
+                                    collegeId: widget.resource.collegeId,
+                                  ),
+                                ),
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primary.withValues(alpha: 0.08),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.picture_as_pdf_rounded,
+                                    color: AppTheme.primary,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      'Open attached PDF in StudyShare',
+                                      style: GoogleFonts.inter(
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                  const Icon(Icons.chevron_right_rounded),
+                                ],
                               ),
                             ),
-                          ],
+                          ),
+                        )
+                      : ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            fileUrl,
+                            fit: BoxFit.contain,
+                            loadingBuilder: (context, child, loadingProgress) {
+                              if (loadingProgress == null) return child;
+                              return const Center(
+                                child: CircularProgressIndicator(),
+                              );
+                            },
+                            errorBuilder: (ctx, err, trace) => Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  const Icon(
+                                    Icons.broken_image_outlined,
+                                    size: 48,
+                                    color: Colors.grey,
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    'Image not found',
+                                    style: GoogleFonts.inter(
+                                      color: Colors.grey,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                  ),
                 ),
               const SizedBox(height: 12),
               Text(
@@ -349,7 +410,6 @@ class _ResourceCardState extends State<ResourceCard> {
     }
 
     final url = hasLocalFile ? localPath! : widget.resource.fileUrl;
-
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -392,10 +452,13 @@ class _ResourceCardState extends State<ResourceCard> {
       ).showSnackBar(const SnackBar(content: Text('Invalid video URL')));
       return;
     }
+
     final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (launched || !mounted) return;
+
     final fallbackLaunched = await launchUrl(uri);
     if (fallbackLaunched || !mounted) return;
+
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text('Could not open video link')));
@@ -407,350 +470,248 @@ class _ResourceCardState extends State<ResourceCard> {
 
   int get _netVotes => _upvotes - _downvotes;
 
+  String _resourceMetaText() {
+    final subject = _normalizedMetaValue(widget.resource.subject) ?? 'Unknown';
+    final branch =
+        _normalizedMetaValue(getBranchShortLabel(widget.resource.branch)) ??
+        'General';
+    return '$subject | $branch';
+  }
+
+  String? _normalizedMetaValue(String? value) {
+    final trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) return null;
+    return trimmed;
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final isCompactCard = widget.showModerationControls;
-    final cardRadius = isCompactCard ? 10.0 : 12.0;
+    final hasActionControls =
+        widget.showModerationControls ||
+        widget.showStatusBadge ||
+        widget.onDelete != null;
     final moderationMetaRow = _buildModerationMetaRow();
+    final moderationButtons = _buildModerationActionButtons();
 
-    final accent = _getTypeColor();
-    final glassBorder = isDark
-        ? Colors.white.withValues(alpha: 0.14)
-        : Colors.white.withValues(alpha: 0.70);
-    final glassShadow = isDark
-        ? Colors.black.withValues(alpha: 0.28)
-        : accent.withValues(alpha: 0.10);
-
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(cardRadius),
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: BackdropFilter(
-              filter: ImageFilter.blur(
-                sigmaX: isCompactCard ? 8 : 10,
-                sigmaY: isCompactCard ? 8 : 10,
-              ),
-              child: const SizedBox(),
+    return Material(
+      color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: _openResource,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: EdgeInsets.all(isCompactCard ? 10 : 12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
             ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.18 : 0.05),
+                blurRadius: 12,
+                offset: const Offset(0, 6),
+              ),
+            ],
           ),
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: _openResource,
-              borderRadius: BorderRadius.circular(cardRadius),
-              child: Container(
-                padding: EdgeInsets.all(isCompactCard ? 10 : 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: isCompactCard ? 40 : 48,
+                height: isCompactCard ? 40 : 48,
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: <Color>[
-                      accent.withValues(alpha: isDark ? 0.20 : 0.12),
-                      isDark
-                          ? AppTheme.darkCard.withValues(alpha: 0.72)
-                          : Colors.white.withValues(alpha: 0.84),
-                    ],
-                  ),
-                  borderRadius: BorderRadius.circular(cardRadius),
-                  border: Border.all(color: glassBorder),
-                  boxShadow: <BoxShadow>[
-                    BoxShadow(
-                      color: glassShadow,
-                      blurRadius: isCompactCard ? 12 : 16,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
+                  color: _getTypeColor().withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(isCompactCard ? 8 : 10),
                 ),
-                child: Row(
+                child: Icon(
+                  _getTypeIcon(),
+                  color: _getTypeColor(),
+                  size: isCompactCard ? 20 : 24,
+                ),
+              ),
+              SizedBox(width: isCompactCard ? 10 : 12),
+              Expanded(
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Type Icon
-                    Container(
-                      width: isCompactCard ? 40 : 48,
-                      height: isCompactCard ? 40 : 48,
-                      decoration: BoxDecoration(
-                        color: _getTypeColor().withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(
-                          isCompactCard ? 8 : 10,
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: isCompactCard ? 6 : 8,
+                      runSpacing: isCompactCard ? 3 : 4,
+                      children: [
+                        Text(
+                          widget.resource.title,
+                          style: GoogleFonts.inter(
+                            fontSize: isCompactCard ? 13 : 14,
+                            fontWeight: FontWeight.w600,
+                            color: isDark
+                                ? AppTheme.textOnDark
+                                : AppTheme.textPrimary,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                      child: Icon(
-                        _getTypeIcon(),
-                        color: _getTypeColor(),
-                        size: isCompactCard ? 20 : 24,
-                      ),
-                    ),
-                    SizedBox(width: isCompactCard ? 10 : 12),
-
-                    // Content
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // Title and Badge
-                          Wrap(
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            spacing: isCompactCard ? 6 : 8,
-                            runSpacing: isCompactCard ? 3 : 4,
-                            children: [
-                              Text(
-                                widget.resource.title,
-                                style: GoogleFonts.inter(
-                                  fontSize: isCompactCard ? 13 : 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: isDark
-                                      ? AppTheme.textOnDark
-                                      : AppTheme.textPrimary,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              Container(
-                                padding: EdgeInsets.symmetric(
-                                  horizontal: isCompactCard ? 5 : 6,
-                                  vertical: isCompactCard ? 1.5 : 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: _getTypeColor().withValues(alpha: 0.1),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(
-                                  widget.resource.type.toUpperCase(),
-                                  style: GoogleFonts.inter(
-                                    fontSize: isCompactCard ? 9 : 10,
-                                    fontWeight: FontWeight.w600,
-                                    color: _getTypeColor(),
-                                  ),
-                                ),
-                              ),
-                            ],
+                        Container(
+                          padding: EdgeInsets.symmetric(
+                            horizontal: isCompactCard ? 5 : 6,
+                            vertical: isCompactCard ? 1.5 : 2,
                           ),
-                          SizedBox(height: isCompactCard ? 2 : 4),
-
-                          // Author
-                          _buildAuthorWidget(compact: isCompactCard),
-                          SizedBox(height: isCompactCard ? 2 : 4),
-                          // Subject & Branch
-                          Text(
-                            '${widget.resource.subject ?? 'Unknown'} • ${widget.resource.branch ?? 'General'}',
+                          decoration: BoxDecoration(
+                            color: _getTypeColor().withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            widget.resource.type.toUpperCase(),
                             style: GoogleFonts.inter(
-                              fontSize: isCompactCard ? 10 : 11,
-                              color: AppTheme.textMuted,
+                              fontSize: isCompactCard ? 9 : 10,
+                              fontWeight: FontWeight.w600,
+                              color: _getTypeColor(),
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                           ),
-                          SizedBox(height: isCompactCard ? 6 : 8),
-
-                          // Actions row
-                          SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: isCompactCard ? 2 : 4),
+                    _buildAuthorWidget(compact: isCompactCard),
+                    SizedBox(height: isCompactCard ? 2 : 4),
+                    Text(
+                      _resourceMetaText(),
+                      style: GoogleFonts.inter(
+                        fontSize: isCompactCard ? 10 : 11,
+                        color: AppTheme.textMuted,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    SizedBox(height: isCompactCard ? 6 : 8),
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: EdgeInsets.symmetric(
+                              horizontal: isCompactCard ? 3 : 4,
+                              vertical: isCompactCard ? 1 : 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: 0.05)
+                                  : Colors.black.withValues(alpha: 0.03),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
                             child: Row(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
-                                // Vote buttons
-                                Container(
+                                _buildVoteButton(
+                                  icon: Icons.thumb_up_outlined,
+                                  isActive: _userVote == 1,
+                                  color: AppTheme.success,
+                                  onTap: () => _vote(1),
+                                ),
+                                Padding(
                                   padding: EdgeInsets.symmetric(
-                                    horizontal: isCompactCard ? 3 : 4,
-                                    vertical: isCompactCard ? 1 : 2,
+                                    horizontal: isCompactCard ? 4 : 6,
                                   ),
-                                  decoration: BoxDecoration(
-                                    color: isDark
-                                        ? Colors.white.withValues(alpha: 0.05)
-                                        : Colors.black.withValues(alpha: 0.03),
-                                    borderRadius: BorderRadius.circular(8),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      _buildVoteButton(
-                                        icon: Icons.thumb_up_outlined,
-                                        isActive: _userVote == 1,
-                                        color: AppTheme.success,
-                                        onTap: () => _vote(1),
-                                      ),
-                                      Padding(
-                                        padding: EdgeInsets.symmetric(
-                                          horizontal: isCompactCard ? 4 : 6,
-                                        ),
-                                        child: Text(
-                                          _netVotes > 0
-                                              ? '+$_netVotes'
-                                              : '$_netVotes',
-                                          style: GoogleFonts.inter(
-                                            fontSize: isCompactCard ? 11 : 12,
-                                            fontWeight: FontWeight.w600,
-                                            color: _netVotes > 0
-                                                ? AppTheme.success
-                                                : _netVotes < 0
-                                                ? AppTheme.error
-                                                : AppTheme.textMuted,
-                                          ),
-                                        ),
-                                      ),
-                                      _buildVoteButton(
-                                        icon: Icons.thumb_down_outlined,
-                                        isActive: _userVote == -1,
-                                        color: AppTheme.error,
-                                        onTap: () => _vote(-1),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-
-                                // Bookmark button
-                                Material(
-                                  color: Colors.transparent,
-                                  child: InkWell(
-                                    borderRadius: BorderRadius.circular(20),
-                                    onTap: _toggleBookmark,
-                                    child: Padding(
-                                      padding: EdgeInsets.all(
-                                        isCompactCard ? 6 : 8,
-                                      ),
-                                      child: Icon(
-                                        _isBookmarked
-                                            ? Icons.bookmark
-                                            : Icons.bookmark_border,
-                                        size: isCompactCard ? 18 : 20,
-                                        color: _isBookmarked
-                                            ? AppTheme.warning
-                                            : AppTheme.textMuted,
-                                      ),
+                                  child: Text(
+                                    _netVotes > 0
+                                        ? '+$_netVotes'
+                                        : '$_netVotes',
+                                    style: GoogleFonts.inter(
+                                      fontSize: isCompactCard ? 11 : 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: _netVotes > 0
+                                          ? AppTheme.success
+                                          : _netVotes < 0
+                                          ? AppTheme.error
+                                          : AppTheme.textMuted,
                                     ),
                                   ),
                                 ),
-
-                                SizedBox(width: isCompactCard ? 12 : 16),
-
-                                // Download Button
-                                if (widget.resource.type == 'notes' ||
-                                    widget.resource.type == 'pyq') ...[
-                                  Material(
-                                    color: Colors.transparent,
-                                    child: InkWell(
-                                      borderRadius: BorderRadius.circular(20),
-                                      onTap: () => _handleDownload(context),
-                                      child: Padding(
-                                        padding: EdgeInsets.all(
-                                          isCompactCard ? 6 : 8,
-                                        ),
-                                        child: _isDownloaded
-                                            ? Icon(
-                                                Icons.offline_pin,
-                                                size: isCompactCard ? 18 : 20,
-                                                color: AppTheme.success,
-                                              )
-                                            : Icon(
-                                                Icons.download_rounded,
-                                                size: isCompactCard ? 18 : 20,
-                                                color: AppTheme.textMuted,
-                                              ),
-                                      ),
-                                    ),
-                                  ),
-                                  SizedBox(width: isCompactCard ? 8 : 12),
-                                ],
-
-                                // Date
-                                Text(
-                                  widget.resource.formattedDate,
-                                  style: GoogleFonts.inter(
-                                    fontSize: isCompactCard ? 9 : 10,
-                                    color: AppTheme.textMuted,
-                                  ),
+                                _buildVoteButton(
+                                  icon: Icons.thumb_down_outlined,
+                                  isActive: _userVote == -1,
+                                  color: AppTheme.error,
+                                  onTap: () => _vote(-1),
                                 ),
                               ],
                             ),
                           ),
-                          if (widget.showModerationControls) ...[
-                            const SizedBox(height: 10),
-                            Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: isDark
-                                    ? Colors.white.withValues(alpha: 0.04)
-                                    : Colors.black.withValues(alpha: 0.03),
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                  color: isDark
-                                      ? Colors.white.withValues(alpha: 0.08)
-                                      : Colors.black.withValues(alpha: 0.08),
+                          const SizedBox(width: 8),
+                          Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(20),
+                              onTap: _toggleBookmark,
+                              child: Padding(
+                                padding: EdgeInsets.all(isCompactCard ? 6 : 8),
+                                child: Icon(
+                                  _isBookmarked
+                                      ? Icons.bookmark
+                                      : Icons.bookmark_border,
+                                  size: isCompactCard ? 18 : 20,
+                                  color: _isBookmarked
+                                      ? AppTheme.warning
+                                      : AppTheme.textMuted,
                                 ),
                               ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Icon(
-                                        Icons.verified_user_rounded,
-                                        size: 13,
-                                        color: AppTheme.primary,
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        'Moderation',
-                                        style: GoogleFonts.inter(
-                                          fontSize: 10.5,
-                                          fontWeight: FontWeight.w700,
-                                          color: isDark
-                                              ? AppTheme.textOnDark
-                                              : AppTheme.textPrimary,
-                                        ),
-                                      ),
-                                    ],
+                            ),
+                          ),
+                          SizedBox(width: isCompactCard ? 12 : 16),
+                          if (widget.resource.type == 'notes' ||
+                              widget.resource.type == 'pyq') ...[
+                            Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(20),
+                                onTap: () => _handleDownload(context),
+                                child: Padding(
+                                  padding: EdgeInsets.all(
+                                    isCompactCard ? 6 : 8,
                                   ),
-                                  if (moderationMetaRow != null) ...[
-                                    const SizedBox(height: 6),
-                                    moderationMetaRow,
-                                  ],
-                                  const SizedBox(height: 8),
-                                  ..._buildModerationActionButtons(),
-                                ],
+                                  child: _isDownloaded
+                                      ? Icon(
+                                          Icons.offline_pin,
+                                          size: isCompactCard ? 18 : 20,
+                                          color: AppTheme.success,
+                                        )
+                                      : Icon(
+                                          Icons.download_rounded,
+                                          size: isCompactCard ? 18 : 20,
+                                          color: AppTheme.textMuted,
+                                        ),
+                                ),
                               ),
                             ),
+                            SizedBox(width: isCompactCard ? 8 : 12),
                           ],
+                          Text(
+                            widget.resource.formattedDate,
+                            style: GoogleFonts.inter(
+                              fontSize: isCompactCard ? 9 : 10,
+                              color: AppTheme.textMuted,
+                            ),
+                          ),
                         ],
                       ),
                     ),
+                    if (hasActionControls) ...[
+                      const SizedBox(height: 10),
+                      if (moderationMetaRow != null) ...[
+                        moderationMetaRow,
+                        if (moderationButtons.isNotEmpty)
+                          const SizedBox(height: 8),
+                      ],
+                      ...moderationButtons,
+                    ],
                   ],
                 ),
               ),
-            ),
+            ],
           ),
-          Positioned(
-            top: -28,
-            right: -22,
-            child: IgnorePointer(
-              child: Container(
-                width: isCompactCard ? 84 : 112,
-                height: isCompactCard ? 72 : 96,
-                decoration: BoxDecoration(
-                  gradient: RadialGradient(
-                    colors: <Color>[
-                      Colors.white.withValues(alpha: isDark ? 0.18 : 0.34),
-                      Colors.white.withValues(alpha: 0),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          Positioned(
-            top: 0,
-            left: 10,
-            right: 10,
-            child: IgnorePointer(
-              child: Container(
-                height: 1,
-                color: Colors.white.withValues(alpha: isDark ? 0.22 : 0.50),
-              ),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -855,18 +816,74 @@ class _ResourceCardState extends State<ResourceCard> {
   }
 
   Widget? _buildModerationMetaRow() {
+    final statusBadge = _buildStatusBadge();
     final teacherProfile = _buildTeacherProfileButton();
     final deleteButton = _buildDeleteIconButton();
-    if (teacherProfile == null && deleteButton == null) return null;
+    if (statusBadge == null && teacherProfile == null && deleteButton == null) {
+      return null;
+    }
 
-    return Row(
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        if (teacherProfile != null) ...[
-          Expanded(child: teacherProfile),
-          if (deleteButton != null) const SizedBox(width: 8),
-        ],
-        ?deleteButton,
+        if (statusBadge != null) statusBadge,
+        if (teacherProfile != null) teacherProfile,
+        if (deleteButton != null) deleteButton,
       ],
+    );
+  }
+
+  Widget? _buildStatusBadge() {
+    if (!widget.showStatusBadge) return null;
+
+    final status = widget.resource.status.trim().toLowerCase();
+    late final Color color;
+    late final String label;
+    late final IconData icon;
+
+    switch (status) {
+      case 'approved':
+        color = AppTheme.success;
+        label = 'Approved';
+        icon = Icons.check_circle_outline_rounded;
+        break;
+      case 'rejected':
+        color = AppTheme.error;
+        label = 'Rejected';
+        icon = Icons.cancel_outlined;
+        break;
+      case 'pending':
+      default:
+        color = AppTheme.warning;
+        label = 'Pending';
+        icon = Icons.schedule_rounded;
+        break;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -874,6 +891,7 @@ class _ResourceCardState extends State<ResourceCard> {
     if (!widget.resource.isTeacherUpload) return null;
     final email = widget.resource.uploadedByEmail.trim();
     if (email.isEmpty) return null;
+
     final name = widget.resource.uploadedByName?.trim().isNotEmpty == true
         ? widget.resource.uploadedByName!.trim()
         : email.split('@').first;
@@ -960,14 +978,14 @@ class _ResourceCardState extends State<ResourceCard> {
   Color _getTypeColor() {
     switch (widget.resource.type.toLowerCase()) {
       case 'video':
-        return AppTheme.error; // Red
+        return AppTheme.error;
       case 'pyq':
-        return AppTheme.warning; // Amber
+        return AppTheme.warning;
       case 'notice':
-        return AppTheme.noticeColor; // Purple for notices
+        return AppTheme.noticeColor;
       case 'notes':
       default:
-        return AppTheme.primary; // Blue (now #2563EB)
+        return AppTheme.primary;
     }
   }
 
@@ -983,9 +1001,7 @@ class _ResourceCardState extends State<ResourceCard> {
         message: 'View profile for $name',
         child: InkWell(
           borderRadius: BorderRadius.circular(4),
-          onTap: () {
-            _openUserProfile(email, name);
-          },
+          onTap: () => _openUserProfile(email, name),
           child: ConstrainedBox(
             constraints: BoxConstraints(
               minWidth: compact ? 0 : 48,
@@ -1032,4 +1048,4 @@ class _ResourceCardState extends State<ResourceCard> {
       ),
     );
   }
-} // End of _ResourceCardState
+}

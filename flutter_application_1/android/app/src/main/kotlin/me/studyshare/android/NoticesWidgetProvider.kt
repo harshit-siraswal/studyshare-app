@@ -33,10 +33,23 @@ class NoticesWidgetProvider : HomeWidgetProvider() {
     ) {
         for (appWidgetId in appWidgetIds) {
             val views = RemoteViews(context.packageName, R.layout.notices_widget_layout).apply {
-                val noticesTitle = widgetData.getString("notices_title", "Recent Notices")
-                val noticesData = widgetData.getString("notices_data", "No recent notices.")
-                setTextViewText(R.id.widget_title, noticesTitle)
-                setTextViewText(R.id.widget_message, noticesData)
+                val noticesTitle = widgetData.getString("notices_title", "Campus Notices") ?: "Campus Notices"
+                val noticesSubtitle = widgetData.getString(
+                    "notices_subtitle",
+                    "Stay updated from your campus",
+                ) ?: "Stay updated from your campus"
+                val noticesEmpty = widgetData.getString(
+                    "notices_empty_message",
+                    "No recent notices yet. Tap to open StudyShare.",
+                ) ?: "No recent notices yet. Tap to open StudyShare."
+                WidgetLayoutBinder.bind(
+                    views = this,
+                    dataPrefix = "notices",
+                    title = noticesTitle,
+                    subtitle = noticesSubtitle,
+                    emptyMessage = noticesEmpty,
+                    widgetData = widgetData,
+                )
                 setOnClickPendingIntent(
                     R.id.widget_container,
                     launchPendingIntent(context, appWidgetId)

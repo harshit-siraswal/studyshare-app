@@ -1,0 +1,32 @@
+<?xml version='1.0' encoding='UTF-8' standalone='yes'?>
+<!--
+  Purpose: Permission dialog UIAutomator dump fixture
+  Usage: Used for UI tests validating permission dialog layout
+  Regeneration: Run UIAutomator dump on permission dialog, update this file
+  Last updated: 2026-03-06
+-->
+<hierarchy rotation="0">
+  <node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="com.google.android.permissioncontroller" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[28,670][1052,1730]" drawing-order="0" hint="">
+    <node index="0" text="" resource-id="" class="android.widget.FrameLayout" package="com.google.android.permissioncontroller" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[28,670][1052,1730]" drawing-order="1" hint="">
+      <node index="0" text="" resource-id="android:id/content" class="android.widget.FrameLayout" package="com.google.android.permissioncontroller" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[28,670][1052,1730]" drawing-order="1" hint="">
+        <node index="0" text="" resource-id="" class="android.widget.ScrollView" package="com.google.android.permissioncontroller" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[28,670][1052,1730]" drawing-order="1" hint="">
+          <node index="0" text="" resource-id="com.android.permissioncontroller:id/grant_singleton" class="android.widget.LinearLayout" package="com.google.android.permissioncontroller" content-desc="" checkable="false" checked="false" clickable="true" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[28,670][1052,1730]" drawing-order="1" hint="">
+            <node index="0" text="" resource-id="com.android.permissioncontroller:id/grant_dialog" class="android.widget.LinearLayout" package="com.google.android.permissioncontroller" content-desc="" checkable="false" checked="false" clickable="true" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[28,670][1052,1730]" drawing-order="1" hint="">
+              <node index="0" text="" resource-id="com.android.permissioncontroller:id/content_container" class="android.widget.LinearLayout" package="com.google.android.permissioncontroller" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[70,712][1010,1207]" drawing-order="1" hint="">
+                <node index="0" text="" resource-id="" class="android.widget.LinearLayout" package="com.google.android.permissioncontroller" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[133,775][947,1144]" drawing-order="1" hint="">
+                  <node index="0" text="" resource-id="com.android.permissioncontroller:id/permission_icon" class="android.widget.ImageView" package="com.google.android.permissioncontroller" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[498,775][582,859]" drawing-order="1" hint="" />
+                  <node index="1" text="Allow StudyShare to access photos and videos on this device?" resource-id="com.android.permissioncontroller:id/permission_message" class="android.widget.TextView" package="com.google.android.permissioncontroller" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[133,891][947,1144]" drawing-order="2" hint="" />
+                </node>
+              </node>
+              <node index="1" text="" resource-id="" class="android.widget.LinearLayout" package="com.google.android.permissioncontroller" content-desc="" checkable="false" checked="false" clickable="false" enabled="true" focusable="false" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[70,1207][1010,1688]" drawing-order="4" hint="">
+                <node index="0" text="Allow limited access" resource-id="com.android.permissioncontroller:id/permission_allow_selected_button" class="android.widget.Button" package="com.google.android.permissioncontroller" content-desc="" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[133,1218][947,1323]" drawing-order="5" hint="" />
+                <node index="1" text="Allow all" resource-id="com.android.permissioncontroller:id/permission_allow_all_button" class="android.widget.Button" package="com.google.android.permissioncontroller" content-desc="" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[133,1366][947,1471]" drawing-order="6" hint="" />
+                <node index="2" text="Don’t allow" resource-id="com.android.permissioncontroller:id/permission_deny_button" class="android.widget.Button" package="com.google.android.permissioncontroller" content-desc="" checkable="false" checked="false" clickable="true" enabled="true" focusable="true" focused="false" scrollable="false" long-clickable="false" password="false" selected="false" bounds="[133,1514][947,1619]" drawing-order="7" hint="" />
+              </node>
+            </node>
+          </node>
+        </node>
+      </node>
+    </node>
+  </node>
+</hierarchy>

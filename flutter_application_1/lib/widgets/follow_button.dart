@@ -28,6 +28,7 @@ class _FollowButtonState extends State<FollowButton> {
   bool _isLoading = true;
   FollowStatus _status = FollowStatus.notFollowing;
   String? _requestId;
+
   @override
   void initState() {
     super.initState();
@@ -42,17 +43,20 @@ class _FollowButtonState extends State<FollowButton> {
     }
   }
 
-  Future<void> _checkStatus() async {
+  Future<void> _checkStatus({bool showLoading = true}) async {
     if (!mounted) return;
 
-    // Set loading initially
-    setState(() => _isLoading = true);
+    if (showLoading) {
+      setState(() => _isLoading = true);
+    }
 
-    final currentUserEmail = _supabase.currentUserEmail;
-    if (currentUserEmail == widget.targetEmail) {
+    final currentUserEmail = _supabase.currentUserEmail?.trim().toLowerCase();
+    final targetEmail = widget.targetEmail.trim().toLowerCase();
+    if (currentUserEmail == targetEmail) {
       if (mounted) {
         setState(() {
           _status = FollowStatus.self;
+          _requestId = null;
           _isLoading = false;
         });
       }
@@ -64,7 +68,8 @@ class _FollowButtonState extends State<FollowButton> {
         setState(() {
           final statusStr = res['status'] as String?;
           _status = _parseStatus(statusStr);
-          _requestId = res['requestId']?.toString();
+          _requestId =
+              res['requestId']?.toString() ?? res['request_id']?.toString();
           _isLoading = false;
         });
       }
@@ -77,8 +82,10 @@ class _FollowButtonState extends State<FollowButton> {
   FollowStatus _parseStatus(String? status) {
     switch (status) {
       case 'following':
+      case 'accepted':
         return FollowStatus.following;
       case 'pending':
+      case 'requested':
         return FollowStatus.pending;
       case 'self':
         return FollowStatus.self;
@@ -87,42 +94,42 @@ class _FollowButtonState extends State<FollowButton> {
     }
   }
 
+  String _errorMessage(Object error) {
+    final message = error.toString().replaceFirst('Exception: ', '').trim();
+    if (message.isEmpty) {
+      return 'Something went wrong. Please try again.';
+    }
+    return message;
+  }
+
   Future<void> _handlePress() async {
     setState(() => _isLoading = true);
     try {
       if (_status == FollowStatus.following) {
-        // Unfollow
-        await _api.unfollowUser(widget.targetEmail);
-        if (mounted) setState(() => _status = FollowStatus.notFollowing);
+        await _api.unfollowUser(widget.targetEmail, context: context);
       } else if (_status == FollowStatus.pending) {
-        // Cancel request
-        if (_requestId != null) {
-          await _api.cancelFollowRequest(_requestId!);
-          if (mounted) setState(() => _status = FollowStatus.notFollowing);
+        if (_requestId != null && _requestId!.trim().isNotEmpty) {
+          await _api.cancelFollowRequest(int.parse(_requestId!), context: context);
         } else {
-          // If we don't have a requestId, we can't cancel.
-          // Maybe refresh status?
           await _checkStatus();
+          return;
         }
       } else {
-        // Not following -> Send Request
-        final currentEmail = _supabase.currentUserEmail;
-        if (currentEmail == null) {
+        final currentEmail = _supabase.currentUserEmail?.trim();
+        if (currentEmail == null || currentEmail.isEmpty) {
           throw Exception('User not logged in');
         }
-        await _supabase.sendFollowRequest(currentEmail, widget.targetEmail);
-        if (mounted) setState(() => _status = FollowStatus.pending);
+        await _api.sendFollowRequest(widget.targetEmail, context: context);
       }
 
-      if (widget.onFollowChanged != null) {
-        widget.onFollowChanged!();
-      }
+      await _checkStatus(showLoading: false);
+      widget.onFollowChanged?.call();
     } catch (e) {
       debugPrint('Error updating follow status: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Something went wrong. Please try again.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_errorMessage(e))));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -158,43 +165,48 @@ class _FollowButtonState extends State<FollowButton> {
         icon = Icons.person_add;
     }
 
-    return SizedBox(
-      height: 32,
-      child: OutlinedButton(
-        onPressed: _isLoading ? null : _handlePress,
-        style: OutlinedButton.styleFrom(
-          backgroundColor: bgColor,
-          side: BorderSide(
-            color: _status == FollowStatus.notFollowing
-                ? Colors.transparent
-                : Colors.grey.withValues(alpha: 0.5),
+    final targetLabel = widget.targetName ?? widget.targetEmail;
+
+    return Tooltip(
+      message: '$text $targetLabel',
+      child: SizedBox(
+        height: 32,
+        child: OutlinedButton(
+          onPressed: _isLoading ? null : _handlePress,
+          style: OutlinedButton.styleFrom(
+            backgroundColor: bgColor,
+            side: BorderSide(
+              color: _status == FollowStatus.notFollowing
+                  ? Colors.transparent
+                  : Colors.grey.withValues(alpha: 0.5),
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
           ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-        ),
-        child: _isLoading
-            ? const SizedBox(
-                width: 12,
-                height: 12,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: 14, color: textColor),
-                  const SizedBox(width: 4),
-                  Text(
-                    text,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: textColor,
+          child: _isLoading
+              ? const SizedBox(
+                  width: 12,
+                  height: 12,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, size: 14, color: textColor),
+                    const SizedBox(width: 4),
+                    Text(
+                      text,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: textColor,
+                      ),
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
+        ),
       ),
     );
   }

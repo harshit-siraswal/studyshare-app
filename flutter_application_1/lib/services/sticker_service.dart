@@ -181,6 +181,7 @@ class StickerService {
 
   String get _giphyKey => AppConfig.giphyApiKey;
   String get _removeBgKey => AppConfig.removeBgApiKey;
+  bool get supportsGiphyMemeTemplates => _giphyKey.isNotEmpty;
 
   @visibleForTesting
   static void resetForTesting() {
@@ -339,6 +340,41 @@ class StickerService {
     }
   }
 
+  Future<List<GiphyStickerItem>> _fetchDirectGiphyMedia({
+    required String collection,
+    String? query,
+    int limit = 24,
+    int offset = 0,
+    String rating = 'g',
+  }) async {
+    final trimmedQuery = query?.trim();
+    final endpoint = trimmedQuery != null && trimmedQuery.isNotEmpty
+        ? '$_giphyBase/$collection/search'
+        : '$_giphyBase/$collection/trending';
+    final uri = Uri.parse(endpoint).replace(
+      queryParameters: {
+        'api_key': _giphyKey,
+        'limit': limit.toString(),
+        'offset': offset.toString(),
+        'rating': rating,
+        if (trimmedQuery != null && trimmedQuery.isNotEmpty) 'q': trimmedQuery,
+      },
+    );
+    try {
+      final res = await http.get(uri).timeout(const Duration(seconds: 15));
+      if (res.statusCode != 200) return [];
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>?;
+      final data = (decoded?['data'] as List?) ?? [];
+      return data
+          .map((e) => GiphyStickerItem.fromJson(e as Map<String, dynamic>))
+          .where((s) => s.previewUrl.isNotEmpty)
+          .toList();
+    } catch (e) {
+      debugPrint('[Giphy] fetch media error for $collection: $e');
+      return [];
+    }
+  }
+
   /// Fetch trending stickers or search results from Giphy.
   Future<List<GiphyStickerItem>> fetchGiphyStickers({
     String? query,
@@ -347,73 +383,75 @@ class StickerService {
     String rating = 'g',
   }) async {
     final trimmedQuery = query?.trim();
-    final hasDirectKey = _giphyKey.isNotEmpty;
-
-    if (hasDirectKey) {
-      final endpoint = trimmedQuery != null && trimmedQuery.isNotEmpty
-          ? '$_giphyBase/stickers/search'
-          : '$_giphyBase/stickers/trending';
-      final uri = Uri.parse(endpoint).replace(
-        queryParameters: {
-          'api_key': _giphyKey,
-          'limit': limit.toString(),
-          'offset': offset.toString(),
-          'rating': rating,
-          if (trimmedQuery != null && trimmedQuery.isNotEmpty)
-            'q': trimmedQuery,
-        },
+    if (_giphyKey.isNotEmpty) {
+      final result = await _fetchDirectGiphyMedia(
+        collection: 'stickers',
+        query: trimmedQuery,
+        limit: limit,
+        offset: offset,
+        rating: rating,
       );
+      _giphyAvailable = true;
+      _remoteCapabilitiesLoaded = true;
+      return result;
+    }
+
+    await _ensureCapabilities();
+    final token = await _getIdToken();
+    final headers = {
+      'Content-Type': 'application/json',
+      if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+    };
+    final endpoint = trimmedQuery != null && trimmedQuery.isNotEmpty
+        ? '/api/stickers/giphy/search'
+        : '/api/stickers/giphy/trending';
+    final uris = _backendUris(endpoint, {
+      'limit': limit.toString(),
+      'offset': offset.toString(),
+      'rating': rating,
+      if (trimmedQuery != null && trimmedQuery.isNotEmpty) 'q': trimmedQuery,
+    });
+
+    for (final uri in uris) {
       try {
-        final res = await http.get(uri).timeout(const Duration(seconds: 15));
-        if (res.statusCode != 200) return [];
+        final res = await http
+            .get(uri, headers: headers)
+            .timeout(const Duration(seconds: 15));
+        if (res.statusCode != 200) continue;
         final decoded = jsonDecode(res.body) as Map<String, dynamic>?;
         final data = (decoded?['data'] as List?) ?? [];
+        _giphyAvailable = true;
+        _remoteCapabilitiesLoaded = true;
         return data
             .map((e) => GiphyStickerItem.fromJson(e as Map<String, dynamic>))
             .where((s) => s.previewUrl.isNotEmpty)
             .toList();
       } catch (e) {
-        debugPrint('[Giphy] fetchGiphyStickers error: $e');
-        return [];
+        debugPrint('[Giphy] fetchGiphyStickers error at $uri: $e');
       }
-    } else {
-      await _ensureCapabilities();
-      final token = await _getIdToken();
-      final headers = {
-        'Content-Type': 'application/json',
-        if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
-      };
-      final endpoint = trimmedQuery != null && trimmedQuery.isNotEmpty
-          ? '/api/stickers/giphy/search'
-          : '/api/stickers/giphy/trending';
-      final uris = _backendUris(endpoint, {
-        'limit': limit.toString(),
-        'offset': offset.toString(),
-        'rating': rating,
-        if (trimmedQuery != null && trimmedQuery.isNotEmpty) 'q': trimmedQuery,
-      });
-
-      for (final uri in uris) {
-        try {
-          final res = await http
-              .get(uri, headers: headers)
-              .timeout(const Duration(seconds: 15));
-          if (res.statusCode != 200) continue;
-          final decoded = jsonDecode(res.body) as Map<String, dynamic>?;
-          final data = (decoded?['data'] as List?) ?? [];
-          _giphyAvailable = true;
-          _remoteCapabilitiesLoaded = true;
-          return data
-              .map((e) => GiphyStickerItem.fromJson(e as Map<String, dynamic>))
-              .where((s) => s.previewUrl.isNotEmpty)
-              .toList();
-        } catch (e) {
-          debugPrint('[Giphy] fetchGiphyStickers error at $uri: $e');
-        }
-      }
-
-      return [];
     }
+
+    return [];
+  }
+
+  /// Fetch meme-friendly gif templates from Giphy.
+  Future<List<GiphyStickerItem>> fetchGiphyMemeTemplates({
+    String? query,
+    int limit = 24,
+    int offset = 0,
+    String rating = 'pg',
+  }) async {
+    if (!supportsGiphyMemeTemplates) return [];
+    final effectiveQuery = query?.trim();
+    return _fetchDirectGiphyMedia(
+      collection: 'gifs',
+      query: effectiveQuery == null || effectiveQuery.isEmpty
+          ? 'meme template'
+          : effectiveQuery,
+      limit: limit,
+      offset: offset,
+      rating: rating,
+    );
   }
 
   /// Fetch sticker categories from Giphy.
@@ -460,6 +498,55 @@ class StickerService {
       return file;
     } catch (e) {
       debugPrint('[Giphy] saveGiphySticker error: $e');
+      return null;
+    }
+  }
+
+  /// Allowed hosts for remote media downloads (SSRF prevention).
+  static const _allowedDownloadHosts = {
+    'media.giphy.com',
+    'media0.giphy.com',
+    'media1.giphy.com',
+    'media2.giphy.com',
+    'media3.giphy.com',
+    'media4.giphy.com',
+    'i.giphy.com',
+  };
+
+  Future<File?> downloadRemoteMediaToTemporaryFile(
+    String url, {
+    String prefix = 'giphy_template',
+  }) async {
+    try {
+      final parsed = Uri.tryParse(url);
+      if (parsed == null || parsed.scheme != 'https' ||
+          !_allowedDownloadHosts.contains(parsed.host)) {
+        debugPrint('[Giphy] Rejected URL (not in allowlist): $url');
+        return null;
+      }
+      final res = await http
+          .get(parsed)
+          .timeout(const Duration(seconds: 30));
+      if (res.statusCode != 200 || res.bodyBytes.isEmpty) return null;
+      final rawExt = path.extension(parsed.path).toLowerCase();
+      final contentType = res.headers['content-type']?.toLowerCase() ?? '';
+      final ext = switch (rawExt) {
+        '.png' || '.jpg' || '.jpeg' || '.webp' || '.gif' => rawExt,
+        _ when contentType.contains('webp') => '.webp',
+        _ when contentType.contains('gif') => '.gif',
+        _ when contentType.contains('jpeg') => '.jpg',
+        _ => '.png',
+      };
+      final tempDir = await getTemporaryDirectory();
+      final outputPath = path.join(
+        tempDir.path,
+        '${prefix}_${DateTime.now().millisecondsSinceEpoch}$ext',
+      );
+      final file = File(outputPath);
+      await file.writeAsBytes(res.bodyBytes, flush: true);
+      return file;
+    } catch (e) {
+      debugPrint('[Giphy] downloadRemoteMediaToTemporaryFile error: $e');
       return null;
     }
   }

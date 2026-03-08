@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/theme.dart';
 
@@ -37,25 +36,41 @@ class _UserBadgeState extends State<UserBadge> {
   }
 
   Future<void> _loadBadges() async {
+    final email = widget.email.trim().toLowerCase();
+    if (email.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _isVerified = false;
+          _isPremium = false;
+        });
+      }
+      return;
+    }
+
     try {
-      final userResponse = await Supabase.instance.client
+        final userResponse = await Supabase.instance.client
           .from('users')
-          .select('role, subscription_end_date')
-          .eq('email', widget.email)
+          .select('role, subscription_tier, subscription_end_date')
+          .eq('email', email)
           .maybeSingle();
-      
+
       if (mounted && userResponse != null) {
         final role = userResponse['role'];
         if (role == 'COLLEGE_USER' || role == 'MODERATOR' || role == 'ADMIN') {
           _isVerified = true;
-          // verified users inherently get premium features but we prefer showing 'verified' only.
-        } else {
-          // Check explicit premium status
-          if (userResponse['subscription_end_date'] != null) {
-            final premiumUntil = DateTime.parse(userResponse['subscription_end_date'].toString());
-            if (premiumUntil.toUtc().isAfter(DateTime.now().toUtc())) {
-              _isPremium = true;
-            }
+        }
+
+        final tier = userResponse['subscription_tier']
+            ?.toString()
+            .toLowerCase();
+        if ((tier == 'pro' || tier == 'max') &&
+            userResponse['subscription_end_date'] != null) {
+          final premiumUntil = DateTime.parse(
+            userResponse['subscription_end_date'].toString(),
+          );
+          if (premiumUntil.toUtc().isAfter(DateTime.now().toUtc())) {
+            _isPremium = true;
           }
         }
       }
@@ -70,26 +85,19 @@ class _UserBadgeState extends State<UserBadge> {
   Widget build(BuildContext context) {
     if (_isLoading) return const SizedBox.shrink();
 
-    // Do NOT write premium if user already implies verified sticker
-    if (_isVerified) {
-      return Icon(Icons.verified, color: AppTheme.primary, size: widget.size + 2);
+    if (_isPremium) {
+      return Icon(
+        Icons.verified_rounded,
+        color: AppTheme.premium,
+        size: widget.size + 2,
+      );
     }
 
-    if (_isPremium) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-        decoration: BoxDecoration(
-          color: AppTheme.primary.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(4),
-        ),
-        child: Text(
-          'PRO',
-          style: GoogleFonts.inter(
-            color: AppTheme.primary,
-            fontSize: widget.size - 4 > 8 ? widget.size - 4 : 8,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
+    if (_isVerified) {
+      return Icon(
+        Icons.verified_rounded,
+        color: AppTheme.primary,
+        size: widget.size + 2,
       );
     }
 

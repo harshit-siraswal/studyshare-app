@@ -1,9 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="splash_background">#EAF2FF</color>
-    <color name="widget_background">#FFFFFF</color>
-    <color name="widget_title_text_color">#333333</color>
-    <color name="widget_message_text_color">#666666</color>
+    <color name="widget_background">#F8FBFF</color>
+    <color name="widget_surface_stroke">#D9E6F6</color>
+    <color name="widget_title_text_color">#0F172A</color>
+    <color name="widget_subtitle_text_color">#64748B</color>
+    <color name="widget_hint_text_color">#475569</color>
+    <color name="widget_message_text_color">#334155</color>
+    <color name="widget_item_background">#EEF4FF</color>
+    <color name="widget_item_text_color">#0F172A</color>
+    <color name="widget_notice_chip_background">#DBEAFE</color>
+    <color name="widget_notice_chip_text">#1D4ED8</color>
+    <color name="widget_notice_board_top">#8A5B34</color>
+    <color name="widget_notice_board_bottom">#6B4226</color>
+    <color name="widget_notice_board_stroke">#55351E</color>
+    <color name="widget_notice_paper_background">#FFF8EA</color>
+    <color name="widget_notice_paper_stroke">#D9C8AE</color>
+    <color name="widget_notice_heading_text">#4A2E17</color>
+    <color name="widget_notice_supporting_text">#7A6048</color>
+    <color name="widget_notice_item_background">#F5E9D3</color>
+    <color name="widget_notice_item_text">#3E2615</color>
+    <color name="widget_notice_hint_text">@color/widget_notice_paper_background</color>
+    <color name="widget_notice_tape_color">#E6D6AC</color>
+    <color name="widget_notice_tape_stroke">#D1BE8E</color>
+    <color name="widget_syllabus_chip_background">#DCFCE7</color>
+    <color name="widget_syllabus_chip_text">#15803D</color>
     <color name="widget_preview_background">#F8FAFC</color>
     <color name="widget_preview_stroke">#E2E8F0</color>
 </resources>

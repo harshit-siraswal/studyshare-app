@@ -5,6 +5,7 @@ import '../../config/theme.dart';
 import '../../services/auth_service.dart';
 import '../../services/supabase_service.dart';
 import '../../services/backend_api_service.dart';
+import '../../services/download_service.dart';
 import '../../widgets/resource_card.dart';
 import '../../models/resource.dart';
 import '../../models/user.dart';
@@ -13,6 +14,7 @@ import '../../widgets/full_screen_image_viewer.dart';
 import '../../widgets/user_badge.dart';
 import 'edit_profile_screen.dart';
 import '../../utils/admin_access.dart';
+import '../../utils/profile_photo_utils.dart';
 
 class UserProfileScreen extends StatefulWidget {
   final String userEmail;
@@ -34,6 +36,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   final SupabaseService _supabaseService = SupabaseService();
   final AuthService _authService = AuthService();
   final BackendApiService _backendApiService = BackendApiService();
+  final DownloadService _downloadService = DownloadService();
 
   bool _isLoading = true;
   String? _errorMessage;
@@ -46,6 +49,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   String? _fetchedPhotoUrl;
   String? _fetchedBio;
   String? _fetchedDisplayName;
+  String? _fetchedSemester;
+  String? _fetchedBranch;
+  String? _fetchedSubject;
   String _viewerRole = AppRoles.readOnly;
   String? _viewerCollegeId;
   String? _profileCollegeId;
@@ -56,7 +62,12 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   @override
   void initState() {
     super.initState();
-    _loadUserProfile();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _supabaseService.attachContext(context);
+        _loadUserProfile();
+      }
+    });
   }
 
   Future<void> _loadUserProfile() async {
@@ -71,6 +82,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       final statsFuture = _supabaseService.getUserStats(widget.userEmail);
       final resourcesFuture = _supabaseService.getUserResources(
         widget.userEmail,
+        approvedOnly: !_isSelfProfile,
       );
       final userInfoFuture = _supabaseService.getUserInfo(widget.userEmail);
       final currentProfileFuture = _supabaseService.getCurrentUserProfile(
@@ -115,11 +127,12 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           _followingCount = following;
           _userResources = resources;
           _followStatus = status;
-          final photo =
-              userInfo?['profile_photo_url'] ?? userInfo?['photo_url'];
-          _fetchedPhotoUrl = photo?.toString();
+          _fetchedPhotoUrl = resolveProfilePhotoUrl(userInfo);
           _fetchedBio = userInfo?['bio']?.toString();
           _fetchedDisplayName = userInfo?['display_name']?.toString();
+          _fetchedSemester = userInfo?['semester']?.toString();
+          _fetchedBranch = userInfo?['branch']?.toString();
+          _fetchedSubject = userInfo?['subject']?.toString();
           _viewerRole = viewerRole;
           _viewerCanBanUsers = viewerCanBanUsers;
           _viewerCollegeId = viewerCollegeId;
@@ -143,6 +156,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     try {
       final resources = await _supabaseService.getUserResources(
         widget.userEmail,
+        approvedOnly: !_isSelfProfile,
       );
       if (mounted) {
         setState(() {
@@ -160,7 +174,16 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       _displayName.isNotEmpty ? _displayName[0].toUpperCase() : 'U';
   String? get _photoUrl => _fetchedPhotoUrl ?? widget.userPhotoUrl;
   String get _bio => _fetchedBio ?? 'No bio yet';
-  bool get _isSelfProfile => _authService.userEmail == widget.userEmail;
+  String get _viewerEmail {
+    final authEmail = (_authService.userEmail ?? '').trim();
+    if (authEmail.isNotEmpty) return authEmail;
+    return (_supabaseService.currentUserEmail ?? '').trim();
+  }
+
+  bool get _isSelfProfile =>
+      _viewerEmail.isNotEmpty &&
+      _viewerEmail.trim().toLowerCase() ==
+          widget.userEmail.trim().toLowerCase();
   bool get _isTeacherOrAdminViewer =>
       _viewerRole == AppRoles.teacher || _viewerRole == AppRoles.admin;
   bool get _canBanViewedUser =>
@@ -168,6 +191,54 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       !_isBanned &&
       _isTeacherOrAdminViewer &&
       _viewerCanBanUsers;
+
+  Future<void> _deleteContribution(Resource resource) async {
+    if (!_isSelfProfile) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete Contribution?'),
+        content: Text(
+          'This will permanently delete "${resource.title}" from your contributions.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await _supabaseService.deleteOwnedResource(
+        resource: resource,
+        ownerEmail: _viewerEmail,
+      );
+      await _downloadService.deleteResource(
+        resource.id,
+        ownerEmail: _viewerEmail,
+      );
+      await _loadUserProfile();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Contribution deleted successfully.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to delete contribution: $e')),
+      );
+    }
+  }
 
   bool _resolveBanStatus(Map<String, dynamic>? userInfo) {
     if (userInfo == null) return false;
@@ -544,7 +615,13 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                           ),
                                           child: ResourceCard(
                                             resource: resource,
-                                            userEmail: widget.userEmail,
+                                            userEmail: _viewerEmail,
+                                            showStatusBadge: _isSelfProfile,
+                                            onDelete: _isSelfProfile
+                                                ? () => _deleteContribution(
+                                                    resource,
+                                                  )
+                                                : null,
                                             onVoteChanged: () {
                                               // Optimistic / Local update instead of full reload
                                               // We can't easily know the new vote count from here without passing it back,
@@ -587,17 +664,23 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       bgColor = isDark ? Colors.white12 : Colors.grey.shade200;
       textColor = isDark ? Colors.white : Colors.black;
       onTap = () async {
-        await Navigator.push(
+        final updated = await Navigator.push(
           context,
           MaterialPageRoute(
             builder: (_) => EditProfileScreen(
               initialName: _fetchedDisplayName ?? widget.userName ?? '',
               initialPhotoUrl: _fetchedPhotoUrl ?? widget.userPhotoUrl,
               initialBio: _fetchedBio ?? '',
+              initialSemester: _fetchedSemester,
+              initialBranch: _fetchedBranch,
+              initialSubject: _fetchedSubject,
               role: _viewerRole,
             ),
           ),
         );
+        if (updated != null && mounted) {
+          await _loadUserProfile();
+        }
       };
     } else {
       if (_isBanned) {

@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../config/theme.dart';
 import '../models/department_option.dart';
+import '../services/cloudinary_service.dart';
 import '../services/supabase_service.dart';
 
 Future<bool> showPostNoticeDialog({
@@ -16,7 +18,17 @@ Future<bool> showPostNoticeDialog({
   final supabaseService = SupabaseService();
   final titleCtrl = TextEditingController();
   final contentCtrl = TextEditingController();
-  final imageUrlCtrl = TextEditingController();
+  PlatformFile? selectedAttachment;
+  var isSubmitting = false;
+  const allowedAttachmentExtensions = <String>[
+    'jpg',
+    'jpeg',
+    'png',
+    'webp',
+    'gif',
+    'pdf',
+  ];
+  const maxAttachmentBytes = 10 * 1024 * 1024;
 
   final uniqueDepartmentOptions = <DepartmentOption>[
     ...{
@@ -39,6 +51,56 @@ Future<bool> showPostNoticeDialog({
   final fieldFill = resolvedIsDark
       ? const Color(0xFF2C2C2E)
       : const Color(0xFFF3F4F6);
+
+  String fileExtension(String filename) {
+    final dot = filename.lastIndexOf('.');
+    if (dot < 0 || dot == filename.length - 1) return '';
+    return filename.substring(dot + 1).toLowerCase();
+  }
+
+  bool isPdfAttachment(PlatformFile file) =>
+      fileExtension(file.name) == 'pdf';
+
+  bool isImageAttachment(PlatformFile file) =>
+      !isPdfAttachment(file) &&
+      allowedAttachmentExtensions.contains(fileExtension(file.name));
+
+  String formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(bytes < 10 * 1024 ? 1 : 0)} KB';
+    }
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  Future<void> pickAttachment(StateSetter setDialogState) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: allowedAttachmentExtensions,
+        withData: false,
+      );
+
+      if (result == null || result.files.isEmpty) return;
+
+      final file = result.files.first;
+      if (file.size > maxAttachmentBytes) {
+        if (!parentCtx.mounted) return;
+        ScaffoldMessenger.of(parentCtx).showSnackBar(
+          const SnackBar(content: Text('Attachment must be under 10MB.')),
+        );
+        return;
+      }
+
+      setDialogState(() => selectedAttachment = file);
+    } catch (e) {
+      debugPrint('Notice attachment pick failed: $e');
+      if (!parentCtx.mounted) return;
+      ScaffoldMessenger.of(parentCtx).showSnackBar(
+        const SnackBar(content: Text('Unable to pick attachment right now.')),
+      );
+    }
+  }
 
   try {
     await showDialog<void>(
@@ -153,26 +215,114 @@ Future<bool> showPostNoticeDialog({
                   },
                 ),
                 const SizedBox(height: 12),
-                TextField(
-                  controller: imageUrlCtrl,
-                  decoration: InputDecoration(
-                    labelText: 'Image URL (optional)',
-                    hintText: 'https://example.com/image.png',
-                    labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
-                    hintStyle: GoogleFonts.inter(
-                      color: AppTheme.textMuted.withValues(alpha: 0.5),
-                    ),
-                    prefixIcon: const Icon(Icons.image_outlined),
-                    filled: true,
-                    fillColor: fieldFill,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: fieldFill,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: resolvedIsDark
+                          ? Colors.white10
+                          : Colors.black.withValues(alpha: 0.06),
                     ),
                   ),
-                  style: GoogleFonts.inter(
-                    color: resolvedIsDark ? Colors.white : Colors.black,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            selectedAttachment != null
+                                ? (isPdfAttachment(selectedAttachment!)
+                                      ? Icons.picture_as_pdf_rounded
+                                      : Icons.image_rounded)
+                                : Icons.attach_file_rounded,
+                            color: AppTheme.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              selectedAttachment == null
+                                  ? 'Attach image or PDF'
+                                  : selectedAttachment!.name,
+                              style: GoogleFonts.inter(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: resolvedIsDark
+                                    ? Colors.white
+                                    : Colors.black,
+                              ),
+                            ),
+                          ),
+                          if (selectedAttachment != null)
+                            IconButton(
+                              onPressed: isSubmitting
+                                  ? null
+                                  : () {
+                                      setDialogState(
+                                        () => selectedAttachment = null,
+                                      );
+                                    },
+                              icon: const Icon(Icons.close_rounded, size: 18),
+                              tooltip: 'Remove attachment',
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        selectedAttachment == null
+                            ? 'Optional. Add a JPG, PNG, WEBP, GIF, or PDF. It will open inside the app.'
+                            : '${isPdfAttachment(selectedAttachment!) ? 'PDF' : 'Image'} • ${formatBytes(selectedAttachment!.size)}',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: AppTheme.textMuted,
+                          height: 1.35,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: isSubmitting
+                                  ? null
+                                  : () => pickAttachment(setDialogState),
+                              icon: Icon(
+                                selectedAttachment == null
+                                    ? Icons.upload_file_rounded
+                                    : Icons.autorenew_rounded,
+                              ),
+                              label: Text(
+                                selectedAttachment == null
+                                    ? 'Choose file'
+                                    : 'Change file',
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: AppTheme.primary,
+                                side: BorderSide(
+                                  color: AppTheme.primary.withValues(
+                                    alpha: 0.35,
+                                  ),
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 12,
+                                ),
+                                textStyle: GoogleFonts.inter(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
+                if (isSubmitting) ...[
+                  const SizedBox(height: 12),
+                  const LinearProgressIndicator(),
+                ],
               ],
             ),
           ),
@@ -186,7 +336,9 @@ Future<bool> showPostNoticeDialog({
             ),
             FilledButton.icon(
               style: FilledButton.styleFrom(backgroundColor: AppTheme.primary),
-              onPressed: () async {
+              onPressed: isSubmitting
+                  ? null
+                  : () async {
                 if (titleCtrl.text.trim().isEmpty ||
                     contentCtrl.text.trim().isEmpty) {
                   ScaffoldMessenger.of(parentCtx).showSnackBar(
@@ -208,32 +360,28 @@ Future<bool> showPostNoticeDialog({
                   return;
                 }
 
-                final imageUrl = imageUrlCtrl.text.trim();
-                if (imageUrl.isNotEmpty) {
-                  final uri = Uri.tryParse(imageUrl);
-                  final isValid =
-                      uri != null &&
-                      uri.isAbsolute &&
-                      (uri.scheme == 'http' || uri.scheme == 'https');
-                  if (!isValid) {
-                    ScaffoldMessenger.of(parentCtx).showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'Please enter a valid image URL (http/https)',
-                        ),
-                      ),
-                    );
-                    return;
-                  }
-                }
-
                 try {
+                  setDialogState(() => isSubmitting = true);
+                  String? uploadedFileUrl;
+                  String? uploadedImageUrl;
+                  final attachment = selectedAttachment;
+                  if (attachment != null) {
+                    uploadedFileUrl = await CloudinaryService.uploadFile(
+                      attachment,
+                      timeout: const Duration(seconds: 90),
+                    );
+                    if (isImageAttachment(attachment)) {
+                      uploadedImageUrl = uploadedFileUrl;
+                    }
+                  }
+
                   await supabaseService.addNotice(
                     collegeId: collegeId,
                     title: titleCtrl.text.trim(),
                     content: contentCtrl.text.trim(),
                     department: normalizedDept,
-                    imageUrl: imageUrl.isEmpty ? null : imageUrl,
+                    imageUrl: uploadedImageUrl,
+                    fileUrl: uploadedFileUrl,
                   );
                   posted = true;
                   if (!parentCtx.mounted) return;
@@ -251,11 +399,24 @@ Future<bool> showPostNoticeDialog({
                       content: Text('Failed to post notice. Please try again.'),
                     ),
                   );
+                } finally {
+                  if (!posted && parentCtx.mounted) {
+                    setDialogState(() => isSubmitting = false);
+                  }
                 }
               },
-              icon: const Icon(Icons.send_rounded, size: 16),
+              icon: isSubmitting
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.send_rounded, size: 16),
               label: Text(
-                'Post notice',
+                isSubmitting ? 'Posting...' : 'Post notice',
                 style: GoogleFonts.inter(
                   color: Colors.white,
                   fontWeight: FontWeight.w600,
@@ -269,7 +430,6 @@ Future<bool> showPostNoticeDialog({
   } finally {
     titleCtrl.dispose();
     contentCtrl.dispose();
-    imageUrlCtrl.dispose();
   }
 
   return posted;

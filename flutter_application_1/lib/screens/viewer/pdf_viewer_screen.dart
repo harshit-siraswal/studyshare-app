@@ -72,6 +72,15 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         _urlPath.endsWith('.xlsx');
   }
 
+  bool _isAllowedOfficeViewerNavigation(String rawUrl) {
+    final uri = Uri.tryParse(rawUrl);
+    if (uri == null) return false;
+    if (uri.scheme == 'about') return true;
+    if (uri.scheme != 'https') return false;
+    final host = uri.host.toLowerCase();
+    return host == 'docs.google.com';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -107,6 +116,15 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       ..setBackgroundColor(const Color(0x00000000))
       ..setNavigationDelegate(
         NavigationDelegate(
+          onNavigationRequest: (request) {
+            if (_isAllowedOfficeViewerNavigation(request.url)) {
+              return NavigationDecision.navigate;
+            }
+            debugPrint(
+              'Blocked unexpected Office WebView URL: ${request.url}',
+            );
+            return NavigationDecision.prevent;
+          },
           onPageStarted: (_) {
             if (mounted) setState(() => _isLoading = true);
           },

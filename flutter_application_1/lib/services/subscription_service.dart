@@ -15,7 +15,12 @@ class SubscriptionService {
   FirebaseAuth get _firebaseAuth => FirebaseAuth.instance;
   late Razorpay _razorpay;
   Completer<bool>? _paymentCompleter;
+  String _pendingPurchaseType = 'premium';
   String? _pendingPlanId;
+  static const Duration _premiumStatusCacheTtl = Duration(seconds: 45);
+  static String? _cachedPremiumEmail;
+  static bool? _cachedPremiumStatus;
+  static DateTime? _cachedPremiumStatusAt;
 
   SubscriptionService() {
     _razorpay = Razorpay();
@@ -28,22 +33,56 @@ class SubscriptionService {
     await prefs.remove('premium_until');
     await prefs.remove('premium_tier');
     await prefs.remove('premium_email');
+    _cachedPremiumEmail = null;
+    _cachedPremiumStatus = null;
+    _cachedPremiumStatusAt = null;
+  }
+
+  bool _hasFreshPremiumCache(String email) {
+    final cachedAt = _cachedPremiumStatusAt;
+    if (cachedAt == null) return false;
+    if (_cachedPremiumEmail != email) return false;
+    return DateTime.now().difference(cachedAt) < _premiumStatusCacheTtl;
+  }
+
+  void _cachePremiumStatus(String email, bool isPremium) {
+    _cachedPremiumEmail = email;
+    _cachedPremiumStatus = isPremium;
+    _cachedPremiumStatusAt = DateTime.now();
   }
 
   void dispose() {
     _razorpay.clear();
   }
 
+  String _resolveRazorpayKey(Map<String, dynamic> orderData) {
+    final keyFromOrder = (orderData['key_id'] ?? orderData['key'])?.toString();
+    final normalizedOrderKey = keyFromOrder?.trim() ?? '';
+    if (normalizedOrderKey.isNotEmpty) {
+      return normalizedOrderKey;
+    }
+    return AppConfig.razorpayKeyId.trim();
+  }
+
+  bool _isValidRazorpayKey(String key) {
+    return key.isNotEmpty &&
+        (key.startsWith('rzp_live_') || key.startsWith('rzp_test_'));
+  }
+
   /// Checks if the user is currently premium
   Future<bool> isPremium() async {
     final email = _firebaseAuth.currentUser?.email;
     if (email == null) return false;
+    final normalizedEmail = email.trim().toLowerCase();
 
     // 1. Check local cache first for immediate responsiveness
     final prefs = await SharedPreferences.getInstance();
     final cachedEmail = prefs.getString('premium_email');
     if (cachedEmail != email) {
       await _clearPremiumCache(prefs);
+    }
+    if (_hasFreshPremiumCache(normalizedEmail) && _cachedPremiumStatus != null) {
+      return _cachedPremiumStatus!;
     }
     final localPremiumUntilStr = prefs.getString('premium_until');
 
@@ -54,6 +93,7 @@ class SubscriptionService {
             ? localUntil
             : localUntil.toUtc();
         if (localUntilUtc.isAfter(DateTime.now().toUtc())) {
+          _cachePremiumStatus(normalizedEmail, true);
           return true;
         }
       } catch (e) {
@@ -63,7 +103,9 @@ class SubscriptionService {
     }
 
     // 2. Fallback to Supabase (Source of Truth)
-    return _checkPremiumStatus();
+    final isPremium = await _checkPremiumStatus();
+    _cachePremiumStatus(normalizedEmail, isPremium);
+    return isPremium;
   }
 
   Future<bool> _checkPremiumStatus() async {
@@ -119,11 +161,13 @@ class SubscriptionService {
                   .toUtc()
                   .toIso8601String(),
             );
+            _cachePremiumStatus(email.trim().toLowerCase(), true);
             return true;
           }
         } catch (e) {
           debugPrint('Failed to check upload count for auto-premium: $e');
         }
+        _cachePremiumStatus(email.trim().toLowerCase(), false);
         return false;
       }
 
@@ -136,10 +180,15 @@ class SubscriptionService {
 
       // Sync expiry to local cache
       await prefs.setString('premium_until', premiumUntilStr!);
+      _cachePremiumStatus(email.trim().toLowerCase(), true);
 
       return true;
     } catch (e) {
       debugPrint('Check Premium Critical Error: $e');
+      final email = _firebaseAuth.currentUser?.email?.trim().toLowerCase();
+      if (email != null && email.isNotEmpty) {
+        _cachePremiumStatus(email, false);
+      }
       return false;
     }
   }
@@ -171,6 +220,7 @@ class SubscriptionService {
     }
 
     _paymentCompleter = Completer<bool>();
+    _pendingPurchaseType = 'premium';
     _pendingPlanId = planId;
 
     // Explicit Amount Logic
@@ -190,6 +240,7 @@ class SubscriptionService {
     try {
       // 2. Create Order on Backend
       final orderData = await _api.createPaymentOrder(
+        purchaseType: 'premium',
         planId: planId,
         amount: amount,
         context: context.mounted ? context : null,
@@ -210,9 +261,16 @@ class SubscriptionService {
         throw Exception('Price mismatch. Please try again or contact support.');
       }
 
+      final razorpayKey = _resolveRazorpayKey(orderData);
+      if (!_isValidRazorpayKey(razorpayKey)) {
+        throw Exception(
+          'Razorpay key is missing or invalid. Configure backend key_id or RAZORPAY_KEY_ID.',
+        );
+      }
+
       // 3. Open Checkout
       var options = {
-        'key': AppConfig.razorpayKeyId,
+        'key': razorpayKey,
         'amount': authorizedAmount,
         'name': 'StudyShare Premium',
         'description': description,
@@ -229,9 +287,87 @@ class SubscriptionService {
       debugPrint('Payment Init Error: $e');
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Failed to initiate payment. Please try again.'),
-          ),
+          SnackBar(content: Text('Failed to initiate payment: $e')),
+        );
+      }
+      _resetPaymentState();
+      _paymentCompleter?.complete(false);
+      return false;
+    }
+  }
+
+  Future<bool> buyAiTokenRecharge(
+    BuildContext context,
+    String email,
+    String phone, {
+    required int rechargeRupees,
+  }) async {
+    if (_paymentCompleter != null && !_paymentCompleter!.isCompleted) {
+      debugPrint('Payment already in progress');
+      return _paymentCompleter!.future;
+    }
+
+    if (rechargeRupees <= 0) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Invalid recharge amount.')),
+        );
+      }
+      return false;
+    }
+
+    _paymentCompleter = Completer<bool>();
+    _pendingPurchaseType = 'ai_token_recharge';
+    _pendingPlanId = null;
+
+    final amount = rechargeRupees * 100;
+    final description = 'AI Tokens Recharge';
+
+    try {
+      final orderData = await _api.createPaymentOrder(
+        purchaseType: 'ai_token_recharge',
+        rechargeRupees: rechargeRupees,
+        amount: amount,
+        context: context.mounted ? context : null,
+      );
+
+      if (orderData['error'] != null) {
+        throw Exception(orderData['error']);
+      }
+
+      final orderId = orderData['id'];
+      final authorizedAmount = orderData['amount'] ?? amount;
+
+      if (authorizedAmount != amount) {
+        throw Exception('Price mismatch. Please try again or contact support.');
+      }
+
+      final razorpayKey = _resolveRazorpayKey(orderData);
+      if (!_isValidRazorpayKey(razorpayKey)) {
+        throw Exception(
+          'Razorpay key is missing or invalid. Configure backend key_id or RAZORPAY_KEY_ID.',
+        );
+      }
+
+      final options = {
+        'key': razorpayKey,
+        'amount': authorizedAmount,
+        'name': 'StudyShare AI Tokens',
+        'description': '$description (\u20b9$rechargeRupees)',
+        'order_id': orderId,
+        'prefill': {'contact': phone, 'email': email},
+        'external': {
+          'wallets': ['paytm'],
+        },
+      };
+
+      _razorpay.open(options);
+      return _paymentCompleter!.future;
+    } catch (e) {
+      debugPrint('AI Recharge Init Error: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to initiate AI token recharge: $e')),
         );
       }
       _resetPaymentState();
@@ -259,6 +395,18 @@ class SubscriptionService {
         paymentId: response.paymentId!,
         signature: response.signature!,
       );
+
+      final purchaseType =
+          (result['purchase_type']?.toString() ?? _pendingPurchaseType)
+              .trim()
+              .toLowerCase();
+
+      if (purchaseType == 'ai_token_recharge') {
+        _supabaseService.markAiTokenBalanceStale();
+        _resetPaymentState();
+        _paymentCompleter?.complete(true);
+        return;
+      }
 
       // 5. Update Local Cache IMMEDIATELY from intent (Optimistic Update)
       // Executed ONLY after successful verification as requested.
@@ -307,6 +455,7 @@ class SubscriptionService {
   }
 
   void _resetPaymentState() {
+    _pendingPurchaseType = 'premium';
     _pendingPlanId = null;
   }
 

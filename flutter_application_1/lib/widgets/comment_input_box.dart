@@ -13,6 +13,7 @@ class CommentInputBox extends StatefulWidget {
   final VoidCallback onCancelReply;
   final VoidCallback onSubmit;
   final Function(File)? onStickerSelected;
+  final Future<bool> Function()? onStickerAccessCheck;
   final String hintText;
 
   const CommentInputBox({
@@ -25,6 +26,7 @@ class CommentInputBox extends StatefulWidget {
     this.replyToName,
     required this.onCancelReply,
     this.onStickerSelected,
+    this.onStickerAccessCheck,
     this.hintText = 'Add a comment...',
   });
 
@@ -54,9 +56,14 @@ class _CommentInputBoxState extends State<CommentInputBox> {
     }
   }
 
-  void _openStickerPicker() {
-    if (widget.isReadOnly) return;
-    
+  Future<void> _openStickerPicker() async {
+    if (widget.isReadOnly || widget.isSubmitting) return;
+
+    if (widget.onStickerAccessCheck != null) {
+      final canOpen = await widget.onStickerAccessCheck!.call();
+      if (!mounted || !canOpen) return;
+    }
+
     // Unfocus to hide keyboard
     widget.focusNode.unfocus();
 
@@ -65,7 +72,9 @@ class _CommentInputBoxState extends State<CommentInputBox> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewInsets.bottom,
+        ),
         child: StickerPicker(
           onStickerSelected: (file) {
             Navigator.pop(context);
@@ -98,16 +107,25 @@ class _CommentInputBoxState extends State<CommentInputBox> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 8, left: 4),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: AppTheme.primary.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
+                    border: Border.all(
+                      color: AppTheme.primary.withValues(alpha: 0.2),
+                    ),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.reply_rounded, size: 14, color: AppTheme.primary),
+                      Icon(
+                        Icons.reply_rounded,
+                        size: 14,
+                        color: AppTheme.primary,
+                      ),
                       const SizedBox(width: 6),
                       Flexible(
                         child: Text(
@@ -129,7 +147,11 @@ class _CommentInputBoxState extends State<CommentInputBox> {
                             color: AppTheme.primary.withValues(alpha: 0.1),
                             shape: BoxShape.circle,
                           ),
-                          child: Icon(Icons.close_rounded, size: 12, color: AppTheme.primary),
+                          child: Icon(
+                            Icons.close_rounded,
+                            size: 12,
+                            color: AppTheme.primary,
+                          ),
                         ),
                       ),
                     ],
@@ -159,14 +181,17 @@ class _CommentInputBoxState extends State<CommentInputBox> {
                   // Sticker Button
                   if (widget.onStickerSelected != null)
                     IconButton(
-                      onPressed: (widget.isReadOnly || widget.isSubmitting) ? null : _openStickerPicker,                      icon: Icon(
+                      onPressed: (widget.isReadOnly || widget.isSubmitting)
+                          ? null
+                          : _openStickerPicker,
+                      icon: Icon(
                         Icons.sticky_note_2_outlined,
                         color: widget.isReadOnly ? Colors.grey : secondaryColor,
                         size: 24,
                       ),
                       tooltip: 'Add Sticker',
                     ),
-                  
+
                   // Input Field
                   Expanded(
                     child: TextField(
@@ -178,14 +203,19 @@ class _CommentInputBoxState extends State<CommentInputBox> {
                       minLines: 1,
                       textCapitalization: TextCapitalization.sentences,
                       decoration: InputDecoration(
-                        hintText: widget.isReadOnly ? 'Read-only mode' : widget.hintText,
+                        hintText: widget.isReadOnly
+                            ? 'Read-only mode'
+                            : widget.hintText,
                         hintStyle: GoogleFonts.inter(
                           color: secondaryColor.withValues(alpha: 0.7),
                           fontSize: 16,
                         ),
                         border: InputBorder.none,
                         isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 10,
+                        ),
                       ),
                       onSubmitted: (_) {
                         if (_showSendButton) widget.onSubmit();
@@ -195,14 +225,23 @@ class _CommentInputBoxState extends State<CommentInputBox> {
 
                   // Send Button
                   IconButton(
-                    onPressed: (_showSendButton && !widget.isSubmitting && !widget.isReadOnly) 
-                      ? widget.onSubmit 
-                      : null,
+                    onPressed:
+                        (_showSendButton &&
+                            !widget.isSubmitting &&
+                            !widget.isReadOnly)
+                        ? widget.onSubmit
+                        : null,
                     icon: widget.isSubmitting
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
                         : Icon(
                             Icons.send_rounded,
-                            color: _showSendButton ? AppTheme.primary : secondaryColor.withValues(alpha: 0.5),
+                            color: _showSendButton
+                                ? AppTheme.primary
+                                : secondaryColor.withValues(alpha: 0.5),
                             size: 24,
                           ),
                   ),

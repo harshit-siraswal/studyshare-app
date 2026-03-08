@@ -1,6 +1,56 @@
 <?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="#EEEEEE" />
-    <corners android:radius="12dp" />
-    <stroke android:width="1dp" android:color="#CCCCCC" />
-</shape>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="@color/widget_preview_background" />
+            <corners android:radius="18dp" />
+            <stroke
+                android:width="1dp"
+                android:color="@color/widget_preview_stroke" />
+        </shape>
+    </item>
+
+    <item
+        android:left="16dp"
+        android:top="16dp"
+        android:right="170dp"
+        android:bottom="128dp">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/widget_syllabus_chip_background" />
+            <corners android:radius="999dp" />
+        </shape>
+    </item>
+
+    <item
+        android:left="16dp"
+        android:top="48dp"
+        android:right="56dp"
+        android:bottom="102dp">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/widget_preview_stroke" />
+            <corners android:radius="8dp" />
+        </shape>
+    </item>
+
+    <item
+        android:left="16dp"
+        android:top="112dp"
+        android:right="16dp"
+        android:bottom="74dp">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/widget_preview_stroke" />
+            <corners android:radius="12dp" />
+        </shape>
+    </item>
+
+    <item
+        android:left="16dp"
+        android:top="156dp"
+        android:right="16dp"
+        android:bottom="30dp">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/widget_preview_stroke" />
+            <corners android:radius="12dp" />
+        </shape>
+    </item>
+</layer-list>

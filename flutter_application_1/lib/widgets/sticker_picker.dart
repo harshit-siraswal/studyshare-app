@@ -10,6 +10,8 @@ import '../services/sticker_service.dart';
 import '../screens/stickers/sticker_editor_screen.dart';
 import 'success_overlay.dart';
 
+enum _GiphyBrowseMode { stickers, memes }
+
 class StickerPicker extends StatefulWidget {
   final ValueChanged<File> onStickerSelected;
 
@@ -37,7 +39,19 @@ class _StickerPickerState extends State<StickerPicker>
   List<GiphyStickerItem> _giphyStickers = [];
   bool _giphyLoading = false;
   bool _hasGiphy = false;
+  bool _supportsGiphyMemeTemplates = false;
   String? _giphySavingId; // ID of the sticker currently being saved
+  _GiphyBrowseMode _giphyBrowseMode = _GiphyBrowseMode.stickers;
+
+  static const List<String> _memeTemplateQueries = [
+    'drake hotline bling',
+    'woman yelling at cat',
+    'this is fine',
+    'surprised pikachu',
+    'disaster girl',
+    'success kid',
+    'two buttons meme',
+  ];
 
   @override
   void initState() {
@@ -89,6 +103,8 @@ class _StickerPickerState extends State<StickerPicker>
         _stickers = stickers;
         _installedPacks = installedPacks;
         _hasGiphy = hasGiphy;
+        _supportsGiphyMemeTemplates =
+            _stickerService.supportsGiphyMemeTemplates;
         _isLoading = false;
       });
     } catch (_) {
@@ -105,14 +121,7 @@ class _StickerPickerState extends State<StickerPicker>
     if (result == null || result.files.single.path == null) return;
 
     final sourceFile = File(result.files.single.path!);
-    if (!mounted) return;
-
-    final savedFile = await Navigator.push<File>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => StickerEditorScreen(sourceFile: sourceFile),
-      ),
-    );
+    final savedFile = await _openStickerEditor(sourceFile);
 
     if (savedFile == null) return;
 
@@ -123,6 +132,24 @@ class _StickerPickerState extends State<StickerPicker>
       title: 'Sticker Created',
       message: 'Your sticker is ready to use.',
       variant: SuccessOverlayVariant.stickerImport,
+    );
+  }
+
+  Future<File?> _openStickerEditor(
+    File sourceFile, {
+    bool startWithMemeLayout = false,
+    String? sourceLabel,
+  }) async {
+    if (!mounted) return null;
+    return Navigator.push<File>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => StickerEditorScreen(
+          sourceFile: sourceFile,
+          startWithMemeLayout: startWithMemeLayout,
+          sourceLabel: sourceLabel,
+        ),
+      ),
     );
   }
 
@@ -366,7 +393,7 @@ class _StickerPickerState extends State<StickerPicker>
           Padding(
             padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
             child: Text(
-              'Create stickers with text or remove background for a clean look.',
+              'Create custom stickers, drag text anywhere, or turn GIPHY templates into memes.',
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(fontSize: 12, color: mutedColor),
             ),
@@ -416,7 +443,7 @@ class _StickerPickerState extends State<StickerPicker>
                 tabs: const [
                   Tab(text: 'My Stickers'),
                   Tab(text: 'Packs'),
-                  Tab(text: '✨ Giphy'),
+                  Tab(text: 'Giphy'),
                 ],
               ),
             ),
@@ -819,11 +846,44 @@ class _StickerPickerState extends State<StickerPicker>
 
   // ─── GIPHY TAB ────────────────────────────────────────────────────────────
 
+  String? _normalizedGiphyQuery({String? overrideQuery}) {
+    final rawQuery = overrideQuery ?? _giphySearchController.text;
+    final trimmedQuery = rawQuery.trim();
+    if (trimmedQuery.isNotEmpty) return trimmedQuery;
+    if (_giphyBrowseMode == _GiphyBrowseMode.memes) {
+      return _memeTemplateQueries.first;
+    }
+    return null;
+  }
+
+  Future<void> _setGiphyBrowseMode(_GiphyBrowseMode mode) async {
+    if (_giphyBrowseMode == mode) return;
+    if (mode == _GiphyBrowseMode.memes && !_supportsGiphyMemeTemplates) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Meme templates need direct GIPHY access in this build.',
+          ),
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _giphyBrowseMode = mode;
+      _giphyStickers = [];
+      _giphySearchController.clear();
+    });
+    await _loadGiphy(query: _normalizedGiphyQuery());
+  }
+
   Future<void> _loadGiphy({String? query}) async {
     if (!_hasGiphy) return;
     if (!mounted) return;
     setState(() => _giphyLoading = true);
-    final results = await _stickerService.fetchGiphyStickers(query: query);
+    final effectiveQuery = _normalizedGiphyQuery(overrideQuery: query);
+    final results = _giphyBrowseMode == _GiphyBrowseMode.memes
+        ? await _stickerService.fetchGiphyMemeTemplates(query: effectiveQuery)
+        : await _stickerService.fetchGiphyStickers(query: effectiveQuery);
     if (!mounted) return;
     setState(() {
       _giphyStickers = results;
@@ -853,8 +913,99 @@ class _StickerPickerState extends State<StickerPicker>
     }
   }
 
+  Future<void> _openGiphyTemplateInEditor(GiphyStickerItem item) async {
+    if (_giphySavingId != null) return;
+    setState(() => _giphySavingId = item.id);
+    try {
+      final file = await _stickerService.downloadRemoteMediaToTemporaryFile(
+        item.originalUrl,
+        prefix: 'giphy_meme',
+      );
+      if (file == null) {
+        throw Exception('Template download failed');
+      }
+      if (!mounted) return;
+      final savedFile = await _openStickerEditor(
+        file,
+        startWithMemeLayout: true,
+        sourceLabel: item.title,
+      );
+      if (savedFile != null && mounted) {
+        await _loadAll();
+        widget.onStickerSelected(savedFile);
+      }
+    } catch (e) {
+      debugPrint('Giphy template edit error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to open meme template. Please try again.'),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _giphySavingId = null);
+    }
+  }
+
+  Widget _buildGiphyModeToggle(bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: SegmentedButton<_GiphyBrowseMode>(
+        segments: [
+          const ButtonSegment<_GiphyBrowseMode>(
+            value: _GiphyBrowseMode.stickers,
+            icon: Icon(Icons.sticky_note_2_outlined, size: 16),
+            label: Text('Stickers'),
+          ),
+          ButtonSegment<_GiphyBrowseMode>(
+            value: _GiphyBrowseMode.memes,
+            enabled: _supportsGiphyMemeTemplates,
+            icon: const Icon(Icons.mood_rounded, size: 16),
+            label: const Text('Meme Templates'),
+          ),
+        ],
+        selected: {_giphyBrowseMode},
+        onSelectionChanged: (selection) {
+          _setGiphyBrowseMode(selection.first);
+        },
+        style: ButtonStyle(
+          backgroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.selected)) {
+              return AppTheme.primary.withValues(alpha: 0.14);
+            }
+            return isDark ? Colors.white10 : const Color(0xFFF4F6FB);
+          }),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMemeTemplateChips() {
+    return SizedBox(
+      height: 38,
+      child: ListView.separated(
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+        scrollDirection: Axis.horizontal,
+        itemCount: _memeTemplateQueries.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        itemBuilder: (context, index) {
+          final query = _memeTemplateQueries[index];
+          return ActionChip(
+            label: Text(query),
+            onPressed: () {
+              _giphySearchController.text = query;
+              _loadGiphy(query: query);
+            },
+          );
+        },
+      ),
+    );
+  }
+
   Widget _buildGiphyTab(bool isDark) {
     final mutedColor = AppTheme.getTextColor(context).withValues(alpha: 0.55);
+    final isMemeMode = _giphyBrowseMode == _GiphyBrowseMode.memes;
     if (!_hasGiphy) {
       return Center(
         child: Text(
@@ -864,17 +1015,33 @@ class _StickerPickerState extends State<StickerPicker>
         ),
       );
     }
+    if (isMemeMode && !_supportsGiphyMemeTemplates) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 28),
+          child: Text(
+            'Meme templates need direct GIPHY access in this build.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.inter(color: mutedColor),
+          ),
+        ),
+      );
+    }
     return Column(
       children: [
+        _buildGiphyModeToggle(isDark),
+        if (isMemeMode) _buildMemeTemplateChips(),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
           child: TextField(
             controller: _giphySearchController,
             onSubmitted: (q) =>
                 _loadGiphy(query: q.trim().isEmpty ? null : q.trim()),
             textInputAction: TextInputAction.search,
             decoration: InputDecoration(
-              hintText: 'Search Giphy stickers...',
+              hintText: isMemeMode
+                  ? 'Search meme templates...'
+                  : 'Search Giphy stickers...',
               isDense: true,
               prefixIcon: Icon(
                 Icons.search_rounded,
@@ -906,6 +1073,29 @@ class _StickerPickerState extends State<StickerPicker>
             onChanged: (_) => setState(() {}),
           ),
         ),
+        if (isMemeMode)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: isDark ? Colors.white10 : const Color(0xFFEFF6FF),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: isDark ? Colors.white12 : const Color(0xFFBFDBFE),
+                ),
+              ),
+              child: Text(
+                'Tap any template to open it in the editor with draggable meme text.',
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white70 : const Color(0xFF1E3A8A),
+                ),
+              ),
+            ),
+          ),
         Expanded(
           child: _giphyLoading
               ? const Center(child: CircularProgressIndicator())
@@ -914,16 +1104,26 @@ class _StickerPickerState extends State<StickerPicker>
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.gif_box_outlined, size: 48, color: mutedColor),
+                      Icon(
+                        isMemeMode
+                            ? Icons.mood_rounded
+                            : Icons.gif_box_outlined,
+                        size: 48,
+                        color: mutedColor,
+                      ),
                       const SizedBox(height: 8),
                       Text(
-                        'No stickers found',
+                        isMemeMode
+                            ? 'No meme templates found'
+                            : 'No stickers found',
                         style: GoogleFonts.inter(color: mutedColor),
                       ),
                       const SizedBox(height: 4),
                       TextButton(
                         onPressed: _loadGiphy,
-                        child: const Text('Load Trending'),
+                        child: Text(
+                          isMemeMode ? 'Load Templates' : 'Load Trending',
+                        ),
                       ),
                     ],
                   ),
@@ -934,14 +1134,16 @@ class _StickerPickerState extends State<StickerPicker>
                     crossAxisCount: 4,
                     mainAxisSpacing: 8,
                     crossAxisSpacing: 8,
-                    childAspectRatio: 1,
+                    childAspectRatio: 0.96,
                   ),
                   itemCount: _giphyStickers.length,
                   itemBuilder: (context, idx) {
                     final item = _giphyStickers[idx];
                     final isSaving = _giphySavingId == item.id;
                     return GestureDetector(
-                      onTap: () => _saveAndSendGiphy(item),
+                      onTap: () => isMemeMode
+                          ? _openGiphyTemplateInEditor(item)
+                          : _saveAndSendGiphy(item),
                       child: Tooltip(
                         message: item.title,
                         child: Container(
@@ -953,13 +1155,17 @@ class _StickerPickerState extends State<StickerPicker>
                             color: isDark ? Colors.white10 : Colors.white,
                           ),
                           clipBehavior: Clip.antiAlias,
-                          child: isSaving
-                              ? const Center(
+                          child: Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              if (isSaving)
+                                const Center(
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2,
                                   ),
                                 )
-                              : CachedNetworkImage(
+                              else
+                                CachedNetworkImage(
                                   imageUrl: item.previewUrl,
                                   fit: BoxFit.cover,
                                   placeholder: (_, __) => Container(
@@ -970,6 +1176,31 @@ class _StickerPickerState extends State<StickerPicker>
                                   errorWidget: (_, __, ___) =>
                                       const Icon(Icons.broken_image, size: 24),
                                 ),
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 6,
+                                  ),
+                                  color: Colors.black.withValues(alpha: 0.48),
+                                  child: Text(
+                                    isMemeMode ? 'Use as meme' : 'Save sticker',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    textAlign: TextAlign.center,
+                                    style: GoogleFonts.inter(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     );
@@ -979,7 +1210,7 @@ class _StickerPickerState extends State<StickerPicker>
         Padding(
           padding: const EdgeInsets.only(bottom: 6, top: 2),
           child: Text(
-            'Powered by GIPHY',
+            isMemeMode ? 'Powered by GIPHY templates' : 'Powered by GIPHY',
             style: GoogleFonts.inter(
               fontSize: 10,
               color: mutedColor,

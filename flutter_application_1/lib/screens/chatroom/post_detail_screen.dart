@@ -8,13 +8,18 @@ import '../../widgets/emoji_reactions.dart';
 import '../profile/user_profile_screen.dart';
 import '../../services/backend_api_service.dart';
 import '../../services/cloudinary_service.dart';
+import '../../services/subscription_service.dart';
 import '../../widgets/comment_input_box.dart';
 
 import 'package:flutter_linkify/flutter_linkify.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../widgets/full_screen_image_viewer.dart';
+import '../../widgets/user_avatar.dart';
 import '../../utils/sticker_comment_codec.dart';
 import '../../widgets/user_badge.dart';
+import '../../widgets/paywall_dialog.dart';
+import '../../utils/profile_photo_utils.dart';
+import '../../utils/youtube_link_utils.dart';
 
 class PostDetailScreen extends StatefulWidget {
   final Map<String, dynamic> post;
@@ -40,6 +45,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   final SupabaseService _supabaseService = SupabaseService();
   final AuthService _authService = AuthService();
   final BackendApiService _backendApiService = BackendApiService();
+  final SubscriptionService _subscriptionService = SubscriptionService();
   final TextEditingController _commentController = TextEditingController();
   final FocusNode _commentFocusNode = FocusNode();
 
@@ -125,24 +131,33 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     return SelectableLinkify(
       text: content,
       onOpen: (link) async {
-        final uri = Uri.tryParse(link.url);
-        if (uri != null) {
-          try {
-            if (await canLaunchUrl(uri)) {
-              await launchUrl(uri, mode: LaunchMode.externalApplication);
-            } else {
-              if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Could not open link: ${link.url}')),
-                );
-              }
-            }
-          } catch (e) {
-            if (mounted) {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(SnackBar(content: Text('Error opening link: $e')));
-            }
+        final uri = buildExternalUri(link.url);
+        if (uri == null) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Could not open: ${link.url}')),
+            );
+          }
+          return;
+        }
+        try {
+          final launched = await launchUrl(
+            uri,
+            mode: LaunchMode.externalApplication,
+          );
+          if (!launched && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Could not open link: ${link.url}')),
+            );
+          }
+        } catch (e) {
+          debugPrint('Error opening link: $e');
+          if (mounted) {
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(
+                const SnackBar(
+                    content: Text('Could not open link. Please try again.')));
           }
         }
       },
@@ -676,7 +691,12 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
     final authorName =
         post['author_name'] ?? post['author_email']?.split('@')[0] ?? 'User';
-    final authorPhotoUrl = post['author_photo_url']?.toString().trim() ?? '';
+    final authorPhotoUrl = _resolvePhotoUrl(post, const [
+      'author_photo_url',
+      'profile_photo_url',
+      'photo_url',
+      'avatar_url',
+    ]);
     final hasAuthorPhoto = authorPhotoUrl.isNotEmpty;
     final createdAt = post['created_at'] != null
         ? DateTime.parse(post['created_at'])
@@ -706,30 +726,17 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                       builder: (context) => UserProfileScreen(
                         userEmail: post['author_email'] ?? '',
                         userName: authorName,
-                        userPhotoUrl: post['author_photo_url'],
+                        userPhotoUrl: hasAuthorPhoto ? authorPhotoUrl : null,
                       ),
                     ),
                   );
                 },
                 child: Row(
                   children: [
-                    CircleAvatar(
+                    UserAvatar(
                       radius: 18,
-                      backgroundColor: AppTheme.primary.withValues(alpha: 0.2),
-                      backgroundImage: hasAuthorPhoto
-                          ? NetworkImage(authorPhotoUrl)
-                          : null,
-                      child: !hasAuthorPhoto
-                          ? Text(
-                              authorName.isNotEmpty
-                                  ? authorName[0].toUpperCase()
-                                  : '?',
-                              style: GoogleFonts.inter(
-                                fontWeight: FontWeight.bold,
-                                color: AppTheme.primary,
-                              ),
-                            )
-                          : null,
+                      displayName: authorName,
+                      photoUrl: hasAuthorPhoto ? authorPhotoUrl : null,
                     ),
                     const SizedBox(width: 10),
                     Column(
@@ -792,65 +799,83 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           ),
 
           // Image (Added Fix)
-          if (post['image_url'] != null &&
-              post['image_url'].toString().isNotEmpty) ...[
+          if ((post['image_url']?.toString() ?? '').isNotEmpty) ...[
             const SizedBox(height: 16),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.network(
-                post['image_url'],
-                width: double.infinity,
-                fit: BoxFit.cover,
-                loadingBuilder: (context, child, loadingProgress) {
-                  if (loadingProgress == null) return child;
-                  return Container(
-                    height: 200,
-                    decoration: BoxDecoration(
-                      color: isDark
-                          ? Colors.white.withValues(alpha: 0.05)
-                          : const Color(0xFFF1F5F9),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Center(
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: AppTheme.primary,
+            Builder(builder: (_) {
+              final imageUrl = post['image_url']?.toString() ?? '';
+              return GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => FullScreenImageViewer(
+                        imageUrl: imageUrl,
+                        heroTag: 'post_image_${widget.post['id']}',
                       ),
                     ),
                   );
                 },
-                errorBuilder: (context, error, stackTrace) => Container(
-                  height: 150,
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? Colors.white.withValues(alpha: 0.05)
-                        : const Color(0xFFF1F5F9),
+                child: Hero(
+                  tag: 'post_image_${widget.post['id']}',
+                  child: ClipRRect(
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isDark ? Colors.white10 : Colors.grey.shade200,
-                    ),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.image_not_supported_outlined,
-                        size: 32,
-                        color: AppTheme.textMuted,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Image unavailable',
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: AppTheme.textMuted,
+                    child: Image.network(
+                      imageUrl,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                      loadingBuilder: (context, child, loadingProgress) {
+                        if (loadingProgress == null) return child;
+                        return Container(
+                          height: 200,
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.05)
+                                : const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: AppTheme.primary,
+                            ),
+                          ),
+                        );
+                      },
+                      errorBuilder: (context, error, stackTrace) => Container(
+                        height: 150,
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.05)
+                              : const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isDark ? Colors.white10 : Colors.grey.shade200,
+                          ),
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.image_not_supported_outlined,
+                              size: 32,
+                              color: AppTheme.textMuted,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Image unavailable',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                color: AppTheme.textMuted,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
+                    ),
                   ),
                 ),
-              ),
-            ),
+              );
+            }),
           ],
           const SizedBox(height: 16),
 
@@ -975,8 +1000,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 'User')
             .toString();
     final authorEmail = (comment['author_email'] ?? '').toString();
-    final hasAuthorPhoto =
-        comment['author_photo_url']?.toString().trim().isNotEmpty ?? false;
+    final authorPhotoUrl = _resolvePhotoUrl(comment, const [
+      'author_photo_url',
+      'profile_photo_url',
+      'photo_url',
+      'avatar_url',
+      'user_photo_url',
+    ]);
+    final hasAuthorPhoto = authorPhotoUrl.isNotEmpty;
     final content = (comment['content'] ?? '').toString();
     final createdAt = comment['created_at'] != null
         ? DateTime.parse(comment['created_at'])
@@ -1049,29 +1080,17 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                           builder: (context) => UserProfileScreen(
                             userEmail: authorEmail,
                             userName: authorName,
-                            userPhotoUrl: comment['author_photo_url'],
+                            userPhotoUrl: hasAuthorPhoto
+                                ? authorPhotoUrl
+                                : null,
                           ),
                         ),
                       );
                     },
-                    child: CircleAvatar(
+                    child: UserAvatar(
                       radius: 18,
-                      backgroundColor: AppTheme.secondary,
-                      backgroundImage: hasAuthorPhoto
-                          ? NetworkImage(comment['author_photo_url'].toString())
-                          : null,
-                      child: hasAuthorPhoto
-                          ? null
-                          : Text(
-                              authorName.isNotEmpty
-                                  ? authorName[0].toUpperCase()
-                                  : '?',
-                              style: GoogleFonts.inter(
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                              ),
-                            ),
+                      displayName: authorName,
+                      photoUrl: hasAuthorPhoto ? authorPhotoUrl : null,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1094,8 +1113,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                         builder: (context) => UserProfileScreen(
                                           userEmail: authorEmail,
                                           userName: authorName,
-                                          userPhotoUrl:
-                                              comment['author_photo_url'],
+                                          userPhotoUrl: hasAuthorPhoto
+                                              ? authorPhotoUrl
+                                              : null,
                                         ),
                                       ),
                                     );
@@ -1291,8 +1311,45 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     );
   }
 
+  static String _resolvePhotoUrl(Map<String, dynamic> source, List<String> keys) {
+    return resolveProfilePhotoUrl(source, preferredKeys: keys) ?? '';
+  }
+
+  Future<bool> _ensurePremiumStickerAccess() async {
+    final hasPremium = await _subscriptionService.isPremium();
+    if (hasPremium) return true;
+    if (!mounted) return false;
+
+    final messenger = ScaffoldMessenger.of(context);
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => PaywallDialog(
+        onSuccess: () {
+          Navigator.of(dialogContext).pop(true);
+        },
+      ),
+    );
+
+    if (result == true && mounted) {
+      // Re-check premium status after successful purchase
+      final isPremium = await _subscriptionService.isPremium();
+      if (isPremium) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('Premium unlocked! Sticker feature enabled.'),
+          ),
+        );
+      }
+      return isPremium;
+    }
+
+    if (!mounted) return false;
+    return false;
+  }
+
   Future<void> _handleStickerSelection(File stickerFile) async {
     if (_isReadOnly) return;
+    if (!await _ensurePremiumStickerAccess()) return;
 
     // For stickers, we would upload to cloudinary or storage and get URL
     // For now, show a placeholder message
@@ -1346,6 +1403,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       },
       onSubmit: _submitComment,
       onStickerSelected: _handleStickerSelection,
+      onStickerAccessCheck: _ensurePremiumStickerAccess,
       hintText: _replyToName != null
           ? 'Write your reply...'
           : 'Add a comment...',

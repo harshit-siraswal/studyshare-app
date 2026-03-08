@@ -2,6 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
+  // Semantic Colors
+  static const Color secondary = Color(0xFF6B7280); // Gray 500
+  static const Color accent = Color(0xFF8B5CF6); // Violet 500
+  static const Color error = Color(0xFFDC2626); // Red 600
+  static const Color success = Color(0xFF059669); // Green 600
+  static const Color warning = Color(0xFFD97706); // Amber 600
+  static const Color notice = Color(0xFFD946EF); // Fuchsia 500 (PurpleAccent replacement)
+  static const Color noticeColor = notice; // Alias for backward compatibility
+  static const Color premium = Color(0xFFFFC107); // Premium badge color
   // ============ NOTION/X INSPIRED DESIGN SYSTEM ============
   // Notion: Clean white backgrounds, warm gray text
   // X/Twitter: Pure black/white, high contrast
@@ -10,17 +19,6 @@ class AppTheme {
   static const Color primary = Color(0xFF2563EB); // Blue 600
   static const Color primaryLight = Color(0xFF3B82F6); // Blue 500
   static const Color primaryDark = Color(0xFF1D4ED8); // Blue 700
-
-  // Semantic Colors
-  static const Color secondary = Color(0xFF6B7280); // Gray 500
-  static const Color accent = Color(0xFF8B5CF6); // Violet 500
-  static const Color error = Color(0xFFDC2626); // Red 600
-  static const Color success = Color(0xFF059669); // Green 600
-  static const Color warning = Color(0xFFD97706); // Amber 600
-  static const Color notice = Color(
-    0xFFD946EF,
-  ); // Fuchsia 500 (PurpleAccent replacement)
-  static const Color noticeColor = notice; // Alias for backward compatibility
 
   // iOS Chat Colors
   static const Color iosBlueLight = Color(0xFF007AFF);
@@ -93,6 +91,12 @@ class AppTheme {
     end: Alignment.bottomRight,
     colors: [secondary, primary],
   );
+
+  // Card/document gradient endpoints (used by notice detail, etc.)
+  static const Color darkGradientStart = Color(0xFF111827); // Gray 900
+  static const Color darkGradientEnd = Color(0xFF1F2937); // Gray 800
+  static const Color lightGradientStart = lightBackground; // Slate 50
+  static const Color lightGradientEnd = lightBackground; // Slate 50 (same as lightBackground)
   static ElevatedButtonThemeData _elevatedButtonTheme(ColorScheme scheme) {
     return ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(

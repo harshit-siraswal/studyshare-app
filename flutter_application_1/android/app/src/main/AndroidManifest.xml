@@ -24,6 +24,13 @@
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:networkSecurityConfig="@xml/network_security_config">
+           <!-- Temporary workaround: Impeller is disabled due to observed rendering/runtime
+               failures on part of our Android device matrix (especially older/API-level devices).
+               TODO(Q3-2026): Re-evaluate and remove this opt-out after validating against the
+               active Android Impeller tracker: https://github.com/flutter/flutter/issues?q=is%3Aissue+is%3Aopen+label%3Ae%3A+impeller+label%3Aplatform-android -->
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableImpeller"
+            android:value="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -106,11 +113,26 @@
             <category android:name="android.intent.category.BROWSABLE"/>
             <data android:scheme="https"/>
         </intent>
+        <!-- Android 11+ package visibility: declare YouTube URL schemes used by in-app
+             deep-link fallback/open flows so package/activity resolution remains visible. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <category android:name="android.intent.category.BROWSABLE"/>
+            <data android:scheme="vnd.youtube"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <category android:name="android.intent.category.BROWSABLE"/>
+            <data android:scheme="youtube"/>
+        </intent>
         <intent>
             <action android:name="android.intent.action.VIEW"/>
             <category android:name="android.intent.category.BROWSABLE"/>
             <data android:scheme="http"/>
         </intent>
+        <!-- Android 11+ package visibility: explicitly query the YouTube package used for
+             app-launch capability checks before opening/handing off watch URLs. -->
+        <package android:name="com.google.android.youtube"/>
         <!-- Required for URL launcher -->
         <intent>
             <action android:name="android.intent.action.VIEW"/>

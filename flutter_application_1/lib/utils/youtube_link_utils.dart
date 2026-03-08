@@ -87,6 +87,14 @@ String normalizeExternalUrl(String rawUrl) {
     }
   }
 
+  final intentFallback = _extractIntentFallbackCandidate(normalized);
+  if (intentFallback != null && intentFallback.isNotEmpty) {
+    final nested = normalizeExternalUrl(intentFallback);
+    if (nested.isNotEmpty && nested != normalized) {
+      normalized = nested;
+    }
+  }
+
   final lowered = normalized.toLowerCase();
   if (lowered.startsWith('youtube:')) {
     final deepLinkId = normalized.substring(normalized.indexOf(':') + 1).trim();
@@ -97,6 +105,12 @@ String normalizeExternalUrl(String rawUrl) {
 
   if (lowered.startsWith('vnd.youtube://') ||
       lowered.startsWith('youtube://')) {
+    final rawDeepLinkId = _extractYoutubeVideoIdFromRawAppLink(normalized);
+    if (rawDeepLinkId != null) {
+      final start = _extractStartSeconds(Uri.tryParse(normalized) ?? Uri());
+      return buildYoutubeWatchUri(rawDeepLinkId, startSeconds: start)
+          .toString();
+    }
     final appUri = Uri.tryParse(normalized);
     if (appUri != null) {
       final deepLinkId = _extractYoutubeVideoId(appUri);
@@ -188,8 +202,7 @@ ParsedYoutubeLink? parseYoutubeLink(String rawUrl) {
   final embedUri = buildYoutubeEmbedUri(id, startSeconds: startSeconds);
 
   final appUri = Uri.parse(
-    'vnd.youtube://www.youtube.com/watch?v=$id'
-    '${startSeconds > 0 ? '&t=${startSeconds}s' : ''}',
+    'vnd.youtube://$id${startSeconds > 0 ? '?t=${startSeconds}s' : ''}',
   );
 
   return ParsedYoutubeLink(
@@ -202,14 +215,24 @@ ParsedYoutubeLink? parseYoutubeLink(String rawUrl) {
 }
 
 String? _extractYoutubeVideoId(Uri uri) {
-  final host = uri.host.toLowerCase();
+  final rawHost = uri.host;
+  final scheme = uri.scheme.toLowerCase();
+  final host = rawHost.toLowerCase();
   final pathSegments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
 
   String? candidate;
+  if ((scheme == 'vnd.youtube' || scheme == 'youtube') &&
+      _youtubeVideoIdPattern.hasMatch(rawHost)) {
+    candidate = rawHost;
+  } else if ((scheme == 'vnd.youtube' || scheme == 'youtube') &&
+      pathSegments.isNotEmpty &&
+      _youtubeVideoIdPattern.hasMatch(pathSegments.first)) {
+    candidate = pathSegments.first;
+  }
   if (host == 'youtu.be' || host.endsWith('.youtu.be')) {
     candidate = pathSegments.isNotEmpty ? pathSegments.first : null;
   } else {
-    if (uri.path == '/watch') {
+    if (uri.path.toLowerCase().startsWith('/watch')) {
       candidate = uri.queryParameters['v'] ?? uri.queryParameters['vi'];
     } else if (pathSegments.isNotEmpty) {
       final first = pathSegments.first.toLowerCase();
@@ -267,6 +290,12 @@ int _parseStartValue(String? raw) {
 String _extractLikelyExternalToken(String rawUrl) {
   final raw = rawUrl.replaceAll('\n', ' ').trim();
   if (raw.isEmpty) return '';
+  final lowered = raw.toLowerCase();
+  if (lowered.startsWith('intent://') ||
+      lowered.startsWith('vnd.youtube://') ||
+      lowered.startsWith('youtube://')) {
+    return raw;
+  }
 
   final match = _firstUrlPattern.firstMatch(raw);
   if (match != null) {
@@ -320,6 +349,90 @@ String? _extractRedirectUrlCandidate(String value) {
       return decoded;
     }
   }
+
+  return null;
+}
+
+String? _extractIntentFallbackCandidate(String value) {
+  final lowered = value.toLowerCase();
+  if (!lowered.startsWith('intent://')) return null;
+
+  String? extractFallback(String input) {
+    const marker = 'browser_fallback_url=';
+    final lowerInput = input.toLowerCase();
+    final index = lowerInput.indexOf(marker);
+    if (index < 0) return null;
+
+    var raw = input.substring(index + marker.length).trim();
+    if (raw.isEmpty) return null;
+
+    var end = raw.length;
+    for (final delimiter in const [';', '#', '&']) {
+      final delimiterIndex = raw.indexOf(delimiter);
+      if (delimiterIndex >= 0 && delimiterIndex < end) {
+        end = delimiterIndex;
+      }
+    }
+    raw = raw.substring(0, end).trim();
+    if (raw.isEmpty) return null;
+
+    final decodedOnce = _maybeDecodeEmbeddedUrl(raw)?.trim() ?? raw;
+    final decodedTwice =
+        _maybeDecodeEmbeddedUrl(decodedOnce)?.trim() ?? decodedOnce;
+    return decodedTwice;
+  }
+
+  final directFallback = extractFallback(value);
+  if (directFallback != null && directFallback.isNotEmpty) {
+    return directFallback;
+  }
+
+  final decodedValue = _maybeDecodeEmbeddedUrl(value);
+  if (decodedValue != null && decodedValue.isNotEmpty) {
+    final decodedFallback = extractFallback(decodedValue);
+    if (decodedFallback != null && decodedFallback.isNotEmpty) {
+      return decodedFallback;
+    }
+  }
+
+  final remainder = value.substring('intent://'.length);
+  final target = remainder.split('#Intent').first.trim();
+  if (target.isEmpty) return null;
+  if (target.startsWith('http://') || target.startsWith('https://')) {
+    return target;
+  }
+  return 'https://$target';
+}
+
+String? _extractYoutubeVideoIdFromRawAppLink(String raw) {
+  final schemeMatch = RegExp(
+    r'^(?:vnd\.youtube|youtube):\/\/',
+    caseSensitive: false,
+  ).firstMatch(raw);
+  if (schemeMatch == null) return null;
+
+  final payload = raw.substring(schemeMatch.end);
+
+  final directHostMatch = RegExp(
+    r'^([A-Za-z0-9_-]{11})(?:[/?#&].*)?$',
+  ).firstMatch(payload);
+  if (directHostMatch != null) return directHostMatch.group(1);
+
+  final watchHostMatch = RegExp(
+    r'^(?:www\.)?youtube\.com\/watch\?v=([A-Za-z0-9_-]{11})',
+    caseSensitive: false,
+  ).firstMatch(payload);
+  if (watchHostMatch != null) return watchHostMatch.group(1);
+
+  final watchPathMatch = RegExp(
+    r'^watch\?v=([A-Za-z0-9_-]{11})',
+    caseSensitive: false,
+  ).firstMatch(payload);
+  if (watchPathMatch != null) return watchPathMatch.group(1);
+
+  final queryParamMatch = RegExp(r'(?:[?&]v=)([A-Za-z0-9_-]{11})')
+      .firstMatch(payload);
+  if (queryParamMatch != null) return queryParamMatch.group(1);
 
   return null;
 }

@@ -21,8 +21,10 @@ import '../../providers/theme_provider.dart';
 import '../../services/supabase_service.dart';
 import '../../services/incoming_share_service.dart';
 import '../../services/sticker_service.dart';
+import '../../services/subscription_service.dart';
 import '../../widgets/success_overlay.dart';
 import '../../widgets/post_notice_dialog.dart';
+import '../../widgets/paywall_dialog.dart';
 import '../../models/user.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -53,10 +55,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final IncomingShareService _incomingShareService =
       IncomingShareService.instance;
   final StickerService _stickerService = StickerService();
+  final SubscriptionService _subscriptionService = SubscriptionService();
   int _currentIndex = 0;
   bool _showHelpOverlay = false;
   bool _canPostNotices = false;
   bool _roleLoading = true;
+  int _noticesRefreshToken = 0;
   StreamSubscription<IncomingSharePayload>? _shareSubscription;
   bool _isHandlingIncomingShare = false;
 
@@ -229,6 +233,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _installIncomingStickerPack(IncomingSharePayload payload) async {
+    final hasStickerAccess = await _ensurePremiumStickerAccess();
+    if (!hasStickerAccess) return;
+
     final paths = payload.stickerFiles.map((file) => file.pathValue).toList();
     if (paths.isEmpty) return;
 
@@ -263,6 +270,38 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
+  Future<bool> _ensurePremiumStickerAccess() async {
+    final hasPremium = await _subscriptionService.isPremium();
+    if (hasPremium) return true;
+    if (!mounted) return false;
+
+    final messenger = ScaffoldMessenger.of(context);
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => PaywallDialog(
+        onSuccess: () {
+          Navigator.of(dialogContext).pop(true);
+        },
+      ),
+    );
+
+    if (result == true && mounted) {
+      // Re-check premium status after successful purchase
+      final isPremium = await _subscriptionService.isPremium();
+      if (isPremium) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('Premium unlocked! Sticker feature enabled.'),
+          ),
+        );
+      }
+      return isPremium;
+    }
+
+    if (!mounted) return false;
+    return _subscriptionService.isPremium();
+  }
+
   Widget _getScreen(int index) {
     switch (index) {
       case 0:
@@ -280,7 +319,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           userEmail: _effectiveUserEmail,
         );
       case 2:
-        return NoticesScreen(collegeId: widget.collegeId);
+        return NoticesScreen(
+          collegeId: widget.collegeId,
+          refreshToken: _noticesRefreshToken,
+        );
       case 3:
         return ProfileScreen(
           collegeName: widget.collegeName,
@@ -564,7 +606,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       );
       if (!mounted) return;
       if (posted) {
-        setState(() => _currentIndex = 2);
+        setState(() {
+          _noticesRefreshToken++;
+        });
       }
       return;
     }
