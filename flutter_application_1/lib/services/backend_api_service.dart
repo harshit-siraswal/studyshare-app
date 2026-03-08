@@ -7,17 +7,31 @@ import 'package:flutter/material.dart';
 import '../config/app_config.dart';
 import 'recaptcha_service.dart';
 
+class _BackendApiHttpException implements Exception {
+  const _BackendApiHttpException({
+    required this.statusCode,
+    required this.message,
+  });
+
+  final int statusCode;
+  final String message;
+
+  @override
+  String toString() => 'Exception: $message';
+}
+
 /// Backend API client (same pattern as Studyspace/src/lib/api.ts).
 ///
 /// Use this for ALL privileged writes (create room, post, comment, upload, profile update).
 /// This avoids client-side Supabase inserts that fail under RLS with anon key.
 class BackendApiService {
-  BackendApiService({FirebaseAuth? firebaseAuth})
-    : _injectedAuth = firebaseAuth;
+  BackendApiService({FirebaseAuth? firebaseAuth, http.Client? httpClient})
+    : _injectedAuth = firebaseAuth,
+      _httpClient = httpClient ?? http.Client();
 
   final FirebaseAuth? _injectedAuth;
+  final http.Client _httpClient;
   bool _ragStreamUnavailable = false;
-  static final http.Client _httpClient = http.Client();
   static const Duration _requestTimeout = Duration(seconds: 20);
   static const Duration _streamRequestTimeout = Duration(seconds: 120);
   static const Duration _aiRequestTimeout = Duration(seconds: 120);
@@ -224,10 +238,14 @@ class BackendApiService {
       final msg =
           data?['message']?.toString() ?? data?['error']?.toString() ?? '';
       if (msg.trim().isNotEmpty) {
-        throw Exception(msg.trim());
+        throw _BackendApiHttpException(
+          statusCode: res.statusCode,
+          message: msg.trim(),
+        );
       }
-      throw Exception(
-        _friendlyHttpErrorMessage(
+      throw _BackendApiHttpException(
+        statusCode: res.statusCode,
+        message: _friendlyHttpErrorMessage(
           statusCode: res.statusCode,
           body: res.body,
           fallbackMessage: 'API request failed',
@@ -780,9 +798,29 @@ class BackendApiService {
     required String resourceId,
     String? bearerToken,
   }) async {
+    try {
+      await _requestJson(
+        '/api/admin/resources/${Uri.encodeComponent(resourceId)}',
+        method: 'DELETE',
+        bearerOverride: bearerToken,
+        requireAuthToken: true,
+      );
+      return;
+    } on _BackendApiHttpException catch (error) {
+      if (error.statusCode != 404 && error.statusCode != 405) {
+        rethrow;
+      }
+    }
+
     await _requestJson(
-      '/api/admin/resources/${Uri.encodeComponent(resourceId)}',
-      method: 'DELETE',
+      '/api/admin',
+      method: 'POST',
+      body: {
+        'action': 'delete_resource',
+        'resourceId': resourceId,
+        if ((bearerToken ?? '').trim().isNotEmpty)
+          'keyHash': bearerToken!.trim(),
+      },
       bearerOverride: bearerToken,
       requireAuthToken: true,
     );

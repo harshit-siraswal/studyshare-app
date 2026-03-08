@@ -3438,18 +3438,7 @@ class SupabaseService {
   Future<void> deleteResourceAsAdminWithFallback({
     required String resourceId,
   }) async {
-    try {
-      await _api.deleteResourceAsAdmin(resourceId: resourceId);
-      invalidateResourceListCache();
-      return;
-    } catch (backendError) {
-      debugPrint(
-        'Backend admin resource delete failed; falling back to direct delete: '
-        '$backendError',
-      );
-    }
-
-    await _client.from('resources').delete().eq('id', resourceId);
+    await _api.deleteResourceAsAdmin(resourceId: resourceId);
     invalidateResourceListCache();
   }
 
