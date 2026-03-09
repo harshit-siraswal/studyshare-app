@@ -114,17 +114,11 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
     try {
       final allNotices = await _supabaseService.getNotices(
         collegeId: widget.collegeId,
+        department: widget.account.id,
       );
 
-      // Filter by department
-      final deptNotices = allNotices.where((n) {
-        final dept =
-            n['department']?.toString() ?? n['department_id']?.toString() ?? '';
-        return dept.toLowerCase() == widget.account.id.toLowerCase();
-      }).toList();
-
       setState(() {
-        _notices = deptNotices;
+        _notices = allNotices;
         _isLoading = false;
       });
     } catch (e) {

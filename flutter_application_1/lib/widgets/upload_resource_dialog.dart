@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'dart:typed_data';
 import 'dart:io';
 import '../config/theme.dart';
+import '../models/resource.dart';
 import '../services/supabase_service.dart';
 import '../services/auth_service.dart';
 import '../services/backend_api_service.dart';
@@ -300,6 +301,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
 
       // Get user role dynamically for source tagging
       String uploaderSource = 'student';
+      var uploadStatus = Resource.pendingStatus;
       try {
         final userInfo = await supabaseService.getUserInfo(widget.userEmail);
         if (userInfo != null) {
@@ -322,8 +324,8 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
         'branch': _branch,
         'subject': _subject,
         'source': uploaderSource,
-        'file_url': filePath ?? resolvedVideoUrl,
-        'url': filePath ?? resolvedVideoUrl,
+        'is_teacher_upload': uploaderSource == 'teacher',
+        if (_typeIndex == 0) 'file_url': filePath,
         if (_typeIndex == 1) 'video_url': resolvedVideoUrl,
         if (_typeIndex == 0) 'pdf_url': filePath,
         'description': _description.trim(),
@@ -331,7 +333,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
         'topic': _topic.trim().isEmpty ? null : _topic.trim(),
         'uploaded_by_name': authService.displayName ?? 'Anonymous',
         'uploaded_by_email': widget.userEmail,
-        'status': 'pending',
+        'status': uploadStatus,
       }, context: context);
 
       int? contributionCount;

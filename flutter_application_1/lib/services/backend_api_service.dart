@@ -7,8 +7,8 @@ import 'package:flutter/material.dart';
 import '../config/app_config.dart';
 import 'recaptcha_service.dart';
 
-class _BackendApiHttpException implements Exception {
-  const _BackendApiHttpException({
+class BackendApiHttpException implements Exception {
+  const BackendApiHttpException({
     required this.statusCode,
     required this.message,
   });
@@ -20,6 +20,26 @@ class _BackendApiHttpException implements Exception {
   String toString() => 'Exception: $message';
 }
 
+const Set<int> kBackendCompatibilityFallbackStatuses = <int>{
+  404,
+  405,
+  406,
+  415,
+  501,
+};
+
+bool isBackendCompatibilityFallbackError(Object error) {
+  if (error is BackendApiHttpException) {
+    return kBackendCompatibilityFallbackStatuses.contains(error.statusCode);
+  }
+
+  final message = error.toString().toLowerCase();
+  return message.contains('http 404') ||
+      message.contains('http 405') ||
+      message.contains('http 406') ||
+      message.contains('http 415') ||
+      message.contains('http 501');
+}
 /// Backend API client (same pattern as Studyspace/src/lib/api.ts).
 ///
 /// Use this for ALL privileged writes (create room, post, comment, upload, profile update).
@@ -111,10 +131,11 @@ class BackendApiService {
     Map<String, dynamic>? body,
     Duration timeout,
   ) async {
-    final encodedBody = jsonEncode(body ?? {});
+    final encodedBody = body == null ? null : jsonEncode(body);
     final future = switch (method.toUpperCase()) {
       'POST' => _httpClient.post(uri, headers: headers, body: encodedBody),
       'PUT' => _httpClient.put(uri, headers: headers, body: encodedBody),
+      'PATCH' => _httpClient.patch(uri, headers: headers, body: encodedBody),
       'DELETE' => _httpClient.delete(uri, headers: headers, body: encodedBody),
       _ => _httpClient.get(uri, headers: headers),
     };
@@ -238,12 +259,12 @@ class BackendApiService {
       final msg =
           data?['message']?.toString() ?? data?['error']?.toString() ?? '';
       if (msg.trim().isNotEmpty) {
-        throw _BackendApiHttpException(
+        throw BackendApiHttpException(
           statusCode: res.statusCode,
           message: msg.trim(),
         );
       }
-      throw _BackendApiHttpException(
+      throw BackendApiHttpException(
         statusCode: res.statusCode,
         message: _friendlyHttpErrorMessage(
           statusCode: res.statusCode,
@@ -280,13 +301,13 @@ class BackendApiService {
     return _requestJson(
       '/api/chat/rooms',
       method: 'POST',
-      body: {
+      body: <String, dynamic>{
         'name': name,
-        'description': ?description,
         'isPrivate': isPrivate,
         'collegeId': collegeId,
-        'durationInDays': ?durationInDays,
-        'tags': ?tags,
+        if (description != null) 'description': description,
+        if (durationInDays != null) 'durationInDays': durationInDays,
+        if (tags != null) 'tags': tags,
       },
     );
   }
@@ -312,11 +333,11 @@ class BackendApiService {
     return _requestJson(
       '/api/chat/messages',
       method: 'POST',
-      body: {
+      body: <String, dynamic>{
         'roomId': roomId,
         'content': content,
-        'imageUrl': ?imageUrl,
-        'authorName': ?authorName,
+        if (imageUrl != null) 'imageUrl': imageUrl,
+        if (authorName != null) 'authorName': authorName,
       },
     );
   }
@@ -374,11 +395,11 @@ class BackendApiService {
     return _requestJson(
       '/api/chat/comments',
       method: 'POST',
-      body: {
+      body: <String, dynamic>{
         'messageId': messageId,
         'content': content,
-        'authorName': ?authorName,
-        'parentId': ?parentId,
+        if (authorName != null) 'authorName': authorName,
+        if (parentId != null) 'parentId': parentId,
       },
     );
   }
@@ -470,9 +491,21 @@ class BackendApiService {
     return path;
   }
 
-  Future<List<Map<String, dynamic>>> getNotices(String collegeId) async {
-    final data = await _requestJson(
+  Future<List<Map<String, dynamic>>> getNotices(
+    String collegeId, {
+    String? department,
+  }) async {
+    final query = StringBuffer(
       '/api/notices?college_id=${Uri.encodeQueryComponent(collegeId)}',
+    );
+    final normalizedDepartment = department?.trim();
+    if (normalizedDepartment != null && normalizedDepartment.isNotEmpty) {
+      query.write(
+        '&department=${Uri.encodeQueryComponent(normalizedDepartment)}',
+      );
+    }
+    final data = await _requestJson(
+      query.toString(),
       method: 'GET',
     );
     final list = (data['notices'] as List?) ?? const [];
@@ -485,18 +518,26 @@ class BackendApiService {
     required String content,
     String department = 'general',
     String? imageUrl,
+    String? fileUrl,
   }) async {
+    final normalizedImageUrl = imageUrl?.trim();
+    final normalizedFileUrl = fileUrl?.trim();
+    final effectiveAttachmentUrl = (normalizedFileUrl?.isNotEmpty ?? false)
+        ? normalizedFileUrl
+        : ((normalizedImageUrl?.isNotEmpty ?? false)
+              ? normalizedImageUrl
+              : null);
+
     return _requestJson(
       '/api/notices',
       method: 'POST',
-      body: {
-        // API currently expects imageUrl and fileUrl to match for notice attachments.
+      body: <String, dynamic>{
         'collegeId': collegeId,
         'title': title,
         'content': content,
         'department': department,
-        'imageUrl': ?imageUrl,
-        'fileUrl': ?imageUrl,
+        if (effectiveAttachmentUrl != null) 'imageUrl': effectiveAttachmentUrl,
+        if (effectiveAttachmentUrl != null) 'fileUrl': effectiveAttachmentUrl,
       },
     );
   }
@@ -522,7 +563,10 @@ class BackendApiService {
     return _requestJson(
       '${_noticePath(noticeId)}/comments',
       method: 'POST',
-      body: {'content': content, 'parentId': ?parentId},
+      body: <String, dynamic>{
+        'content': content,
+        if (parentId != null) 'parentId': parentId,
+      },
     );
   }
 
@@ -628,11 +672,11 @@ class BackendApiService {
     return _requestJson(
       '/api/payments/order',
       method: 'POST',
-      body: {
+      body: <String, dynamic>{
         'purchaseType': purchaseType,
-        'planId': ?planId,
-        'rechargeRupees': ?rechargeRupees,
-        'amount': ?amount,
+        if (planId != null) 'planId': planId,
+        if (rechargeRupees != null) 'rechargeRupees': rechargeRupees,
+        if (amount != null) 'amount': amount,
       },
     );
   }
@@ -806,7 +850,7 @@ class BackendApiService {
         requireAuthToken: true,
       );
       return;
-    } on _BackendApiHttpException catch (error) {
+    } on BackendApiHttpException catch (error) {
       if (error.statusCode != 404 && error.statusCode != 405) {
         rethrow;
       }
@@ -826,6 +870,76 @@ class BackendApiService {
     );
   }
 
+  Future<void> deleteOwnedResource({
+    required String resourceId,
+    String? bearerToken,
+    String? fileUrl,
+    String? thumbnailUrl,
+    String? uploadedByEmail,
+  }) async {
+    final normalizedFileUrl = fileUrl?.trim();
+    final normalizedThumbnailUrl = thumbnailUrl?.trim();
+    final normalizedUploadedByEmail = uploadedByEmail?.trim().toLowerCase();
+    final deletePayload = <String, dynamic>{
+      if (normalizedFileUrl != null && normalizedFileUrl.isNotEmpty)
+        'fileUrl': normalizedFileUrl,
+      if (normalizedFileUrl != null && normalizedFileUrl.isNotEmpty)
+        'file_url': normalizedFileUrl,
+      if (normalizedThumbnailUrl != null && normalizedThumbnailUrl.isNotEmpty)
+        'thumbnailUrl': normalizedThumbnailUrl,
+      if (normalizedThumbnailUrl != null && normalizedThumbnailUrl.isNotEmpty)
+        'thumbnail_url': normalizedThumbnailUrl,
+      if (normalizedUploadedByEmail != null &&
+          normalizedUploadedByEmail.isNotEmpty)
+        'uploadedByEmail': normalizedUploadedByEmail,
+      if (normalizedUploadedByEmail != null &&
+          normalizedUploadedByEmail.isNotEmpty)
+        'uploaded_by_email': normalizedUploadedByEmail,
+    };
+
+    try {
+      await _requestJson(
+        '/api/resources/${Uri.encodeComponent(resourceId)}',
+        method: 'DELETE',
+        body: deletePayload.isEmpty ? null : deletePayload,
+        bearerOverride: bearerToken,
+        requireAuthToken: true,
+      );
+      return;
+    } on BackendApiHttpException catch (error) {
+      if (error.statusCode != 404 && error.statusCode != 405) {
+        rethrow;
+      }
+    }
+
+    await _requestJson(
+      '/api/admin',
+      method: 'POST',
+      body: {
+        'action': 'delete_resource',
+        'resourceId': resourceId,
+        if ((bearerToken ?? '').trim().isNotEmpty)
+          'keyHash': bearerToken!.trim(),
+        if (normalizedFileUrl != null && normalizedFileUrl.isNotEmpty)
+          'fileUrl': normalizedFileUrl,
+        if (normalizedFileUrl != null && normalizedFileUrl.isNotEmpty)
+          'file_url': normalizedFileUrl,
+        if (normalizedThumbnailUrl != null && normalizedThumbnailUrl.isNotEmpty)
+          'thumbnailUrl': normalizedThumbnailUrl,
+        if (normalizedThumbnailUrl != null && normalizedThumbnailUrl.isNotEmpty)
+          'thumbnail_url': normalizedThumbnailUrl,
+        if (normalizedUploadedByEmail != null &&
+            normalizedUploadedByEmail.isNotEmpty)
+          'uploadedByEmail': normalizedUploadedByEmail,
+        if (normalizedUploadedByEmail != null &&
+            normalizedUploadedByEmail.isNotEmpty)
+          'uploaded_by_email': normalizedUploadedByEmail,
+      },
+      bearerOverride: bearerToken,
+      requireAuthToken: true,
+    );
+  }
+
   Future<Map<String, dynamic>> banUserAsAdmin({
     required String email,
     String? bearerToken,
@@ -835,10 +949,10 @@ class BackendApiService {
     return _requestJson(
       '/api/admin/users-ban',
       method: 'POST',
-      body: {
+      body: <String, dynamic>{
         'email': email.trim().toLowerCase(),
-        'reason': ?reason,
-        'collegeId': ?collegeId,
+        if (reason != null) 'reason': reason,
+        if (collegeId != null) 'collegeId': collegeId,
       },
       bearerOverride: bearerToken,
       requireAuthToken: true,
@@ -899,7 +1013,7 @@ class BackendApiService {
     return _requestJson(
       '/api/admin',
       method: 'POST',
-      body: {
+      body: <String, dynamic>{
         'action': 'upload_syllabus',
         'collegeId': collegeId,
         'semester': semester,
@@ -907,7 +1021,7 @@ class BackendApiService {
         'subject': subject,
         'title': title,
         'pdfUrl': pdfUrl,
-        'academicYear': ?academicYear,
+        if (academicYear != null) 'academicYear': academicYear,
       },
       bearerOverride: bearerToken,
       requireAuthToken: true,
@@ -1019,15 +1133,15 @@ class BackendApiService {
       '/api/ai/summary',
       method: 'POST',
       timeout: _aiRequestTimeout,
-      body: {
+      body: <String, dynamic>{
         'file_id': fileId,
-        'college_id': ?collegeId,
-        'use_ocr': ?useOcr,
-        'force_ocr': ?forceOcr,
-        'ocr_provider': ?ocrProvider,
-        'force': ?force,
-        'include_source': ?includeSource,
-        'video_url': ?videoUrl,
+        if (collegeId != null) 'college_id': collegeId,
+        if (useOcr != null) 'use_ocr': useOcr,
+        if (forceOcr != null) 'force_ocr': forceOcr,
+        if (ocrProvider != null) 'ocr_provider': ocrProvider,
+        if (force != null) 'force': force,
+        if (includeSource != null) 'include_source': includeSource,
+        if (videoUrl != null) 'video_url': videoUrl,
       },
     );
   }
@@ -1046,15 +1160,15 @@ class BackendApiService {
       '/api/ai/quiz',
       method: 'POST',
       timeout: _aiRequestTimeout,
-      body: {
+      body: <String, dynamic>{
         'file_id': fileId,
-        'college_id': ?collegeId,
-        'use_ocr': ?useOcr,
-        'force_ocr': ?forceOcr,
-        'ocr_provider': ?ocrProvider,
-        'force': ?force,
-        'include_source': ?includeSource,
-        'video_url': ?videoUrl,
+        if (collegeId != null) 'college_id': collegeId,
+        if (useOcr != null) 'use_ocr': useOcr,
+        if (forceOcr != null) 'force_ocr': forceOcr,
+        if (ocrProvider != null) 'ocr_provider': ocrProvider,
+        if (force != null) 'force': force,
+        if (includeSource != null) 'include_source': includeSource,
+        if (videoUrl != null) 'video_url': videoUrl,
       },
     );
   }
@@ -1073,15 +1187,15 @@ class BackendApiService {
       '/api/ai/flashcards',
       method: 'POST',
       timeout: _aiRequestTimeout,
-      body: {
+      body: <String, dynamic>{
         'file_id': fileId,
-        'college_id': ?collegeId,
-        'use_ocr': ?useOcr,
-        'force_ocr': ?forceOcr,
-        'ocr_provider': ?ocrProvider,
-        'force': ?force,
-        'include_source': ?includeSource,
-        'video_url': ?videoUrl,
+        if (collegeId != null) 'college_id': collegeId,
+        if (useOcr != null) 'use_ocr': useOcr,
+        if (forceOcr != null) 'force_ocr': forceOcr,
+        if (ocrProvider != null) 'ocr_provider': ocrProvider,
+        if (force != null) 'force': force,
+        if (includeSource != null) 'include_source': includeSource,
+        if (videoUrl != null) 'video_url': videoUrl,
       },
     );
   }
@@ -1097,13 +1211,13 @@ class BackendApiService {
     return _requestJson(
       '/api/ai/find',
       method: 'POST',
-      body: {
+      body: <String, dynamic>{
         'file_id': fileId,
         'query': query,
-        'college_id': ?collegeId,
-        'use_ocr': ?useOcr,
-        'force_ocr': ?forceOcr,
-        'ocr_provider': ?ocrProvider,
+        if (collegeId != null) 'college_id': collegeId,
+        if (useOcr != null) 'use_ocr': useOcr,
+        if (forceOcr != null) 'force_ocr': forceOcr,
+        if (ocrProvider != null) 'ocr_provider': ocrProvider,
       },
     );
   }
@@ -1127,20 +1241,20 @@ class BackendApiService {
       '/api/rag/query',
       method: 'POST',
       timeout: _aiRequestTimeout,
-      body: {
+      body: <String, dynamic>{
         'question': question,
-        'college_id': ?collegeId,
-        'session_id': ?sessionId,
-        'top_k': ?topK,
-        'min_score': ?minScore,
-        'allow_web': ?allowWeb,
-        'file_id': ?fileId,
-        'use_ocr': ?useOcr,
-        'force_ocr': ?forceOcr,
-        'ocr_provider': ?ocrProvider,
-        'attachments': ?attachments,
-        'history': ?history,
-        'filters': ?filters,
+        if (collegeId != null) 'college_id': collegeId,
+        if (sessionId != null) 'session_id': sessionId,
+        if (topK != null) 'top_k': topK,
+        if (minScore != null) 'min_score': minScore,
+        if (allowWeb != null) 'allow_web': allowWeb,
+        if (fileId != null) 'file_id': fileId,
+        if (useOcr != null) 'use_ocr': useOcr,
+        if (forceOcr != null) 'force_ocr': forceOcr,
+        if (ocrProvider != null) 'ocr_provider': ocrProvider,
+        if (attachments != null) 'attachments': attachments,
+        if (history != null) 'history': history,
+        if (filters != null) 'filters': filters,
       },
     );
   }
@@ -1203,10 +1317,10 @@ class BackendApiService {
     return _requestJson(
       '/api/notebooks/sources/${Uri.encodeComponent(sourceId)}/request-reupload',
       method: 'POST',
-      body: {
+      body: <String, dynamic>{
         'replacement_file_id': replacementFileId,
-        'reason': ?reason,
-        'ocr_error_code': ?ocrErrorCode,
+        if (reason != null) 'reason': reason,
+        if (ocrErrorCode != null) 'ocr_error_code': ocrErrorCode,
       },
     );
   }
@@ -1218,7 +1332,7 @@ class BackendApiService {
     return _requestJson(
       '/api/notebooks/sources/${Uri.encodeComponent(sourceId)}/retry-now',
       method: 'POST',
-      body: {'reason': ?reason},
+      body: <String, dynamic>{if (reason != null) 'reason': reason},
     );
   }
 
@@ -1229,7 +1343,7 @@ class BackendApiService {
     return _requestJson(
       '/api/notebooks/sources/${Uri.encodeComponent(sourceId)}/cancel-retry',
       method: 'POST',
-      body: {'reason': ?reason},
+      body: <String, dynamic>{if (reason != null) 'reason': reason},
     );
   }
 
@@ -1304,13 +1418,16 @@ class BackendApiService {
     if (normalizedSources.isNotEmpty || noLocal) {
       yield jsonEncode({
         'type': 'metadata',
-        'data': {
+        'data': <String, dynamic>{
           'sources': normalizedSources,
           'no_local': noLocal,
-          'retrieval_score': ?retrievalScore,
-          'llm_confidence_score': ?llmConfidenceScore,
-          'combined_confidence': ?combinedConfidence,
-          'ocr_failure_affects_retrieval': ?ocrFailureAffectsRetrieval,
+          if (retrievalScore != null) 'retrieval_score': retrievalScore,
+          if (llmConfidenceScore != null)
+            'llm_confidence_score': llmConfidenceScore,
+          if (combinedConfidence != null)
+            'combined_confidence': combinedConfidence,
+          if (ocrFailureAffectsRetrieval != null)
+            'ocr_failure_affects_retrieval': ocrFailureAffectsRetrieval,
         },
       });
     }
@@ -1374,20 +1491,20 @@ class BackendApiService {
 
     final request = http.Request('POST', uri)
       ..headers.addAll(headers)
-      ..body = jsonEncode({
+      ..body = jsonEncode(<String, dynamic>{
         'question': question,
-        'college_id': ?collegeId,
-        'session_id': ?sessionId,
-        'top_k': ?topK,
-        'min_score': ?minScore,
-        'allow_web': ?allowWeb,
-        'file_id': ?fileId,
-        'use_ocr': ?useOcr,
-        'force_ocr': ?forceOcr,
-        'ocr_provider': ?ocrProvider,
-        'attachments': ?attachments,
-        'history': ?history,
-        'filters': ?filters,
+        if (collegeId != null) 'college_id': collegeId,
+        if (sessionId != null) 'session_id': sessionId,
+        if (topK != null) 'top_k': topK,
+        if (minScore != null) 'min_score': minScore,
+        if (allowWeb != null) 'allow_web': allowWeb,
+        if (fileId != null) 'file_id': fileId,
+        if (useOcr != null) 'use_ocr': useOcr,
+        if (forceOcr != null) 'force_ocr': forceOcr,
+        if (ocrProvider != null) 'ocr_provider': ocrProvider,
+        if (attachments != null) 'attachments': attachments,
+        if (history != null) 'history': history,
+        if (filters != null) 'filters': filters,
       });
 
     http.StreamedResponse response;
@@ -1480,7 +1597,7 @@ class BackendApiService {
     );
   }
 
-  /// Delete FCM token (on logout)
+  /// Delete the current install token using backend-owned token semantics.
   Future<void> deleteFcmToken(String token) async {
     await _requestJson(
       '/api/notifications/fcm-token',
