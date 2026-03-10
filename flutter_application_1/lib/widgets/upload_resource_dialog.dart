@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:typed_data';
 import 'dart:io';
+import 'package:crypto/crypto.dart';
 import '../config/theme.dart';
 import '../models/resource.dart';
 import '../services/supabase_service.dart';
@@ -48,6 +49,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
   String _topic = '';
   String _videoUrl = '';
   PlatformFile? _selectedFile;
+  Map<String, dynamic>? _academicCatalog;
 
   bool _isUploading = false;
   double _uploadProgress = 0;
@@ -56,6 +58,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
   late TextEditingController _titleController;
+  late TextEditingController _subjectController;
 
   // Compact config data
   static const _allowedFileExtensions = [
@@ -79,18 +82,54 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
   };
 
   List<String> get availableSubjects =>
-      getSubjectsForBranchAndSemester(_branch, _semester);
+      _catalogSubjectsForCurrentScope.isNotEmpty
+          ? _catalogSubjectsForCurrentScope
+          : getSubjectsForBranchAndSemester(_branch, _semester);
+
+  List<String> get _catalogSubjectsForCurrentScope {
+    final offerings = (_academicCatalog?['offerings'] as List?) ?? const [];
+    if (_branch.isEmpty || _semester.isEmpty) return const <String>[];
+    final subjects = offerings
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .where(
+          (item) =>
+              item['branch']?.toString() == _branch &&
+              item['semester']?.toString() == _semester,
+        )
+        .map((item) => item['subject']?.toString().trim() ?? '')
+        .where((subject) => subject.isNotEmpty)
+        .toSet()
+        .toList();
+    subjects.sort();
+    return subjects;
+  }
+
+  bool get _isCatalogSelectMode {
+    final branchModes = (_academicCatalog?['branchModes'] as List?) ?? const [];
+    return branchModes
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .any(
+          (item) =>
+              item['branch']?.toString() == _branch &&
+              item['semester']?.toString() == _semester &&
+              item['mode']?.toString() == 'catalog_select',
+        );
+  }
 
   @override
   void initState() {
     super.initState();
     _titleController = TextEditingController();
+    _subjectController = TextEditingController();
     _animController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 300),
     );
     _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
     _animController.forward();
+    _loadAcademicCatalog();
 
     final prefilledFile = widget.prefilledFile;
     if (prefilledFile != null) {
@@ -110,10 +149,22 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     }
   }
 
+  Future<void> _loadAcademicCatalog() async {
+    try {
+      final backendApi = BackendApiService();
+      final catalog = await backendApi.getAcademicCatalog();
+      if (!mounted) return;
+      setState(() => _academicCatalog = catalog);
+    } catch (e) {
+      debugPrint('Failed to load academic catalog: $e');
+    }
+  }
+
   @override
   void dispose() {
     _animController.dispose();
     _titleController.dispose();
+    _subjectController.dispose();
     super.dispose();
   }
 
@@ -127,6 +178,27 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     final dot = filename.lastIndexOf('.');
     final base = dot > 0 ? filename.substring(0, dot) : filename;
     return base.replaceAll('_', ' ').trim();
+  }
+
+  Future<String> _computeSha256Hex(List<int> bytes) async {
+    return compute(_sha256Sync, bytes);
+  }
+
+  static String _sha256Sync(List<int> bytes) {
+    return sha256.convert(bytes).toString();
+  }
+
+  void _setSubjectValue(String value) {
+    _subject = value;
+    if (_subjectController.text == value) return;
+    _subjectController.value = TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: value.length),
+    );
+  }
+
+  void _clearSubjectValue() {
+    _setSubjectValue('');
   }
 
   Future<void> _pickFile() async {
@@ -200,11 +272,6 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
       final youtube = parseYoutubeLink(normalizedVideo);
       resolvedVideoUrl = (youtube?.watchUri ?? uri).toString();
     }
-    if (_typeIndex == 0 &&
-        _selectedFile != null &&
-        _selectedFile!.size > 10 * 1024 * 1024) {
-      return _showError('File must be under 10MB');
-    }
 
     setState(() {
       _isUploading = true;
@@ -234,6 +301,13 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
       // Progress: preparing
       setState(() => _uploadProgress = 0.2);
 
+      final selectedScope = <String, dynamic>{
+        'branch': _branch,
+        'semester': _semester,
+        'subject': _subject.trim(),
+      };
+      String? fileSha256;
+
       // Upload file to R2 if notes/pyq
       String? filePath;
       if (_typeIndex == 0 && _selectedFile != null) {
@@ -262,31 +336,46 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
             );
           }
 
-          final presign = await backendApi.getResourceUploadUrl(
+          fileSha256 = await _computeSha256Hex(bytes);
+
+          final uploadPlan = await backendApi.planResourceUpload(
             filename: file.name,
-          );
-          final uploadUrl = presign['uploadUrl']?.toString();
-          final publicUrl = presign['publicUrl']?.toString();
-
-          if (uploadUrl == null || publicUrl == null) {
-            throw Exception('Failed to get upload URL');
-          }
-
-          final response = await http.put(
-            Uri.parse(uploadUrl),
-            headers: {
-              'Content-Type': _getContentType(file.name),
-              'Cache-Control': 'max-age=31536000',
-              'Content-Length': bytes.length.toString(),
-            },
-            body: bytes,
+            contentType: _getContentType(file.name),
+            sizeBytes: file.size,
+            fileSha256: fileSha256,
+            type: _resourceType,
+            selectedScope: selectedScope,
           );
 
-          if (response.statusCode < 200 || response.statusCode >= 300) {
-            throw Exception('Upload failed: ${response.statusCode}');
-          }
+          if (uploadPlan['mode']?.toString() == 'reuse') {
+            final preview = uploadPlan['resourcePreview'] as Map?;
+            filePath =
+                preview?['file_url']?.toString() ??
+                preview?['filePath']?.toString();
+          } else {
+            final uploadUrl = uploadPlan['uploadUrl']?.toString();
+            final publicUrl = uploadPlan['publicUrl']?.toString();
 
-          filePath = publicUrl;
+            if (uploadUrl == null || publicUrl == null) {
+              throw Exception('Failed to get upload URL');
+            }
+
+            final response = await http.put(
+              Uri.parse(uploadUrl),
+              headers: {
+                'Content-Type': _getContentType(file.name),
+                'Cache-Control': 'max-age=31536000',
+                'Content-Length': bytes.length.toString(),
+              },
+              body: bytes,
+            );
+
+            if (response.statusCode < 200 || response.statusCode >= 300) {
+              throw Exception('Upload failed: ${response.statusCode}');
+            }
+
+            filePath = publicUrl;
+          }
         } catch (e) {
           _showError('File submission failed: $e');
           setState(() {
@@ -314,20 +403,20 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
         debugPrint('Error fetching user role for upload: $e');
       }
 
-      // Create resource with backend-first fallback so uploads still work
-      // when the API deployment is behind the app.
-      await supabaseService.createResourceWithFallback({
+      await backendApi.createResource({
         'college_id': widget.collegeId,
         'title': _title.trim(),
         'type': _typeIndex == 1 ? 'video' : _resourceType,
         'semester': _semester,
         'branch': _branch,
         'subject': _subject,
+        'selectedScope': selectedScope,
         'source': uploaderSource,
         'is_teacher_upload': uploaderSource == 'teacher',
         if (_typeIndex == 0) 'file_url': filePath,
         if (_typeIndex == 1) 'video_url': resolvedVideoUrl,
         if (_typeIndex == 0) 'pdf_url': filePath,
+        if (_typeIndex == 0 && fileSha256 != null) 'fileSha256': fileSha256,
         'description': _description.trim(),
         'chapter': _chapter.trim().isEmpty ? null : _chapter.trim(),
         'topic': _topic.trim().isEmpty ? null : _topic.trim(),
@@ -500,7 +589,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
                                   color: isDark
-                                      ? AppTheme.textLight
+                                      ? AppTheme.textOnDark
                                       : AppTheme.textPrimary,
                                 ),
                               ),
@@ -606,7 +695,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                             _semester,
                             (v) => setState(() {
                               _semester = v;
-                              _subject = '';
+                              _clearSubjectValue();
                             }),
                             isDark,
                           ),
@@ -626,7 +715,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                                       .key,
                             (v) => setState(() {
                               _branch = branches[v] ?? '';
-                              _subject = '';
+                              _clearSubjectValue();
                             }),
                             isDark,
                           ),
@@ -637,13 +726,55 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
 
                     // Subject
                     if (_branch.isNotEmpty)
-                      _buildChipSelector(
-                        'Subject',
-                        availableSubjects,
-                        _subject,
-                        (v) => setState(() => _subject = v),
-                        isDark,
-                      ),
+                      (_isCatalogSelectMode
+                          ? _buildChipSelector(
+                              'Subject',
+                              availableSubjects,
+                              _subject,
+                              (v) => setState(() => _setSubjectValue(v)),
+                              isDark,
+                            )
+                          : TextField(
+                              controller: _subjectController,
+                              onChanged: (value) =>
+                                  setState(() => _subject = value),
+                              enabled: !_isUploading && _semester.isNotEmpty,
+                              style: GoogleFonts.inter(
+                                color: isDark
+                                    ? Colors.white
+                                    : AppTheme.textPrimary,
+                                fontSize: 14,
+                              ),
+                              decoration: InputDecoration(
+                                hintText: _semester.isEmpty
+                                    ? 'Select semester first'
+                                    : 'Enter subject',
+                                hintStyle: TextStyle(
+                                  color: isDark
+                                      ? AppTheme.textMuted
+                                      : Colors.grey.shade500,
+                                ),
+                                filled: true,
+                                fillColor: isDark
+                                    ? Colors.black26
+                                    : Colors.grey.shade100,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                  borderSide: BorderSide.none,
+                                ),
+                                prefixIcon: Icon(
+                                  Icons.menu_book_rounded,
+                                  size: 18,
+                                  color: isDark
+                                      ? AppTheme.textMuted
+                                      : Colors.grey.shade500,
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 12,
+                                ),
+                              ),
+                            )),
                     if (_branch.isNotEmpty) const SizedBox(height: 12),
 
                     // Chapter & Topic

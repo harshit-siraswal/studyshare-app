@@ -291,6 +291,7 @@ class _AppRootState extends State<AppRoot> {
     if (lastOwner != null &&
         lastOwner.isNotEmpty &&
         lastOwner != normalizedEmail) {
+      // The backend now treats token ownership as one-install-to-one-user.
       await _unregisterFcmToken(token, reason: 'account_switch');
       _lastRegisteredFcmToken = null;
     }
@@ -485,6 +486,21 @@ class _AppRootState extends State<AppRoot> {
         await _pushService.initialize(
           onTokenRefresh: (token) async {
             await _ensureFcmTokenOwnership(token);
+          },
+          onTokenInvalidated: (token) async {
+            _lastRegisteredFcmToken = null;
+            await _unregisterFcmToken(
+              token,
+              reason: 'notifications_disabled',
+            );
+            try {
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.remove(_fcmOwnerEmailKey);
+            } catch (e, st) {
+              debugPrint(
+                'Failed to remove FCM owner email from prefs: $e\n$st',
+              );
+            }
           },
           onMessageReceived: (message) {
             debugPrint('Foreground message: ${message.notification?.title}');

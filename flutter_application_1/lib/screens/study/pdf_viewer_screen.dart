@@ -28,7 +28,7 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   PdfTextSearchResult _searchResult = PdfTextSearchResult();
   final TextEditingController _searchController = TextEditingController();
   bool _showSearchBar = false;
-  bool _isSearching = false;
+  VoidCallback? _searchListener;
 
   @override
   void initState() {
@@ -38,23 +38,29 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
   @override
   void dispose() {
+    if (_searchListener != null) {
+      _searchResult.removeListener(_searchListener!);
+    }
     _searchController.dispose();
+    _pdfViewerController.dispose();
     super.dispose();
   }
 
   void _handleSearch(String query) {
     if (query.isEmpty) return;
-    setState(() => _isSearching = true);
-    
+
+    // Remove previous listener to prevent duplicate setState calls.
+    if (_searchListener != null) {
+      _searchResult.removeListener(_searchListener!);
+      _searchListener = null;
+    }
+
     _searchResult = _pdfViewerController.searchText(query);
-    
-    _searchResult.addListener(() {
-      if (mounted) {
-        setState(() {});
-      }
-    });
-    
-    if (mounted) setState(() => _isSearching = false);
+
+    _searchListener = () {
+      if (mounted) setState(() {});
+    };
+    _searchResult.addListener(_searchListener!);
   }
 
   void _clearSearch() {

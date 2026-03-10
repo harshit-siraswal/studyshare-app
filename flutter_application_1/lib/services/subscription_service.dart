@@ -5,6 +5,7 @@ import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../config/app_config.dart';
+import '../models/resource.dart';
 import 'backend_api_service.dart';
 import 'supabase_service.dart';
 
@@ -81,7 +82,8 @@ class SubscriptionService {
     if (cachedEmail != email) {
       await _clearPremiumCache(prefs);
     }
-    if (_hasFreshPremiumCache(normalizedEmail) && _cachedPremiumStatus != null) {
+    if (_hasFreshPremiumCache(normalizedEmail) &&
+        _cachedPremiumStatus != null) {
       return _cachedPremiumStatus!;
     }
     final localPremiumUntilStr = prefs.getString('premium_until');
@@ -145,7 +147,11 @@ class SubscriptionService {
               .from('resources')
               .select('id')
               .eq('uploaded_by_email', email)
-              .eq('status', 'approved')
+              .or(
+                Resource.buildStatusOrFilter(const [
+                  Resource.approvedStatus,
+                ], includeLegacyApprovalFlag: true),
+              )
               .count(CountOption.exact);
 
           final uploadCount = response.count;

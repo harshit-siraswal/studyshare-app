@@ -25,6 +25,7 @@ import '../../widgets/study/department_card_3d.dart';
 import '../../data/academic_subjects_data.dart';
 import '../../data/departments_data.dart'; // Added for DepartmentData and DepartmentsProvider
 import '../../utils/admin_access.dart';
+import 'syllabus_screen.dart';
 
 class StudyScreen extends StatefulWidget {
   final String collegeId;
@@ -91,9 +92,15 @@ class _StudyScreenState extends State<StudyScreen>
   bool _moderationRelevantOnly = true;
   bool _isResourceScopeToggleLoading = false;
   bool _canManageAdminResources = false;
+  bool _canUploadSyllabus = false;
   String _followingSearchQuery = '';
   List<Resource>? _cachedFilteredFollowingResources;
   String _lastFollowingFilterQuery = '';
+
+  void _invalidateFollowingFilterCache() {
+    _cachedFilteredFollowingResources = null;
+    _lastFollowingFilterQuery = '';
+  }
 
   // Filters
   String? _selectedSemester;
@@ -194,6 +201,10 @@ class _StudyScreenState extends State<StudyScreen>
           : null;
       final normalizedBranchCode = normalizeBranchCode(branch);
       final canManageAdminResources = canManageAdminResourcesProfile(profile);
+      final canUploadSyllabus =
+          canUploadSyllabusProfile(profile) ||
+          isTeacherOrAdminProfile(profile) ||
+          resolveEffectiveProfileRole(profile) == appRoleModerator;
       if (mounted) {
         setState(() {
           _profileSemesterFilter = semester;
@@ -204,6 +215,7 @@ class _StudyScreenState extends State<StudyScreen>
               ? (branch ?? _userBranch)
               : normalizedBranchCode;
           _canManageAdminResources = canManageAdminResources;
+          _canUploadSyllabus = canUploadSyllabus;
         });
       }
     } catch (e) {
@@ -300,6 +312,7 @@ class _StudyScreenState extends State<StudyScreen>
           _activeModerationBranchFilter = selectedScope.branch;
           _activeModerationSubjectFilter = selectedScope.subject;
           _followingResources = resources;
+          _invalidateFollowingFilterCache();
           _hasMoreModeration = resources.length >= _moderationPageSize;
           _isLoadingMoreModeration = false;
           _isLoadingFollowing = false;
@@ -310,6 +323,7 @@ class _StudyScreenState extends State<StudyScreen>
           if (!mounted) return;
           setState(() {
             _followingResources = [];
+            _invalidateFollowingFilterCache();
             _isLoadingFollowing = false;
             _hasMoreModeration = false;
             _isLoadingMoreModeration = false;
@@ -324,6 +338,7 @@ class _StudyScreenState extends State<StudyScreen>
         if (!mounted) return;
         setState(() {
           _followingResources = resources;
+          _invalidateFollowingFilterCache();
           _hasMoreModeration = false;
           _isLoadingMoreModeration = false;
           _isLoadingFollowing = false;
@@ -364,6 +379,7 @@ class _StudyScreenState extends State<StudyScreen>
       setState(() {
         _moderationPage = nextPage;
         _followingResources = [..._followingResources, ...resources];
+        _invalidateFollowingFilterCache();
         _hasMoreModeration = resources.length >= _moderationPageSize;
         _isLoadingMoreModeration = false;
       });
@@ -1244,21 +1260,20 @@ class _StudyScreenState extends State<StudyScreen>
         }
 
         final resource = visibleResources[index];
-        final status = resource.status.toLowerCase();
-        final bool isApproved = status == 'approved';
-        final bool isPending = status == 'pending';
-        final bool isRejected = status == 'rejected';
+        final bool isApproved = resource.isApprovedStatus;
+        final bool isPending = resource.isPendingStatus;
+        final bool isRejected = resource.isRejectedStatus;
 
         final VoidCallback? onApprove = isTeacher && !isApproved
-            ? () => _moderateResource(resource.id, 'approved')
+            ? () => _moderateResource(resource.id, Resource.approvedStatus)
             : null;
         final VoidCallback? onReject = isTeacher && isPending
-            ? () => _moderateResource(resource.id, 'rejected')
+            ? () => _moderateResource(resource.id, Resource.rejectedStatus)
             : null;
         final VoidCallback? onRetract = isTeacher && isApproved
-            ? () => _moderateResource(resource.id, 'rejected')
+            ? () => _moderateResource(resource.id, Resource.rejectedStatus)
             : (isTeacher && isRejected
-                  ? () => _moderateResource(resource.id, 'pending')
+                  ? () => _moderateResource(resource.id, Resource.pendingStatus)
                   : null);
         final VoidCallback? onDelete = isTeacher
             ? () => _deleteResource(resource)
@@ -1308,9 +1323,9 @@ class _StudyScreenState extends State<StudyScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            newStatus == 'rejected'
+            newStatus == Resource.rejectedStatus
                 ? 'Resource retracted/rejected successfully'
-                : newStatus == 'pending'
+                : newStatus == Resource.pendingStatus
                 ? 'Resource retracted successfully'
                 : 'Resource $newStatus successfully',
           ),
@@ -1320,7 +1335,9 @@ class _StudyScreenState extends State<StudyScreen>
       debugPrint('Error moderating resource: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to moderate resource: $e')),
+        const SnackBar(
+          content: Text('Failed to moderate resource. Please try again.'),
+        ),
       );
     } finally {
       if (mounted) setState(() => _isModerating = false);
@@ -1368,7 +1385,14 @@ class _StudyScreenState extends State<StudyScreen>
       await _supabaseService.deleteResourceAsAdminWithFallback(
         resourceId: resource.id,
       );
-      await _downloadService.deleteResource(resource.id);
+      try {
+        await _downloadService.deleteResource(resource.id);
+      } catch (cleanupError) {
+        debugPrint(
+          'Local moderation download cleanup failed for ${resource.id}: '
+          '$cleanupError',
+        );
+      }
 
       if (!mounted) return;
       await _loadFollowingFeed();
@@ -1379,9 +1403,11 @@ class _StudyScreenState extends State<StudyScreen>
     } catch (e) {
       debugPrint('Error deleting resource: $e');
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Failed to delete resource: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not delete the item. Please try again.'),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _isModerating = false);
     }
@@ -1432,46 +1458,286 @@ class _StudyScreenState extends State<StudyScreen>
         }
         final departments = snapshot.data!;
 
-        return SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 132),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Select Department',
-                style: GoogleFonts.inter(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: textColor,
-                ),
+        return Stack(
+          children: [
+            SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(
+                16, 16, 16, _canUploadSyllabus ? 100 : 32,
               ),
-              const SizedBox(height: 8),
-              Text(
-                'View syllabus by department',
-                style: GoogleFonts.inter(fontSize: 13, color: secondaryColor),
-              ),
-              const SizedBox(height: 20),
-
-              // Department Grid
-              GridView(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  crossAxisSpacing: 12,
-                  mainAxisSpacing: 12,
-                  childAspectRatio: 1.4,
-                ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  ...departments.map((dept) {
-                    return _buildDepartmentCard(dept, isDark: isDark);
-                  }),
+                  Text(
+                    'Select Department',
+                    style: GoogleFonts.inter(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: textColor,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'View syllabus by department',
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      color: secondaryColor,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Department Grid
+                  GridView(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 12,
+                          mainAxisSpacing: 12,
+                          childAspectRatio: 1.4,
+                        ),
+                    children: [
+                      ...departments.map((dept) {
+                        return _buildDepartmentCard(dept, isDark: isDark);
+                      }),
+                    ],
+                  ),
                 ],
+              ),
+            ),
+
+            // Floating "Add Syllabus" button for teachers / admins
+            if (_canUploadSyllabus)
+              Positioned(
+                left: 20,
+                right: 20,
+                bottom: 16,
+                child: _buildAddSyllabusButton(
+                  isDark,
+                  departments,
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildAddSyllabusButton(
+    bool isDark,
+    List<DepartmentData> departments,
+  ) {
+    // Try to match the user's branch to a department
+    DepartmentData? userDept;
+    if (_userBranch.isNotEmpty) {
+      final lowerBranch = _userBranch.toLowerCase();
+      userDept = departments.cast<DepartmentData?>().firstWhere(
+        (d) => d!.name.toLowerCase() == lowerBranch,
+        orElse: () => null,
+      );
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () {
+          if (userDept != null) {
+            // Navigate directly to the user's department SyllabusScreen
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => SyllabusScreen(
+                  collegeId: widget.collegeId,
+                  department: userDept!.name,
+                  departmentName: userDept.full,
+                  departmentColor: userDept.color,
+                  canUploadSyllabus: true,
+                ),
+              ),
+            );
+          } else {
+            // Show a bottom sheet to pick a department
+            _showDepartmentPicker(isDark, departments);
+          }
+        },
+        borderRadius: BorderRadius.circular(18),
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: <Color>[
+                AppTheme.primary,
+                Color.lerp(AppTheme.primary, Colors.black, 0.18)!,
+              ],
+            ),
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: <BoxShadow>[
+              BoxShadow(
+                color: AppTheme.primary.withValues(alpha: isDark ? 0.28 : 0.18),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
               ),
             ],
           ),
-        );
-      },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.library_add_rounded,
+                    color: Colors.white,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Add Syllabus',
+                        style: GoogleFonts.inter(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        userDept != null
+                            ? 'Upload to ${userDept.full}'
+                            : 'Choose department to upload',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: Colors.white.withValues(alpha: 0.85),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  color: Colors.white,
+                  size: 18,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showDepartmentPicker(
+    bool isDark,
+    List<DepartmentData> departments,
+  ) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isDark ? AppTheme.darkCard : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white24 : Colors.black12,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Select Department',
+              style: GoogleFonts.inter(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: isDark ? Colors.white : Colors.black,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Choose a department to upload syllabus',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: AppTheme.textMuted,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: departments.length,
+                separatorBuilder: (context2, _) => const SizedBox(height: 8),
+                itemBuilder: (context3, i) {
+                  final dept = departments[i];
+                  return ListTile(
+                    leading: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: dept.color.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Center(
+                        child: Text(
+                          dept.name,
+                          style: GoogleFonts.inter(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: dept.color,
+                          ),
+                        ),
+                      ),
+                    ),
+                    title: Text(
+                      dept.full,
+                      style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black,
+                      ),
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    tileColor: isDark ? AppTheme.darkBackground : Colors.grey[50],
+                    onTap: () {
+                      Navigator.pop(ctx); // close picker
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => SyllabusScreen(
+                            collegeId: widget.collegeId,
+                            department: dept.name,
+                            departmentName: dept.full,
+                            departmentColor: dept.color,
+                            canUploadSyllabus: true,
+                          ),
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -1622,6 +1888,7 @@ class _StudyScreenState extends State<StudyScreen>
     return DepartmentCard3D(
       dept: dept,
       collegeId: widget.collegeId,
+      canUploadSyllabus: _canUploadSyllabus,
       textColor: textColor,
       secondaryColor: secondaryColor,
       cardColor: cardColor,

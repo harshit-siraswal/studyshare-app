@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../models/resource.dart';
 
 /// Multiplier mapping raw backend AI token units to a single user-visible
 /// "AI token". Used by [AiTokenBudgetSnapshot] and token-display helpers to
@@ -135,9 +136,13 @@ class AiTokenBudgetSnapshot {
         subscriptionEnd.toUtc().isAfter(DateTime.now().toUtc());
     final isPremiumActive =
         hasActiveSubscriptionWindow && isPremiumSubscriptionTier(tier);
+    final normalizedBudgetMultiplier =
+        isPremiumActive && premiumMultiplier > 1
+        ? math.max(1, (rawBudgetMultiplier / premiumMultiplier).round())
+        : rawBudgetMultiplier;
     final inferredFreeBudget = baseBudgetFromApi > 0
-        ? math.max(1, baseBudgetFromApi * rawBudgetMultiplier)
-        : math.max(1, defaultBudget * rawBudgetMultiplier);
+        ? math.max(1, baseBudgetFromApi * normalizedBudgetMultiplier)
+        : math.max(1, defaultBudget * normalizedBudgetMultiplier);
 
     // Prefer the explicit base budget when the backend provides it. Some paid
     // profiles still return the free-plan `ai_token_budget`, so scaling down
@@ -168,7 +173,7 @@ class AiTokenBudgetSnapshot {
 
     final baseBudget = baseBudgetFromApi > 0
         ? baseBudgetFromApi
-        : math.max(1, (freeBudget / rawBudgetMultiplier).round());
+        : math.max(1, (freeBudget / normalizedBudgetMultiplier).round());
     final budgetMultiplier = math.max(1, (freeBudget / baseBudget).round());
     final premiumBudget = math.max(1, freeBudget * premiumMultiplier);
     final computedCurrentBudget = isPremiumActive ? premiumBudget : freeBudget;
@@ -260,7 +265,11 @@ class AiTokenBudgetSnapshot {
           .from('resources')
           .select('id')
           .eq('uploaded_by_email', resolvedEmail)
-          .eq('status', 'approved')
+          .or(
+            Resource.buildStatusOrFilter(const [
+              Resource.approvedStatus,
+            ], includeLegacyApprovalFlag: true),
+          )
           .count(CountOption.exact);
 
       if (response.count < _contributorPremiumThreshold) {

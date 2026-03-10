@@ -49,7 +49,7 @@ class StudyTimerWidget extends StatelessWidget {
                         style: GoogleFonts.inter(
                           fontSize: 18,
                           fontWeight: FontWeight.bold,
-                          color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
+                          color: isDark ? AppTheme.textOnDark : AppTheme.textPrimary,
                         ),
                       ),
                       const Spacer(),
@@ -101,7 +101,7 @@ class StudyTimerWidget extends StatelessWidget {
                                   style: GoogleFonts.jetBrainsMono(
                                     fontSize: 36,
                                     fontWeight: FontWeight.bold,
-                                    color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
+                                    color: isDark ? AppTheme.textOnDark : AppTheme.textPrimary,
                                   ),
                                 ),
                                 Text(
@@ -312,7 +312,7 @@ class StudyTimerWidget extends StatelessWidget {
             Text(
               value,
               style: GoogleFonts.inter(
-                color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
+                color: isDark ? AppTheme.textOnDark : AppTheme.textPrimary,
                 fontWeight: FontWeight.bold,
                 fontSize: 18,
               ),

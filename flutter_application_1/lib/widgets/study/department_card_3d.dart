@@ -7,6 +7,7 @@ import '../../screens/study/syllabus_screen.dart';
 class DepartmentCard3D extends StatefulWidget {
   final DepartmentData dept;
   final String collegeId;
+  final bool canUploadSyllabus;
   final Color textColor;
   final Color secondaryColor;
   final Color cardColor;
@@ -16,6 +17,7 @@ class DepartmentCard3D extends StatefulWidget {
     super.key,
     required this.dept,
     required this.collegeId,
+    required this.canUploadSyllabus,
     required this.textColor,
     required this.secondaryColor,
     required this.cardColor,
@@ -143,6 +145,7 @@ class _DepartmentCard3DState extends State<DepartmentCard3D>
                     department: widget.dept.name,
                     departmentName: widget.dept.full,
                     departmentColor: widget.dept.color,
+                    canUploadSyllabus: widget.canUploadSyllabus,
                   ),
                 ),
               );

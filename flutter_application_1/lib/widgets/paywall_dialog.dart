@@ -100,6 +100,7 @@ class _PaywallDialogState extends State<PaywallDialog> {
     });
   }
 
+  // ignore: unused_element
   int _toSafeInt(dynamic value) {
     if (value is int) return value;
     if (value is num) return value.round();

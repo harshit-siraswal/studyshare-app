@@ -45,7 +45,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   bool _isLoading = true;
   bool _hasError = false;
   String _errorMessage = '';
-  bool _isNightMode = false;
+
 
   bool _showSearch = false;
   final TextEditingController _searchController = TextEditingController();
@@ -56,6 +56,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   bool _isOcrSearching = false;
   List<Map<String, dynamic>> _ocrMatches = [];
   String? _ocrSearchError;
+
+  bool _isNightMode = false;
 
   String get _urlPath => Uri.tryParse(widget.pdfUrl)?.path.toLowerCase() ?? '';
 
@@ -259,11 +261,13 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
 
   void _openOcrMatchesSheet() {
     if (_ocrMatches.isEmpty) return;
-    final isDark = _isNightMode;
     showModalBottomSheet(
       context: context,
+      backgroundColor:
+          Theme.of(context).brightness == Brightness.dark
+              ? AppTheme.darkSurface
+              : Colors.white,
       isScrollControlled: true,
-      backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
       builder: (context) {
         return SafeArea(
           child: SizedBox(
@@ -279,7 +283,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                         style: GoogleFonts.inter(
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
-                          color: isDark ? Colors.white : const Color(0xFF0F172A),
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? Colors.white
+                              : const Color(0xFF0F172A),
                         ),
                       ),
                       const Spacer(),
@@ -297,20 +303,31 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                     itemCount: _ocrMatches.length,
                     separatorBuilder: (_, __) => const SizedBox(height: 10),
                     itemBuilder: (context, index) {
-                      final snippet = _ocrMatches[index]['snippet']?.toString() ?? '';
+                      final snippet =
+                          _ocrMatches[index]['snippet']?.toString() ?? '';
                       return Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: isDark ? AppTheme.darkCard : const Color(0xFFF8FAFC),
+                          color: Theme.of(context).brightness == Brightness.dark
+                              ? AppTheme.darkCard
+                              : const Color(0xFFF8FAFC),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: isDark ? AppTheme.darkBorder : const Color(0xFFE2E8F0)),
+                          border: Border.all(
+                            color:
+                                Theme.of(context).brightness == Brightness.dark
+                                    ? AppTheme.darkBorder
+                                    : const Color(0xFFE2E8F0),
+                          ),
                         ),
                         child: Text(
                           snippet,
                           style: GoogleFonts.inter(
                             fontSize: 13,
                             height: 1.5,
-                            color: isDark ? Colors.white70 : const Color(0xFF334155),
+                            color:
+                                Theme.of(context).brightness == Brightness.dark
+                                    ? Colors.white70
+                                    : const Color(0xFF334155),
                           ),
                         ),
                       );
@@ -388,9 +405,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final bgColor = _isNightMode ? const Color(0xFF121212) : AppTheme.lightBackground;
-    final textColor = _isNightMode ? Colors.white : Colors.black;
-    final appBarColor = _isNightMode ? const Color(0xFF1E1E1E) : Colors.white;
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    final bgColor = isDarkMode ? const Color(0xFF121212) : AppTheme.lightBackground;
+    final textColor = isDarkMode ? Colors.white : Colors.black;
+    final appBarColor = isDarkMode ? const Color(0xFF1E1E1E) : Colors.white;
 
     return Scaffold(
       backgroundColor: bgColor,
@@ -422,7 +440,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     decoration: BoxDecoration(
-                      color: _isNightMode ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+  // No change needed logically, keeping the variables with new names.
+                      color: isDarkMode ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: Row(
@@ -462,7 +481,17 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
             IconButton(
               icon: Icon(_showSearch ? Icons.close_rounded : Icons.search_rounded),
               onPressed: _toggleSearch,
-              tooltip: 'Find in PDF',
+              tooltip: 'Find in document',
+            ),
+          if (_isPdf)
+            IconButton(
+              icon: Icon(_isNightMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded),
+              onPressed: () {
+                setState(() {
+                  _isNightMode = !_isNightMode;
+                });
+              },
+              tooltip: _isNightMode ? 'Light Mode' : 'Night Mode',
             ),
           if (_showSearch && _isPdf) ...[
             Padding(
@@ -495,18 +524,13 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               onPressed: _openAiTools,
               tooltip: 'AI Study Tools',
             ),
-          if (_isPdf && _isNetwork)
+          if ((_isPdf || _isOfficeDoc) && _isNetwork)
             IconButton(
               icon: const Icon(Icons.download_rounded),
               onPressed: _handleDownload,
               tooltip: 'Download',
             ),
-          if (_isPdf)
-            IconButton(
-              icon: Icon(_isNightMode ? Icons.light_mode : Icons.dark_mode_rounded),
-              onPressed: () => setState(() => _isNightMode = !_isNightMode),
-              tooltip: _isNightMode ? 'Light Mode' : 'Night Mode',
-            ),
+
         ],
       ),
       body: Stack(
@@ -555,14 +579,14 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   }
 
   Widget _buildOcrStatusCard() {
-    final isDark = _isNightMode;
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     return Container(
       margin: const EdgeInsets.only(top: 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: _isNightMode ? AppTheme.darkCard : Colors.white,
+        color: isDarkMode ? AppTheme.darkCard : Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _isNightMode ? AppTheme.darkBorder : const Color(0xFFE2E8F0)),
+        border: Border.all(color: isDarkMode ? AppTheme.darkBorder : const Color(0xFFE2E8F0)),
       ),
       child: Row(
         children: [
@@ -583,7 +607,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               style: GoogleFonts.inter(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color: _isNightMode ? Colors.white70 : const Color(0xFF334155),
+                color: isDarkMode ? Colors.white70 : const Color(0xFF334155),
               ),
             ),
           ),
@@ -598,17 +622,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   }
 
   Widget _buildPdfContent() {
-    if (_isNightMode) {
-      return ColorFiltered(
-        colorFilter: const ColorFilter.matrix([
-          -1, 0, 0, 0, 255,
-          0, -1, 0, 0, 255,
-          0, 0, -1, 0, 255,
-          0, 0, 0, 1, 0,
-        ]),
-        child: _buildSfPdfViewer(),
-      );
-    }
     return _buildSfPdfViewer();
   }
 
@@ -632,13 +645,15 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     }
 
     if (_isNetwork) {
-      return SfPdfViewer.network(
-        widget.pdfUrl,
-        key: _pdfViewerKey,
-        controller: _pdfViewerController,
-        onDocumentLoaded: onLoaded,
-        onDocumentLoadFailed: onFailed,
-        enableDoubleTapZooming: true,
+      return _buildColorFilteredSfPdfViewer(
+        SfPdfViewer.network(
+          widget.pdfUrl,
+          key: _pdfViewerKey,
+          controller: _pdfViewerController,
+          onDocumentLoaded: onLoaded,
+          onDocumentLoadFailed: onFailed,
+          enableDoubleTapZooming: true,
+        ),
       );
     } else {
       String filePath = widget.pdfUrl;
@@ -648,13 +663,15 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
           if (uri != null && uri.scheme == 'file') {
             filePath = uri.toFilePath();
           }
-          return SfPdfViewer.file(
-            File(filePath),
-            key: _pdfViewerKey,
-            controller: _pdfViewerController,
-            onDocumentLoaded: onLoaded,
-            onDocumentLoadFailed: onFailed,
-            enableDoubleTapZooming: true,
+          return _buildColorFilteredSfPdfViewer(
+            SfPdfViewer.file(
+              File(filePath),
+              key: _pdfViewerKey,
+              controller: _pdfViewerController,
+              onDocumentLoaded: onLoaded,
+              onDocumentLoadFailed: onFailed,
+              enableDoubleTapZooming: true,
+            ),
           );
         } else {
           return _buildUnsupportedContent();
@@ -664,6 +681,19 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         return _buildErrorState();
       }
     }
+  }
+
+  Widget _buildColorFilteredSfPdfViewer(Widget child) {
+    if (!_isNightMode) return child;
+    return ColorFiltered(
+      colorFilter: const ColorFilter.matrix([
+        -1, 0, 0, 0, 255, //
+        0, -1, 0, 0, 255, //
+        0, 0, -1, 0, 255, //
+        0, 0, 0, 1, 0, //
+      ]),
+      child: child,
+    );
   }
 
   Widget _buildUnsupportedContent() {

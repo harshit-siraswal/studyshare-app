@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -251,21 +252,287 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   }
 
   List<QuizQuestion>? _parseSavedQuiz(dynamic raw) {
-    if (raw is! List) return null;
-    final parsed = raw
-        .whereType<Map>()
-        .map((item) => QuizQuestion.fromJson(Map<String, dynamic>.from(item)))
-        .toList();
-    return parsed;
+    final parsed = _parseQuizPayload(raw);
+    return parsed.isEmpty ? null : parsed;
   }
 
   List<Flashcard>? _parseSavedFlashcards(dynamic raw) {
-    if (raw is! List) return null;
-    final parsed = raw
-        .whereType<Map>()
-        .map((item) => Flashcard.fromJson(Map<String, dynamic>.from(item)))
+    final parsed = _parseFlashcardPayload(raw);
+    return parsed.isEmpty ? null : parsed;
+  }
+
+  List<QuizQuestion> _parseQuizPayload(dynamic raw) {
+    final items = _extractStructuredList(
+      raw,
+      preferredKeys: const [
+        'data',
+        'quiz',
+        'quizzes',
+        'questions',
+        'mcqs',
+        'items',
+        'result',
+        'results',
+      ],
+    );
+    if (items == null) return const [];
+
+    return items
+        .map(_parseQuizQuestionItem)
+        .whereType<QuizQuestion>()
         .toList();
-    return parsed;
+  }
+
+  List<Flashcard> _parseFlashcardPayload(dynamic raw) {
+    final items = _extractStructuredList(
+      raw,
+      preferredKeys: const [
+        'data',
+        'flashcards',
+        'cards',
+        'items',
+        'result',
+        'results',
+      ],
+    );
+    if (items == null) return const [];
+
+    return items.map(_parseFlashcardItem).whereType<Flashcard>().toList();
+  }
+
+  List<dynamic>? _extractStructuredList(
+    dynamic raw, {
+    required List<String> preferredKeys,
+  }) {
+    final decoded = _decodeStructuredValue(raw);
+    if (decoded is List) return decoded;
+    if (decoded is! Map) return null;
+
+    final map = _stringKeyedMap(decoded);
+    for (final key in preferredKeys) {
+      final nested = _extractStructuredList(
+        map[key],
+        preferredKeys: preferredKeys,
+      );
+      if (nested != null) return nested;
+    }
+
+    if (map.length == 1) {
+      return _extractStructuredList(
+        map.values.first,
+        preferredKeys: preferredKeys,
+      );
+    }
+
+    return null;
+  }
+
+  dynamic _decodeStructuredValue(dynamic raw) {
+    dynamic current = raw;
+    for (var i = 0; i < 3; i++) {
+      if (current is! String) return current;
+      final trimmed = _stripCodeFence(current).trim();
+      if (trimmed.isEmpty) return null;
+      if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) {
+        return trimmed;
+      }
+      try {
+        current = jsonDecode(trimmed);
+      } catch (_) {
+        return trimmed;
+      }
+    }
+    return current;
+  }
+
+  String _stripCodeFence(String raw) {
+    final trimmed = raw.trim();
+    final match = RegExp(
+      r'^```(?:json)?\s*([\s\S]*?)\s*```$',
+      caseSensitive: false,
+    ).firstMatch(trimmed);
+    return match?.group(1) ?? trimmed;
+  }
+
+  Map<String, dynamic> _stringKeyedMap(Map<dynamic, dynamic> raw) {
+    return raw.map((key, value) => MapEntry(key.toString(), value));
+  }
+
+  QuizQuestion? _parseQuizQuestionItem(dynamic raw) {
+    final decoded = _decodeStructuredValue(raw);
+    if (decoded is! Map) return null;
+
+    final item = _stringKeyedMap(decoded);
+    final question = _firstNonEmptyString([
+      item['question'],
+      item['prompt'],
+      item['text'],
+      item['query'],
+      item['title'],
+    ]);
+    if (question == null) return null;
+
+    final options = _extractOptionList(
+      item['options'] ??
+          item['choices'] ??
+          item['answers'] ??
+          item['mcq_options'],
+    );
+    if (options.length < 2) return null;
+
+    final correct = _normalizeQuizCorrectValue(
+      _firstNonEmptyString([
+            item['correct'],
+            item['answer'],
+            item['correct_answer'],
+            item['correctOption'],
+            item['correct_option'],
+            item['solution'],
+          ]) ??
+          '',
+      options,
+    );
+    if (correct == null) return null;
+
+    return QuizQuestion(question: question, options: options, correct: correct);
+  }
+
+  Flashcard? _parseFlashcardItem(dynamic raw) {
+    final decoded = _decodeStructuredValue(raw);
+    if (decoded is! Map) return null;
+
+    final item = _stringKeyedMap(decoded);
+    final front = _firstNonEmptyString([
+      item['front'],
+      item['question'],
+      item['term'],
+      item['title'],
+      item['prompt'],
+      item['heading'],
+    ]);
+    final back = _firstNonEmptyString([
+      item['back'],
+      item['answer'],
+      item['definition'],
+      item['explanation'],
+      item['content'],
+      item['description'],
+      item['note'],
+    ]);
+    if (front == null || back == null) return null;
+
+    return Flashcard(front: front, back: back);
+  }
+
+  List<String> _extractOptionList(dynamic raw) {
+    final decoded = _decodeStructuredValue(raw);
+    final options = <String>[];
+
+    if (decoded is List) {
+      for (final item in decoded) {
+        final option = _extractOptionText(item);
+        if (option != null) options.add(option);
+      }
+    } else if (decoded is Map) {
+      final item = _stringKeyedMap(decoded);
+      for (final value in item.values) {
+        final option = _extractOptionText(value);
+        if (option != null) options.add(option);
+      }
+    } else if (decoded is String) {
+      for (final line in decoded.split(RegExp(r'[\r\n]+'))) {
+        final option = _normalizeOptionText(line);
+        if (option != null) options.add(option);
+      }
+    }
+
+    return options.toSet().toList();
+  }
+
+  String? _extractOptionText(dynamic raw) {
+    final decoded = _decodeStructuredValue(raw);
+    if (decoded is Map) {
+      return _firstNonEmptyString([
+        decoded['text'],
+        decoded['option'],
+        decoded['label'],
+        decoded['value'],
+        decoded['answer'],
+        decoded['content'],
+      ]);
+    }
+    if (decoded == null) return null;
+    return _normalizeOptionText(decoded.toString());
+  }
+
+  String? _normalizeOptionText(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return null;
+
+    final cleaned = trimmed
+        .replaceFirst(RegExp(r'^[A-Za-z][\)\.\:\-]\s*'), '')
+        .replaceFirst(RegExp(r'^\d+[\)\.\:\-]\s*'), '')
+        .replaceFirst(RegExp(r'^[-*]\s*'), '')
+        .trim();
+
+    return cleaned.isEmpty ? null : cleaned;
+  }
+
+  String? _firstNonEmptyString(List<dynamic> candidates) {
+    for (final candidate in candidates) {
+      if (candidate == null) continue;
+      final value = candidate.toString().trim();
+      if (value.isNotEmpty) return value;
+    }
+    return null;
+  }
+
+  String? _normalizeQuizCorrectValue(String raw, List<String> options) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) {
+      debugPrint(
+        '_normalizeQuizCorrectValue: AI provided empty correct answer.',
+      );
+      return null;
+    }
+
+    final upper = trimmed.toUpperCase();
+    final letterPatterns = [
+      RegExp(r'^[A-Z]$'),
+      RegExp(r'^(?:OPTION|CHOICE)\s+([A-Z])$'),
+      RegExp(r'^([A-Z])[\)\.\:\-]'),
+    ];
+
+    for (final pattern in letterPatterns) {
+      final match = pattern.firstMatch(upper);
+      final label = match?.groupCount == 1 ? match?.group(1) : match?.group(0);
+      if (label == null || label.isEmpty) continue;
+      final index = label.codeUnitAt(0) - 65;
+      if (index >= 0 && index < options.length) {
+        return String.fromCharCode(65 + index);
+      }
+    }
+
+    final numericMatch = RegExp(r'\b(\d+)\b').firstMatch(trimmed);
+    final numeric = int.tryParse(numericMatch?.group(1) ?? '');
+    if (numeric != null && numeric >= 1 && numeric <= options.length) {
+      return String.fromCharCode(64 + numeric);
+    }
+
+    final normalizedAnswer = _normalizeOptionText(trimmed)?.toLowerCase();
+    if (normalizedAnswer != null) {
+      for (var i = 0; i < options.length; i++) {
+        if (options[i].trim().toLowerCase() == normalizedAnswer) {
+          return String.fromCharCode(65 + i);
+        }
+      }
+    }
+
+    debugPrint(
+      '_normalizeQuizCorrectValue: no match found for "$raw", '
+      'returning trimmed value "$trimmed" as-is.',
+    );
+    return trimmed;
   }
 
   String get _activeType {
@@ -415,11 +682,12 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
           includeSource: false,
           videoUrl: widget.videoUrl,
         );
-        final raw = (response['data'] as List?) ?? const [];
-        final parsed = raw
-            .whereType<Map>()
-            .map((q) => QuizQuestion.fromJson(Map<String, dynamic>.from(q)))
-            .toList();
+        final parsed = _parseQuizPayload(response);
+        if (parsed.isEmpty) {
+          throw Exception(
+            'Could not create a valid quiz from the AI response. Please try again.',
+          );
+        }
 
         setState(() {
           _quiz = parsed;
@@ -439,11 +707,12 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
           includeSource: false,
           videoUrl: widget.videoUrl,
         );
-        final raw = (response['data'] as List?) ?? const [];
-        final parsed = raw
-            .whereType<Map>()
-            .map((c) => Flashcard.fromJson(Map<String, dynamic>.from(c)))
-            .toList();
+        final parsed = _parseFlashcardPayload(response);
+        if (parsed.isEmpty) {
+          throw Exception(
+            'Could not create valid flashcards from the AI response. Please try again.',
+          );
+        }
 
         setState(() {
           _flashcards = parsed;
@@ -1459,7 +1728,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                 final label = String.fromCharCode(65 + entry.key);
                 final opt = entry.value;
                 final selected = _selectedAnswers[idx] == label;
-                final correct = q.correct.toUpperCase() == label;
+                final correct = _resolveQuizAnswerIndex(q) == entry.key;
                 final reveal = _showAnswers || selected;
                 final isCorrect = reveal && correct;
                 final isWrong = selected && !correct && reveal;

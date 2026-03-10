@@ -19,6 +19,7 @@ import '../../services/download_service.dart';
 import 'settings_screen.dart';
 import 'explore_students_screen.dart';
 import 'saved_posts_screen.dart';
+import 'ai_token_usage_screen.dart';
 import '../../models/user.dart';
 import '../../widgets/animated_counter.dart';
 import '../../data/academic_subjects_data.dart';
@@ -69,6 +70,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   DateTime? _aiTokenCycleStartedAt;
   DateTime? _aiTokenCycleEndsAt;
   static const int _tokensPerCredit = 2000;
+  static const double _bottomNavBarAllowance = 124;
   Future<bool>? _isPremiumFuture;
   Future<List<Resource>>? _contributionsFuture;
 
@@ -223,27 +225,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
-  String _formatTokenCompact3(int value) {
-    final abs = value.abs();
-    if (abs < 1000) return value.toString();
-
-    double scaled = value.toDouble();
-    String suffix = '';
-    if (abs >= 1000000000) {
-      scaled = value / 1000000000;
-      suffix = 'B';
-    } else if (abs >= 1000000) {
-      scaled = value / 1000000;
-      suffix = 'M';
-    } else {
-      scaled = value / 1000;
-      suffix = 'K';
-    }
-
-    final compact = scaled.round().toString();
-    return '$compact$suffix';
-  }
-
   String _formatTokenWithCommas(int value) {
     final digits = value.toString();
     final buffer = StringBuffer();
@@ -257,24 +238,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return buffer.toString();
   }
 
-  String _formatTokenDetailed(int value) {
-    return '${_formatTokenCompact3(value)} (${_formatTokenWithCommas(value)})';
-  }
-
   String _formatCreditCompact(int tokenValue) {
     if (tokenValue <= 0) return '0';
     final credits = tokenValue / _tokensPerCredit;
     return math.max(1, credits.round()).toString();
-  }
-
-  String _formatCreditDetailed(int tokenValue) {
-    return '${_formatCreditCompact(tokenValue)} credits '
-        '(${_formatTokenWithCommas(tokenValue)} tokens)';
-  }
-
-  String _formatCreditRange(int minTokens, int maxTokens) {
-    return '${_formatCreditCompact(minTokens)} - '
-        '${_formatCreditCompact(maxTokens)} credits';
   }
 
   String _profileBranchLabel() {
@@ -338,10 +305,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
         resource: resource,
         ownerEmail: userEmail,
       );
-      await DownloadService().deleteResource(
-        resource.id,
-        ownerEmail: userEmail,
-      );
+      try {
+        await DownloadService().deleteResource(
+          resource.id,
+          ownerEmail: userEmail,
+        );
+      } catch (cleanupError) {
+        debugPrint(
+          'Local contribution cleanup failed for ${resource.id}: '
+          '$cleanupError',
+        );
+      }
       _supabaseService.invalidateResourceListCache();
       if (!mounted) return;
       setState(() => _refreshContributionsFuture());
@@ -350,10 +324,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Contribution deleted successfully.')),
       );
-    } catch (e) {
+    } catch (e, stackTrace) {
+      debugPrint('Failed to delete contribution: $e\n$stackTrace');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to delete contribution: $e')),
+        const SnackBar(
+          content: Text('Failed to delete contribution. Please try again.'),
+        ),
       );
     }
   }
@@ -364,6 +341,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = AppTheme.getTextColor(context);
     final subTextColor = AppTheme.getTextColor(context, isPrimary: false);
+    final bottomPadding = MediaQuery.of(context).padding.bottom + _bottomNavBarAllowance;
 
     return Scaffold(
       backgroundColor: isDark ? Colors.black : AppTheme.lightBackground,
@@ -432,7 +410,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               },
               child: SingleChildScrollView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.symmetric(horizontal: 20),
+                padding: EdgeInsets.fromLTRB(20, 0, 20, bottomPadding),
                 child: Column(
                   children: [
                     const SizedBox(height: 20),
@@ -448,22 +426,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       isDark,
                     ),
                     const SizedBox(height: 24),
-                    // Premium Badge / Status
                     FutureBuilder<bool>(
                       future: _isPremiumFuture ??= _subscriptionService
                           .isPremium(),
                       builder: (context, snapshot) {
+                        if (snapshot.hasError || !snapshot.hasData) {
+                          return const SizedBox.shrink();
+                        }
                         final isPremium = snapshot.data ?? false;
-                        final isVerified =
-                            _authService.currentUser?.emailVerified ?? false;
-                        return isPremium && isVerified
-                            ? _buildPremiumBadge()
-                            : !isPremium
-                            ? _buildUpgradeCard()
-                            : const SizedBox.shrink();
+                        return isPremium
+                            ? const SizedBox.shrink()
+                            : Padding(
+                                padding: const EdgeInsets.only(bottom: 24),
+                                child: _buildUpgradeCard(),
+                              );
                       },
                     ),
-                    const SizedBox(height: 24),
                     // Search & Filter
                     _buildSearchBar(isDark),
                     const SizedBox(height: 16),
@@ -489,7 +467,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     const SizedBox(height: 10),
                     _buildContributionsList(),
-                    const SizedBox(height: 40),
+                    const SizedBox(height: 16),
                   ],
                 ),
               ),
@@ -895,11 +873,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final exhausted = budget > 0 && remaining <= 0;
 
     return GestureDetector(
-      onTap: () => _showAiTokenConsumptionDetailsSheet(
-        textColor: textColor,
-        subTextColor: subTextColor,
-        isDark: isDark,
-      ),
+      onTap: _openAiTokenUsageScreen,
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(16),
@@ -1033,225 +1007,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  String _formatCycleDate(DateTime? value) {
-    if (value == null) return 'N/A';
-    final local = value.toLocal();
-    final dd = local.day.toString().padLeft(2, '0');
-    final mm = local.month.toString().padLeft(2, '0');
-    final yyyy = local.year.toString();
-    final hh = local.hour.toString().padLeft(2, '0');
-    final min = local.minute.toString().padLeft(2, '0');
-    return '$dd/$mm/$yyyy $hh:$min';
-  }
-
-  Widget _buildTokenDetailRow(
-    String label,
-    String value,
-    Color labelColor,
-    Color valueColor,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: labelColor,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Text(
-            value,
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: valueColor,
-            ),
-          ),
-        ],
+  Future<void> _openAiTokenUsageScreen() async {
+    final didRefresh = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AiTokenUsageScreen(
+          budget: _aiTokenBudget,
+          used: _aiTokenUsed,
+          remaining: _aiTokenRemaining,
+          baseBudget: _aiTokenBaseBudget,
+          budgetMultiplier: _aiTokenBudgetMultiplier,
+          premiumMultiplier: _aiTokenPremiumMultiplier,
+          cycleDays: _aiTokenCycleDays,
+          cycleStartedAt: _aiTokenCycleStartedAt,
+          cycleEndsAt: _aiTokenCycleEndsAt,
+        ),
       ),
     );
-  }
-
-  Future<void> _showAiTokenConsumptionDetailsSheet({
-    required Color textColor,
-    required Color subTextColor,
-    required bool isDark,
-  }) async {
-    final budget = _aiTokenBudget > 0 ? _aiTokenBudget : 40160;
-    final used = _aiTokenUsed.clamp(0, budget);
-    final remaining = _aiTokenRemaining.clamp(0, budget);
-    final cycleLabel =
-        '${_aiTokenCycleDays > 0 ? _aiTokenCycleDays : 30} day cycle';
-    final usagePercent = budget > 0
-        ? ((used / budget) * 100).toStringAsFixed(0)
-        : '0';
-
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: isDark ? AppTheme.darkCard : Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(18, 14, 18, 22),
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.query_stats_rounded,
-                        color: AppTheme.primary,
-                        size: 18,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'AI Credits & Token Usage',
-                        style: GoogleFonts.inter(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                          color: textColor,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  _buildTokenDetailRow(
-                    'Total monthly credits',
-                    _formatCreditDetailed(budget),
-                    subTextColor,
-                    textColor,
-                  ),
-                  _buildTokenDetailRow(
-                    'Used in current cycle',
-                    '${_formatCreditDetailed(used)} ($usagePercent%)',
-                    subTextColor,
-                    textColor,
-                  ),
-                  _buildTokenDetailRow(
-                    'Remaining credits',
-                    _formatCreditDetailed(remaining),
-                    subTextColor,
-                    textColor,
-                  ),
-                  _buildTokenDetailRow(
-                    'Token to credit ratio',
-                    '1 credit = ${_formatTokenWithCommas(_tokensPerCredit)} tokens',
-                    subTextColor,
-                    textColor,
-                  ),
-                  _buildTokenDetailRow(
-                    'Base budget',
-                    _formatTokenDetailed(_aiTokenBaseBudget),
-                    subTextColor,
-                    textColor,
-                  ),
-                  _buildTokenDetailRow(
-                    'Current multiplier',
-                    '${_aiTokenBudgetMultiplier}x',
-                    subTextColor,
-                    textColor,
-                  ),
-                  _buildTokenDetailRow(
-                    'Premium multiplier',
-                    '${_aiTokenPremiumMultiplier}x',
-                    subTextColor,
-                    textColor,
-                  ),
-                  _buildTokenDetailRow(
-                    'Cycle',
-                    cycleLabel,
-                    subTextColor,
-                    textColor,
-                  ),
-                  _buildTokenDetailRow(
-                    'Cycle started',
-                    _formatCycleDate(_aiTokenCycleStartedAt),
-                    subTextColor,
-                    textColor,
-                  ),
-                  _buildTokenDetailRow(
-                    'Cycle ends',
-                    _formatCycleDate(_aiTokenCycleEndsAt),
-                    subTextColor,
-                    textColor,
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'Estimated cost per task:',
-                    style: GoogleFonts.inter(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                      color: textColor,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  _buildTokenDetailRow(
-                    'AI Chat reply',
-                    '${_formatCreditRange(300, 1200)} '
-                        '(~${_formatTokenCompact3(300)}-${_formatTokenCompact3(1200)} tokens)',
-                    subTextColor,
-                    textColor,
-                  ),
-                  _buildTokenDetailRow(
-                    'Generate summary',
-                    '${_formatCreditRange(1400, 3200)} '
-                        '(~${_formatTokenCompact3(1400)}-${_formatTokenCompact3(3200)} tokens)',
-                    subTextColor,
-                    textColor,
-                  ),
-                  _buildTokenDetailRow(
-                    'Generate flashcards',
-                    '${_formatCreditRange(1800, 4200)} '
-                        '(~${_formatTokenCompact3(1800)}-${_formatTokenCompact3(4200)} tokens)',
-                    subTextColor,
-                    textColor,
-                  ),
-                  _buildTokenDetailRow(
-                    'Generate quiz',
-                    '${_formatCreditRange(2200, 5200)} '
-                        '(~${_formatTokenCompact3(2200)}-${_formatTokenCompact3(5200)} tokens)',
-                    subTextColor,
-                    textColor,
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'How consumption is calculated:',
-                    style: GoogleFonts.inter(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                      color: textColor,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Billable usage = input tokens + weighted output tokens. '
-                    'Task numbers are estimates and vary with note size and '
-                    'response length. Your quota resets when the cycle ends.',
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: subTextColor,
-                      height: 1.35,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
+    if (didRefresh == true && mounted) {
+      await _loadProfile(forceRefresh: true);
+      await _loadStats();
+    }
   }
 
   Widget _buildAiTokenMetric(
@@ -1282,26 +1058,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildPremiumBadge() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFD700).withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: const Color(0xFFFFD700), width: 1.5),
-      ),
-      child: Text(
-        'PREMIUM MEMBER',
-        style: GoogleFonts.inter(
-          color: const Color(0xFFD4AF37),
-          fontWeight: FontWeight.bold,
-          fontSize: 14,
-          letterSpacing: 1.2,
-        ),
       ),
     );
   }

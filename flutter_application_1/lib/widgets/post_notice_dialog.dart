@@ -179,7 +179,7 @@ Future<bool> showPostNoticeDialog({
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<String>(
-                  value:
+                  initialValue:
                       uniqueDepartmentOptions.any(
                         (option) => option.id == selectedDept,
                       )

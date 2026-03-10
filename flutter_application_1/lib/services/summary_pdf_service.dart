@@ -86,7 +86,6 @@ class SummaryPdfService {
     required String watermarkText,
     required String summary,
     String? headerBrandName,
-    String? headerSubtitle,
   }) {
     final lines = _buildWrappedLines(
       title: title,

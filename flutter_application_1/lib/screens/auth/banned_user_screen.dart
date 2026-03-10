@@ -79,7 +79,7 @@ class BannedUserScreen extends StatelessWidget {
                         fontSize: 28,
                         fontWeight: FontWeight.bold,
                         color: isDark
-                            ? AppTheme.textLight
+                            ? AppTheme.textOnDark
                             : AppTheme.textPrimary,
                       ),
                     ),
@@ -120,7 +120,7 @@ class BannedUserScreen extends StatelessWidget {
                       reason,
                       style: GoogleFonts.inter(
                         color: isDark
-                            ? AppTheme.textLight
+                            ? AppTheme.textOnDark
                             : AppTheme.textPrimary,
                         height: 1.5,
                       ),

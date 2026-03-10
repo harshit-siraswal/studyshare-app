@@ -10,7 +10,7 @@ import 'saved_posts_screen.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
-import '../../config/app_config.dart';
+import '../../services/push_notification_service.dart';
 import '../../services/subscription_service.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../../widgets/paywall_dialog.dart';
@@ -28,6 +28,7 @@ class SettingsScreen extends StatefulWidget {
   final String? branch;
   final AuthService authService;
   final SubscriptionService subscriptionService;
+  final PushNotificationService pushNotificationService;
 
   SettingsScreen({
     super.key,
@@ -42,8 +43,10 @@ class SettingsScreen extends StatefulWidget {
     this.branch,
     AuthService? authService,
     SubscriptionService? subscriptionService,
+    PushNotificationService? pushNotificationService,
   }) : authService = authService ?? AuthService(),
-       subscriptionService = subscriptionService ?? SubscriptionService();
+       subscriptionService = subscriptionService ?? SubscriptionService(),
+       pushNotificationService = pushNotificationService ?? PushNotificationService();
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -56,6 +59,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   late final AuthService _authService;
   late final SubscriptionService _subscriptionService;
+  late final PushNotificationService _pushNotificationService;
   bool _notificationsEnabled = true;
   bool _isLoading = true;
   bool _isPremium = false;
@@ -66,6 +70,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     _authService = widget.authService;
     _subscriptionService = widget.subscriptionService;
+    _pushNotificationService = widget.pushNotificationService;
     _loadSettings();
   }
 
@@ -115,9 +120,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final previousValue = _notificationsEnabled;
     setState(() => _notificationsEnabled = value);
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('notifications_enabled', value);
+      await _pushNotificationService.setNotificationsEnabled(value);
     } catch (e) {
+      debugPrint('Failed to update notification settings: $e');
       if (mounted) {
         setState(() => _notificationsEnabled = previousValue);
         ScaffoldMessenger.of(context).showSnackBar(

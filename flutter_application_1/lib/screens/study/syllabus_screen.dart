@@ -15,6 +15,7 @@ class SyllabusScreen extends StatefulWidget {
   final String department;
   final String departmentName;
   final Color departmentColor;
+  final bool canUploadSyllabus;
 
   const SyllabusScreen({
     super.key,
@@ -22,6 +23,7 @@ class SyllabusScreen extends StatefulWidget {
     required this.department,
     required this.departmentName,
     required this.departmentColor,
+    this.canUploadSyllabus = false,
   });
 
   @override
@@ -47,7 +49,10 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
   @override
   void initState() {
     super.initState();
-    _checkTeacherRole();
+    _isTeacherOrAdmin = widget.canUploadSyllabus;
+    if (!_isTeacherOrAdmin) {
+      _checkTeacherRole();
+    }
   }
 
   Future<void> _checkTeacherRole() async {
@@ -248,6 +253,45 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
                             : 'Select Subject'),
                   isDisabled: _selectedSemester == null,
                 ),
+                if (_isTeacherOrAdmin) ...[
+                  const SizedBox(height: 14),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: widget.departmentColor.withValues(
+                        alpha: isDark ? 0.18 : 0.10,
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: widget.departmentColor.withValues(alpha: 0.22),
+                      ),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.upload_file_rounded,
+                          color: widget.departmentColor,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Teacher flow: this branch is already selected. '
+                            'Choose semester and subject, then post the syllabus PDF.',
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: isDark ? Colors.white70 : Colors.black87,
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -339,7 +383,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Add syllabus PDF',
+                          'Post syllabus',
                           style: GoogleFonts.inter(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
@@ -748,7 +792,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
               Icon(Icons.upload_file_rounded, color: widget.departmentColor),
               const SizedBox(width: 8),
               Text(
-                'Add Syllabus',
+                'Post Syllabus',
                 style: GoogleFonts.inter(
                   fontWeight: FontWeight.bold,
                   color: isDark ? Colors.white : Colors.black,
@@ -973,6 +1017,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
     ).whenComplete(titleCtrl.dispose);
   }
 
+  // ignore: unused_element
   void _showUploadSyllabusDialog(bool isDark) {
     final titleCtrl = TextEditingController();
     final urlCtrl = TextEditingController();

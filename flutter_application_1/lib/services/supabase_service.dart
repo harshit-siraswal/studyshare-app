@@ -86,19 +86,6 @@ class SupabaseService {
     return '$scopedEmail::$resourceId';
   }
 
-  dynamic _applyResourceStatusFilter(
-    dynamic query,
-    Iterable<String> statuses, {
-    bool includeLegacyApprovalFlag = false,
-  }) {
-    final filter = Resource.buildStatusOrFilter(
-      statuses,
-      includeLegacyApprovalFlag: includeLegacyApprovalFlag,
-    );
-    if (filter.isEmpty) return query;
-    return query.or(filter);
-  }
-
   bool _hasFreshCurrentUserProfileCacheFor(String email) {
     if (email.isEmpty) return false;
     final cachedAt = _cachedCurrentUserProfileAt;
@@ -129,12 +116,6 @@ class SupabaseService {
   void invalidateResourceListCache() {
     _resourceListCache.clear();
     _resourceListInFlight.clear();
-  }
-
-  void _clearResourceStateCaches(String resourceId) {
-    invalidateResourceListCache();
-    _bookmarkStateCache.removeWhere((key, _) => key.endsWith('::$resourceId'));
-    _voteStateCache.removeWhere((key, _) => key.endsWith('::$resourceId'));
   }
 
   String _resourceListCacheKey({
@@ -652,10 +633,8 @@ class SupabaseService {
         var query = _client
             .from('resources')
             .select()
-            .eq('college_id', collegeId);
-        query = _applyResourceStatusFilter(query, const [
-          Resource.approvedStatus,
-        ], includeLegacyApprovalFlag: true);
+            .eq('college_id', collegeId)
+            .eq('status', 'approved');
 
         if (normalizedSemester != null && normalizedSemester.isNotEmpty) {
           query = query.eq('semester', normalizedSemester);
@@ -740,12 +719,8 @@ class SupabaseService {
           .from('resources')
           .select()
           .eq('college_id', collegeId)
+          .eq('status', 'approved')
           .inFilter('uploaded_by_email', normalizedEmails)
-          .or(
-            Resource.buildStatusOrFilter(const [
-              Resource.approvedStatus,
-            ], includeLegacyApprovalFlag: true),
-          )
           .order('created_at', ascending: false)
           .range(offset, offset + limit - 1);
 
@@ -769,11 +744,7 @@ class SupabaseService {
           .from('resources')
           .select()
           .eq('college_id', collegeId)
-          .or(
-            Resource.buildStatusOrFilter(const [
-              Resource.approvedStatus,
-            ], includeLegacyApprovalFlag: true),
-          )
+          .eq('status', 'approved')
           .order('created_at', ascending: false)
           .range(0, offset + fetchWindow - 1);
       final emailSet = normalizedEmails.toSet();
@@ -1300,6 +1271,7 @@ class SupabaseService {
     }
   }
 
+  // ignore: unused_element
   Future<void> _createNotification({
     required String userId,
     required String type,
@@ -1324,8 +1296,7 @@ class SupabaseService {
   /// Mark notification as read
   Future<void> markNotificationRead(String notificationId) async {
     try {
-      final ctx = _ctx;
-      await _api.markNotificationRead(notificationId, contextForRecaptcha: ctx);
+      await _api.markNotificationRead(notificationId);
     } catch (e) {
       debugPrint('Error marking notification read: $e');
     }
@@ -1412,21 +1383,21 @@ class SupabaseService {
   }) async {
     final normalizedImageUrl = imageUrl?.trim() ?? '';
     final normalizedFileUrl = fileUrl?.trim() ?? '';
+    final canUseBackendApi =
+        normalizedFileUrl.isEmpty || normalizedFileUrl == normalizedImageUrl;
 
     try {
-      await _api.createNotice(
-        collegeId: collegeId,
-        title: title,
-        content: content,
-        department: department,
-        imageUrl: normalizedImageUrl.isEmpty ? null : normalizedImageUrl,
-        fileUrl: normalizedFileUrl.isEmpty ? null : normalizedFileUrl,
-      );
-      return;
-    } catch (e) {
-      if (!isBackendCompatibilityFallbackError(e)) {
-        rethrow;
+      if (canUseBackendApi) {
+        await _api.createNotice(
+          collegeId: collegeId,
+          title: title,
+          content: content,
+          department: department,
+          imageUrl: normalizedImageUrl.isEmpty ? null : normalizedImageUrl,
+        );
+        return;
       }
+    } catch (e) {
       debugPrint('Backend notice post failed, retrying via Supabase: $e');
     }
 
@@ -1737,14 +1708,11 @@ class SupabaseService {
       final results = await Future.wait<dynamic>([
         getFollowersCount(userEmail),
         getFollowingCount(userEmail),
-        _applyResourceStatusFilter(
-          _client
-              .from('resources')
-              .count(CountOption.exact)
-              .eq('uploaded_by_email', userEmail),
-          const [Resource.approvedStatus],
-          includeLegacyApprovalFlag: true,
-        ),
+        _client
+            .from('resources')
+            .count(CountOption.exact)
+            .eq('uploaded_by_email', userEmail)
+            .eq('status', 'approved'),
       ]);
       final followers = (results[0] as num?)?.toInt() ?? 0;
       final following = (results[1] as num?)?.toInt() ?? 0;
@@ -1877,10 +1845,8 @@ class SupabaseService {
       var query = _client
           .from('resources')
           .select(column)
-          .eq('college_id', collegeId);
-      query = _applyResourceStatusFilter(query, const [
-        Resource.approvedStatus,
-      ], includeLegacyApprovalFlag: true);
+          .eq('college_id', collegeId)
+          .eq('status', 'approved');
 
       if (branch != null && branch.isNotEmpty) {
         query = query.eq('branch', branch);
@@ -2590,6 +2556,160 @@ class SupabaseService {
     return rowIds;
   }
 
+  Future<Set<String>> _getSavedPostIdsDirect(String userEmail) async {
+    final schema = await _getSavedPostsSchema();
+    final userFilters = _savedPostUserFilters(schema, userEmail);
+    final messageColumns = _savedPostMessageColumns(schema);
+    if (userFilters.isEmpty || messageColumns.isEmpty) {
+      return {};
+    }
+
+    final ids = <String>{};
+    for (final filter in userFilters) {
+      for (final messageColumn in messageColumns) {
+        try {
+          final rows = await _client
+              .from('saved_posts')
+              .select(messageColumn)
+              .eq(filter.column, filter.value);
+
+          for (final row in List<Map<String, dynamic>>.from(rows)) {
+            final id = row[messageColumn]?.toString().trim() ?? '';
+            if (id.isNotEmpty) {
+              ids.add(id);
+            }
+          }
+        } catch (e) {
+          final ignoreMissing =
+              _isMissingColumnError(e, filter.column) ||
+              _isMissingColumnError(e, messageColumn);
+          if (!ignoreMissing) {
+            debugPrint(
+              'saved_posts direct id fetch failed for '
+              '${filter.column}/$messageColumn: $e',
+            );
+          }
+        }
+      }
+    }
+    return ids;
+  }
+
+  Future<List<Map<String, dynamic>>> _getSavedPostsDirect(
+    String userEmail,
+  ) async {
+    final schema = await _getSavedPostsSchema();
+    final userFilters = _savedPostUserFilters(schema, userEmail);
+    final messageColumns = _savedPostMessageColumns(schema);
+    if (userFilters.isEmpty || messageColumns.isEmpty) {
+      return [];
+    }
+
+    final savedByMessage = <String, Map<String, dynamic>>{};
+
+    for (final filter in userFilters) {
+      for (final messageColumn in messageColumns) {
+        final selectParts = <String>[messageColumn];
+        if (schema.hasRoomId) selectParts.add('room_id');
+        if (schema.hasCreatedAt) selectParts.add('created_at');
+
+        try {
+          final rows = schema.hasCreatedAt
+              ? await _client
+                    .from('saved_posts')
+                    .select(selectParts.join(', '))
+                    .eq(filter.column, filter.value)
+                    .order('created_at', ascending: false)
+              : await _client
+                    .from('saved_posts')
+                    .select(selectParts.join(', '))
+                    .eq(filter.column, filter.value);
+          for (final row in List<Map<String, dynamic>>.from(rows)) {
+            final messageId = row[messageColumn]?.toString().trim() ?? '';
+            if (messageId.isEmpty) continue;
+
+            final savedAt = row['created_at']?.toString();
+            final existing = savedByMessage[messageId];
+            if (existing == null) {
+              savedByMessage[messageId] = {
+                'message_id': messageId,
+                'room_id': row['room_id']?.toString(),
+                'created_at': savedAt,
+              };
+              continue;
+            }
+
+            final existingTime = DateTime.tryParse(
+              existing['created_at']?.toString() ?? '',
+            );
+            final currentTime = DateTime.tryParse(savedAt ?? '');
+            if (existingTime == null ||
+                (currentTime != null && currentTime.isAfter(existingTime))) {
+              savedByMessage[messageId] = {
+                'message_id': messageId,
+                'room_id': row['room_id']?.toString(),
+                'created_at': savedAt,
+              };
+            }
+          }
+        } catch (e) {
+          final ignoreMissing =
+              _isMissingColumnError(e, filter.column) ||
+              _isMissingColumnError(e, messageColumn);
+          if (!ignoreMissing) {
+            debugPrint(
+              'saved_posts direct list fetch failed for '
+              '${filter.column}/$messageColumn: $e',
+            );
+          }
+        }
+      }
+    }
+
+    if (savedByMessage.isEmpty) return [];
+
+    final messageIds = savedByMessage.keys.toList();
+    final messageResponse = await _client
+        .from('room_messages')
+        .select('*, comment_count:room_post_comments(count)')
+        .inFilter('id', messageIds);
+
+    final messagesById = <String, Map<String, dynamic>>{};
+    for (final row in List<Map<String, dynamic>>.from(messageResponse)) {
+      final id = row['id']?.toString();
+      if (id == null || id.isEmpty) continue;
+      row['comment_count'] = _normalizeCount(row['comment_count']);
+      messagesById[id] = row;
+    }
+
+    final savedRows = savedByMessage.values.toList()
+      ..sort((a, b) {
+        final aTime = DateTime.tryParse(a['created_at']?.toString() ?? '');
+        final bTime = DateTime.tryParse(b['created_at']?.toString() ?? '');
+        if (aTime == null && bTime == null) return 0;
+        if (aTime == null) return 1;
+        if (bTime == null) return -1;
+        return bTime.compareTo(aTime);
+      });
+
+    final ordered = <Map<String, dynamic>>[];
+    for (final saved in savedRows) {
+      final id = saved['message_id']?.toString();
+      if (id == null || id.isEmpty) continue;
+      final message = messagesById[id];
+      if (message == null) continue;
+      ordered.add({
+        ...message,
+        '_saved_at': saved['created_at'],
+        '_saved_room_id': saved['room_id']?.toString().trim().isNotEmpty == true
+            ? saved['room_id']
+            : message['room_id'],
+      });
+    }
+
+    return ordered;
+  }
+
   Future<void> _savePostDirect(
     String postId,
     String userEmail, {
@@ -2679,34 +2799,21 @@ class SupabaseService {
     String? roomId,
   }) async {
     final normalizedEmail = _normalizeEmail(userEmail);
-    final normalizedPostId = postId.trim();
-    if (normalizedPostId.isEmpty) {
-      throw Exception('Post id is required to save a post.');
+
+    try {
+      await _savePostDirect(postId, normalizedEmail, roomId: roomId);
+      return;
+    } catch (directError) {
+      debugPrint('Direct save_post failed, trying backend: $directError');
     }
 
     try {
-      if (await _isPostSavedInBackend(normalizedPostId)) {
-        return;
-      }
-      final resolvedRoomId =
-          roomId ?? await _resolveRoomIdForMessage(normalizedPostId);
+      final resolvedRoomId = roomId ?? await _resolveRoomIdForMessage(postId);
+
       await _api.toggleSaveChatMessage(
-        messageId: normalizedPostId,
+        messageId: postId,
         roomId: resolvedRoomId,
       );
-      return;
-    } catch (backendError) {
-      if (!isBackendCompatibilityFallbackError(backendError)) {
-        rethrow;
-      }
-      debugPrint(
-        'Backend save_post unavailable, retrying direct Supabase save: '
-        '$backendError',
-      );
-    }
-
-    try {
-      await _savePostDirect(normalizedPostId, normalizedEmail, roomId: roomId);
     } catch (e) {
       debugPrint('Error saving post: $e');
       rethrow;
@@ -2774,25 +2881,25 @@ class SupabaseService {
         .toList();
   }
 
-  Future<bool> _isPostSavedInBackend(String postId) async {
-    final normalizedPostId = postId.trim();
-    if (normalizedPostId.isEmpty) return false;
-    final savedPosts = await _getSavedPostsFromBackend();
-    return savedPosts.any((row) => row['id']?.toString() == normalizedPostId);
-  }
-
   /// Check if a post is saved
   Future<bool> isPostSaved(String postId, String userEmail) async {
     final normalizedPostId = postId.trim();
     if (normalizedPostId.isEmpty) return false;
 
     try {
-      return await _isPostSavedInBackend(normalizedPostId);
-    } catch (backendError) {
-      if (!isBackendCompatibilityFallbackError(backendError)) {
-        rethrow;
+      final directSavedIds = await _getSavedPostIdsDirect(userEmail);
+      if (directSavedIds.contains(normalizedPostId)) {
+        return true;
       }
-      debugPrint('Backend isPostSaved lookup failed: $backendError');
+    } catch (e) {
+      debugPrint('Direct isPostSaved lookup failed: $e');
+    }
+
+    try {
+      final savedPosts = await _getSavedPostsFromBackend();
+      return savedPosts.any((row) => row['id']?.toString() == normalizedPostId);
+    } catch (_) {
+      // Fallback to direct Supabase read for compatibility.
     }
 
     try {
@@ -2826,34 +2933,21 @@ class SupabaseService {
     String? roomId,
   }) async {
     final normalizedEmail = _normalizeEmail(userEmail);
-    final normalizedPostId = postId.trim();
-    if (normalizedPostId.isEmpty) {
-      throw Exception('Post id is required to unsave a post.');
+
+    try {
+      await _unsavePostDirect(postId, normalizedEmail);
+      return;
+    } catch (directError) {
+      debugPrint('Direct unsave_post failed, trying backend: $directError');
     }
 
     try {
-      if (!await _isPostSavedInBackend(normalizedPostId)) {
-        return;
-      }
-      final resolvedRoomId =
-          roomId ?? await _resolveRoomIdForMessage(normalizedPostId);
+      final resolvedRoomId = roomId ?? await _resolveRoomIdForMessage(postId);
+
       await _api.toggleSaveChatMessage(
-        messageId: normalizedPostId,
+        messageId: postId,
         roomId: resolvedRoomId,
       );
-      return;
-    } catch (backendError) {
-      if (!isBackendCompatibilityFallbackError(backendError)) {
-        rethrow;
-      }
-      debugPrint(
-        'Backend unsave_post unavailable, retrying direct Supabase unsave: '
-        '$backendError',
-      );
-    }
-
-    try {
-      await _unsavePostDirect(normalizedPostId, normalizedEmail);
     } catch (e) {
       debugPrint('Error unsaving post: $e');
       rethrow;
@@ -2862,18 +2956,32 @@ class SupabaseService {
 
   /// Get all saved post IDs for a user (Batch Optimization)
   Future<Set<String>> getSavedPostIds(String userEmail) async {
+    final combinedIds = <String>{};
+    var hasAuthoritativeSource = false;
+
+    try {
+      final directIds = await _getSavedPostIdsDirect(userEmail);
+      combinedIds.addAll(directIds);
+      hasAuthoritativeSource = true;
+    } catch (e) {
+      debugPrint('Direct getSavedPostIds failed: $e');
+    }
+
     try {
       final savedPosts = await _getSavedPostsFromBackend();
-      return savedPosts
-          .map((row) => row['id']?.toString())
-          .where((id) => id != null && id.isNotEmpty)
-          .cast<String>()
-          .toSet();
-    } catch (backendError) {
-      if (!isBackendCompatibilityFallbackError(backendError)) {
-        rethrow;
-      }
-      debugPrint('Backend getSavedPostIds failed: $backendError');
+      combinedIds.addAll(
+        savedPosts
+            .map((row) => row['id']?.toString())
+            .where((id) => id != null && id.isNotEmpty)
+            .cast<String>(),
+      );
+      hasAuthoritativeSource = true;
+    } catch (_) {
+      // Continue with legacy Supabase fallback.
+    }
+
+    if (hasAuthoritativeSource) {
+      return combinedIds;
     }
 
     try {
@@ -2909,13 +3017,53 @@ class SupabaseService {
 
   /// Get all saved posts for a user
   Future<List<Map<String, dynamic>>> getSavedPosts(String userEmail) async {
-    try {
-      return await _getSavedPostsFromBackend();
-    } catch (backendError) {
-      if (!isBackendCompatibilityFallbackError(backendError)) {
-        rethrow;
+    final merged = <String, Map<String, dynamic>>{};
+    DateTime? parseSavedAt(Map<String, dynamic> row) => DateTime.tryParse(
+      (row['_saved_at'] ?? row['savedAt'] ?? row['created_at'] ?? '')
+          .toString(),
+    );
+    void mergeRows(List<Map<String, dynamic>> rows) {
+      for (final row in rows) {
+        final id = (row['id'] ?? row['message_id'] ?? '').toString().trim();
+        if (id.isEmpty) continue;
+        final existing = merged[id];
+        if (existing == null) {
+          merged[id] = row;
+          continue;
+        }
+        final existingTime = parseSavedAt(existing);
+        final nextTime = parseSavedAt(row);
+        if (existingTime == null ||
+            (nextTime != null && nextTime.isAfter(existingTime))) {
+          merged[id] = row;
+        }
       }
-      debugPrint('Backend getSavedPosts failed: $backendError');
+    }
+
+    try {
+      mergeRows(await _getSavedPostsDirect(userEmail));
+    } catch (e) {
+      debugPrint('Direct getSavedPosts failed: $e');
+    }
+
+    try {
+      final backendPosts = await _getSavedPostsFromBackend();
+      mergeRows(backendPosts);
+    } catch (_) {
+      // Continue with legacy Supabase fallback.
+    }
+
+    if (merged.isNotEmpty) {
+      final rows = merged.values.toList()
+        ..sort((a, b) {
+          final aTime = parseSavedAt(a);
+          final bTime = parseSavedAt(b);
+          if (aTime == null && bTime == null) return 0;
+          if (aTime == null) return 1;
+          if (bTime == null) return -1;
+          return bTime.compareTo(aTime);
+        });
+      return rows;
     }
 
     try {
@@ -3192,10 +3340,6 @@ class SupabaseService {
     final payload = Map<String, dynamic>.from(input);
     final type = (payload['type']?.toString() ?? 'notes').trim();
     final normalizedType = type.toLowerCase();
-    final normalizedStatus = Resource.normalizeStatusValue(
-      payload['status'],
-      isApproved: payload['is_approved'] ?? payload['isApproved'],
-    );
     final fileUrl =
         <dynamic>[
               payload['file_url'],
@@ -3220,8 +3364,6 @@ class SupabaseService {
       }
     }
 
-    payload['status'] = normalizedStatus;
-    payload['is_approved'] = normalizedStatus == Resource.approvedStatus;
     payload.remove('url');
 
     payload.removeWhere((key, value) {
@@ -3244,9 +3386,6 @@ class SupabaseService {
       invalidateResourceListCache();
       return;
     } catch (backendError) {
-      if (!isBackendCompatibilityFallbackError(backendError)) {
-        rethrow;
-      }
       debugPrint(
         'Backend resource create failed; falling back to direct insert: '
         '$backendError',
@@ -3273,8 +3412,6 @@ class SupabaseService {
             if (payload['file_url'] != null) 'file_url': payload['file_url'],
             if (payload['video_url'] != null) 'video_url': payload['video_url'],
             if (payload['status'] != null) 'status': payload['status'],
-            if (payload['is_approved'] != null)
-              'is_approved': payload['is_approved'],
             if (payload['chapter'] != null) 'chapter': payload['chapter'],
             if (payload['topic'] != null) 'topic': payload['topic'],
           }..removeWhere((key, value) {
@@ -3313,7 +3450,7 @@ class SupabaseService {
           .toSet()
           .toList();
       if (normalizedStatuses.isNotEmpty) {
-        query = _applyResourceStatusFilter(query, normalizedStatuses);
+        query = query.inFilter('status', normalizedStatuses);
       }
 
       if (branch != null && branch.trim().isNotEmpty) {
@@ -3336,19 +3473,15 @@ class SupabaseService {
     required BuildContext context,
   }) async {
     Object? backendError;
-    final normalizedStatus = Resource.normalizeStatusValue(status);
     try {
       await _api.updateResourceStatus(
         resourceId: resourceId,
-        status: normalizedStatus,
+        status: status,
         context: context,
       );
       invalidateResourceListCache();
       return;
     } catch (error) {
-      if (!isBackendCompatibilityFallbackError(error)) {
-        rethrow;
-      }
       backendError = error;
       debugPrint(
         'Backend resource moderation failed; falling back to direct update: '
@@ -3360,8 +3493,8 @@ class SupabaseService {
       final updated = await _client
           .from('resources')
           .update(<String, dynamic>{
-            'status': normalizedStatus,
-            'is_approved': normalizedStatus == Resource.approvedStatus,
+            'status': status,
+            'is_approved': status.trim().toLowerCase() == 'approved',
           })
           .eq('id', resourceId)
           .select('id, status, is_approved')
@@ -3374,7 +3507,6 @@ class SupabaseService {
     } catch (error) {
       if (_isNoRowsMutationResult(error)) {
         throw Exception(
-          'Resource moderation failed: backend error and direct update both '
           'failed: ${backendError.toString()}',
         );
       }
@@ -3404,18 +3536,10 @@ class SupabaseService {
 
     Object? backendError;
     try {
-      await _api.deleteOwnedResource(
-        resourceId: resource.id,
-        fileUrl: resource.fileUrl,
-        thumbnailUrl: resource.thumbnailUrl,
-        uploadedByEmail: activeOwner,
-      );
-      _clearResourceStateCaches(resource.id);
+      await _api.deleteOwnedResource(resourceId: resource.id);
+      invalidateResourceListCache();
       return;
     } catch (error) {
-      if (!isBackendCompatibilityFallbackError(error)) {
-        rethrow;
-      }
       backendError = error;
       debugPrint(
         'Backend owned resource delete failed; falling back to direct delete: '
@@ -3430,45 +3554,58 @@ class SupabaseService {
         .maybeSingle();
 
     if (row == null) {
-      debugPrint(
-        'Resource ${resource.id} no longer exists after backend delete '
-        'failure; treating as already deleted.',
+      throw Exception(
+        'Contribution not found for ${resource.id}: '
+         '${backendError.toString()}',
       );
-      _clearResourceStateCaches(resource.id);
-      return;
     }
 
     final rowMap = Map<String, dynamic>.from(row);
     final rowOwner = _normalizeEmail(
       rowMap['uploaded_by_email']?.toString() ?? resource.uploadedByEmail,
     );
-    if (rowOwner.isNotEmpty && rowOwner != activeOwner) {
-      throw Exception('You can delete only your own contributions.');
-    }
 
-    try {
-      await _client.from('resources').delete().eq('id', resource.id);
-    } catch (error) {
-      if (!_isNoRowsMutationResult(error)) {
+    if (rowOwner.isNotEmpty && rowOwner == activeOwner) {
+      // User is the canonical owner — delete the full resource record.
+      try {
+        final deleted = await _client
+            .from('resources')
+            .delete()
+            .eq('id', resource.id)
+            .select('id')
+            .maybeSingle();
+        if (deleted == null) {
+          throw Exception(
+            'Contribution delete did not affect any row for ${resource.id}.',
+          );
+        }
+      } catch (error) {
+        if (_isNoRowsMutationResult(error)) {
+          throw Exception(error.toString());
+        }
         rethrow;
       }
-    }
+    } else {
+      // User is not the canonical owner — check if they are a contributor and
+      // remove only their contributor row so others keep access to the resource.
+      final contributorRow = await _client
+          .from('resource_contributors')
+          .select('id')
+          .eq('resource_id', resource.id)
+          .eq('user_email', activeOwner)
+          .maybeSingle();
 
-    final remaining = await _client
-        .from('resources')
-        .select('id')
-        .eq('id', resource.id)
-        .maybeSingle();
-    if (remaining != null) {
-      final backendMessage =
-          ' Backend cleanup failed first: ${backendError.toString()}';
-      throw Exception(
-        'Could not delete this contribution from the database.'
-        '$backendMessage',
-      );
-    }
+      if (contributorRow == null) {
+        throw Exception('You can delete only your own contributions.');
+      }
 
-    _clearResourceStateCaches(resource.id);
+      await _client
+          .from('resource_contributors')
+          .delete()
+          .eq('resource_id', resource.id)
+          .eq('user_email', activeOwner);
+    }
+    invalidateResourceListCache();
   }
 
   // ============ DEPARTMENT FOLLOWERS ============
@@ -4013,31 +4150,13 @@ class SupabaseService {
 
   Future<List<Map<String, dynamic>>> getNotices({
     required String collegeId,
-    String? department,
   }) async {
     try {
-      return await _api.getNotices(collegeId, department: department);
-    } catch (backendError) {
-      if (!isBackendCompatibilityFallbackError(backendError)) {
-        debugPrint('Backend notice fetch failed: $backendError');
-      } else {
-        debugPrint(
-          'Backend notice fetch unavailable, retrying via Supabase: '
-          '$backendError',
-        );
-      }
-    }
-
-    try {
-      var query = _client
+      final response = await _client
           .from('notices')
           .select()
-          .eq('college_id', collegeId);
-      final normalizedDepartment = department?.trim();
-      if (normalizedDepartment != null && normalizedDepartment.isNotEmpty) {
-        query = query.eq('department', normalizedDepartment);
-      }
-      final response = await query.order('created_at', ascending: false);
+          .eq('college_id', collegeId)
+          .order('created_at', ascending: false);
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
       debugPrint('Error getting notices: $e');
@@ -4250,9 +4369,7 @@ class SupabaseService {
           .eq('uploaded_by_email', rawEmail);
 
       if (approvedOnly) {
-        query = _applyResourceStatusFilter(query, const [
-          Resource.approvedStatus,
-        ], includeLegacyApprovalFlag: true);
+        query = query.eq('status', 'approved');
       }
 
       final response = await query
@@ -4273,9 +4390,7 @@ class SupabaseService {
       final fetchWindow = (limit * 8).clamp(80, 240).toInt();
       var query = _client.from('resources').select();
       if (approvedOnly) {
-        query = _applyResourceStatusFilter(query, const [
-          Resource.approvedStatus,
-        ], includeLegacyApprovalFlag: true);
+        query = query.eq('status', 'approved');
       }
 
       final raw = await query

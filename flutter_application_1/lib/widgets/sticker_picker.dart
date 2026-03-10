@@ -553,6 +553,7 @@ class _StickerPickerState extends State<StickerPicker>
             final sticker = items[index]!;
             return GestureDetector(
               onTap: () => widget.onStickerSelected(sticker),
+              onLongPress: () => _deleteSticker(sticker),
               child: Semantics(
                 label: 'Sticker $index',
                 button: true,

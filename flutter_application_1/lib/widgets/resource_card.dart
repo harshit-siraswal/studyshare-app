@@ -8,10 +8,10 @@ import '../data/academic_subjects_data.dart';
 import '../models/resource.dart';
 import '../screens/profile/user_profile_screen.dart';
 import '../screens/viewer/pdf_viewer_screen.dart';
-import '../screens/viewer/youtube_player_screen.dart';
 import '../services/download_service.dart';
 import '../services/subscription_service.dart';
 import '../services/supabase_service.dart';
+import '../utils/link_navigation_utils.dart';
 import '../utils/youtube_link_utils.dart';
 import '../widgets/paywall_dialog.dart';
 import 'user_badge.dart';
@@ -426,21 +426,30 @@ class _ResourceCardState extends State<ResourceCard> {
   Future<void> _openVideo() async {
     final youtube = parseYoutubeLink(widget.resource.fileUrl);
     if (youtube != null) {
-      if (!mounted) return;
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => YoutubePlayerScreen(
-            videoUrl: youtube.watchUri.toString(),
-            title: widget.resource.title,
-            resourceId: widget.resource.id,
-            collegeId: widget.resource.collegeId,
-            subject: widget.resource.subject,
-            semester: widget.resource.semester,
-            branch: widget.resource.branch,
+      try {
+        final opened = await openStudyShareLink(
+          context,
+          rawUrl: widget.resource.fileUrl,
+          title: widget.resource.title,
+          resourceId: widget.resource.id,
+          collegeId: widget.resource.collegeId,
+          subject: widget.resource.subject,
+          semester: widget.resource.semester,
+          branch: widget.resource.branch,
+        );
+        if (opened || !mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open video link')),
+        );
+      } catch (e) {
+        debugPrint('openStudyShareLink error: $e');
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to open video. Please try again.'),
           ),
-        ),
-      );
+        );
+      }
       return;
     }
 
@@ -828,9 +837,9 @@ class _ResourceCardState extends State<ResourceCard> {
       runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        if (statusBadge != null) statusBadge,
-        if (teacherProfile != null) teacherProfile,
-        if (deleteButton != null) deleteButton,
+        ?statusBadge,
+        ?teacherProfile,
+        ?deleteButton,
       ],
     );
   }

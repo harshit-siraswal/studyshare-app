@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../config/app_config.dart';
@@ -33,19 +34,11 @@ class RecaptchaService {
       ),
     );
 
-    // Add timeout to prevent hanging forever
-    return completer.future.timeout(
-      const Duration(seconds: 10),
-      onTimeout: () {
-        // Close the overlay if it's still open (we can't easily reach the specific route here, 
-        // but the completer error will propagate. The overlay might stay if we don't pop it.)
-        // Ideally we should have a handle to pop the route.
-        // For now, relies on the caller handling the error, but the transparent route might block input.
-        // We can use a custom Navigator key or assume the user can back out if we allowed detailed control.
-        // BETTER: The OverlayState should handle timeout.
-        throw TimeoutException('reCAPTCHA timed out');
-      },
-    );
+    // The overlay's internal timeout handles cleanup and Navigator.pop(),
+    // which causes the push() future above to resolve. The completer is
+    // completed (either with a token or an error) before pop, so we can
+    // simply return it without an additional service-level timeout.
+    return completer.future;
   }
 }
 
@@ -85,7 +78,7 @@ class _RecaptchaOverlayState extends State<_RecaptchaOverlay> {
   void initState() {
     super.initState();
     
-    // Safety timeout in case JS never responds (though service level handles it too)
+    // Safety timeout in case JS never responds.
     _timeoutTimer = Timer(const Duration(seconds: 10), () {
       if (mounted) {
         widget.onError(TimeoutException('Security check timed out'));
@@ -124,6 +117,9 @@ class _RecaptchaOverlayState extends State<_RecaptchaOverlay> {
             widget.onError(Exception(error.description));
             if (mounted) Navigator.of(context).pop();
           },
+          onPageStarted: (_) {
+            if (mounted) setState(() => _isLoading = true);
+          },
           onPageFinished: (_) {
             if (mounted) setState(() => _isLoading = false);
           },
@@ -140,9 +136,8 @@ class _RecaptchaOverlayState extends State<_RecaptchaOverlay> {
 
   @override
   Widget build(BuildContext context) {
-    // Show spinner while loading, then hidden webview
     return Scaffold(
-      backgroundColor: Colors.black54, // Semi-transparent dim
+      backgroundColor: Colors.black54,
       body: Center(
         child: Stack(
           alignment: Alignment.center,
@@ -152,29 +147,40 @@ class _RecaptchaOverlayState extends State<_RecaptchaOverlay> {
               height: 1,
               child: WebViewWidget(controller: _controller),
             ),
-            const Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircularProgressIndicator(color: Colors.white),
-                SizedBox(height: 16),
-                Text(
-                  'Verifying security...',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                ),
-              ],
-            ),
+            if (_isLoading)
+              const Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(color: Colors.white),
+                  SizedBox(height: 16),
+                  Text(
+                    'Verifying security...',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
           ],
         ),
       ),
     );
   }
 
-  String _html(String siteKey, String action) => '''
+  /// Builds the in-memory HTML page that executes reCAPTCHA v3.
+  ///
+  /// [siteKey] and [action] are safely serialized via [jsonEncode] to prevent
+  /// JS injection if caller-controlled values contain special characters.
+  String _html(String siteKey, String action) {
+    final safeSiteKey = jsonEncode(siteKey);
+    final safeAction = jsonEncode(action);
+    return '''
 <!DOCTYPE html>
 <html>
   <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <script src="https://www.google.com/recaptcha/api.js?render=$siteKey"></script>
+    <script src="https://www.google.com/recaptcha/api.js?render=${Uri.encodeComponent(siteKey)}"></script>
     <script>
       function sendToken(token) {
         Recaptcha.postMessage(token);
@@ -185,7 +191,7 @@ class _RecaptchaOverlayState extends State<_RecaptchaOverlay> {
       window.onload = function() {
         try {
           grecaptcha.ready(function() {
-            grecaptcha.execute("$siteKey", {action: "$action"}).then(function(token) {
+            grecaptcha.execute($safeSiteKey, {action: $safeAction}).then(function(token) {
               sendToken(token);
             }).catch(function(e) {
               sendError(e);
@@ -200,5 +206,5 @@ class _RecaptchaOverlayState extends State<_RecaptchaOverlay> {
   <body></body>
 </html>
 ''';
+  }
 }
-

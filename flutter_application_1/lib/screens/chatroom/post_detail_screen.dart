@@ -12,14 +12,14 @@ import '../../services/subscription_service.dart';
 import '../../widgets/comment_input_box.dart';
 
 import 'package:flutter_linkify/flutter_linkify.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../../widgets/full_screen_image_viewer.dart';
 import '../../widgets/user_avatar.dart';
 import '../../utils/sticker_comment_codec.dart';
 import '../../widgets/user_badge.dart';
 import '../../widgets/paywall_dialog.dart';
 import '../../utils/profile_photo_utils.dart';
-import '../../utils/youtube_link_utils.dart';
+import '../../utils/link_navigation_utils.dart';
+import '../../models/user.dart';
 
 class PostDetailScreen extends StatefulWidget {
   final Map<String, dynamic> post;
@@ -62,6 +62,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   int? _userVote;
   bool _isSubmitting = false;
   bool _isReadOnly = false;
+  bool _hasAccessOverride = false;
   final Set<String> _expandedCommentIds = {};
   int _reactionRefreshTick = 0;
   static const List<String> _quickReactions = [
@@ -131,19 +132,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     return SelectableLinkify(
       text: content,
       onOpen: (link) async {
-        final uri = buildExternalUri(link.url);
-        if (uri == null) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Could not open: ${link.url}')),
-            );
-          }
-          return;
-        }
         try {
-          final launched = await launchUrl(
-            uri,
-            mode: LaunchMode.externalApplication,
+          final launched = await openStudyShareLink(
+            context,
+            rawUrl: link.url,
+            title: 'Shared link',
           );
           if (!launched && mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -153,11 +146,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         } catch (e) {
           debugPrint('Error opening link: $e');
           if (mounted) {
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(
-                const SnackBar(
-                    content: Text('Could not open link. Please try again.')));
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Could not open link. Please try again.'),
+              ),
+            );
           }
         }
       },
@@ -181,15 +174,31 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _supabaseService.attachContext(context);
     });
+    _loadWriterRole();
     _initReadOnly();
     _loadData();
   }
 
   void _initReadOnly() {
-    if (widget.collegeDomain.isEmpty) {
+    if (_hasAccessOverride) {
+      _isReadOnly = false;
+    } else if (widget.collegeDomain.isEmpty) {
       _isReadOnly = true;
     } else {
       _isReadOnly = !widget.userEmail.endsWith(widget.collegeDomain);
+    }
+  }
+
+  Future<void> _loadWriterRole() async {
+    try {
+      final role = await _supabaseService.getCurrentUserRole();
+      if (!mounted) return;
+      setState(() {
+        _hasAccessOverride = role != AppRoles.readOnly;
+        _initReadOnly();
+      });
+    } catch (e, st) {
+      debugPrint('PostDetailScreen._loadWriterRole failed: $e\n$st');
     }
   }
 
@@ -801,8 +810,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           // Image (Added Fix)
           if ((post['image_url']?.toString() ?? '').isNotEmpty) ...[
             const SizedBox(height: 16),
-            Builder(builder: (_) {
-              final imageUrl = post['image_url']?.toString() ?? '';
+            Builder(builder: (context) {
+              final imageUrl = post['image_url']!.toString();
               return GestureDetector(
                 onTap: () {
                   Navigator.push(
@@ -821,60 +830,66 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     borderRadius: BorderRadius.circular(12),
                     child: Image.network(
                       imageUrl,
-                      width: double.infinity,
-                      fit: BoxFit.cover,
-                      loadingBuilder: (context, child, loadingProgress) {
-                        if (loadingProgress == null) return child;
-                        return Container(
-                          height: 200,
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? Colors.white.withValues(alpha: 0.05)
-                                : const Color(0xFFF1F5F9),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Center(
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: AppTheme.primary,
-                            ),
-                          ),
-                        );
-                      },
-                      errorBuilder: (context, error, stackTrace) => Container(
-                        height: 150,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                    loadingBuilder: (context, child, loadingProgress) {
+                      if (loadingProgress == null) return child;
+                      final expectedBytes = loadingProgress.expectedTotalBytes;
+                      final progress = expectedBytes != null
+                          ? loadingProgress.cumulativeBytesLoaded /
+                                expectedBytes
+                          : null;
+                      return Container(
+                        height: 200,
                         decoration: BoxDecoration(
                           color: isDark
                               ? Colors.white.withValues(alpha: 0.05)
                               : const Color(0xFFF1F5F9),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: isDark ? Colors.white10 : Colors.grey.shade200,
+                        ),
+                        child: Center(
+                          child: CircularProgressIndicator(
+                            value: progress,
+                            strokeWidth: 2,
+                            color: AppTheme.primary,
                           ),
                         ),
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(
-                              Icons.image_not_supported_outlined,
-                              size: 32,
+                      );
+                    },
+                    errorBuilder: (context, error, stackTrace) => Container(
+                      height: 150,
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? Colors.white.withValues(alpha: 0.05)
+                            : const Color(0xFFF1F5F9),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isDark ? Colors.white10 : Colors.grey.shade200,
+                        ),
+                      ),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.image_not_supported_outlined,
+                            size: 32,
+                            color: AppTheme.textMuted,
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Image unavailable',
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
                               color: AppTheme.textMuted,
                             ),
-                            const SizedBox(height: 8),
-                            Text(
-                              'Image unavailable',
-                              style: GoogleFonts.inter(
-                                fontSize: 12,
-                                color: AppTheme.textMuted,
-                              ),
-                            ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
                   ),
                 ),
-              );
+              ),
+            );
             }),
           ],
           const SizedBox(height: 16),
@@ -1311,7 +1326,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     );
   }
 
-  static String _resolvePhotoUrl(Map<String, dynamic> source, List<String> keys) {
+  static String _resolvePhotoUrl(
+    Map<String, dynamic> source,
+    List<String> keys,
+  ) {
     return resolveProfilePhotoUrl(source, preferredKeys: keys) ?? '';
   }
 

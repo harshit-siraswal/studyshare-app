@@ -120,7 +120,7 @@ class _NotificationScreenState extends State<NotificationScreen>
 
   Future<void> _markAllRead() async {
     try {
-      await _api.markAllNotificationsRead(contextForRecaptcha: context);
+      await _api.markAllNotificationsRead();
       setState(() {
         for (var i = 0; i < _notifications.length; i++) {
           if (!_notifications[i].isRead) {
@@ -271,7 +271,7 @@ class _NotificationScreenState extends State<NotificationScreen>
         });
 
         try {
-          await _api.deleteNotification(n.id, contextForRecaptcha: context);
+          await _api.deleteNotification(n.id);
         } catch (e) {
           // Revert on failure
           if (mounted) {
@@ -575,7 +575,7 @@ class _NotificationScreenState extends State<NotificationScreen>
     });
 
     try {
-      await _api.markNotificationRead(n.id, contextForRecaptcha: context);
+      await _api.markNotificationRead(n.id);
     } catch (e) {
       debugPrint('Error marking notification as read: $e');
       // Optionally revert optimistic update or show error

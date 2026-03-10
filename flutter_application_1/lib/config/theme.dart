@@ -19,6 +19,7 @@ class AppTheme {
   static const Color primary = Color(0xFF2563EB); // Blue 600
   static const Color primaryLight = Color(0xFF3B82F6); // Blue 500
   static const Color primaryDark = Color(0xFF1D4ED8); // Blue 700
+  static const Color primaryColor = primary; // Backward-compatible alias
 
   // iOS Chat Colors
   static const Color iosBlueLight = Color(0xFF007AFF);
@@ -65,10 +66,7 @@ class AppTheme {
   static const Color textOnDark = darkTextPrimary;
   static const Color textOnLight = lightTextPrimary;
 
-  @Deprecated('Use textOnDark')
-  static const Color textLight = textOnDark;
-  @Deprecated('Use textOnLight')
-  static const Color textDark = textOnLight;
+
   static const Color glassBorder = lightBorder;
   static const Color glassLight = Color(0x15FFFFFF);
   static const Color glassMedium = Color(0x25FFFFFF);
@@ -451,7 +449,11 @@ class AppTheme {
 
   // ============ HELPER FUNCTIONS ============
 
-  /// Get the appropriate text color based on theme
+  /// Get the appropriate text color based on theme.
+  ///
+  /// Intentionally uses static brand color constants (darkTextPrimary,
+  /// lightTextPrimary, etc.) rather than dynamic ColorScheme values to
+  /// ensure consistent brand identity across all theme configurations.
   static Color getTextColor(
     BuildContext context, {
     bool isPrimary = true,
@@ -467,30 +469,32 @@ class AppTheme {
   static Color getCardColor(BuildContext context) {
     final theme = Theme.of(context);
     return theme.cardTheme.color ??
-        theme.colorScheme.surfaceContainerLow ??
-        (theme.brightness == Brightness.dark ? darkCard : lightCard);
+        theme.colorScheme.surfaceContainerLow;
   }
 
   /// Get the appropriate border color based on theme
   static Color getBorderColor(BuildContext context) {
     final theme = Theme.of(context);
     return theme.dividerTheme.color ??
-        theme.colorScheme.outlineVariant ??
-        (theme.brightness == Brightness.dark ? darkBorder : lightBorder);
+        theme.colorScheme.outlineVariant;
   }
 
-  /// Get the appropriate muted text color based on theme
+  /// Get the appropriate muted text color based on theme.
+  ///
+  /// Prefers the active ColorScheme's [onSurfaceVariant] for dynamic theme
+  /// support, falling back to static brand muted colors.
   static Color getMutedColor(BuildContext context) {
-    return Theme.of(context).brightness == Brightness.dark
-        ? darkTextMuted
-        : lightTextMuted;
+    final theme = Theme.of(context);
+    return theme.colorScheme.onSurfaceVariant;
   }
 
-  /// Get the appropriate background color based on theme
+  /// Get the appropriate background color based on theme.
+  ///
+  /// Prefers the active ColorScheme's [surface] for dynamic theme support,
+  /// falling back to static brand background colors.
   static Color getBackgroundColor(BuildContext context) {
-    return Theme.of(context).brightness == Brightness.dark
-        ? darkBackground
-        : lightBackground;
+    final theme = Theme.of(context);
+    return theme.scaffoldBackgroundColor;
   }
 
   /// Get the appropriate surface color based on theme

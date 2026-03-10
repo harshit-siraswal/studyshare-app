@@ -131,7 +131,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                     style: GoogleFonts.inter(
                       fontSize: 28,
                       fontWeight: FontWeight.bold,
-                      color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
+                      color: isDark ? AppTheme.textOnDark : AppTheme.textPrimary,
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -159,7 +159,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                       controller: _searchController,
                       style: GoogleFonts.inter(
                         color: isDark
-                            ? AppTheme.textLight
+                            ? AppTheme.textOnDark
                             : AppTheme.textPrimary,
                       ),
                       decoration: InputDecoration(
@@ -374,7 +374,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                             fontSize: 15,
                             fontWeight: FontWeight.w600,
                             color: isDark
-                                ? AppTheme.textLight
+                                ? AppTheme.textOnDark
                                 : AppTheme.textPrimary,
                           ),
                           maxLines: 2,
@@ -473,7 +473,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                 style: GoogleFonts.inter(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
-                  color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
+                  color: isDark ? AppTheme.textOnDark : AppTheme.textPrimary,
                 ),
               ),
               const SizedBox(height: 8),
@@ -575,7 +575,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                 style: GoogleFonts.inter(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
-                  color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
+                  color: isDark ? AppTheme.textOnDark : AppTheme.textPrimary,
                 ),
               ),
               const SizedBox(height: 8),
@@ -660,7 +660,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
     return TextField(
       controller: controller,
       style: GoogleFonts.inter(
-        color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
+        color: isDark ? AppTheme.textOnDark : AppTheme.textPrimary,
       ),
       decoration: InputDecoration(
         hintText: hintText,

@@ -13,7 +13,6 @@ import 'package:flutter_linkify/flutter_linkify.dart';
 import 'package:giphy_picker/giphy_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../config/theme.dart';
 import '../../services/auth_service.dart';
@@ -29,8 +28,8 @@ import '../../config/app_config.dart';
 import '../../models/user.dart';
 import '../../widgets/paywall_dialog.dart';
 import '../../widgets/user_avatar.dart';
+import '../../utils/link_navigation_utils.dart';
 import '../../utils/profile_photo_utils.dart';
-import '../../utils/youtube_link_utils.dart';
 
 class ChatRoomScreen extends StatefulWidget {
   final String roomId;
@@ -203,7 +202,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       final role = await _supabaseService.getCurrentUserRole();
       if (!mounted) return;
       setState(() {
-        _isTeacherOrAdmin = role == AppRoles.teacher || role == AppRoles.admin;
+        _isTeacherOrAdmin = role != AppRoles.readOnly;
       });
     } catch (e, st) {
       debugPrint('ChatRoomScreen._loadWriterRole failed: $e\n$st');
@@ -978,20 +977,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                     SelectableLinkify(
                       text: bodyText,
                       onOpen: (link) async {
-                        final uri = buildExternalUri(link.url);
-                        if (uri == null) {
-                          if (!mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Could not open: ${link.url}'),
-                            ),
-                          );
-                          return;
-                        }
                         try {
-                          final launched = await launchUrl(
-                            uri,
-                            mode: LaunchMode.externalApplication,
+                          final launched = await openStudyShareLink(
+                            context,
+                            rawUrl: link.url,
+                            title: 'Shared link',
                           );
                           if (!launched) {
                             if (!mounted) return;

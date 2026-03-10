@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:developer' as developer;
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:flutter/services.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -34,16 +35,93 @@ class AuthService {
        _pushService = pushService ?? PushNotificationService() {
     // Only initialize GoogleSignIn on mobile (not web)
     if (!kIsWeb) {
-      final serverClientId = AppConfig.googleServerClientId.trim();
-      // Do not force an empty serverClientId. When omitted, Android/iOS can use
-      // Firebase platform config (google-services/GoogleService-Info) directly.
-      _googleSignIn = serverClientId.isEmpty
-          ? GoogleSignIn(scopes: const ['email', 'profile'])
-          : GoogleSignIn(
-              serverClientId: serverClientId,
-              scopes: const ['email', 'profile'],
-            );
+      _googleSignIn = _buildGoogleSignIn();
     }
+  }
+
+  GoogleSignIn _buildGoogleSignIn({bool preferPlatformConfig = false}) {
+    final serverClientId = AppConfig.googleServerClientId.trim();
+    final usePlatformConfig = preferPlatformConfig || serverClientId.isEmpty;
+    if (usePlatformConfig) {
+      return GoogleSignIn(scopes: const ['email', 'profile']);
+    }
+    return GoogleSignIn(
+      serverClientId: serverClientId,
+      scopes: const ['email', 'profile'],
+    );
+  }
+
+  Future<bool> _hasMobileNetworkConnection() async {
+    final connectivityResult = await Connectivity().checkConnectivity();
+    return connectivityResult.any((item) => item != ConnectivityResult.none);
+  }
+
+  Future<void> _resetGoogleSignInClient({
+    bool preferPlatformConfig = false,
+  }) async {
+    final client = _googleSignIn;
+    if (client != null) {
+      try {
+        await client.disconnect();
+      } catch (e) {
+        debugPrint('GoogleSignIn disconnect error (ignored): $e');
+      }
+      try {
+        await client.signOut();
+      } catch (e) {
+        debugPrint('GoogleSignIn signOut error (ignored): $e');
+      }
+    }
+    _googleSignIn = _buildGoogleSignIn(
+      preferPlatformConfig: preferPlatformConfig,
+    );
+  }
+
+  Future<firebase_auth.UserCredential?> _performMobileGoogleSignIn() async {
+    final googleUser = await _googleSignIn!.signIn();
+    if (googleUser == null) return null;
+
+    final googleAuth = await googleUser.authentication;
+    final accessToken = googleAuth.accessToken;
+    final idToken = googleAuth.idToken;
+    if ((accessToken == null || accessToken.isEmpty) &&
+        (idToken == null || idToken.isEmpty)) {
+      throw Exception(
+        'Google Sign-In did not return a valid authentication token. Please try again.',
+      );
+    }
+
+    final credential = firebase_auth.GoogleAuthProvider.credential(
+      accessToken: accessToken,
+      idToken: idToken,
+    );
+
+    final userCredential = await _auth.signInWithCredential(credential);
+
+    if (userCredential.user != null) {
+      _backgroundSaveUser(userCredential.user!);
+    }
+
+    return userCredential;
+  }
+
+  /// Fire-and-forget save of user data to the backend database.
+  void _backgroundSaveUser(firebase_auth.User user) {
+    unawaited(_saveUserToDatabase(user).catchError((e) {
+      debugPrint('Background save error: $e');
+    }));
+  }
+
+  /// Logs Google config details and throws a user-facing config error.
+  Never _throwGoogleConfigError() {
+    debugPrint(
+      'Google Sign-In config error: '
+      'Android=${AppConfig.androidBundleId}, iOS=${AppConfig.iosBundleId}. '
+      'Ensure signing SHA fingerprint is registered in Firebase.',
+    );
+    throw Exception(
+      'Google Sign-In configuration error. Please contact support.',
+    );
   }
 
   // Current user stream
@@ -156,9 +234,7 @@ class AuthService {
         final userCredential = await _auth.signInWithPopup(provider);
 
         if (userCredential.user != null) {
-          _saveUserToDatabase(userCredential.user!).catchError((e) {
-            debugPrint('Background save error: $e');
-          });
+          _backgroundSaveUser(userCredential.user!);
         }
 
         return userCredential;
@@ -169,36 +245,59 @@ class AuthService {
         throw Exception('Google Sign-In is not available on this platform');
       }
 
-      final GoogleSignInAccount? googleUser = await _googleSignIn!.signIn();
-      if (googleUser == null) return null;
-
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
-
-      final credential = firebase_auth.GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-
-      final userCredential = await _auth.signInWithCredential(credential);
-
-      if (userCredential.user != null) {
-        // Save to database without blocking navigation
-        _saveUserToDatabase(userCredential.user!).catchError((e) {
-          debugPrint('Background save error: $e');
-        });
+      final hasNetwork = await _hasMobileNetworkConnection();
+      if (!hasNetwork) {
+        throw Exception(
+          'No internet connection. Google Sign-In requires Wi-Fi or mobile data.',
+        );
       }
 
-      return userCredential;
+      PlatformException? lastPlatformError;
+      for (var attempt = 0; attempt < 2; attempt++) {
+        try {
+          if (attempt > 0) {
+            await _resetGoogleSignInClient(preferPlatformConfig: true);
+            await Future<void>.delayed(const Duration(milliseconds: 350));
+          }
+          return await _performMobileGoogleSignIn();
+        } on PlatformException catch (e) {
+          final errorMessage = '${e.code} ${e.message ?? ''}'.toLowerCase();
+          debugPrint('Google Sign-In platform error (attempt ${attempt + 1}): $e');
+          if (_looksLikeGoogleConfigIssue(errorMessage)) {
+            _throwGoogleConfigError();
+          }
+          lastPlatformError = e;
+          if (!_looksLikeGoogleNetworkIssue(errorMessage) || attempt > 0) {
+            break;
+          }
+        }
+      }
+
+      if (lastPlatformError != null) {
+        final errorMessage =
+            '${lastPlatformError.code} ${lastPlatformError.message ?? ''}'
+                .toLowerCase();
+        if (_looksLikeGoogleNetworkIssue(errorMessage)) {
+          final stillOnline = await _hasMobileNetworkConnection();
+          if (!stillOnline) {
+            throw Exception(
+              'No internet connection. Check Wi-Fi or mobile data and try again.',
+            );
+          }
+          throw Exception(
+            'Google Sign-In temporarily could not reach Google services. '
+            'Try again in a few seconds or switch network once.',
+          );
+        }
+        throw lastPlatformError;
+      }
+
+      return null;
     } on PlatformException catch (e) {
       final errorMessage = '${e.code} ${e.message ?? ''}'.toLowerCase();
       debugPrint('Google Sign-In platform error: $e');
       if (_looksLikeGoogleConfigIssue(errorMessage)) {
-        throw Exception(
-          'Google Sign-In configuration error. Verify Firebase app identifiers '
-          '(Android: ${AppConfig.androidBundleId}, iOS: ${AppConfig.iosBundleId}) and ensure '
-          'the signing SHA fingerprint for the installed build is added in Firebase.',
-        );
+        _throwGoogleConfigError();
       }
       rethrow;
     } catch (e) {
@@ -214,6 +313,12 @@ class AuthService {
         message.contains('12500');
   }
 
+  bool _looksLikeGoogleNetworkIssue(String message) {
+    return message.contains('network_error') ||
+        message.contains('apiexception: 7') ||
+        message.contains('status code 7');
+  }
+
   /// Sign in with email and password
   Future<firebase_auth.UserCredential> signInWithEmail(
     String email,
@@ -227,9 +332,7 @@ class AuthService {
 
       // Save/update user in database (non-blocking)
       if (userCredential.user != null) {
-        _saveUserToDatabase(userCredential.user!).catchError((e) {
-          debugPrint('Background save error: $e');
-        });
+        _backgroundSaveUser(userCredential.user!);
       }
 
       return userCredential;
@@ -256,10 +359,7 @@ class AuthService {
       await userCredential.user?.reload();
 
       if (userCredential.user != null) {
-        // Save to database (non-blocking)
-        _saveUserToDatabase(userCredential.user!).catchError((e) {
-          debugPrint('Background save error: $e');
-        });
+        _backgroundSaveUser(userCredential.user!);
       }
       return userCredential;
     } catch (e) {
@@ -548,6 +648,19 @@ class AuthService {
 
   /// Get Firebase error message
   String getErrorMessage(dynamic error) {
+    if (error is PlatformException) {
+      final message = '${error.code} ${error.message ?? ''}'.toLowerCase();
+      if (_looksLikeGoogleConfigIssue(message)) {
+        return 'Google Sign-In configuration error. Please update the app or contact support.';
+      }
+      if (_looksLikeGoogleNetworkIssue(message)) {
+        return 'Google Sign-In could not reach Google services. Check internet and try again.';
+      }
+      if (message.contains('sign_in_canceled') || message.contains('canceled')) {
+        return 'Google sign-in was cancelled';
+      }
+      return error.message ?? error.toString();
+    }
     if (error is firebase_auth.FirebaseAuthException) {
       switch (error.code) {
         case 'user-not-found':

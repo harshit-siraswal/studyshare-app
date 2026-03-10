@@ -26,7 +26,7 @@ class UserAvatar extends StatelessWidget {
     
     final avatarWidget = hasImage
         ? CachedNetworkImage(
-            imageUrl: normalizedPhotoUrl!,
+            imageUrl: normalizedPhotoUrl,
             imageBuilder: (context, imageProvider) => CircleAvatar(
               radius: radius,
               backgroundImage: imageProvider,

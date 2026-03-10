@@ -31,13 +31,13 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
 
   List<Map<String, dynamic>> _rooms = [];
   bool _isLoading = true;
-  bool _isTeacherOrAdmin = false;
+  bool _hasWriteAccess = false;
   bool _roleLoaded = false;
   bool _roleLoadFailed = false;
   String? _loadErrorMessage;
 
   bool get _isReadOnly {
-    if (_isTeacherOrAdmin) return false;
+    if (_hasWriteAccess) return false;
     final email = widget.userEmail;
     final domain = widget.collegeDomain;
     if (domain.isEmpty) return true;
@@ -101,8 +101,7 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
         final role = await _supabaseService.getCurrentUserRole();
         if (!mounted) return;
         setState(() {
-          _isTeacherOrAdmin =
-              role == AppRoles.teacher || role == AppRoles.admin;
+          _hasWriteAccess = role != AppRoles.readOnly;
           _roleLoaded = true;
           _roleLoadFailed = false;
         });
@@ -119,7 +118,7 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
     }
     if (!mounted) return;
     setState(() {
-      _isTeacherOrAdmin = false;
+      _hasWriteAccess = false;
       _roleLoaded = true;
       _roleLoadFailed = true;
     });
@@ -427,7 +426,9 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
               if (value.isEmpty) return;
               final normalized = value.startsWith('#') ? value : '#$value';
               final tagBody = normalized.substring(1);
-              final isAllowedTag = RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(tagBody);
+              final isAllowedTag = RegExp(
+                r'^[A-Za-z0-9_-]+$',
+              ).hasMatch(tagBody);
               const maxTagLength = 24;
 
               if (tagBody.length < 2) {

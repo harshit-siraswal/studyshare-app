@@ -78,11 +78,12 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
     try {
       final currentUserEmail = _authService.userEmail;
+      final isSelfProfile = _isSelfProfile;
 
       final statsFuture = _supabaseService.getUserStats(widget.userEmail);
       final resourcesFuture = _supabaseService.getUserResources(
         widget.userEmail,
-        approvedOnly: !_isSelfProfile,
+        approvedOnly: !isSelfProfile,
       );
       final userInfoFuture = _supabaseService.getUserInfo(widget.userEmail);
       final currentProfileFuture = _supabaseService.getCurrentUserProfile(
@@ -223,19 +224,40 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         resource: resource,
         ownerEmail: _viewerEmail,
       );
-      await _downloadService.deleteResource(
-        resource.id,
-        ownerEmail: _viewerEmail,
-      );
-      await _loadUserProfile();
+      try {
+        await _downloadService.deleteResource(
+          resource.id,
+          ownerEmail: _viewerEmail,
+        );
+      } catch (cleanupError) {
+        debugPrint(
+          'Local contribution cleanup failed for ${resource.id}: '
+          '$cleanupError',
+        );
+      }
       if (!mounted) return;
+      setState(() {
+        _userResources = _userResources
+            .where((r) => r.id != resource.id)
+            .toList();
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Contribution deleted successfully.')),
       );
-    } catch (e) {
+      try {
+        await _loadUserProfile();
+      } catch (reloadError) {
+        debugPrint(
+          'Profile reload after deletion failed: $reloadError',
+        );
+      }
+    } catch (e, stackTrace) {
+      debugPrint('Failed to delete contribution: $e\n$stackTrace');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to delete contribution: $e')),
+        const SnackBar(
+          content: Text('Failed to delete contribution. Please try again.'),
+        ),
       );
     }
   }
@@ -376,7 +398,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                     Colors.black,
                     Colors.transparent,
                   ],
-                  stops: const [0.0, 0.05, 0.85, 1.0],
+                  stops: const [0.0, 0.015, 0.94, 1.0],
                 ).createShader(bounds);
               },
               blendMode: BlendMode.dstIn,

@@ -1,7 +1,6 @@
 import 'dart:async' show unawaited;
 import 'package:flutter/material.dart';
 import 'package:flutter_linkify/flutter_linkify.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:screenshot/screenshot.dart';
@@ -13,7 +12,7 @@ import '../services/auth_service.dart';
 import '../models/department_account.dart';
 import '../screens/notices/notice_detail_screen.dart';
 import 'notice_share_preview.dart';
-import '../utils/youtube_link_utils.dart';
+import '../utils/link_navigation_utils.dart';
 
 class NoticeCard extends StatefulWidget {
   final Map<String, dynamic> notice;
@@ -115,6 +114,21 @@ class _NoticeCardState extends State<NoticeCard> {
     final commentCount = rawCount is int
         ? rawCount
         : int.tryParse(rawCount?.toString() ?? '');
+    final boardTop = widget.isDark
+        ? const Color(0xFF3A2F22)
+        : const Color(0xFFC79863);
+    final boardBottom = widget.isDark
+        ? const Color(0xFF2A2118)
+        : const Color(0xFFAA7C4C);
+    final paperTop = widget.isDark
+        ? cardColor.withValues(alpha: 0.95)
+        : const Color(0xFFFFF7E6);
+    final paperBottom = widget.isDark
+        ? cardColor.withValues(alpha: 0.82)
+        : const Color(0xFFF6E5BC);
+    final paperBorder = widget.isDark
+        ? borderColor.withValues(alpha: 0.85)
+        : const Color(0xFFD8BE88);
 
     void openDetail() {
       Navigator.push(
@@ -132,257 +146,288 @@ class _NoticeCardState extends State<NoticeCard> {
       );
     }
 
-    /*
-    Notice-board layout kept here intentionally for future widget use.
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 6),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: <Color>[boardTop, boardBottom],
-        ),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: <Widget>[
-          Positioned(top: 8, left: 22, child: _buildTapePiece(rotation: -0.18)),
-          Positioned(top: 8, right: 22, child: _buildTapePiece(rotation: 0.18)),
-          // Existing board/paper composition intentionally commented out.
-        ],
-      ),
-    );
-    */
-
     return Hero(
-      tag: 'notice_card_${widget.notice['id'] ?? identityHashCode(widget.notice)}',
+      tag:
+          'notice_card_${widget.notice['id'] ?? identityHashCode(widget.notice)}',
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: cardColor,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: borderColor),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: <Color>[boardTop, boardBottom],
+          ),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: widget.isDark
+                ? Colors.white.withValues(alpha: 0.06)
+                : const Color(0xFF8F6438).withValues(alpha: 0.35),
+          ),
           boxShadow: <BoxShadow>[
-            if (!widget.isDark)
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
-                blurRadius: 10,
-                offset: const Offset(0, 4),
-              ),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: widget.isDark ? 0.25 : 0.14),
+              blurRadius: 20,
+              offset: const Offset(0, 10),
+            ),
           ],
         ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: openDetail,
-            borderRadius: BorderRadius.circular(16),
-            child: Stack(
-              children: <Widget>[
-                Positioned(
-                  left: 0,
-                  top: 0,
-                  bottom: 0,
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: <Widget>[
+            Positioned(top: 8, left: 22, child: _buildTapePiece(rotation: -0.18)),
+            Positioned(top: 8, right: 22, child: _buildTapePiece(rotation: 0.18)),
+            Positioned(
+              top: -8,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: Container(
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: const LinearGradient(
+                      colors: <Color>[Color(0xFFE34F47), Color(0xFFC8302A)],
+                    ),
+                    boxShadow: <BoxShadow>[
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.22),
+                        blurRadius: 8,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.push_pin_rounded,
+                    size: 12,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 18, 10, 10),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: openDetail,
+                  borderRadius: BorderRadius.circular(14),
                   child: Container(
-                    width: 4,
                     decoration: BoxDecoration(
-                      color: widget.account.color,
-                      borderRadius: const BorderRadius.horizontal(
-                        left: Radius.circular(16),
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: <Color>[paperTop, paperBottom],
+                      ),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: paperBorder),
+                      boxShadow: <BoxShadow>[
+                        BoxShadow(
+                          color: Colors.black.withValues(
+                            alpha: widget.isDark ? 0.18 : 0.08,
+                          ),
+                          blurRadius: 12,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: <Widget>[
+                              Container(
+                                width: 36,
+                                height: 36,
+                                decoration: BoxDecoration(
+                                  color: widget.account.color,
+                                  borderRadius: BorderRadius.circular(18),
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    widget.account.avatarLetter,
+                                    style: GoogleFonts.inter(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: <Widget>[
+                                    Row(
+                                      children: <Widget>[
+                                        Flexible(
+                                          child: Text(
+                                            widget.account.name,
+                                            style: GoogleFonts.inter(
+                                              fontSize: 13.5,
+                                              fontWeight: FontWeight.w600,
+                                              color: textColor,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Icon(
+                                          Icons.verified_rounded,
+                                          size: 12,
+                                          color: AppTheme.primary,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: widget.isDark
+                                                ? Colors.white10
+                                                : Colors.black.withValues(
+                                                    alpha: 0.05,
+                                                  ),
+                                            borderRadius: BorderRadius.circular(
+                                              10,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            widget.account.handle,
+                                            style: GoogleFonts.inter(
+                                              fontSize: 10,
+                                              color: secondaryColor,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      children: <Widget>[
+                                        Text(
+                                          timeAgo,
+                                          style: GoogleFonts.inter(
+                                            fontSize: 11,
+                                            color: secondaryColor,
+                                          ),
+                                        ),
+                                        if (priority == 'urgent') ...[
+                                          const SizedBox(width: 8),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 2,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: AppTheme.error.withValues(
+                                                alpha: 0.16,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
+                                            ),
+                                            child: Text(
+                                              'URGENT',
+                                              style: GoogleFonts.inter(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w700,
+                                                color: AppTheme.error,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            title,
+                            style: GoogleFonts.inter(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: textColor,
+                              height: 1.2,
+                            ),
+                          ),
+                          if (content.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Linkify(
+                              onOpen: (link) => _openNoticeLink(link.url),
+                              text: content,
+                              style: GoogleFonts.inter(
+                                fontSize: 13.5,
+                                color: secondaryColor,
+                                height: 1.35,
+                              ),
+                              linkStyle: GoogleFonts.inter(
+                                fontSize: 13.5,
+                                color: AppTheme.primary,
+                                decoration: TextDecoration.underline,
+                                height: 1.35,
+                              ),
+                              maxLines: 4,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                          const SizedBox(height: 12),
+                          Row(
+                            children: <Widget>[
+                              _buildActionButton(
+                                icon: Icons.mode_comment_outlined,
+                                count: commentCount != null
+                                    ? '$commentCount'
+                                    : 'Comment',
+                                color: secondaryColor,
+                                onTap: openDetail,
+                              ),
+                              const Spacer(),
+                              InkWell(
+                                onTap: _isLoading ? null : _toggleSaved,
+                                borderRadius: BorderRadius.circular(20),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(8),
+                                  child: Icon(
+                                    _isSaved
+                                        ? Icons.bookmark_rounded
+                                        : Icons.bookmark_border_rounded,
+                                    size: 20,
+                                    color: _isSaved
+                                        ? AppTheme.primary
+                                        : secondaryColor,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              _buildActionButton(
+                                icon: Icons.share_outlined,
+                                count: 'Share',
+                                color: secondaryColor,
+                                onTap: _shareAsImage,
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
                     ),
                   ),
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Container(
-                            width: 38,
-                            height: 38,
-                            decoration: BoxDecoration(
-                              color: widget.account.color,
-                              borderRadius: BorderRadius.circular(19),
-                            ),
-                            child: Center(
-                              child: Text(
-                                widget.account.avatarLetter,
-                                style: GoogleFonts.inter(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: <Widget>[
-                                Row(
-                                  children: <Widget>[
-                                    Flexible(
-                                      child: Text(
-                                        widget.account.name,
-                                        style: GoogleFonts.inter(
-                                          fontSize: 14,
-                                          fontWeight: FontWeight.w600,
-                                          color: textColor,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Icon(
-                                      Icons.verified_rounded,
-                                      size: 12,
-                                      color: AppTheme.primary,
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 8,
-                                        vertical: 2,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: widget.isDark
-                                            ? Colors.white10
-                                            : Colors.black.withValues(
-                                                alpha: 0.06,
-                                              ),
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      child: Text(
-                                        widget.account.handle,
-                                        style: GoogleFonts.inter(
-                                          fontSize: 10,
-                                          color: secondaryColor,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 4),
-                                Row(
-                                  children: <Widget>[
-                                    Text(
-                                      timeAgo,
-                                      style: GoogleFonts.inter(
-                                        fontSize: 11,
-                                        color: secondaryColor,
-                                      ),
-                                    ),
-                                    if (priority == 'urgent') ...[
-                                      const SizedBox(width: 8),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 2,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: AppTheme.error.withValues(
-                                            alpha: 0.15,
-                                          ),
-                                          borderRadius: BorderRadius.circular(10),
-                                        ),
-                                        child: Text(
-                                          'URGENT',
-                                          style: GoogleFonts.inter(
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.w600,
-                                            color: AppTheme.error,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ],
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      Text(
-                        title,
-                        style: GoogleFonts.inter(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          color: textColor,
-                        ),
-                      ),
-                      if (content.isNotEmpty) ...[
-                        const SizedBox(height: 8),
-                        Linkify(
-                          onOpen: (link) => _openNoticeLink(link.url),
-                          text: content,
-                          style: GoogleFonts.inter(
-                            fontSize: 14,
-                            color: secondaryColor,
-                            height: 1.4,
-                          ),
-                          linkStyle: GoogleFonts.inter(
-                            fontSize: 14,
-                            color: AppTheme.primary,
-                            decoration: TextDecoration.underline,
-                            height: 1.4,
-                          ),
-                          maxLines: 4,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                      const SizedBox(height: 12),
-                      Row(
-                        children: <Widget>[
-                          _buildActionButton(
-                            icon: Icons.mode_comment_outlined,
-                            count: commentCount != null ? '$commentCount' : 'Comment',
-                            color: secondaryColor,
-                            onTap: openDetail,
-                          ),
-                          const Spacer(),
-                          InkWell(
-                            onTap: _isLoading ? null : _toggleSaved,
-                            borderRadius: BorderRadius.circular(20),
-                            child: Padding(
-                              padding: const EdgeInsets.all(8.0),
-                              child: Icon(
-                                _isSaved
-                                    ? Icons.bookmark_rounded
-                                    : Icons.bookmark_border_rounded,
-                                size: 20,
-                                color: _isSaved
-                                    ? AppTheme.primary
-                                    : secondaryColor,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          _buildActionButton(
-                            icon: Icons.share_outlined,
-                            count: 'Share',
-                            color: secondaryColor,
-                            onTap: _shareAsImage,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
+          ],
         ),
       ),
     );
   }
 
-  // ignore: unused_element
   Widget _buildTapePiece({required double rotation}) {
     final tapeColor = widget.isDark
         ? const Color(0x55E7D7AF)
@@ -457,21 +502,14 @@ class _NoticeCardState extends State<NoticeCard> {
     }
   }
 
-  /// Share the notice as a PNG image instead of plain text.
+  /// Opens the notice URL in a browser or in-app viewer.
   Future<void> _openNoticeLink(String rawUrl) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final uri = buildExternalUri(rawUrl);
-      if (uri == null) {
-        messenger.showSnackBar(
-          SnackBar(content: Text('Could not open: $rawUrl')),
-        );
-        return;
-      }
-
-      final launched = await launchUrl(
-        uri,
-        mode: LaunchMode.externalApplication,
+      final launched = await openStudyShareLink(
+        context,
+        rawUrl: rawUrl,
+        title: widget.notice['title']?.toString() ?? 'Notice link',
       );
       if (!mounted) return;
       if (!launched) {

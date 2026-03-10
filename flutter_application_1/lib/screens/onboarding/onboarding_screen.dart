@@ -237,7 +237,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             style: GoogleFonts.inter(
               fontSize: 34,
               fontWeight: FontWeight.w800,
-              color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
+              color: isDark ? AppTheme.textOnDark : AppTheme.textPrimary,
               height: 1.12,
               letterSpacing: -0.5,
             ),

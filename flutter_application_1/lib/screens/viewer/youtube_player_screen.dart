@@ -2,17 +2,15 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:youtube_player_iframe/youtube_player_iframe.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
-import '../../config/app_config.dart';
 import '../../config/theme.dart';
 import '../../utils/youtube_link_utils.dart';
 import '../../widgets/ai_study_tools_sheet.dart';
 import '../../widgets/branded_loader.dart';
 
 class YoutubePlayerScreen extends StatefulWidget {
-  final String videoUrl;
+  final ParsedYoutubeLink youtubeLink;
   final String title;
   final String? resourceId;
   final String? collegeId;
@@ -22,7 +20,7 @@ class YoutubePlayerScreen extends StatefulWidget {
 
   const YoutubePlayerScreen({
     super.key,
-    required this.videoUrl,
+    required this.youtubeLink,
     required this.title,
     this.resourceId,
     this.collegeId,
@@ -36,194 +34,150 @@ class YoutubePlayerScreen extends StatefulWidget {
 }
 
 class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
-  ParsedYoutubeLink? _youtubeLink;
-  YoutubePlayerController? _playerController;
-  StreamSubscription<YoutubePlayerValue>? _playerSubscription;
-  bool _playerReady = false;
-  bool _didAutoFallbackToExternal = false;
+  WebViewController? _webViewController;
+  bool _isPlayerLoading = true;
+  bool _isPlayerReady = false;
   int _currentStartSeconds = 0;
   String? _playerErrorMessage;
+  int _playerLoadToken = 0;
+
+  ParsedYoutubeLink get _activeLink =>
+      widget.youtubeLink.copyWith(startSeconds: _currentStartSeconds);
 
   @override
   void initState() {
     super.initState();
+    _currentStartSeconds = widget.youtubeLink.startSeconds;
     _setupPlayer();
   }
 
   @override
-  void dispose() {
-    _playerSubscription?.cancel();
-    final controller = _playerController;
-    if (controller != null) {
-      unawaited(controller.close());
+  void didUpdateWidget(covariant YoutubePlayerScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.youtubeLink.videoId != widget.youtubeLink.videoId ||
+        oldWidget.youtubeLink.startSeconds != widget.youtubeLink.startSeconds) {
+      _currentStartSeconds = widget.youtubeLink.startSeconds;
+      _setupPlayer();
     }
+  }
+
+  @override
+  void dispose() {
+    _playerLoadToken++;
+    _webViewController = null;
     super.dispose();
   }
 
-  void _setupPlayer() {
-    final parsed = parseYoutubeLink(widget.videoUrl);
-    if (parsed == null) {
-      setState(() {
-        _youtubeLink = null;
-        _playerController = null;
-        _playerReady = false;
-        _playerErrorMessage = 'Invalid YouTube link';
-      });
-      return;
-    }
+  void _setupPlayer({int? startSeconds}) {
+    final nextStartSeconds = startSeconds ?? _currentStartSeconds;
+    _playerLoadToken++;
+    _webViewController = null;
+    setState(() {
+      _currentStartSeconds = nextStartSeconds;
+      _isPlayerLoading = true;
+      _isPlayerReady = false;
+      _playerErrorMessage = null;
+    });
+    unawaited(_loadPlayerForLink(_activeLink));
+  }
 
-    _playerSubscription?.cancel();
-    final previousController = _playerController;
-    if (previousController != null) {
-      unawaited(previousController.close());
-    }
-
-    final controller = YoutubePlayerController.fromVideoId(
-      videoId: parsed.videoId,
-      autoPlay: false,
-      startSeconds: parsed.startSeconds > 0
-          ? parsed.startSeconds.toDouble()
-          : null,
-      params: YoutubePlayerParams(
-        showControls: true,
-        showFullscreenButton: true,
-        enableCaption: true,
-        strictRelatedVideos: true,
-        interfaceLanguage: 'en',
-        playsInline: true,
-        origin: 'https://${AppConfig.webDomain}',
+  Future<void> _loadPlayerForLink(ParsedYoutubeLink link) async {
+    final token = _playerLoadToken;
+    final controller = WebViewController();
+    await controller.setJavaScriptMode(JavaScriptMode.unrestricted);
+    await controller.setBackgroundColor(Colors.black);
+    await controller.addJavaScriptChannel(
+      'StudySharePlayer',
+      onMessageReceived: (message) {
+        if (!mounted || _playerLoadToken != token) return;
+        if (message.message == 'player_ready') {
+          setState(() {
+            _isPlayerLoading = false;
+            _isPlayerReady = true;
+            _playerErrorMessage = null;
+          });
+          return;
+        }
+        if (message.message.startsWith('error:')) {
+          setState(() {
+            _isPlayerLoading = false;
+            _playerErrorMessage = message.message
+                .substring('error:'.length)
+                .trim();
+          });
+        }
+      },
+    );
+    await controller.setNavigationDelegate(
+      NavigationDelegate(
+        onWebResourceError: (error) {
+          if (!mounted || _playerLoadToken != token) return;
+          setState(() {
+            _isPlayerLoading = false;
+            _playerErrorMessage = error.description.trim().isNotEmpty
+                ? error.description.trim()
+                : 'Unable to load this YouTube video right now.';
+          });
+        },
       ),
     );
 
-    _playerSubscription = controller.stream.listen(_handlePlayerValueChanged);
+    if (!mounted || _playerLoadToken != token) return;
+    setState(() => _webViewController = controller);
 
-    setState(() {
-      _youtubeLink = parsed;
-      _playerController = controller;
-      _playerReady = false;
-      _didAutoFallbackToExternal = false;
-      _currentStartSeconds = parsed.startSeconds;
-      _playerErrorMessage = null;
-    });
-  }
-
-  void _handlePlayerValueChanged(YoutubePlayerValue value) {
-    if (!mounted) return;
-
-    final ready =
-        value.metaData.videoId.isNotEmpty ||
-        value.playerState == PlayerState.cued ||
-        value.playerState == PlayerState.playing ||
-        value.playerState == PlayerState.paused ||
-        value.playerState == PlayerState.buffering ||
-        value.playerState == PlayerState.ended;
-
-    if (ready != _playerReady) {
-      setState(() => _playerReady = ready);
+    try {
+      await controller.loadHtmlString(
+        _buildPlayerHtml(link),
+        baseUrl: link.watchUri.toString(),
+      );
+    } catch (error) {
+      if (!mounted || _playerLoadToken != token) return;
+      setState(() {
+        _isPlayerLoading = false;
+        _playerErrorMessage = 'Unable to load this YouTube video right now.';
+      });
+      debugPrint('YoutubePlayerScreen load error: $error');
     }
-
-    if (!value.hasError) {
-      if (_playerErrorMessage != null) {
-        setState(() => _playerErrorMessage = null);
-      }
-      return;
-    }
-
-    final message = _youtubeErrorMessage(value.error);
-    if (_playerErrorMessage != message) {
-      setState(() => _playerErrorMessage = message);
-    }
-
-    if (_shouldAutoOpenExternal(value.error)) {
-      unawaited(_autoFallbackToExternal('iframe_error_${value.error.code}'));
-    }
-  }
-
-  String _youtubeErrorMessage(YoutubeError error) {
-    switch (error) {
-      case YoutubeError.invalidParam:
-        return 'This video link is invalid.';
-      case YoutubeError.videoNotFound:
-      case YoutubeError.cannotFindVideo:
-        return 'This video is unavailable.';
-      case YoutubeError.notEmbeddable:
-      case YoutubeError.sameAsNotEmbeddable:
-        return 'This video cannot play inline. Open it in YouTube.';
-      case YoutubeError.html5Error:
-        return 'In-app playback failed on this device/network.';
-      case YoutubeError.unknown:
-        return 'Unable to load this YouTube video right now.';
-      case YoutubeError.none:
-        return '';
-    }
-  }
-
-  bool _shouldAutoOpenExternal(YoutubeError error) {
-    return error == YoutubeError.notEmbeddable ||
-        error == YoutubeError.sameAsNotEmbeddable ||
-        error == YoutubeError.html5Error;
-  }
-
-  Future<bool> _launchYoutubeExternally() async {
-    final link = _youtubeLink;
-    if (link == null) return false;
-
-    if (await launchUrl(
-      link.appUri,
-      mode: LaunchMode.externalNonBrowserApplication,
-    )) {
-      return true;
-    }
-    if (await launchUrl(
-      link.watchUri,
-      mode: LaunchMode.externalNonBrowserApplication,
-    )) {
-      return true;
-    }
-    if (await launchUrl(link.watchUri, mode: LaunchMode.externalApplication)) {
-      return true;
-    }
-    return false;
-  }
-
-  Future<void> _autoFallbackToExternal(String reason) async {
-    if (_didAutoFallbackToExternal) return;
-    _didAutoFallbackToExternal = true;
-    debugPrint('Auto external YouTube fallback triggered: $reason');
-    final opened = await _launchYoutubeExternally();
-    if (opened || !mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Could not open YouTube automatically.')),
-    );
   }
 
   Future<void> _openInYoutube({bool showFailureSnackBar = true}) async {
-    final opened = await _launchYoutubeExternally();
+    final opened = await openYoutubeExternally(_activeLink);
     if (opened || !showFailureSnackBar || !mounted) return;
 
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Could not open YouTube app')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Could not open YouTube right now.')),
+    );
+  }
+
+  Future<void> _openInBrowser() async {
+    final opened = await launchExternalUri(_activeLink.watchUri);
+    if (opened || !mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Could not open the video link.')),
+    );
   }
 
   Future<void> _jumpToSecond(int seconds) async {
-    final controller = _playerController;
-    if (controller == null) return;
-
     final bounded = seconds.clamp(0, 24 * 3600);
-    setState(() {
-      _currentStartSeconds = bounded;
-      _playerErrorMessage = null;
-    });
-    await controller.seekTo(seconds: bounded.toDouble(), allowSeekAhead: true);
-    await controller.playVideo();
+    if (_isPlayerReady && _webViewController != null) {
+      try {
+        await _webViewController!.runJavaScript(
+          'if(window._ytPlayer&&window._ytPlayer.seekTo){window._ytPlayer.seekTo($bounded,true);}',
+        );
+        setState(() => _currentStartSeconds = bounded);
+        return;
+      } catch (e) {
+        debugPrint('JS seekTo failed, falling back to full reload: $e');
+      }
+    }
+    _setupPlayer(startSeconds: bounded);
   }
 
   List<int> _chapterJumpSeconds() {
     final markers = <int>{0, 300, 600, 900, 1200};
-    if (_youtubeLink != null && _youtubeLink!.startSeconds > 0) {
-      markers.add(_youtubeLink!.startSeconds);
+    if (widget.youtubeLink.startSeconds > 0) {
+      markers.add(widget.youtubeLink.startSeconds);
     }
     final sorted = markers.toList()..sort();
     return sorted.where((seconds) => seconds <= 3600).toList();
@@ -265,51 +219,105 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
         semester: widget.semester,
         branch: widget.branch,
         resourceType: 'video',
-        videoUrl: _youtubeLink?.watchUri.toString() ?? widget.videoUrl,
+        videoUrl: _activeLink.watchUri.toString(),
         initialTabIndex: initialTabIndex,
         autoGenerateType: autoGenerateType,
       ),
     );
   }
 
-  Widget _buildStudioFeatureChip({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required bool isDark,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(
-        color: isDark ? Colors.white10 : color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark ? Colors.white12 : color.withValues(alpha: 0.22),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: isDark ? Colors.white70 : const Color(0xFF1E293B),
-            ),
-          ),
-        ],
-      ),
-    );
+  /// Error codes 101 and 150 mean the video owner has disabled embedding.
+  /// Error 2 = invalid video ID; error 5 = HTML5 player error.
+  /// We treat 101, 150, and 152 as "embedding disabled" for messaging.
+  static const _embeddingDisabledCodes = {101, 150, 152};
+
+  bool get _isEmbeddingError {
+    final msg = _playerErrorMessage ?? '';
+    final codeMatch = RegExp(r'error code (\d+)').firstMatch(msg);
+    if (codeMatch == null) return false;
+    final code = int.tryParse(codeMatch.group(1)!) ?? -1;
+    return _embeddingDisabledCodes.contains(code);
   }
 
+  String _buildPlayerHtml(ParsedYoutubeLink link) {
+    final videoId = link.videoId;
+    final start = link.startSeconds;
+    return '''
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    >
+    <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+      }
+      #player {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+    </style>
+    <script>
+      function studyShareNotify(message) {
+        if (window.StudySharePlayer) {
+          StudySharePlayer.postMessage(message);
+        }
+      }
+      var tag = document.createElement('script');
+      tag.src = 'https://www.youtube.com/iframe_api';
+      var firstScriptTag = document.getElementsByTagName('script')[0];
+      firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+      function onYouTubeIframeAPIReady() {
+        window._ytPlayer = new YT.Player('player', {
+          host: 'https://www.youtube-nocookie.com',
+          videoId: '$videoId',
+          playerVars: {
+            autoplay: 1,
+            start: $start,
+            playsinline: 1,
+            rel: 0,
+            modestbranding: 1,
+            enablejsapi: 1,
+            origin: 'https://www.youtube-nocookie.com',
+          },
+          events: {
+            onReady: function(event) {
+              studyShareNotify('player_ready');
+            },
+            onError: function(event) {
+              studyShareNotify('error:YouTube player error code ' + event.data);
+            },
+          },
+        });
+      }
+    </script>
+  </head>
+  <body>
+    <div id="player"></div>
+  </body>
+</html>
+''';
+  }
+
+
+
   Widget _buildPlayerError() {
-    final message =
-        (_playerErrorMessage == null || _playerErrorMessage!.isEmpty)
-        ? 'Unable to load video.'
-        : _playerErrorMessage!;
+    final isEmbedError = _isEmbeddingError;
+    final message = isEmbedError
+        ? 'This video cannot be played in-app.\nPlease open it in YouTube.'
+        : (_playerErrorMessage == null || _playerErrorMessage!.isEmpty)
+            ? 'Unable to load video.'
+            : _playerErrorMessage!;
 
     return ColoredBox(
       color: Colors.black,
@@ -319,31 +327,57 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.error_outline_rounded, color: Colors.white70),
+              Icon(
+                isEmbedError
+                    ? Icons.videocam_off_rounded
+                    : Icons.error_outline_rounded,
+                color: Colors.white70,
+                size: 28,
+              ),
               const SizedBox(height: 10),
               Text(
                 message,
                 textAlign: TextAlign.center,
-                style: GoogleFonts.inter(color: Colors.white70),
+                style: GoogleFonts.inter(
+                  color: Colors.white70,
+                  fontSize: 13,
+                  height: 1.4,
+                ),
               ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                alignment: WrapAlignment.center,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: _setupPlayer,
-                    icon: const Icon(Icons.refresh_rounded, size: 16),
-                    label: const Text('Retry in app'),
+              const SizedBox(height: 14),
+              // Primary action: Open in YouTube (especially for embed errors)
+              FilledButton.icon(
+                onPressed: _openInYoutube,
+                icon: const Icon(Icons.play_circle_fill_rounded, size: 18),
+                label: const Text('Open in YouTube'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFE11D48),
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(200, 40),
+                  textStyle: GoogleFonts.inter(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
                   ),
-                  FilledButton.icon(
-                    onPressed: _openInYoutube,
-                    icon: const Icon(Icons.open_in_new_rounded, size: 16),
-                    label: const Text('Open in YouTube'),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
                   ),
-                ],
+                ),
               ),
+              if (!isEmbedError) ...[
+                const SizedBox(height: 8),
+                OutlinedButton.icon(
+                  onPressed: _setupPlayer,
+                  icon: const Icon(Icons.refresh_rounded, size: 16),
+                  label: const Text('Retry'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white70,
+                    side: const BorderSide(color: Colors.white24),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -351,35 +385,175 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
     );
   }
 
-  Widget _buildPlayerSurface(Widget player) {
-    if (_playerController == null) {
-      return AspectRatio(aspectRatio: 16 / 9, child: _buildPlayerError());
+  Widget _buildPlayerSurface() {
+    final controller = _webViewController;
+    if (controller == null) {
+      if (_playerErrorMessage != null) {
+        return AspectRatio(aspectRatio: 16 / 9, child: _buildPlayerError());
+      }
+      return AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Container(
+          color: Colors.black,
+          child: const Center(
+            child: CircularProgressIndicator(color: Colors.white),
+          ),
+        ),
+      );
     }
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(18),
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: ColoredBox(color: Colors.black, child: player),
-          ),
-          if (!_playerReady && _playerErrorMessage == null)
-            const Positioned.fill(
+      child: AspectRatio(
+        aspectRatio: 16 / 9,
+        child: Stack(
+          children: [
+            Positioned.fill(
               child: ColoredBox(
                 color: Colors.black,
-                child: Center(
-                  child: BrandedLoader(message: 'Loading video...'),
-                ),
+                child: WebViewWidget(controller: controller),
               ),
             ),
-          if (_playerErrorMessage != null)
-            Positioned.fill(child: _buildPlayerError()),
-        ],
+            if (_isPlayerLoading && _playerErrorMessage == null)
+              const Positioned.fill(
+                child: ColoredBox(
+                  color: Colors.black,
+                  child: Center(
+                    child: BrandedLoader(message: 'Loading video...'),
+                  ),
+                ),
+              ),
+            if (_playerErrorMessage != null)
+              Positioned.fill(child: _buildPlayerError()),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildScreen({required bool isDark, required Widget playerSection}) {
+  Widget _buildExternalActions() {
+    return Row(
+      children: [
+        Expanded(
+          child: ElevatedButton.icon(
+            onPressed: _openInYoutube,
+            icon: const Icon(Icons.play_circle_fill_rounded),
+            label: const Text('Open in YouTube'),
+            style: ElevatedButton.styleFrom(
+              minimumSize: const Size.fromHeight(46),
+              backgroundColor: const Color(0xFFE11D48),
+              foregroundColor: Colors.white,
+              textStyle: GoogleFonts.inter(
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: _openInBrowser,
+            icon: const Icon(Icons.language_rounded),
+            label: const Text('Open in browser'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(46),
+              textStyle: GoogleFonts.inter(
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAiActionCard({
+    required BuildContext context,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required List<Color> gradientColors,
+    required VoidCallback onTap,
+  }) {
+    return Container(
+      width: 160,
+      margin: const EdgeInsets.only(right: 12),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: gradientColors,
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: gradientColors.last.withValues(alpha: 0.3),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(20),
+          highlightColor: Colors.white.withValues(alpha: 0.1),
+          splashColor: Colors.white.withValues(alpha: 0.2),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.25),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, color: Colors.white, size: 22),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: GoogleFonts.inter(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                        height: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: GoogleFonts.inter(
+                        color: Colors.white.withValues(alpha: 0.85),
+                        fontWeight: FontWeight.w500,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScreen({required bool isDark}) {
     return Scaffold(
       backgroundColor: isDark
           ? AppTheme.darkBackground
@@ -404,248 +578,173 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
-              child: playerSection,
+              child: _buildPlayerSurface(),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: _openInYoutube,
-                  icon: const Icon(Icons.play_circle_fill_rounded),
-                  label: const Text('Open in YouTube'),
-                  style: ElevatedButton.styleFrom(
-                    minimumSize: const Size.fromHeight(46),
-                    backgroundColor: const Color(0xFFE11D48),
-                    foregroundColor: Colors.white,
-                    textStyle: GoogleFonts.inter(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                ),
-              ),
+              child: _buildExternalActions(),
             ),
             Expanded(
               child: SingleChildScrollView(
                 physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(14, 14, 14, 18),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: isDark ? AppTheme.darkCard : Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: isDark
-                          ? AppTheme.darkBorder
-                          : const Color(0xFFE2E8F0),
-                    ),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'AI Studio',
-                        style: GoogleFonts.inter(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: isDark
-                              ? Colors.white
-                              : const Color(0xFF0F172A),
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        'Generate smart outputs from this video instantly.',
-                        style: GoogleFonts.inter(
-                          fontSize: 12.5,
-                          color: isDark
-                              ? Colors.white70
-                              : const Color(0xFF475569),
-                          height: 1.4,
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
+                padding: const EdgeInsets.fromLTRB(14, 14, 14, 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // AI Actions Section
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Row(
                         children: [
-                          OutlinedButton.icon(
-                            onPressed: () => _openAiStudioSheet(
+                          Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? AppTheme.primaryColor.withValues(alpha: 0.2)
+                                  : AppTheme.primaryColor.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(
+                              Icons.auto_awesome_rounded,
+                              size: 16,
+                              color: AppTheme.primaryColor,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            'AI Studio Tools',
+                            style: GoogleFonts.inter(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              color: isDark ? Colors.white : const Color(0xFF0F172A),
+                              letterSpacing: -0.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      height: 140,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        physics: const BouncingScrollPhysics(),
+                        clipBehavior: Clip.none,
+                        children: [
+                          _buildAiActionCard(
+                            context: context,
+                            title: 'Transcript',
+                            subtitle: 'Smart Highlights',
+                            icon: Icons.subtitles_rounded,
+                            gradientColors: const [Color(0xFF8B5CF6), Color(0xFF6D28D9)],
+                            onTap: () => _openAiStudioSheet(
                               initialTabIndex: 0,
                               autoGenerateType: 'transcript',
                             ),
-                            icon: const Icon(Icons.subtitles_rounded, size: 16),
-                            label: const Text('Transcript Highlights'),
                           ),
-                          OutlinedButton.icon(
-                            onPressed: () => _openAiStudioSheet(
+                          _buildAiActionCard(
+                            context: context,
+                            title: 'AI Notes',
+                            subtitle: 'Generate summary',
+                            icon: Icons.notes_rounded,
+                            gradientColors: const [Color(0xFF3B82F6), Color(0xFF1D4ED8)],
+                            onTap: () => _openAiStudioSheet(
                               initialTabIndex: 0,
                               autoGenerateType: 'notes',
                             ),
-                            icon: const Icon(Icons.notes_rounded, size: 16),
-                            label: const Text('AI Notes'),
                           ),
-                          OutlinedButton.icon(
-                            onPressed: () =>
-                                _openAiStudioSheet(initialTabIndex: 3),
-                            icon: const Icon(
-                              Icons.chat_bubble_rounded,
-                              size: 16,
-                            ),
-                            label: const Text('Ask AI'),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      Text(
-                        'Chapter jumps',
-                        style: GoogleFonts.inter(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: isDark
-                              ? Colors.white70
-                              : const Color(0xFF334155),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: _chapterJumpSeconds().map((seconds) {
-                          final selected = _currentStartSeconds == seconds;
-                          return ChoiceChip(
-                            selected: selected,
-                            label: Text(_formatTimestamp(seconds)),
-                            onSelected: (_) => _jumpToSecond(seconds),
-                          );
-                        }).toList(),
-                      ),
-                      const SizedBox(height: 10),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? Colors.white.withValues(alpha: 0.05)
-                              : const Color(0xFFF8FAFC),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: isDark
-                                ? Colors.white12
-                                : const Color(0xFFE2E8F0),
-                          ),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Study assist',
-                              style: GoogleFonts.inter(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
-                                color: isDark
-                                    ? Colors.white70
-                                    : const Color(0xFF334155),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                OutlinedButton.icon(
-                                  onPressed: () => _openAiStudioSheet(
-                                    initialTabIndex: 0,
-                                    autoGenerateType: 'transcript',
-                                  ),
-                                  icon: const Icon(
-                                    Icons.subtitles_rounded,
-                                    size: 16,
-                                  ),
-                                  label: const Text('Transcript Highlights'),
-                                ),
-                                OutlinedButton.icon(
-                                  onPressed: () => _openAiStudioSheet(
-                                    initialTabIndex: 0,
-                                    autoGenerateType: 'notes',
-                                  ),
-                                  icon: const Icon(
-                                    Icons.notes_rounded,
-                                    size: 16,
-                                  ),
-                                  label: const Text('AI Notes'),
-                                ),
-                                OutlinedButton.icon(
-                                  onPressed: () =>
-                                      _openAiStudioSheet(initialTabIndex: 3),
-                                  icon: const Icon(
-                                    Icons.chat_bubble_rounded,
-                                    size: 16,
-                                  ),
-                                  label: const Text('Ask AI'),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          _buildStudioFeatureChip(
-                            icon: Icons.summarize_rounded,
-                            label: 'Summary',
-                            color: const Color(0xFF2563EB),
-                            isDark: isDark,
-                          ),
-                          _buildStudioFeatureChip(
-                            icon: Icons.quiz_rounded,
-                            label: 'Quiz',
-                            color: const Color(0xFFF97316),
-                            isDark: isDark,
-                          ),
-                          _buildStudioFeatureChip(
-                            icon: Icons.style_rounded,
-                            label: 'Flash Cards',
-                            color: const Color(0xFF14B8A6),
-                            isDark: isDark,
-                          ),
-                          _buildStudioFeatureChip(
+                          _buildAiActionCard(
+                            context: context,
+                            title: 'Ask AI',
+                            subtitle: 'Q&A on this video',
                             icon: Icons.chat_bubble_rounded,
-                            label: 'AI Chat',
-                            color: const Color(0xFF7C3AED),
-                            isDark: isDark,
+                            gradientColors: const [Color(0xFFF59E0B), Color(0xFFD97706)],
+                            onTap: () => _openAiStudioSheet(initialTabIndex: 3),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 14),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: _openAiStudioSheet,
-                          icon: const Icon(Icons.auto_awesome_rounded),
-                          label: const Text('Open AI Studio'),
-                          style: FilledButton.styleFrom(
-                            minimumSize: const Size.fromHeight(46),
-                            textStyle: GoogleFonts.inter(
-                              fontWeight: FontWeight.w700,
-                              fontSize: 13,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
+                    ),
+                    const SizedBox(height: 28),
+
+                    // Chapters Section
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Text(
+                        'Video Chapters',
+                        style: GoogleFonts.inter(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: isDark ? Colors.white : const Color(0xFF334155),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: _chapterJumpSeconds().map((seconds) {
+                        final selected = _currentStartSeconds == seconds;
+                        return ChoiceChip(
+                          selected: selected,
+                          showCheckmark: false,
+                          labelStyle: GoogleFonts.inter(
+                            color: selected
+                                ? Colors.white
+                                : (isDark ? Colors.white70 : Colors.black87),
+                            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                          ),
+                          selectedColor: AppTheme.primaryColor,
+                          backgroundColor:
+                              isDark ? AppTheme.darkCard : Colors.white,
+                          side: BorderSide(
+                            color: selected
+                                ? Colors.transparent
+                                : (isDark ? AppTheme.darkBorder : Colors.grey.shade300),
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 10),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(24),
+                          ),
+                          label: Text(_formatTimestamp(seconds)),
+                          onSelected: (_) => _jumpToSecond(seconds),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 32),
+
+                    // Main CTA
+                    Container(
+                      decoration: BoxDecoration(
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppTheme.primaryColor.withValues(alpha: 0.25),
+                            blurRadius: 12,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
+                      ),
+                      width: double.infinity,
+                      height: 54,
+                      child: FilledButton.icon(
+                        onPressed: _openAiStudioSheet,
+                        icon: const Icon(Icons.auto_awesome_rounded, size: 20),
+                        label: const Text('Open Full AI Studio'),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppTheme.primaryColor,
+                          foregroundColor: Colors.white,
+                          textStyle: GoogleFonts.inter(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 15,
+                            letterSpacing: 0.2,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
                           ),
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -658,27 +757,6 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final controller = _playerController;
-
-    if (controller == null) {
-      return _buildScreen(
-        isDark: isDark,
-        playerSection: AspectRatio(
-          aspectRatio: 16 / 9,
-          child: _buildPlayerError(),
-        ),
-      );
-    }
-
-    return YoutubePlayerScaffold(
-      controller: controller,
-      aspectRatio: 16 / 9,
-      builder: (context, player) {
-        return _buildScreen(
-          isDark: isDark,
-          playerSection: _buildPlayerSurface(player),
-        );
-      },
-    );
+    return _buildScreen(isDark: isDark);
   }
 }

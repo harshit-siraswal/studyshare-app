@@ -29,9 +29,9 @@ import '../widgets/ai_formatted_text.dart';
 import '../widgets/onboarding_overlay.dart';
 import '../widgets/paywall_dialog.dart';
 import '../utils/ai_token_budget_utils.dart';
+import '../utils/link_navigation_utils.dart';
 import 'ai_question_paper_quiz_screen.dart';
 import 'viewer/pdf_viewer_screen.dart';
-import 'viewer/youtube_player_screen.dart';
 import '../utils/youtube_link_utils.dart';
 
 class RagSource {
@@ -184,7 +184,6 @@ class AIChatScreen extends StatefulWidget {
 class _AIChatScreenState extends State<AIChatScreen>
     with TickerProviderStateMixin {
   static const String _aiCoachMarksSeenKey = 'ai_chat_coach_marks_v1_seen';
-  static final String _internalDomainSuffix = '.${AppConfig.webDomain}';
   static const int _minLowTokenThreshold = 4000;
 
   final BackendApiService _api = BackendApiService();
@@ -855,8 +854,9 @@ class _AIChatScreenState extends State<AIChatScreen>
       // Only skip if both fileIds are non-empty and equal
       if (primary.fileId.isNotEmpty &&
           source.fileId.isNotEmpty &&
-          source.fileId == primary.fileId)
+          source.fileId == primary.fileId) {
         continue;
+      }
       merged.add(source);
     }
     return merged;
@@ -952,7 +952,7 @@ class _AIChatScreenState extends State<AIChatScreen>
 
     setState(() => _isOcrActionLoading = true);
     try {
-      await _api.cancelNotebookSourceRetry(sourceId: source.fileId);
+      await _api.cancelNotebookSourceReupload(sourceId: source.fileId);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Retry cancelled for "${source.title}".')),
@@ -1445,6 +1445,11 @@ class _AIChatScreenState extends State<AIChatScreen>
         normalized.contains('practice test');
   }
 
+  /// Fallback UI for manual question-paper configuration when auto-detection
+  /// from resource context is incomplete. Currently unused because
+  /// [_buildQuestionPaperRequest] infers values automatically.
+  // TODO(question-paper): Re-enable when user-editable QP config is exposed.
+  // ignore: unused_element
   Future<_QuestionPaperRequestConfig?> _showQuestionPaperConfigDialog() async {
     final semesterController = TextEditingController(
       text: widget.resourceContext?.semester ?? '',
@@ -1975,8 +1980,9 @@ class _AIChatScreenState extends State<AIChatScreen>
   }
 
   Future<int> _resolveEffectiveAiBudget(Map<String, dynamic> profile) async {
-    final snapshot =
-        await AiTokenBudgetSnapshot.fromProfileWithLocalPremium(profile);
+    final snapshot = await AiTokenBudgetSnapshot.fromProfileWithLocalPremium(
+      profile,
+    );
     return snapshot.currentBudget;
   }
 
@@ -3717,32 +3723,34 @@ Return STRICT JSON only (no markdown). Schema:
                         try {
                           if (!mounted) return;
                           if (isYoutubeSource) {
-                            final youtubeLink = parseYoutubeLink(
-                              normalizedLaunchTarget,
-                            );
-                            if (youtubeLink != null) {
-                              Navigator.push(
+                            bool opened;
+                            try {
+                              opened = await openStudyShareLink(
                                 context,
-                                MaterialPageRoute(
-                                  builder: (_) => YoutubePlayerScreen(
-                                    videoUrl: youtubeLink.watchUri.toString(),
-                                    title: s.title,
-                                    resourceId: s.fileId.trim().isEmpty
-                                        ? null
-                                        : s.fileId,
-                                    collegeId: widget.collegeId,
-                                    subject: widget.resourceContext?.subject,
-                                    semester: widget.resourceContext?.semester,
-                                    branch: widget.resourceContext?.branch,
-                                  ),
-                                ),
+                                rawUrl: normalizedLaunchTarget,
+                                title: s.title,
+                                resourceId: s.fileId.trim().isEmpty
+                                    ? null
+                                    : s.fileId,
+                                collegeId: widget.collegeId,
+                                subject: widget.resourceContext?.subject,
+                                semester: widget.resourceContext?.semester,
+                                branch: widget.resourceContext?.branch,
+                                fallbackBaseUrl: AppConfig.apiUrl,
                               );
-                            } else if (uri != null) {
+                            } catch (e) {
+                              debugPrint(
+                                'openStudyShareLink failed for '
+                                '"${s.title}": $e',
+                              );
+                              opened = false;
+                            }
+                            if (!opened && uri != null) {
                               await _openExternalSourceLink(
                                 uri: uri,
                                 sourceTitle: s.title,
                               );
-                            } else {
+                            } else if (!opened) {
                               _showSourceUrlErrorSnackBar(s.title);
                             }
                           } else if (uri != null) {

@@ -1,18 +1,29 @@
+import 'package:flutter/foundation.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 /// Parsed representation of a YouTube URL with normalized launch targets.
 class ParsedYoutubeLink {
   final String videoId;
   final int startSeconds;
   final Uri watchUri;
   final Uri embedUri;
-  final Uri appUri;
 
   const ParsedYoutubeLink({
     required this.videoId,
     required this.startSeconds,
     required this.watchUri,
     required this.embedUri,
-    required this.appUri,
   });
+
+  ParsedYoutubeLink copyWith({int? startSeconds}) {
+    final nextStartSeconds = startSeconds ?? this.startSeconds;
+    return ParsedYoutubeLink(
+      videoId: videoId,
+      startSeconds: nextStartSeconds,
+      watchUri: buildYoutubeWatchUri(videoId, startSeconds: nextStartSeconds),
+      embedUri: buildYoutubeEmbedUri(videoId, startSeconds: nextStartSeconds),
+    );
+  }
 }
 
 final RegExp _youtubeVideoIdPattern = RegExp(r'^[A-Za-z0-9_-]{11}$');
@@ -67,6 +78,12 @@ Uri buildYoutubeEmbedUri(
   return Uri.https('www.youtube.com', '/embed/$videoId', embedQuery);
 }
 
+/// Builds a YouTube app deep link for an already parsed video id.
+Uri buildYoutubeAppUri(String videoId, {int startSeconds = 0}) {
+  final query = startSeconds > 0 ? '?t=${startSeconds}s' : '';
+  return Uri.parse('vnd.youtube://$videoId$query');
+}
+
 /// Returns a URL with `https://` if scheme is missing.
 String normalizeExternalUrl(String rawUrl) {
   var normalized = _extractLikelyExternalToken(rawUrl);
@@ -108,8 +125,10 @@ String normalizeExternalUrl(String rawUrl) {
     final rawDeepLinkId = _extractYoutubeVideoIdFromRawAppLink(normalized);
     if (rawDeepLinkId != null) {
       final start = _extractStartSeconds(Uri.tryParse(normalized) ?? Uri());
-      return buildYoutubeWatchUri(rawDeepLinkId, startSeconds: start)
-          .toString();
+      return buildYoutubeWatchUri(
+        rawDeepLinkId,
+        startSeconds: start,
+      ).toString();
     }
     final appUri = Uri.tryParse(normalized);
     if (appUri != null) {
@@ -201,16 +220,11 @@ ParsedYoutubeLink? parseYoutubeLink(String rawUrl) {
   final watchUri = buildYoutubeWatchUri(id, startSeconds: startSeconds);
   final embedUri = buildYoutubeEmbedUri(id, startSeconds: startSeconds);
 
-  final appUri = Uri.parse(
-    'vnd.youtube://$id${startSeconds > 0 ? '?t=${startSeconds}s' : ''}',
-  );
-
   return ParsedYoutubeLink(
     videoId: id,
     startSeconds: startSeconds,
     watchUri: watchUri,
     embedUri: embedUri,
-    appUri: appUri,
   );
 }
 
@@ -430,9 +444,38 @@ String? _extractYoutubeVideoIdFromRawAppLink(String raw) {
   ).firstMatch(payload);
   if (watchPathMatch != null) return watchPathMatch.group(1);
 
-  final queryParamMatch = RegExp(r'(?:[?&]v=)([A-Za-z0-9_-]{11})')
-      .firstMatch(payload);
+  final queryParamMatch = RegExp(
+    r'(?:[?&]v=)([A-Za-z0-9_-]{11})',
+  ).firstMatch(payload);
   if (queryParamMatch != null) return queryParamMatch.group(1);
 
   return null;
+}
+
+Future<bool> launchExternalUri(Uri uri) async {
+  try {
+    final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (launched) return true;
+    return await launchUrl(uri);
+  } catch (e) {
+    debugPrint(
+      'launchExternalUri failed for ${uri.scheme}://${uri.host}${uri.path}: $e',
+    );
+    return false;
+  }
+}
+
+Future<bool> openYoutubeExternally(ParsedYoutubeLink youtubeLink) async {
+  final appUri = buildYoutubeAppUri(
+    youtubeLink.videoId,
+    startSeconds: youtubeLink.startSeconds,
+  );
+  try {
+    if (await launchUrl(appUri, mode: LaunchMode.externalNonBrowserApplication)) {
+      return true;
+    }
+  } catch (e) {
+    debugPrint('openYoutubeExternally app launch failed: $e');
+  }
+  return launchExternalUri(youtubeLink.watchUri);
 }

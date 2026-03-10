@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_linkify/flutter_linkify.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:screenshot/screenshot.dart';
@@ -26,10 +25,11 @@ import '../../widgets/notice_share_preview.dart';
 import '../../widgets/user_badge.dart';
 import '../../widgets/user_avatar.dart';
 import '../../widgets/paywall_dialog.dart';
+import '../../utils/link_navigation_utils.dart';
 import '../../utils/profile_photo_utils.dart';
-import '../../utils/youtube_link_utils.dart';
 import '../viewer/pdf_viewer_screen.dart';
 import 'department_account_screen.dart';
+import '../../models/user.dart';
 
 class NoticeDetailScreen extends StatefulWidget {
   final Map<String, dynamic> notice;
@@ -66,6 +66,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
   String? _replyToId;
   String? _replyToName;
   bool _isReadOnly = true;
+  bool _hasAccessOverride = false;
 
   @override
   void initState() {
@@ -73,14 +74,32 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _supabaseService.attachContext(context);
     });
-    _initReadOnly();
+    _loadWriterRole();
     _extractMedia();
     _loadComments();
     _checkSavedStatus();
   }
 
+  Future<void> _loadWriterRole() async {
+    try {
+      final role = await _supabaseService.getCurrentUserRole();
+      if (!mounted) return;
+      setState(() {
+        _hasAccessOverride = role != AppRoles.readOnly;
+      });
+    } catch (e, st) {
+      debugPrint('NoticeDetailScreen._loadWriterRole failed: $e\n$st');
+    }
+    await _initReadOnly();
+  }
+
   Future<void> _initReadOnly() async {
     try {
+      if (_hasAccessOverride) {
+        _isReadOnly = false;
+        if (mounted) setState(() {});
+        return;
+      }
       final prefs = await SharedPreferences.getInstance();
       final domain = prefs.getString('selectedCollegeDomain') ?? '';
       final email = _authService.userEmail ?? '';
@@ -117,10 +136,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     final List<String> imageUrls = [];
     String? documentUrl;
 
-    void consumeCandidate(
-      Object? rawValue, {
-      bool preferImage = false,
-    }) {
+    void consumeCandidate(Object? rawValue, {bool preferImage = false}) {
       final candidate = rawValue?.toString().trim() ?? '';
       if (candidate.isEmpty) return;
 
@@ -509,20 +525,12 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                     SelectableLinkify(
                       onOpen: (link) async {
                         try {
-                          final uri = buildExternalUri(link.url);
-                          if (uri == null) {
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('Could not open: ${link.url}'),
-                                ),
-                              );
-                            }
-                            return;
-                          }
-                          final launched = await launchUrl(
-                            uri,
-                            mode: LaunchMode.externalApplication,
+                          final launched = await openStudyShareLink(
+                            context,
+                            rawUrl: link.url,
+                            title:
+                                widget.notice['title']?.toString() ??
+                                'Notice link',
                           );
                           if (!launched && mounted) {
                             _showError('Could not open link');
@@ -773,7 +781,10 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: isDark
-                  ? <Color>[AppTheme.darkGradientStart, AppTheme.darkGradientEnd]
+                  ? <Color>[
+                      AppTheme.darkGradientStart,
+                      AppTheme.darkGradientEnd,
+                    ]
                   : <Color>[Colors.white, AppTheme.lightGradientEnd],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
@@ -832,7 +843,10 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
               ),
               const SizedBox(width: 12),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: AppTheme.primary.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(999),

@@ -258,6 +258,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           fallbackProfile: submittedProfile,
         );
       } catch (backendError) {
+        if (!isBackendCompatibilityFallbackError(backendError)) {
+          rethrow;
+        }
         debugPrint(
           'Backend profile update failed, retrying direct Supabase update: '
           '$backendError',

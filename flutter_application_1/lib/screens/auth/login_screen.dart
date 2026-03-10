@@ -292,7 +292,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   fontSize: 28,
                   fontWeight: FontWeight.bold,
                   color: Theme.of(context).brightness == Brightness.dark
-                      ? AppTheme.textLight
+                      ? AppTheme.textOnDark
                       : AppTheme.textPrimary,
                 ),
               ),
@@ -605,7 +605,7 @@ class _LoginScreenState extends State<LoginScreen> {
       obscureText: obscureText,
       keyboardType: keyboardType,
       style: GoogleFonts.inter(
-        color: isDark ? AppTheme.textLight : AppTheme.textPrimary,
+        color: isDark ? AppTheme.textOnDark : AppTheme.textPrimary,
       ),
       validator: validator,
       decoration: InputDecoration(

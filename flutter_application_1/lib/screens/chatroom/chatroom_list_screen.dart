@@ -115,7 +115,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
       final role = await _supabaseService.getCurrentUserRole();
       if (!mounted) return;
       setState(() {
-        _isTeacherOrAdmin = role == AppRoles.teacher || role == AppRoles.admin;
+        _isTeacherOrAdmin = role != AppRoles.readOnly;
       });
     } catch (e, st) {
       debugPrint('ChatroomListScreen._loadWriterRole failed: $e\n$st');
@@ -442,6 +442,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
 
   // Simplify Dialogs for brevity in this rewrite, keeping styles consistent
 
+  // ignore: unused_element
   void _showCreateOrJoinDialog() {
     // Standard bottom sheet selector
     final isDark = Theme.of(context).brightness == Brightness.dark;

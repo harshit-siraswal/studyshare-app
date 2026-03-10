@@ -112,16 +112,25 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
 
   Future<void> _loadDepartmentNotices() async {
     try {
+      final departmentId = widget.account.id;
       final allNotices = await _supabaseService.getNotices(
         collegeId: widget.collegeId,
-        department: widget.account.id,
       );
+      final departmentNotices = allNotices.where((notice) {
+        final noticeDepartment =
+            (notice['department'] ?? notice['department_id'] ?? '')
+                .toString()
+                .trim();
+        return noticeDepartment == departmentId;
+      }).toList();
 
+      if (!mounted) return;
       setState(() {
-        _notices = allNotices;
+        _notices = departmentNotices;
         _isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() => _isLoading = false);
     }
   }
