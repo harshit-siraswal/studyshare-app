@@ -1,0 +1,63 @@
+info - 'value' is deprecated and shouldn't be used. Use component accessors like .r or .g, or toARGB32 for an explicit conversion - lib\data\departments_data.dart:17:24 - deprecated_member_use
+info - The imported package 'collection' isn't a dependency of the importing package - lib\screens\ai_chat_screen.dart:1:8 - depend_on_referenced_packages
+info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_list_screen.dart:557:34 - use_build_context_synchronously
+info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\chatroom\chatroom_list_screen.dart:710:36 - use_build_context_synchronously
+info - Unnecessary use of multiple underscores - lib\screens\chatroom\chatroom_list_screen.dart:743:29 - unnecessary_underscores
+info - Unnecessary use of multiple underscores - lib\screens\chatroom\chatroom_list_screen.dart:744:24 - unnecessary_underscores
+info - Unnecessary use of multiple underscores - lib\screens\profile\explore_students_screen.dart:145:47 - unnecessary_underscores
+info - 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor or activeTrackColor instead. This feature was deprecated after v3.31.0-2.0.pre - lib\screens\profile\settings_screen.dart:355:31 - deprecated_member_use
+info - 'activeColor' is deprecated and shouldn't be used. Use activeThumbColor or activeTrackColor instead. This feature was deprecated after v3.31.0-2.0.pre - lib\screens\profile\settings_screen.dart:371:31 - deprecated_member_use
+info - Unnecessary use of multiple underscores - lib\screens\study\pdf_viewer_screen.dart:144:54 - unnecessary_underscores
+info - Unnecessary use of multiple underscores - lib\screens\study\pdf_viewer_screen.dart:144:58 - unnecessary_underscores
+info - Unnecessary use of multiple underscores - lib\screens\study\pdf_viewer_screen.dart:144:63 - unnecessary_underscores
+info - Unnecessary use of multiple underscores - lib\screens\study\syllabus_screen.dart:509:26 - unnecessary_underscores
+info - Unnecessary use of multiple underscores - lib\screens\study\syllabus_screen.dart:591:29 - unnecessary_underscores
+info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\study\syllabus_screen.dart:975:41 - use_build_context_synchronously
+info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\study\syllabus_screen.dart:976:48 - use_build_context_synchronously
+info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\study\syllabus_screen.dart:986:48 - use_build_context_synchronously
+info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\screens\study\syllabus_screen.dart:1137:33 - use_build_context_synchronously
+info - Unnecessary use of multiple underscores - lib\screens\viewer\pdf_viewer_screen.dart:304:43 - unnecessary_underscores
+warning - The declaration '_buildStudioFeatureChip' isn't referenced - lib\screens\viewer\youtube_player_screen.dart:312:10 - unused_element
+info - The imported package 'collection' isn't a dependency of the importing package - lib\services\chat_session_repository.dart:3:8 - depend_on_referenced_packages
+info - Unnecessary use of multiple underscores - lib\services\recaptcha_service.dart:23:26 - unnecessary_underscores
+info - Unnecessary use of multiple underscores - lib\services\recaptcha_service.dart:23:30 - unnecessary_underscores
+info - Don't use 'BuildContext's across async gaps - lib\services\supabase_service.dart:936:60 - use_build_context_synchronously
+warning - The receiver can't be null, so the null-aware operator '?.' is unnecessary - lib\services\supabase_service.dart:3511:35 - invalid_null_aware_operator
+warning - The receiver can't be null, so the null-aware operator '?.' is unnecessary - lib\services\supabase_service.dart:3560:25 - invalid_null_aware_operator
+info - Don't use 'BuildContext's across async gaps - lib\services\supabase_service.dart:4273:61 - use_build_context_synchronously
+info - Don't use 'BuildContext's across async gaps - lib\services\supabase_service.dart:4281:9 - use_build_context_synchronously
+info - 'Share' is deprecated and shouldn't be used. Use SharePlus instead - lib\widgets\full_screen_image_viewer.dart:53:13 - deprecated_member_use
+info - 'shareXFiles' is deprecated and shouldn't be used. Use SharePlus.instance.share() instead - lib\widgets\full_screen_image_viewer.dart:53:19 - deprecated_member_use
+info - Invalid use of a private type in a public API - lib\widgets\global_timer_overlay.dart:12:26 - library_private_types_in_public_api
+info - Don't use 'BuildContext's across async gaps - lib\widgets\resource_card.dart:197:11 - use_build_context_synchronously
+info - Don't use 'BuildContext's across async gaps - lib\widgets\resource_card.dart:215:9 - use_build_context_synchronously
+info - Don't use 'BuildContext's across async gaps - lib\widgets\resource_card.dart:228:28 - use_build_context_synchronously
+info - Don't use 'BuildContext's across async gaps - lib\widgets\resource_card.dart:236:9 - use_build_context_synchronously
+info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\widgets\resource_card.dart:246:11 - use_build_context_synchronously
+info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\widgets\resource_card.dart:254:11 - use_build_context_synchronously
+info - Don't use 'BuildContext's across async gaps - lib\widgets\resource_card.dart:414:7 - use_build_context_synchronously
+info - Unnecessary use of multiple underscores - lib\widgets\sticker_picker.dart:570:39 - unnecessary_underscores
+info - Unnecessary use of multiple underscores - lib\widgets\sticker_picker.dart:570:43 - unnecessary_underscores
+info - Unnecessary use of multiple underscores - lib\widgets\sticker_picker.dart:663:29 - unnecessary_underscores
+info - Unnecessary use of multiple underscores - lib\widgets\sticker_picker.dart:735:55 - unnecessary_underscores
+info - Unnecessary use of multiple underscores - lib\widgets\sticker_picker.dart:815:41 - unnecessary_underscores
+info - Unnecessary use of multiple underscores - lib\widgets\sticker_picker.dart:830:51 - unnecessary_underscores
+info - Unnecessary use of multiple underscores - lib\widgets\sticker_picker.dart:992:31 - unnecessary_underscores
+info - Unnecessary use of multiple underscores - lib\widgets\sticker_picker.dart:1172:52 - unnecessary_underscores
+info - Unnecessary use of multiple underscores - lib\widgets\sticker_picker.dart:1177:52 - unnecessary_underscores
+info - Unnecessary use of multiple underscores - lib\widgets\sticker_picker.dart:1177:56 - unnecessary_underscores
+info - 'scale' is deprecated and shouldn't be used. Use scaleByVector3, scaleByVector4, or scaleByDouble instead - lib\widgets\study\department_card_3d.dart:83:9 - deprecated_member_use
+info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\widgets\study\department_card_3d.dart:141:17 - use_build_context_synchronously
+info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:22:35 - deprecated_member_use
+info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:53:56 - deprecated_member_use
+info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:53:88 - deprecated_member_use
+info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:58:44 - deprecated_member_use
+info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:77:81 - deprecated_member_use
+info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:135:48 - deprecated_member_use
+info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:143:55 - deprecated_member_use
+info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:184:60 - deprecated_member_use
+info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:184:93 - deprecated_member_use
+info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:190:80 - deprecated_member_use
+info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:228:40 - deprecated_member_use
+info - 'withOpacity' is deprecated and shouldn't be used. Use .withValues() to avoid precision loss - lib\widgets\study_timer_dialog.dart:228:72 - deprecated_member_use
+info - Don't use 'BuildContext's across async gaps - lib\widgets\upload_resource_dialog.dart:426:10 - use_build_context_synchronously

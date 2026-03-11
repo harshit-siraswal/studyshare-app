@@ -36,8 +36,10 @@ class AiTokenUsageScreen extends StatefulWidget {
 
 class _AiTokenUsageScreenState extends State<AiTokenUsageScreen> {
   static const int _tokensPerCredit = 2000;
+  /// Default monthly token budget for new/free-tier users
+  static const int _defaultBudget = 40160;
 
-  int get _budget => widget.budget > 0 ? widget.budget : 40160;
+  int get _budget => widget.budget > 0 ? widget.budget : _defaultBudget;
   int get _used => widget.used.clamp(0, _budget);
   int get _remaining => widget.remaining.clamp(0, _budget);
   double get _progress => _budget > 0 ? (_used / _budget).clamp(0.0, 1.0) : 0;

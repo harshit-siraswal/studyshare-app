@@ -50,7 +50,7 @@ void main() {
           'subscription_end_date': futurePremiumDate,
           'ai_token_budget': 401600,
           'ai_token_base_budget': 40160,
-          'ai_token_budget_multiplier': 1,
+          'ai_token_budget_multiplier': 10,
           'ai_token_premium_multiplier': 10,
         });
 
@@ -58,6 +58,27 @@ void main() {
         expect(snapshot.freeBudget, 40160);
         expect(snapshot.premiumBudget, 401600);
         expect(snapshot.currentBudget, 401600);
+        expect(visibleAiTokensFromRaw(snapshot.currentBudget), 200);
+      },
+    );
+
+    test(
+      'preserves premium top-ups without inflating the visible budget',
+      () {
+        final snapshot = AiTokenBudgetSnapshot.fromProfile({
+          'subscription_tier': 'pro',
+          'subscription_end_date': futurePremiumDate,
+          'ai_token_budget': 411600,
+          'ai_token_base_budget': 40160,
+          'ai_token_budget_multiplier': 10,
+          'ai_token_premium_multiplier': 10,
+        });
+
+        expect(snapshot.isPremiumActive, isTrue);
+        expect(snapshot.freeBudget, 41160);
+        expect(snapshot.premiumBudget, 411600);
+        expect(snapshot.currentBudget, 411600);
+        expect(visibleAiTokensFromRaw(snapshot.currentBudget), 205);
       },
     );
 

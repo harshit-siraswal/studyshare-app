@@ -175,9 +175,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       if (mounted) _supabaseService.attachContext(context);
     });
     _loadWriterRole();
-    _initReadOnly();
-    _loadData();
-  }
+    _loadData();  }
 
   void _initReadOnly() {
     if (_hasAccessOverride) {

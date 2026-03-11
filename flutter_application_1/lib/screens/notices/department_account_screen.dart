@@ -130,6 +130,7 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
         _isLoading = false;
       });
     } catch (e) {
+      debugPrint('Error loading department notices: $e');
       if (!mounted) return;
       setState(() => _isLoading = false);
     }

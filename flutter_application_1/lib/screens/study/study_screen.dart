@@ -1543,18 +1543,18 @@ class _StudyScreenState extends State<StudyScreen>
         onTap: () {
           if (userDept != null) {
             // Navigate directly to the user's department SyllabusScreen
+            final dept = userDept;
             Navigator.push(
               context,
               MaterialPageRoute(
                 builder: (context) => SyllabusScreen(
                   collegeId: widget.collegeId,
-                  department: userDept!.name,
-                  departmentName: userDept.full,
-                  departmentColor: userDept.color,
+                  department: dept.name,
+                  departmentName: dept.full,
+                  departmentColor: dept.color,
                   canUploadSyllabus: true,
                 ),
-              ),
-            );
+              ),            );
           } else {
             // Show a bottom sheet to pick a department
             _showDepartmentPicker(isDark, departments);

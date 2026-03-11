@@ -164,13 +164,14 @@ class Resource {
     if (approvedStatusAliases.contains(normalized)) return approvedStatus;
     if (rejectedStatusAliases.contains(normalized)) return rejectedStatus;
     if (pendingStatusAliases.contains(normalized)) return pendingStatus;
-    debugPrint(
-      '_normalizeStatusToken: unrecognized status "$rawStatus" '
-      '(normalized: "$normalized") — not in approvedStatusAliases, '
-      'rejectedStatusAliases, or pendingStatusAliases. Returning as-is.',
-    );
-    return normalized;
-  }
+    if (kDebugMode) {
+      debugPrint(
+        '_normalizeStatusToken: unrecognized status "$rawStatus" '
+        '(normalized: "$normalized") — not in approvedStatusAliases, '
+        'rejectedStatusAliases, or pendingStatusAliases. Returning as-is.',
+      );
+    }
+    return normalized;  }
 
   static String normalizeStatusValue(
     dynamic rawStatus, {

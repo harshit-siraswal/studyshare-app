@@ -490,13 +490,12 @@ class AppTheme {
 
   /// Get the appropriate background color based on theme.
   ///
-  /// Prefers the active ColorScheme's [surface] for dynamic theme support,
-  /// falling back to static brand background colors.
+  /// Returns the theme's [scaffoldBackgroundColor], which respects dynamic
+  /// themes when available or falls back to static brand background colors.
   static Color getBackgroundColor(BuildContext context) {
     final theme = Theme.of(context);
     return theme.scaffoldBackgroundColor;
   }
-
   /// Get the appropriate surface color based on theme
   static Color getSurfaceColor(BuildContext context) {
     final theme = Theme.of(context);

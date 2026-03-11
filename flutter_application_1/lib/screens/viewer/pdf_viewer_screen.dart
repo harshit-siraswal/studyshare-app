@@ -440,7 +440,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     decoration: BoxDecoration(
-  // No change needed logically, keeping the variables with new names.
                       color: isDarkMode ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
                       borderRadius: BorderRadius.circular(14),
                     ),
