@@ -119,6 +119,12 @@ class _StudyScreenState extends State<StudyScreen>
 
   int _unreadNotificationCount = 0;
 
+  bool get _isKietCollege {
+    final collegeName = widget.collegeName.trim().toLowerCase();
+    final collegeDomain = widget.collegeDomain.trim().toLowerCase();
+    return collegeName.contains('kiet') || collegeDomain.contains('kiet');
+  }
+
   String get _effectiveUserEmail {
     final fromWidget = widget.userEmail.trim();
     if (fromWidget.isNotEmpty) return fromWidget;
@@ -1841,26 +1847,26 @@ class _StudyScreenState extends State<StudyScreen>
             ),
           ),
 
-          // Attendance button
-          IconButton(
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => AttendanceScreen(
-                    collegeId: widget.collegeId,
-                    collegeName: widget.collegeName,
+          if (_isKietCollege)
+            IconButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => AttendanceScreen(
+                      collegeId: widget.collegeId,
+                      collegeName: widget.collegeName,
+                    ),
                   ),
-                ),
-              );
-            },
-            icon: Icon(
-              Icons.fact_check_outlined,
-              color: isDark
-                  ? AppTheme.darkTextSecondary
-                  : AppTheme.lightTextSecondary,
+                );
+              },
+              icon: Icon(
+                Icons.fact_check_outlined,
+                color: isDark
+                    ? AppTheme.darkTextSecondary
+                    : AppTheme.lightTextSecondary,
+              ),
             ),
-          ),
 
           // Notification bell
           IconButton(

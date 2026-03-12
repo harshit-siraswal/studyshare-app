@@ -427,6 +427,43 @@ class BackendApiService {
     return _requestJson('/api/academics/catalog', method: 'GET');
   }
 
+  Future<Map<String, dynamic>> syncKietAttendance({
+    required String collegeId,
+    required String cybervidyaToken,
+    required BuildContext context,
+  }) async {
+    return _requestJson(
+      '/api/attendance/kiet/sync',
+      method: 'POST',
+      body: {'collegeId': collegeId, 'cybervidyaToken': cybervidyaToken},
+      securityContext: context,
+      includeRecaptchaToken: true,
+      recaptchaAction: 'attendance_sync',
+      requireAuthToken: true,
+    );
+  }
+
+  Future<Map<String, dynamic>> getKietAttendanceDaywise({
+    required String collegeId,
+    required String cybervidyaToken,
+    required int courseId,
+    required int courseComponentId,
+    required int studentId,
+  }) async {
+    return _requestJson(
+      '/api/attendance/kiet/daywise',
+      method: 'POST',
+      body: {
+        'collegeId': collegeId,
+        'cybervidyaToken': cybervidyaToken,
+        'courseId': courseId,
+        'courseComponentId': courseComponentId,
+        'studentId': studentId,
+      },
+      requireAuthToken: true,
+    );
+  }
+
   Future<Map<String, dynamic>> resolveResourceScopes({
     required Map<String, dynamic> selectedScope,
   }) async {
@@ -472,9 +509,7 @@ class BackendApiService {
     if (branch != null && branch.trim().isNotEmpty && branch != 'all') {
       query['branch'] = branch.trim();
     }
-    if (semester != null &&
-        semester.trim().isNotEmpty &&
-        semester != 'all') {
+    if (semester != null && semester.trim().isNotEmpty && semester != 'all') {
       query['semester'] = semester.trim();
     }
     if (subject != null && subject.trim().isNotEmpty && subject != 'all') {
@@ -582,10 +617,7 @@ class BackendApiService {
         '&department=${Uri.encodeQueryComponent(normalizedDepartment)}',
       );
     }
-    final data = await _requestJson(
-      query.toString(),
-      method: 'GET',
-    );
+    final data = await _requestJson(query.toString(), method: 'GET');
     final list = (data['notices'] as List?) ?? const [];
     return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
   }
@@ -643,10 +675,7 @@ class BackendApiService {
     return _requestJson(
       '${_noticePath(noticeId)}/comments',
       method: 'POST',
-      body: <String, dynamic>{
-        'content': content,
-        'parentId': ?parentId,
-      },
+      body: <String, dynamic>{'content': content, 'parentId': ?parentId},
     );
   }
 
@@ -849,9 +878,7 @@ class BackendApiService {
     }
   }
 
-  Future<void> markNotificationRead(
-    Object id,
-  ) async {
+  Future<void> markNotificationRead(Object id) async {
     await _requestJson(
       '/api/notifications/${Uri.encodeComponent(id.toString())}/read',
       method: 'POST',
@@ -862,9 +889,7 @@ class BackendApiService {
     await _requestJson('/api/notifications/read-all', method: 'POST');
   }
 
-  Future<void> deleteNotification(
-    Object id,
-  ) async {
+  Future<void> deleteNotification(Object id) async {
     await _requestJson(
       '/api/notifications/${Uri.encodeComponent(id.toString())}',
       method: 'DELETE',
@@ -921,10 +946,7 @@ class BackendApiService {
   }
 
   /// Unfollow a user identified by [targetEmail].
-  Future<void> unfollowUser(
-    String targetEmail, {
-    BuildContext? context,
-  }) async {
+  Future<void> unfollowUser(String targetEmail, {BuildContext? context}) async {
     final encoded = Uri.encodeComponent(targetEmail.trim());
     try {
       await _requestJson(
@@ -1237,7 +1259,6 @@ class BackendApiService {
     return data['added'] == true;
   }
 
-
   Future<void> acceptFollowRequest(
     int requestId, {
     required BuildContext context,
@@ -1454,7 +1475,8 @@ class BackendApiService {
     } catch (_) {
       throw BackendApiHttpException(
         statusCode: streamed.statusCode,
-        message: 'Notebook source upload failed (${streamed.statusCode}): $body',
+        message:
+            'Notebook source upload failed (${streamed.statusCode}): $body',
       );
     }
 
@@ -1820,6 +1842,4 @@ class BackendApiService {
       rethrow;
     }
   }
-
-
-  }
+}

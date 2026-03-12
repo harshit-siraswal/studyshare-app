@@ -166,6 +166,7 @@ class ResourceContext {
 class AIChatScreen extends StatefulWidget {
   final String collegeId;
   final String collegeName;
+  final String? initialPrompt;
 
   /// Optional: if set, all RAG queries are pinned to this resource.
   final ResourceContext? resourceContext;
@@ -174,6 +175,7 @@ class AIChatScreen extends StatefulWidget {
     super.key,
     required this.collegeId,
     required this.collegeName,
+    this.initialPrompt,
     this.resourceContext,
   });
 
@@ -236,6 +238,7 @@ class _AIChatScreenState extends State<AIChatScreen>
   int _aiTokenBudgetTokens = 0;
   int _aiTokenLowThreshold = _minLowTokenThreshold;
   _QuestionPaperRequestConfig? _cachedQuestionPaperConfig;
+  bool _didQueueInitialPrompt = false;
 
   final GlobalKey _coachHistoryKey = GlobalKey(debugLabel: 'ai_chat_history');
   final GlobalKey _coachAttachKey = GlobalKey(debugLabel: 'ai_chat_attach');
@@ -1112,6 +1115,20 @@ class _AIChatScreenState extends State<AIChatScreen>
     }
 
     await _scrollToBottom();
+    _queueInitialPromptIfNeeded();
+  }
+
+  void _queueInitialPromptIfNeeded() {
+    final prompt = widget.initialPrompt?.trim();
+    if (_didQueueInitialPrompt || prompt == null || prompt.isEmpty) {
+      return;
+    }
+    _didQueueInitialPrompt = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      _controller.text = prompt;
+      await _sendMessage();
+    });
   }
 
   Future<void> _startNewChat() async {

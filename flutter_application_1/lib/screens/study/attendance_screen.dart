@@ -2,8 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../config/theme.dart';
+import '../../models/attendance_models.dart';
+import '../../services/attendance_service.dart';
+import '../ai_chat_screen.dart';
+import 'attendance_web_login_screen.dart';
 
-class AttendanceScreen extends StatelessWidget {
+class AttendanceScreen extends StatefulWidget {
   final String collegeId;
   final String collegeName;
 
@@ -12,6 +16,216 @@ class AttendanceScreen extends StatelessWidget {
     required this.collegeId,
     required this.collegeName,
   });
+
+  @override
+  State<AttendanceScreen> createState() => _AttendanceScreenState();
+}
+
+class _AttendanceScreenState extends State<AttendanceScreen> {
+  final AttendanceService _attendanceService = AttendanceService();
+
+  AttendanceSnapshot? _snapshot;
+  bool _isLoading = true;
+  bool _isSyncing = false;
+  bool _isLoadingDaywise = false;
+
+  bool get _isKietCollege => _attendanceService.isKietCollege(
+    collegeId: widget.collegeId,
+    collegeName: widget.collegeName,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCachedSnapshot();
+  }
+
+  Future<void> _loadCachedSnapshot() async {
+    if (!_isKietCollege) {
+      setState(() => _isLoading = false);
+      return;
+    }
+    final snapshot = await _attendanceService.loadCachedSnapshot(
+      widget.collegeId,
+    );
+    if (!mounted) return;
+    setState(() {
+      _snapshot = snapshot;
+      _isLoading = false;
+    });
+  }
+
+  Future<void> _connectAndSync() async {
+    if (_isSyncing) return;
+
+    final token = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (_) => const AttendanceWebLoginScreen()),
+    );
+    if (!mounted || token == null || token.trim().isEmpty) return;
+
+    await _syncWithToken(token.trim());
+  }
+
+  Future<void> _syncWithSavedToken() async {
+    final token = await _attendanceService.loadSavedToken(widget.collegeId);
+    if (!mounted) return;
+    if (token == null || token.isEmpty) {
+      await _connectAndSync();
+      return;
+    }
+    await _syncWithToken(token);
+  }
+
+  Future<void> _syncWithToken(String token) async {
+    setState(() => _isSyncing = true);
+    try {
+      final snapshot = await _attendanceService.syncKietAttendance(
+        collegeId: widget.collegeId,
+        collegeName: widget.collegeName,
+        cybervidyaToken: token,
+        context: context,
+      );
+      if (!mounted) return;
+      setState(() => _snapshot = snapshot);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('KIET attendance synced successfully.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isSyncing = false);
+    }
+  }
+
+  Future<void> _openDaywiseSheet(AttendanceComponent component) async {
+    final snapshot = _snapshot;
+    final studentId = snapshot?.student.studentId;
+    if (snapshot == null || studentId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Sync attendance first to load daywise data.'),
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isLoadingDaywise = true);
+    try {
+      final lectures = await _attendanceService.getDaywiseAttendance(
+        collegeId: widget.collegeId,
+        component: component,
+        studentId: studentId,
+      );
+      if (!mounted) return;
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        builder: (context) {
+          final isDark = Theme.of(context).brightness == Brightness.dark;
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: SizedBox(
+                height: MediaQuery.of(context).size.height * 0.7,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${component.courseName} · ${component.componentName}',
+                      style: GoogleFonts.inter(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: isDark
+                            ? AppTheme.darkTextPrimary
+                            : AppTheme.lightTextPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: lectures.isEmpty
+                          ? Center(
+                              child: Text(
+                                'No daywise attendance available yet.',
+                                style: GoogleFonts.inter(
+                                  color: isDark
+                                      ? AppTheme.darkTextSecondary
+                                      : AppTheme.lightTextSecondary,
+                                ),
+                              ),
+                            )
+                          : ListView.separated(
+                              itemCount: lectures.length,
+                              separatorBuilder: (_, itemIndex) =>
+                                  const Divider(height: 1),
+                              itemBuilder: (context, index) {
+                                final lecture = lectures[index];
+                                return ListTile(
+                                  contentPadding: EdgeInsets.zero,
+                                  title: Text(
+                                    lecture.lectureDate,
+                                    style: GoogleFonts.inter(
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  subtitle: Text(
+                                    '${lecture.dayName} · ${lecture.timeSlot}',
+                                    style: GoogleFonts.inter(),
+                                  ),
+                                  trailing: Text(
+                                    lecture.attendanceStatus.isEmpty
+                                        ? 'N/A'
+                                        : lecture.attendanceStatus,
+                                    style: GoogleFonts.inter(
+                                      fontWeight: FontWeight.w700,
+                                      color:
+                                          lecture.attendanceStatus
+                                              .toLowerCase()
+                                              .contains('present')
+                                          ? Colors.green
+                                          : Colors.redAccent,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoadingDaywise = false);
+    }
+  }
+
+  void _openAttendanceAi() {
+    final snapshot = _snapshot;
+    if (snapshot == null) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AIChatScreen(
+          collegeId: widget.collegeId,
+          collegeName: widget.collegeName,
+          initialPrompt: _attendanceService.buildAiPrompt(snapshot),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -26,58 +240,412 @@ class AttendanceScreen extends StatelessWidget {
           'Attendance',
           style: GoogleFonts.inter(fontWeight: FontWeight.w600),
         ),
+        actions: _isKietCollege
+            ? [
+                IconButton(
+                  onPressed: _isSyncing ? null : _syncWithSavedToken,
+                  icon: _isSyncing
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.sync_rounded),
+                ),
+              ]
+            : null,
       ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: _buildBody(isDark),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBody(bool isDark) {
+    if (!_isKietCollege) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Attendance is currently available only for KIET.',
+            style: GoogleFonts.inter(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: isDark
+                  ? AppTheme.darkTextPrimary
+                  : AppTheme.lightTextPrimary,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Switch to KIET in the college selector to use attendance sync and attendance insights.',
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              height: 1.4,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (_isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final snapshot = _snapshot;
+    if (snapshot == null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Connect your KIET ERP session to sync attendance.',
+            style: GoogleFonts.inter(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: isDark
+                  ? AppTheme.darkTextPrimary
+                  : AppTheme.lightTextPrimary,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'StudyShare opens the official KIET ERP page, waits for the authenticated home state after login and reCAPTCHA, then reads the session token the same way the upstream bridge does.',
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              height: 1.4,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
+            ),
+          ),
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            onPressed: _isSyncing ? null : _connectAndSync,
+            icon: const Icon(Icons.login_rounded),
+            label: Text(
+              _isSyncing ? 'Syncing...' : 'Connect KIET ERP',
+              style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: _syncWithSavedToken,
+      child: ListView(
+        children: [
+          _buildOverviewCard(snapshot, isDark),
+          const SizedBox(height: 16),
+          if (snapshot.lowAttendance.isNotEmpty) ...[
+            _buildLowAttendanceCard(snapshot, isDark),
+            const SizedBox(height: 16),
+          ],
+          Row(
             children: [
-              Text(
-                'Attendance module is now enabled.',
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: _isSyncing ? null : _syncWithSavedToken,
+                  icon: const Icon(Icons.sync_rounded),
+                  label: Text(
+                    'Sync now',
+                    style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _openAttendanceAi,
+                  icon: const Icon(Icons.auto_awesome_rounded),
+                  label: Text(
+                    'Ask AI',
+                    style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Subjects',
+            style: GoogleFonts.inter(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: isDark
+                  ? AppTheme.darkTextPrimary
+                  : AppTheme.lightTextPrimary,
+            ),
+          ),
+          const SizedBox(height: 12),
+          ...snapshot.courses.expand(
+            (course) => course.components.map(
+              (component) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _buildComponentCard(component, isDark),
+              ),
+            ),
+          ),
+          if (snapshot.schedule.entries.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              'This Week',
+              style: GoogleFonts.inter(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: isDark
+                    ? AppTheme.darkTextPrimary
+                    : AppTheme.lightTextPrimary,
+              ),
+            ),
+            const SizedBox(height: 12),
+            ...snapshot.schedule.entries
+                .take(5)
+                .map(
+                  (entry) => ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(
+                      entry.courseName.isEmpty ? entry.title : entry.courseName,
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                    ),
+                    subtitle: Text(
+                      '${entry.lectureDate} · ${entry.start} - ${entry.end}',
+                      style: GoogleFonts.inter(),
+                    ),
+                    trailing: Text(
+                      entry.classRoom,
+                      style: GoogleFonts.inter(
+                        color: isDark
+                            ? AppTheme.darkTextSecondary
+                            : AppTheme.lightTextSecondary,
+                      ),
+                    ),
+                  ),
+                ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOverviewCard(AttendanceSnapshot snapshot, bool isDark) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            snapshot.student.fullName,
+            style: GoogleFonts.inter(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: isDark
+                  ? AppTheme.darkTextPrimary
+                  : AppTheme.lightTextPrimary,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${snapshot.student.branchShortName} · ${snapshot.student.semesterName} · ${snapshot.student.sectionName}',
+            style: GoogleFonts.inter(
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            '${snapshot.overall.percentage.toStringAsFixed(2)}%',
+            style: GoogleFonts.inter(
+              fontSize: 32,
+              fontWeight: FontWeight.w800,
+              color:
+                  snapshot.overall.percentage <
+                      AttendanceService.lowAttendanceThreshold
+                  ? Colors.redAccent
+                  : Colors.green,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${snapshot.overall.presentClasses}/${snapshot.overall.totalClasses} classes attended',
+            style: GoogleFonts.inter(
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'Last synced ${_formatSyncTime(snapshot.syncedAt)}',
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLowAttendanceCard(AttendanceSnapshot snapshot, bool isDark) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF3A1A1A) : const Color(0xFFFFEFEF),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Low attendance alert',
+            style: GoogleFonts.inter(
+              fontSize: 17,
+              fontWeight: FontWeight.w700,
+              color: Colors.redAccent,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ...snapshot.lowAttendance.map(
+            (component) => Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                '${component.courseName} (${component.componentName}) · '
+                '${component.percentage.toStringAsFixed(2)}% · '
+                'Need ${component.classesNeededForThreshold} classes to recover',
                 style: GoogleFonts.inter(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
                   color: isDark
                       ? AppTheme.darkTextPrimary
                       : AppTheme.lightTextPrimary,
                 ),
               ),
-              const SizedBox(height: 12),
-              Text(
-                'College: $collegeName',
-                style: GoogleFonts.inter(
-                  fontSize: 14,
-                  color: isDark
-                      ? AppTheme.darkTextSecondary
-                      : AppTheme.lightTextSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildComponentCard(AttendanceComponent component, bool isDark) {
+    final accent = component.isLowAttendance ? Colors.redAccent : Colors.green;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      component.courseName,
+                      style: GoogleFonts.inter(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w700,
+                        color: isDark
+                            ? AppTheme.darkTextPrimary
+                            : AppTheme.lightTextPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${component.componentName} · ${component.courseCode}',
+                      style: GoogleFonts.inter(
+                        color: isDark
+                            ? AppTheme.darkTextSecondary
+                            : AppTheme.lightTextSecondary,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 8),
-              Text(
-                'College ID: $collegeId',
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  color: isDark
-                      ? AppTheme.darkTextSecondary
-                      : AppTheme.lightTextSecondary,
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
                 ),
-              ),
-              const SizedBox(height: 24),
-              Text(
-                'Next steps in progress:\n- KIET sync bridge\n- Dashboard cards\n- Low-attendance alerts (<75%)\n- AI attendance context',
-                style: GoogleFonts.inter(
-                  fontSize: 14,
-                  height: 1.4,
-                  color: isDark
-                      ? AppTheme.darkTextSecondary
-                      : AppTheme.lightTextSecondary,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: Text(
+                  '${component.percentage.toStringAsFixed(2)}%',
+                  style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w700,
+                    color: accent,
+                  ),
                 ),
               ),
             ],
           ),
-        ),
+          const SizedBox(height: 12),
+          Text(
+            '${component.attendedClasses}/${component.totalClasses} attended · '
+            '${component.extraAttendance} extra attendance',
+            style: GoogleFonts.inter(
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            component.isLowAttendance
+                ? 'Recovery: attend ${component.classesNeededForThreshold} more classes to reach ${component.threshold}%.'
+                : 'Safe margin: you can miss ${component.bunkAllowance} classes and stay above ${component.threshold}%.',
+            style: GoogleFonts.inter(
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: _isLoadingDaywise
+                  ? null
+                  : () => _openDaywiseSheet(component),
+              icon: const Icon(Icons.calendar_view_day_rounded),
+              label: Text(
+                'Daywise',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+        ],
       ),
     );
+  }
+
+  String _formatSyncTime(DateTime syncedAt) {
+    if (syncedAt.millisecondsSinceEpoch == 0) {
+      return 'just now';
+    }
+    final now = DateTime.now();
+    final difference = now.difference(syncedAt);
+    if (difference.inMinutes < 1) return 'just now';
+    if (difference.inHours < 1) return '${difference.inMinutes} min ago';
+    if (difference.inDays < 1) return '${difference.inHours} hr ago';
+    return '${difference.inDays} day ago';
   }
 }
