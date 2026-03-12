@@ -25,6 +25,7 @@ import '../../widgets/study/department_card_3d.dart';
 import '../../data/academic_subjects_data.dart';
 import '../../data/departments_data.dart'; // Added for DepartmentData and DepartmentsProvider
 import '../../utils/admin_access.dart';
+import 'attendance_screen.dart';
 import 'syllabus_screen.dart';
 
 class StudyScreen extends StatefulWidget {
@@ -1462,7 +1463,10 @@ class _StudyScreenState extends State<StudyScreen>
           children: [
             SingleChildScrollView(
               padding: EdgeInsets.fromLTRB(
-                16, 16, 16, _canUploadSyllabus ? 100 : 32,
+                16,
+                16,
+                16,
+                _canUploadSyllabus ? 100 : 32,
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1512,10 +1516,7 @@ class _StudyScreenState extends State<StudyScreen>
                 left: 20,
                 right: 20,
                 bottom: 16,
-                child: _buildAddSyllabusButton(
-                  isDark,
-                  departments,
-                ),
+                child: _buildAddSyllabusButton(isDark, departments),
               ),
           ],
         );
@@ -1554,7 +1555,8 @@ class _StudyScreenState extends State<StudyScreen>
                   departmentColor: dept.color,
                   canUploadSyllabus: true,
                 ),
-              ),            );
+              ),
+            );
           } else {
             // Show a bottom sheet to pick a department
             _showDepartmentPicker(isDark, departments);
@@ -1635,10 +1637,7 @@ class _StudyScreenState extends State<StudyScreen>
     );
   }
 
-  void _showDepartmentPicker(
-    bool isDark,
-    List<DepartmentData> departments,
-  ) {
+  void _showDepartmentPicker(bool isDark, List<DepartmentData> departments) {
     showModalBottomSheet(
       context: context,
       backgroundColor: isDark ? AppTheme.darkCard : Colors.white,
@@ -1673,10 +1672,7 @@ class _StudyScreenState extends State<StudyScreen>
             const SizedBox(height: 4),
             Text(
               'Choose a department to upload syllabus',
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                color: AppTheme.textMuted,
-              ),
+              style: GoogleFonts.inter(fontSize: 13, color: AppTheme.textMuted),
             ),
             const SizedBox(height: 16),
             Flexible(
@@ -1715,7 +1711,9 @@ class _StudyScreenState extends State<StudyScreen>
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    tileColor: isDark ? AppTheme.darkBackground : Colors.grey[50],
+                    tileColor: isDark
+                        ? AppTheme.darkBackground
+                        : Colors.grey[50],
                     onTap: () {
                       Navigator.pop(ctx); // close picker
                       Navigator.push(
@@ -1842,6 +1840,28 @@ class _StudyScreenState extends State<StudyScreen>
                   : AppTheme.lightTextSecondary,
             ),
           ),
+
+          // Attendance button
+          IconButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => AttendanceScreen(
+                    collegeId: widget.collegeId,
+                    collegeName: widget.collegeName,
+                  ),
+                ),
+              );
+            },
+            icon: Icon(
+              Icons.fact_check_outlined,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
+            ),
+          ),
+
           // Notification bell
           IconButton(
             onPressed: () {
