@@ -82,6 +82,16 @@ class BackendApiService {
     525,
     526,
   };
+
+  bool _isRecaptchaTransientFailure(Object error) {
+    final lowered = error.toString().toLowerCase();
+    return lowered.contains('security check timed out') ||
+        lowered.contains('security verification') ||
+        lowered.contains('recaptcha') ||
+        lowered.contains('timed out') ||
+        lowered.contains('unavailable') ||
+        lowered.contains('not supported');
+  }
   static final Map<String, DateTime> _bookmarkCheckRateLimitUntil =
       <String, DateTime>{};
   DateTime? _notificationsRateLimitUntil;
@@ -449,15 +459,28 @@ class BackendApiService {
     required String cybervidyaToken,
     required BuildContext context,
   }) async {
-    return _requestJson(
-      '/api/attendance/kiet/sync',
-      method: 'POST',
-      body: {'collegeId': collegeId, 'cybervidyaToken': cybervidyaToken},
-      securityContext: context,
-      includeRecaptchaToken: true,
-      recaptchaAction: 'attendance_sync',
-      requireAuthToken: true,
-    );
+    try {
+      return await _requestJson(
+        '/api/attendance/kiet/sync',
+        method: 'POST',
+        body: {'collegeId': collegeId, 'cybervidyaToken': cybervidyaToken},
+        securityContext: context,
+        includeRecaptchaToken: true,
+        recaptchaAction: 'attendance_sync',
+        requireAuthToken: true,
+      );
+    } catch (e) {
+      if (!_isRecaptchaTransientFailure(e)) rethrow;
+      debugPrint(
+        'Attendance sync security check failed on mobile; retrying without recaptcha token: $e',
+      );
+      return _requestJson(
+        '/api/attendance/kiet/sync',
+        method: 'POST',
+        body: {'collegeId': collegeId, 'cybervidyaToken': cybervidyaToken},
+        requireAuthToken: true,
+      );
+    }
   }
 
   Future<Map<String, dynamic>> getKietAttendanceDaywise({

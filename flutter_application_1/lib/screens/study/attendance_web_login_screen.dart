@@ -29,11 +29,18 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
     if (uri.scheme == 'about') return true;
     if (uri.scheme != 'https') return false;
     final host = uri.host.toLowerCase();
-    return host.contains('kiet.cybervidya.net') ||
+    final isKietOrCybervidyaHost =
+      host == 'kiet.cybervidya.net' ||
+      host.endsWith('.kiet.cybervidya.net') ||
+      host == 'cybervidya.net' ||
+      host.endsWith('.cybervidya.net');
+    return isKietOrCybervidyaHost ||
         host == 'www.google.com' ||
         host == 'www.gstatic.com' ||
         host == 'www.recaptcha.net' ||
-        host == 'recaptcha.net';
+      host == 'recaptcha.net' ||
+      host == 'www.google.co.in' ||
+      host == 'googleads.g.doubleclick.net';
   }
 
   @override

@@ -248,9 +248,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           displayName: name,
           bio: _bioController.text.trim(),
           profilePhotoUrl: photoUrl,
-          semester: normalizedSemester ?? '',
-          branch: normalizedBranch ?? '',
-          subject: _supportsSubjectField ? (normalizedSubject ?? '') : null,
+          semester: normalizedSemester,
+          branch: normalizedBranch,
+          subject: _supportsSubjectField ? normalizedSubject : null,
           context: context,
         );
         updatedProfile = _coerceUpdatedProfile(
@@ -258,7 +258,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           fallbackProfile: submittedProfile,
         );
       } catch (backendError) {
-        if (!isBackendCompatibilityFallbackError(backendError)) {
+        if (!_shouldFallbackToDirectProfileUpdate(backendError)) {
           rethrow;
         }
         debugPrint(
@@ -269,9 +269,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           displayName: name,
           bio: _bioController.text.trim(),
           profilePhotoUrl: photoUrl,
-          semester: normalizedSemester ?? '',
-          branch: normalizedBranch ?? '',
-          subject: _supportsSubjectField ? (normalizedSubject ?? '') : null,
+          semester: normalizedSemester,
+          branch: normalizedBranch,
+          subject: _supportsSubjectField ? normalizedSubject : null,
         );
       }
 
@@ -328,9 +328,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       'display_name': name,
       'profile_photo_url': photoUrl,
       'bio': _bioController.text.trim(),
-      'semester': semester ?? '',
-      'branch': branch ?? '',
-      if (_supportsSubjectField) 'subject': subject ?? '',
+      'semester': semester,
+      'branch': branch,
+      if (_supportsSubjectField) 'subject': subject,
     };
   }
 
@@ -376,6 +376,24 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         ? raw.substring(prefix.length).trim()
         : raw;
     return normalized.isEmpty ? 'Failed to update profile.' : normalized;
+  }
+
+  bool _shouldFallbackToDirectProfileUpdate(Object error) {
+    if (isBackendCompatibilityFallbackError(error)) {
+      return true;
+    }
+
+    if (error is BackendApiHttpException) {
+      if (error.statusCode == 429) return true;
+      if (error.statusCode >= 500) return true;
+    }
+
+    final lowered = error.toString().toLowerCase();
+    return lowered.contains('timeout') ||
+        lowered.contains('timed out') ||
+        lowered.contains('rate limit') ||
+        lowered.contains('temporarily unavailable') ||
+        lowered.contains('connection');
   }
 
   @override
