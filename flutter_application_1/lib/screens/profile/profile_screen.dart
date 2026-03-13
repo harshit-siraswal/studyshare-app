@@ -18,7 +18,6 @@ import '../../services/subscription_service.dart';
 import '../../services/download_service.dart';
 import 'settings_screen.dart';
 import 'explore_students_screen.dart';
-import 'saved_posts_screen.dart';
 import 'ai_token_usage_screen.dart';
 import '../../models/user.dart';
 import '../../widgets/animated_counter.dart';
@@ -81,6 +80,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   ContributionBadge _contributionBadge = ContributionBadgeCatalog.resolve(0);
 
   final TextEditingController _searchController = TextEditingController();
+  final GlobalKey _myPostsSectionKey = GlobalKey(debugLabel: 'my_posts_section');
   String _searchQuery = '';
 
   @override
@@ -449,12 +449,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     _buildOfflineToggle(textColor),
                     const SizedBox(height: 16),
 
-                    // Saved Posts Link
-                    _buildSavedPostsLink(textColor),
+                    // My Posts Link
+                    _buildMyPostsLink(textColor),
                     const SizedBox(height: 16),
 
                     // Contributions Header
                     Align(
+                      key: _myPostsSectionKey,
                       alignment: Alignment.centerLeft,
                       child: Text(
                         'Contributions',
@@ -1814,16 +1815,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildSavedPostsLink(Color textColor) {
+  Widget _buildMyPostsLink(Color textColor) {
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => SavedPostsScreen(userEmail: _userEmail),
-            ),
+          final target = _myPostsSectionKey.currentContext;
+          if (target == null) return;
+          Scrollable.ensureVisible(
+            target,
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeOutCubic,
+            alignment: 0.08,
           );
         },
         borderRadius: BorderRadius.circular(
@@ -1838,10 +1841,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ), // Ensure hit target size
             child: Row(
               children: [
-                Icon(Icons.bookmark_border_rounded, color: textColor, size: 24),
+                Icon(Icons.dynamic_feed_outlined, color: textColor, size: 24),
                 const SizedBox(width: 12),
                 Text(
-                  'Saved Posts',
+                  'My Posts',
                   style: GoogleFonts.inter(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,

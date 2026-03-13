@@ -42,8 +42,20 @@ class SupabaseService {
   static final Map<String, ({DateTime cachedAt, List<String> data})>
   _uniqueValuesCache = <String, ({DateTime cachedAt, List<String> data})>{};
   static final Map<String, bool> _bookmarkStateCache = <String, bool>{};
+  static final Map<String, Future<bool>> _bookmarkStateInFlight =
+      <String, Future<bool>>{};
+  static final Map<String, DateTime> _bookmarkRateLimitUntil =
+      <String, DateTime>{};
   static final Map<String, ({int? userVote, int upvotes, int downvotes})>
   _voteStateCache = <String, ({int? userVote, int upvotes, int downvotes})>{};
+  static final Map<
+    String,
+    Future<({int? userVote, int upvotes, int downvotes})>
+  >
+  _voteStateInFlight =
+      <String, Future<({int? userVote, int upvotes, int downvotes})>>{};
+  static final Map<String, DateTime> _voteRateLimitUntil = <String, DateTime>{};
+  static bool? _usersTableHasFirebaseUid;
   static ({
     bool hasUserEmail,
     bool hasUserId,
@@ -262,6 +274,14 @@ class SupabaseService {
         message.contains('42501');
   }
 
+  bool _isRateLimitError(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('rate limit') ||
+        message.contains('too many requests') ||
+        message.contains('http 429') ||
+        message.contains('statuscode: 429');
+  }
+
   bool _isNoRowsSingleObjectMessage(String message) {
     return message.contains('pgrst116') ||
         (message.contains('0 rows') &&
@@ -322,34 +342,59 @@ class SupabaseService {
       return cached;
     }
 
-    try {
-      final data = await _api.getVoteStatus(resourceId);
-      final rawVote = data['userVote'];
-      int? userVote;
-      if (rawVote is String) {
-        if (rawVote == 'upvote') {
-          userVote = 1;
-        } else if (rawVote == 'downvote') {
-          userVote = -1;
-        }
-      } else if (rawVote is num) {
-        userVote = rawVote.toInt();
-      }
-
-      final upvotesRaw = data['upvotes'] ?? data['up_votes'] ?? 0;
-      final downvotesRaw = data['downvotes'] ?? data['down_votes'] ?? 0;
-
-      final resolved = (
-        userVote: userVote,
-        upvotes: upvotesRaw is num ? upvotesRaw.toInt() : 0,
-        downvotes: downvotesRaw is num ? downvotesRaw.toInt() : 0,
-      );
-      _voteStateCache[key] = resolved;
-      return resolved;
-    } catch (e) {
-      debugPrint('Error fetching resource vote status: $e');
+    final cooldownUntil = _voteRateLimitUntil[key];
+    if (cooldownUntil != null && DateTime.now().isBefore(cooldownUntil)) {
       return (userVote: null, upvotes: 0, downvotes: 0);
     }
+
+    final inFlight = _voteStateInFlight[key];
+    if (inFlight != null) {
+      return inFlight;
+    }
+
+    final future = () async {
+      try {
+        final data = await _api.getVoteStatus(resourceId);
+        final rawVote = data['userVote'];
+        int? userVote;
+        if (rawVote is String) {
+          if (rawVote == 'upvote') {
+            userVote = 1;
+          } else if (rawVote == 'downvote') {
+            userVote = -1;
+          }
+        } else if (rawVote is num) {
+          userVote = rawVote.toInt();
+        }
+
+        final upvotesRaw = data['upvotes'] ?? data['up_votes'] ?? 0;
+        final downvotesRaw = data['downvotes'] ?? data['down_votes'] ?? 0;
+
+        final resolved = (
+          userVote: userVote,
+          upvotes: upvotesRaw is num ? upvotesRaw.toInt() : 0,
+          downvotes: downvotesRaw is num ? downvotesRaw.toInt() : 0,
+        );
+        _voteStateCache[key] = resolved;
+        _voteRateLimitUntil.remove(key);
+        return resolved;
+      } catch (e) {
+        final fallback = (userVote: null, upvotes: 0, downvotes: 0);
+        if (_isRateLimitError(e)) {
+          _voteRateLimitUntil[key] = DateTime.now().add(
+            const Duration(seconds: 20),
+          );
+          _voteStateCache[key] = fallback;
+        }
+        debugPrint('Error fetching resource vote status: $e');
+        return fallback;
+      } finally {
+        _voteStateInFlight.remove(key);
+      }
+    }();
+
+    _voteStateInFlight[key] = future;
+    return future;
   }
 
   Map<String, dynamic> _normalizeSocialUser(Map<String, dynamic> raw) {
@@ -393,18 +438,43 @@ class SupabaseService {
 
   Future<List<String>> _resolveUserIdentifiers(String email) async {
     try {
-      final user = await _client
-          .from('users')
-          .select('id, firebase_uid')
-          .eq('email', email)
-          .maybeSingle();
+      Map<String, dynamic>? user;
+      if (_usersTableHasFirebaseUid == false) {
+        user = await _client
+            .from('users')
+            .select('id')
+            .eq('email', email)
+            .maybeSingle();
+      } else {
+        try {
+          user = await _client
+              .from('users')
+              .select('id, firebase_uid')
+              .eq('email', email)
+              .maybeSingle();
+          _usersTableHasFirebaseUid = true;
+        } catch (e) {
+          if (_isMissingColumnError(e, 'firebase_uid')) {
+            _usersTableHasFirebaseUid = false;
+            user = await _client
+                .from('users')
+                .select('id')
+                .eq('email', email)
+                .maybeSingle();
+          } else {
+            rethrow;
+          }
+        }
+      }
       if (user == null) return [];
 
       final ids = <String>{};
       final id = user['id'];
       if (id != null) ids.add(id.toString());
-      final firebaseUid = user['firebase_uid'];
-      if (firebaseUid != null) ids.add(firebaseUid.toString());
+      if (_usersTableHasFirebaseUid != false) {
+        final firebaseUid = user['firebase_uid'];
+        if (firebaseUid != null) ids.add(firebaseUid.toString());
+      }
 
       return ids.toList();
     } catch (e) {
@@ -4292,14 +4362,36 @@ class SupabaseService {
     final cacheKey = _resourceStateKey(resourceId, userEmail: userEmail);
     final cached = _bookmarkStateCache[cacheKey];
     if (cached != null) return cached;
-    try {
-      final value = await _api.checkBookmark(resourceId);
-      _bookmarkStateCache[cacheKey] = value;
-      return value;
-    } catch (e) {
-      debugPrint('Error checking bookmark: $e');
+
+    final cooldownUntil = _bookmarkRateLimitUntil[cacheKey];
+    if (cooldownUntil != null && DateTime.now().isBefore(cooldownUntil)) {
       return false;
     }
+
+    final inFlight = _bookmarkStateInFlight[cacheKey];
+    if (inFlight != null) return inFlight;
+
+    final future = () async {
+      try {
+        final value = await _api.checkBookmark(resourceId);
+        _bookmarkStateCache[cacheKey] = value;
+        _bookmarkRateLimitUntil.remove(cacheKey);
+        return value;
+      } catch (e) {
+        if (_isRateLimitError(e)) {
+          _bookmarkRateLimitUntil[cacheKey] = DateTime.now().add(
+            const Duration(seconds: 20),
+          );
+        }
+        debugPrint('Error checking bookmark: $e');
+        return false;
+      } finally {
+        _bookmarkStateInFlight.remove(cacheKey);
+      }
+    }();
+
+    _bookmarkStateInFlight[cacheKey] = future;
+    return future;
   }
 
   // ============ NOTICES ============

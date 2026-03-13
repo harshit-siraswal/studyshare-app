@@ -82,6 +82,10 @@ class BackendApiService {
     525,
     526,
   };
+  static final Map<String, DateTime> _bookmarkCheckRateLimitUntil =
+      <String, DateTime>{};
+  DateTime? _notificationsRateLimitUntil;
+  int? _lastUnreadNotificationCount;
 
   FirebaseAuth? get _auth {
     if (_injectedAuth != null) return _injectedAuth;
@@ -240,6 +244,19 @@ class BackendApiService {
           'Authorization': 'Bearer $token',
         };
         res = await _sendRequest(method, uri, headers, effectiveBody, timeout);
+      }
+    }
+
+    final normalizedMethod = method.toUpperCase();
+    final allowRateLimitRetry =
+        normalizedMethod == 'GET' ||
+        (normalizedMethod == 'PUT' && path == '/api/users/profile');
+    if (allowRateLimitRetry && res.statusCode == 429) {
+      for (var attempt = 1; attempt <= 2; attempt++) {
+        final waitMs = 350 * attempt;
+        await Future<void>.delayed(Duration(milliseconds: waitMs));
+        res = await _sendRequest(method, uri, headers, effectiveBody, timeout);
+        if (res.statusCode != 429) break;
       }
     }
 
@@ -580,13 +597,25 @@ class BackendApiService {
   }
 
   Future<bool> checkBookmark(String itemId) async {
+    final cooldownUntil = _bookmarkCheckRateLimitUntil[itemId];
+    if (cooldownUntil != null && DateTime.now().isBefore(cooldownUntil)) {
+      return false;
+    }
+
     try {
       final data = await _requestJson(
         '/api/bookmarks/check/${Uri.encodeComponent(itemId)}',
         method: 'GET',
       );
+      _bookmarkCheckRateLimitUntil.remove(itemId);
       return data['isBookmarked'] == true;
     } catch (e) {
+      final message = e.toString().toLowerCase();
+      if (message.contains('rate limit') || message.contains('429')) {
+        _bookmarkCheckRateLimitUntil[itemId] = DateTime.now().add(
+          const Duration(seconds: 20),
+        );
+      }
       debugPrint('checkBookmark failed for $itemId: $e');
       return false;
     }
@@ -865,14 +894,26 @@ class BackendApiService {
     int limit = 20,
     int offset = 0,
   }) async {
+    final cooldownUntil = _notificationsRateLimitUntil;
+    if (cooldownUntil != null && DateTime.now().isBefore(cooldownUntil)) {
+      throw Exception('Rate limit exceeded. Please try again later.');
+    }
+
     try {
       final data = await _requestJson(
         '/api/notifications?limit=$limit&offset=$offset',
         method: 'GET',
       );
+      _notificationsRateLimitUntil = null;
       final list = (data['notifications'] as List?) ?? const [];
       return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
     } catch (e) {
+      final message = e.toString().toLowerCase();
+      if (message.contains('rate limit') || message.contains('429')) {
+        _notificationsRateLimitUntil = DateTime.now().add(
+          const Duration(seconds: 20),
+        );
+      }
       debugPrint('Backend /api/notifications query failed. Bubbling up: $e');
       rethrow;
     }
@@ -1001,24 +1042,32 @@ class BackendApiService {
       );
       final countRaw = data['count'] ?? data['unreadCount'] ?? data['unread'];
       if (countRaw is num) {
-        return countRaw.toInt();
+        _lastUnreadNotificationCount = countRaw.toInt();
+        return _lastUnreadNotificationCount!;
       }
       final parsed = int.tryParse(countRaw?.toString() ?? '');
       if (parsed != null) {
+        _lastUnreadNotificationCount = parsed;
         return parsed;
       }
-    } catch (_) {
+    } catch (e) {
+      final message = e.toString().toLowerCase();
+      if (message.contains('rate limit') || message.contains('429')) {
+        return _lastUnreadNotificationCount ?? 0;
+      }
       // Fallback below for backward compatibility.
     }
 
     final notifications = await getNotifications(limit: 200, offset: 0);
-    return notifications.where((notification) {
+    final unreadCount = notifications.where((notification) {
       final isReadRaw = notification.containsKey('is_read')
           ? notification['is_read']
           : notification['isRead'];
       if (isReadRaw is bool) return !isReadRaw;
       return isReadRaw?.toString().toLowerCase() != 'true';
     }).length;
+    _lastUnreadNotificationCount = unreadCount;
+    return unreadCount;
   }
 
   Future<void> updateResourceStatus({

@@ -14,7 +14,7 @@ class DepartmentData {
   Map<String, dynamic> toJson() => {
     'name': name,
     'full': full,
-    'color': '#${color.value.toRadixString(16).padLeft(8, '0').toUpperCase()}',
+    'color': '#${color.toARGB32().toRadixString(16).padLeft(8, '0').toUpperCase()}',
   };
 
   factory DepartmentData.fromJson(Map<String, dynamic> json) {

@@ -27,6 +27,12 @@ Future<bool> showPostNoticeDialog({
     'webp',
     'gif',
     'pdf',
+    'doc',
+    'docx',
+    'ppt',
+    'pptx',
+    'xls',
+    'xlsx',
   ];
   const maxAttachmentBytes = 10 * 1024 * 1024;
 
@@ -58,11 +64,13 @@ Future<bool> showPostNoticeDialog({
     return filename.substring(dot + 1).toLowerCase();
   }
 
-  bool isPdfAttachment(PlatformFile file) =>
-      fileExtension(file.name) == 'pdf';
+  bool isDocumentAttachment(PlatformFile file) {
+    final ext = fileExtension(file.name);
+    return ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'].contains(ext);
+  }
 
   bool isImageAttachment(PlatformFile file) =>
-      !isPdfAttachment(file) &&
+      !isDocumentAttachment(file) &&
       allowedAttachmentExtensions.contains(fileExtension(file.name));
 
   String formatBytes(int bytes) {
@@ -234,8 +242,8 @@ Future<bool> showPostNoticeDialog({
                         children: [
                           Icon(
                             selectedAttachment != null
-                                ? (isPdfAttachment(selectedAttachment!)
-                                      ? Icons.picture_as_pdf_rounded
+                                ? (isDocumentAttachment(selectedAttachment!)
+                                      ? Icons.description_rounded
                                       : Icons.image_rounded)
                                 : Icons.attach_file_rounded,
                             color: AppTheme.primary,
@@ -272,8 +280,8 @@ Future<bool> showPostNoticeDialog({
                       const SizedBox(height: 6),
                       Text(
                         selectedAttachment == null
-                            ? 'Optional. Add a JPG, PNG, WEBP, GIF, or PDF. It will open inside the app.'
-                            : '${isPdfAttachment(selectedAttachment!) ? 'PDF' : 'Image'} • ${formatBytes(selectedAttachment!.size)}',
+                            ? 'Optional. Add an image, PDF, Word, Excel, or PPT. It will open inside the app.'
+                            : '${isDocumentAttachment(selectedAttachment!) ? 'Document' : 'Image'} • ${formatBytes(selectedAttachment!.size)}',
                         style: GoogleFonts.inter(
                           fontSize: 12,
                           color: AppTheme.textMuted,

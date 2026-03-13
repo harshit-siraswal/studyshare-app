@@ -229,6 +229,7 @@ class _AIChatScreenState extends State<AIChatScreen>
   bool _showAiTokenLowBanner = false;
   bool _userDismissedTokenBanner = false;
   bool _isAiTokenStatusLoading = false;
+  bool _allowWebMode = false;
   DateTime? _lastAiTokenTopUpSnackBarAt;
   String? _lastAiTokenTopUpSnackBarMessage;
   DateTime? _lastSourceLinkSnackBarAt;
@@ -238,6 +239,7 @@ class _AIChatScreenState extends State<AIChatScreen>
   int _aiTokenBudgetTokens = 0;
   int _aiTokenLowThreshold = _minLowTokenThreshold;
   _QuestionPaperRequestConfig? _cachedQuestionPaperConfig;
+  Map<String, dynamic>? _cachedProfileFilters;
   bool _didQueueInitialPrompt = false;
 
   final GlobalKey _coachHistoryKey = GlobalKey(debugLabel: 'ai_chat_history');
@@ -536,6 +538,43 @@ class _AIChatScreenState extends State<AIChatScreen>
       filters['subject'] = resource.subject!.trim();
     }
     return filters.isEmpty ? null : filters;
+  }
+
+  Future<Map<String, dynamic>?> _buildContextFiltersForRequest() async {
+    final contextFilters = _buildContextFilters();
+    if (contextFilters != null && contextFilters.isNotEmpty) {
+      return contextFilters;
+    }
+
+    if (_cachedProfileFilters != null && _cachedProfileFilters!.isNotEmpty) {
+      return Map<String, dynamic>.from(_cachedProfileFilters!);
+    }
+
+    final email = _auth.userEmail?.trim().toLowerCase();
+    if (email == null || email.isEmpty) return null;
+
+    try {
+      final info = await _supabase.getUserInfo(email);
+      if (info == null || info.isEmpty) return null;
+
+      final filters = <String, dynamic>{};
+      final semester = info['semester']?.toString().trim() ?? '';
+      final branch =
+          (info['branch'] ?? info['department'])?.toString().trim() ?? '';
+      final subject = info['subject']?.toString().trim() ?? '';
+
+      if (semester.isNotEmpty) filters['semester'] = semester;
+      if (branch.isNotEmpty) filters['branch'] = branch;
+      if (subject.isNotEmpty) filters['subject'] = subject;
+
+      _cachedProfileFilters = filters.isEmpty ? null : filters;
+      return _cachedProfileFilters == null
+          ? null
+          : Map<String, dynamic>.from(_cachedProfileFilters!);
+    } catch (e) {
+      debugPrint('AI chat profile filters lookup failed: $e');
+      return null;
+    }
   }
 
   bool _isSummaryExportIntent({
@@ -1918,7 +1957,7 @@ class _AIChatScreenState extends State<AIChatScreen>
     required List<Map<String, dynamic>> attachments,
   }) async {
     if (attachments.isEmpty) return widget.resourceContext?.subject ?? '';
-    final contextFilters = _buildContextFilters();
+    final contextFilters = await _buildContextFiltersForRequest();
     try {
       final response = await _api.queryRag(
         question:
@@ -2145,6 +2184,18 @@ class _AIChatScreenState extends State<AIChatScreen>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text('Invalid source URL for $sourceTitle')),
     );
+  }
+
+  bool _isTransientAiFailure(Object error) {
+    final lowered = error.toString().toLowerCase();
+    return lowered.contains('504') ||
+        lowered.contains('timeout') ||
+        lowered.contains('timed out') ||
+        lowered.contains('gateway') ||
+        lowered.contains('temporarily unavailable') ||
+        lowered.contains('service unavailable') ||
+        lowered.contains('connection reset') ||
+        lowered.contains('connection closed');
   }
 
   String _cleanUserVisibleErrorMessage(Object error) {
@@ -2645,7 +2696,7 @@ Return STRICT JSON only (no markdown). Schema:
     await _scrollToBottom();
 
     try {
-      final contextFilters = _buildContextFilters();
+      final contextFilters = await _buildContextFiltersForRequest();
       final inferredFromPrompt = _extractTopicFromPrompt(userPrompt);
       final inferredFromAttachments = await _inferSubjectFromAttachments(
         attachments: attachmentPayload,
@@ -2685,7 +2736,7 @@ Return STRICT JSON only (no markdown). Schema:
           strictAntiPlaceholder: strictMode,
         );
         final allowWeb =
-            (attempt == 2) || (mergedAttachments.isEmpty && attempt > 0);
+          _allowWebMode && ((attempt == 2) || (mergedAttachments.isEmpty && attempt > 0));
         final response = await _api.queryRag(
           question: prompt,
           collegeId: widget.collegeId,
@@ -2799,37 +2850,73 @@ Return STRICT JSON only (no markdown). Schema:
     await _scrollToBottom();
 
     try {
-      final contextFilters = _buildContextFilters();
+      final contextFilters = await _buildContextFiltersForRequest();
       final prompt = _buildRagPrompt(
         userPrompt:
             '$userPrompt\n\nOutput instruction: generate a structured report-ready summary.',
         hasAttachments: attachmentPayload.isNotEmpty,
       );
-      final response = await _api.queryRag(
-        question: prompt,
-        collegeId: widget.collegeId,
-        sessionId: _activeSessionId,
-        fileId: widget.resourceContext?.fileId,
-        allowWeb: false,
-        useOcr: true,
-        forceOcr: true,
-        ocrProvider: 'google_vision',
-        attachments: attachmentPayload,
-        history: history,
-        filters: contextFilters,
-      );
-      _supabase.markAiTokenBalanceStale();
-      _refreshAiTokenStatus(forceRefresh: true);
-      final answer = _sanitizeAssistantAnswerText(
-        _extractRagAnswer(response).trim(),
-      );
+      Map<String, dynamic>? response;
+      String answer = '';
+      Object? lastError;
+
+      for (var attempt = 0; attempt < 2; attempt++) {
+        final allowWeb = _allowWebMode && attempt > 0;
+        try {
+          final candidate = await _api.queryRag(
+            question: prompt,
+            collegeId: widget.collegeId,
+            sessionId: _activeSessionId,
+            fileId: widget.resourceContext?.fileId,
+            allowWeb: allowWeb,
+            useOcr: true,
+            forceOcr: true,
+            ocrProvider: 'google_vision',
+            attachments: attachmentPayload,
+            history: history,
+            filters: contextFilters,
+          );
+          final candidateAnswer = _sanitizeAssistantAnswerText(
+            _extractRagAnswer(candidate).trim(),
+          );
+          final noLocal =
+              _responseIndicatesNoLocal(candidate) ||
+              _looksLikeNoContextAnswer(candidateAnswer);
+          final shouldRetryWithWeb =
+              _allowWebMode && !allowWeb && (candidateAnswer.isEmpty || noLocal);
+
+          response = candidate;
+          answer = candidateAnswer;
+          if (shouldRetryWithWeb) {
+            continue;
+          }
+          break;
+        } catch (e) {
+          lastError = e;
+          final retryOnWeb =
+              _allowWebMode && attempt == 0 && _isTransientAiFailure(e);
+          if (retryOnWeb) {
+            continue;
+          }
+          rethrow;
+        }
+      }
+
+      if (response == null && lastError != null) {
+        throw lastError!;
+      }
+      if (response != null) {
+        _supabase.markAiTokenBalanceStale();
+        _refreshAiTokenStatus(forceRefresh: true);
+      }
       if (answer.isEmpty) {
         setState(() {
           _messages.add(
             AIChatMessage(
               isUser: false,
-              content:
-                  'I could not generate a summary from the uploaded files.',
+              content: _allowWebMode
+                  ? 'I could not generate a summary from your files. Try uploading a clearer PDF or asking for a shorter chapter-wise summary.'
+                  : 'I could not generate a summary from the uploaded files.',
             ),
           );
         });
@@ -2965,7 +3052,7 @@ Return STRICT JSON only (no markdown). Schema:
           preferLocalOnly: localContextRequired,
         );
         final history = _buildStructuredHistory(pendingUserPrompt: userPrompt);
-        final contextFilters = _buildContextFilters();
+        final contextFilters = await _buildContextFiltersForRequest();
         final shouldForceVisionOcr = attachmentPayload.isNotEmpty;
         final userVisible = turnAttachments.isEmpty
             ? userPrompt
@@ -3025,7 +3112,7 @@ Return STRICT JSON only (no markdown). Schema:
             sessionId: _activeSessionId,
             minScore: localContextRequired ? 0.08 : null,
             fileId: widget.resourceContext?.fileId,
-            allowWeb: !localContextRequired,
+            allowWeb: _allowWebMode && !localContextRequired,
             useOcr: shouldForceVisionOcr,
             forceOcr: shouldForceVisionOcr,
             ocrProvider: shouldForceVisionOcr ? 'google_vision' : null,
@@ -4416,6 +4503,46 @@ Return STRICT JSON only (no markdown). Schema:
                             padding: const EdgeInsets.only(bottom: 8),
                             child: _buildAiTokenLowBanner(isDark),
                           ),
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                ChoiceChip(
+                                  label: Text(
+                                    'Local',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  selected: !_allowWebMode,
+                                  onSelected: (selected) {
+                                    if (!selected || !mounted) return;
+                                    setState(() => _allowWebMode = false);
+                                  },
+                                ),
+                                ChoiceChip(
+                                  label: Text(
+                                    'Web',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  selected: _allowWebMode,
+                                  onSelected: (selected) {
+                                    if (!mounted) return;
+                                    setState(() => _allowWebMode = selected);
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                         if (_attachments.isNotEmpty)
                           Align(
                             alignment: Alignment.centerLeft,

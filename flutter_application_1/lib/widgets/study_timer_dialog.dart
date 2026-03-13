@@ -19,7 +19,7 @@ class StudyTimerDialog extends StatelessWidget {
           borderRadius: BorderRadius.circular(24),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.2),
+              color: Colors.black.withValues(alpha: 0.2),
               blurRadius: 20,
               offset: const Offset(0, 10),
             ),
@@ -50,12 +50,12 @@ class StudyTimerDialog extends StatelessWidget {
                       icon: Container(
                         padding: const EdgeInsets.all(4),
                         decoration: BoxDecoration(
-                          color: isDark ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.05),
+                          color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.05),
                           shape: BoxShape.circle,
                         ),
                         child: Icon(
                           Icons.close,
-                          color: textColor.withOpacity(0.7),
+                          color: textColor.withValues(alpha: 0.7),
                           size: 20,
                         ),
                       ),
@@ -74,7 +74,7 @@ class StudyTimerDialog extends StatelessWidget {
                       child: CircularProgressIndicator(
                         value: controller.progress,
                         strokeWidth: 12,
-                        backgroundColor: (isDark ? Colors.white : Colors.black).withOpacity(0.1),
+                        backgroundColor: (isDark ? Colors.white : Colors.black).withValues(alpha: 0.1),
                         valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
                       ),
                     ),
@@ -132,7 +132,7 @@ class StudyTimerDialog extends StatelessWidget {
                           gradient: LinearGradient(
                             colors: [
                               AppTheme.primary,
-                              AppTheme.primary.withOpacity(0.8),
+                              AppTheme.primary.withValues(alpha: 0.8),
                             ],
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
@@ -140,7 +140,7 @@ class StudyTimerDialog extends StatelessWidget {
                           shape: BoxShape.circle,
                           boxShadow: [
                             BoxShadow(
-                              color: AppTheme.primary.withOpacity(0.3),
+                              color: AppTheme.primary.withValues(alpha: 0.3),
                               blurRadius: 12,
                               offset: const Offset(0, 6),
                             ),
@@ -181,13 +181,13 @@ class StudyTimerDialog extends StatelessWidget {
                               decoration: BoxDecoration(
                                 color: isSelected 
                                   ? AppTheme.primary 
-                                  : (isDark ? Colors.white.withOpacity(0.05) : Colors.black.withOpacity(0.05)),
+                                  : (isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.05)),
                                 borderRadius: BorderRadius.circular(20),
                               ),
                               child: Text(
                                 '$mins m',
                                 style: GoogleFonts.outfit(
-                                  color: isSelected ? Colors.white : textColor.withOpacity(0.7),
+                                  color: isSelected ? Colors.white : textColor.withValues(alpha: 0.7),
                                   fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                                 ),
                               ),
@@ -225,7 +225,7 @@ class _TimeControlButton extends StatelessWidget {
         width: 48,
         height: 48,
         decoration: BoxDecoration(
-          color: isDark ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.05),
+          color: isDark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.05),
           shape: BoxShape.circle,
         ),
         child: Icon(

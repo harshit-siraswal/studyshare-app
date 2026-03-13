@@ -44,7 +44,7 @@ class DownloadService {
     }
 
     _initFuture = () async {
-      _box = await Hive.openBox(_boxName);
+      _box = await _openBoxWithHiveFallback();
       await _rebuildResourceOwnersIndex();
       _initialized = true;
     }();
@@ -53,6 +53,21 @@ class DownloadService {
       await _initFuture;
     } finally {
       _initFuture = null;
+    }
+  }
+
+  Future<Box> _openBoxWithHiveFallback() async {
+    try {
+      return await Hive.openBox(_boxName);
+    } catch (e) {
+      final message = e.toString().toLowerCase();
+      final needsInit =
+          message.contains('you need to initialize hive') ||
+          message.contains('initialize hive');
+      if (!needsInit) rethrow;
+
+      await Hive.initFlutter();
+      return Hive.openBox(_boxName);
     }
   }
 

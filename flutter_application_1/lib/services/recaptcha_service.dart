@@ -10,35 +10,54 @@ import '../config/app_config.dart';
 ///   grecaptcha.execute(siteKey, { action })
 /// returning the token to Flutter via a JS channel.
 class RecaptchaService {
+  static const int _maxAttempts = 2;
+
   static Future<String> getToken(
     BuildContext context, {
     String action = 'mobile_write',
   }) async {
-    final completer = Completer<String>();
+    Object? lastError;
 
-    await Navigator.of(context).push(
-      PageRouteBuilder(
-        opaque: false,
-        barrierDismissible: false,
-        pageBuilder: (_, __, ___) {
-          return _RecaptchaOverlay(
-            action: action,
-            onToken: (token) {
-              if (!completer.isCompleted) completer.complete(token);
-            },
-            onError: (err) {
-              if (!completer.isCompleted) completer.completeError(err);
-            },
-          );
-        },
-      ),
-    );
+    for (var attempt = 1; attempt <= _maxAttempts; attempt++) {
+      if (!context.mounted) {
+        throw Exception('Security verification context missing');
+      }
 
-    // The overlay's internal timeout handles cleanup and Navigator.pop(),
-    // which causes the push() future above to resolve. The completer is
-    // completed (either with a token or an error) before pop, so we can
-    // simply return it without an additional service-level timeout.
-    return completer.future;
+      final completer = Completer<String>();
+      await Navigator.of(context).push(
+        PageRouteBuilder(
+          opaque: false,
+          barrierDismissible: false,
+          pageBuilder: (_, __, ___) {
+            return _RecaptchaOverlay(
+              action: action,
+              onToken: (token) {
+                if (!completer.isCompleted) completer.complete(token);
+              },
+              onError: (err) {
+                if (!completer.isCompleted) completer.completeError(err);
+              },
+            );
+          },
+        ),
+      );
+
+      try {
+        // The overlay's internal timeout handles cleanup and Navigator.pop(),
+        // which causes the push() future above to resolve. The completer is
+        // completed (either with a token or an error) before pop, so we can
+        // simply return it without an additional service-level timeout.
+        return await completer.future;
+      } catch (e) {
+        lastError = e;
+        if (attempt < _maxAttempts) {
+          await Future<void>.delayed(const Duration(milliseconds: 450));
+          continue;
+        }
+      }
+    }
+
+    throw lastError ?? Exception('Security verification failed');
   }
 }
 
@@ -79,7 +98,7 @@ class _RecaptchaOverlayState extends State<_RecaptchaOverlay> {
     super.initState();
     
     // Safety timeout in case JS never responds.
-    _timeoutTimer = Timer(const Duration(seconds: 10), () {
+    _timeoutTimer = Timer(const Duration(seconds: 20), () {
       if (mounted) {
         widget.onError(TimeoutException('Security check timed out'));
         Navigator.of(context).pop();

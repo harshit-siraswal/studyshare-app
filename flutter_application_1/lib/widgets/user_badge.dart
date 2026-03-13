@@ -12,9 +12,18 @@ class UserBadge extends StatefulWidget {
 }
 
 class _UserBadgeState extends State<UserBadge> {
+  static bool? _usersTableHasRoleColumn;
+
   bool _isLoading = true;
   bool _isVerified = false;
   bool _isPremium = false;
+
+  bool _isMissingRoleColumnError(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('column') &&
+        message.contains('users.role') &&
+        message.contains('does not exist');
+  }
 
   @override
   void initState() {
@@ -49,11 +58,34 @@ class _UserBadgeState extends State<UserBadge> {
     }
 
     try {
-        final userResponse = await Supabase.instance.client
-          .from('users')
-          .select('role, subscription_tier, subscription_end_date')
-          .eq('email', email)
-          .maybeSingle();
+      Map<String, dynamic>? userResponse;
+      if (_usersTableHasRoleColumn == false) {
+        userResponse = await Supabase.instance.client
+            .from('users')
+            .select('subscription_tier, subscription_end_date')
+            .eq('email', email)
+            .maybeSingle();
+      } else {
+        try {
+          userResponse = await Supabase.instance.client
+              .from('users')
+              .select('role, subscription_tier, subscription_end_date')
+              .eq('email', email)
+              .maybeSingle();
+          _usersTableHasRoleColumn = true;
+        } catch (e) {
+          if (_isMissingRoleColumnError(e)) {
+            _usersTableHasRoleColumn = false;
+            userResponse = await Supabase.instance.client
+                .from('users')
+                .select('subscription_tier, subscription_end_date')
+                .eq('email', email)
+                .maybeSingle();
+          } else {
+            rethrow;
+          }
+        }
+      }
 
       if (mounted && userResponse != null) {
         final role = userResponse['role'];
