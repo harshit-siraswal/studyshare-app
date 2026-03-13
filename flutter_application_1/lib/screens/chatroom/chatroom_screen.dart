@@ -68,7 +68,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
 
   List<Map<String, dynamic>> _posts = [];
   bool _isLoading = true;
-  final String _sortBy = 'recent'; // 'recent' or 'top'
+  String _sortBy = 'recent'; // 'recent' or 'top'
   Map<String, dynamic>? _roomInfo;
   bool _isAdmin = false;
   bool _isMember = false;
@@ -531,27 +531,34 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                   setState(() {}); // Trigger rebuild to filter posts
                 },
               )
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    widget.roomName,
-                    style: GoogleFonts.inter(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : Colors.black,
-                    ),
+            : InkWell(
+                onTap: _showRoomInfo,
+                borderRadius: BorderRadius.circular(8),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.roomName,
+                        style: GoogleFonts.inter(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white : Colors.black,
+                        ),
+                      ),
+                      Text(
+                        _activeMemberCount <= 0
+                            ? 'No active members'
+                            : '$_activeMemberCount active now',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: isDark ? Colors.white60 : Colors.black54,
+                        ),
+                      ),
+                    ],
                   ),
-                  Text(
-                    _activeMemberCount <= 0
-                        ? 'No active members'
-                        : '$_activeMemberCount active now',
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      color: isDark ? Colors.white60 : Colors.black54,
-                    ),
-                  ),
-                ],
+                ),
               ),
         actions: [
           IconButton(
@@ -569,12 +576,159 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
             },
           ),
           if (!_isSearching)
-            IconButton(
+            PopupMenuButton<String>(
               icon: Icon(
                 Icons.more_vert,
                 color: isDark ? Colors.white70 : Colors.black54,
               ),
-              onPressed: _showRoomInfo,
+              color: isDark ? const Color(0xFF1E293B) : Colors.white,
+              onSelected: (value) async {
+                if (value == 'sort_recent') {
+                  if (_sortBy == 'recent') return;
+                  setState(() => _sortBy = 'recent');
+                  await _loadRoomData();
+                } else if (value == 'sort_top') {
+                  if (_sortBy == 'top') return;
+                  setState(() => _sortBy = 'top');
+                  await _loadRoomData();
+                } else if (value == 'refresh') {
+                  await _loadRoomData();
+                } else if (value == 'leave') {
+                  if (!_isMember) {
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('You are not in this room')),
+                    );
+                    return;
+                  }
+
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      title: const Text('Leave Room?'),
+                      content: const Text(
+                        'Are you sure you want to leave this room?',
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Cancel'),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          child: const Text(
+                            'Leave',
+                            style: TextStyle(color: Colors.red),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+
+                  if (confirm != true) return;
+                  if (!context.mounted) return;
+
+                  final messenger = ScaffoldMessenger.of(context);
+                  final navigator = Navigator.of(context);
+                  try {
+                    await _backendApiService.leaveChatRoom(
+                      roomId: widget.roomId,
+                      context: context,
+                    );
+                    if (!context.mounted) return;
+                    navigator.pop();
+                    messenger.showSnackBar(
+                      const SnackBar(content: Text('Left room successfully')),
+                    );
+                  } catch (e) {
+                    if (!context.mounted) return;
+                    messenger.showSnackBar(
+                      SnackBar(content: Text('Failed to leave room: $e')),
+                    );
+                  }
+                }
+              },
+              itemBuilder: (context) => [
+                PopupMenuItem(
+                  value: 'sort_recent',
+                  child: Row(
+                    children: [
+                      Icon(
+                        _sortBy == 'recent'
+                            ? Icons.check_circle
+                            : Icons.schedule,
+                        size: 18,
+                        color: isDark ? Colors.white70 : Colors.black54,
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        'Sort: Recent',
+                        style: GoogleFonts.inter(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'sort_top',
+                  child: Row(
+                    children: [
+                      Icon(
+                        _sortBy == 'top'
+                            ? Icons.check_circle
+                            : Icons.trending_up,
+                        size: 18,
+                        color: isDark ? Colors.white70 : Colors.black54,
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        'Sort: Top',
+                        style: GoogleFonts.inter(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'refresh',
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.refresh,
+                        size: 18,
+                        color: isDark ? Colors.white70 : Colors.black54,
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        'Refresh',
+                        style: GoogleFonts.inter(
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_isMember)
+                  PopupMenuItem(
+                    value: 'leave',
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.exit_to_app_rounded,
+                          size: 18,
+                          color: Colors.redAccent,
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          'Leave Room',
+                          style: GoogleFonts.inter(color: Colors.redAccent),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
             ),
         ],
       ),
@@ -1620,10 +1774,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         content: SizedBox(
           width: double.maxFinite,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
               Row(
                 children: [
                   Expanded(
@@ -1675,9 +1830,153 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
               const SizedBox(height: 16),
               _buildInfoRow(
                 Icons.admin_panel_settings_outlined,
-                'Admin',
+                'Created By',
                 '${_roomInfo?['created_by'] ?? "Unknown"}',
                 isDark,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Admins & Members',
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? Colors.white70 : Colors.black54,
+                ),
+              ),
+              const SizedBox(height: 8),
+              FutureBuilder<List<Map<String, dynamic>>>(
+                future: _supabaseService.getRoomMembers(widget.roomId),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 12),
+                      child: Center(child: CircularProgressIndicator()),
+                    );
+                  }
+
+                  if (snapshot.hasError) {
+                    return Text(
+                      'Could not load members right now',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: AppTheme.textMuted,
+                      ),
+                    );
+                  }
+
+                  final members = snapshot.data ?? const [];
+                  if (members.isEmpty) {
+                    return Text(
+                      'No members found',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: AppTheme.textMuted,
+                      ),
+                    );
+                  }
+
+                  final admins = members
+                      .where(
+                        (m) =>
+                            (m['role'] ?? 'member').toString().toLowerCase() ==
+                            'admin',
+                      )
+                      .toList();
+                  final nonAdmins = members
+                      .where(
+                        (m) =>
+                            (m['role'] ?? 'member').toString().toLowerCase() !=
+                            'admin',
+                      )
+                      .toList();
+                  final preview = [...admins, ...nonAdmins].take(6).toList();
+
+                  return Column(
+                    children: [
+                      ...preview.map((member) {
+                        final email =
+                            (member['user_email'] ?? '').toString().trim();
+                        final role =
+                            (member['role'] ?? 'member').toString().toLowerCase();
+                        final photoUrl = _resolvePhotoUrl(member, const [
+                          'profile_photo_url',
+                          'photo_url',
+                          'avatar_url',
+                        ]);
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            children: [
+                              UserAvatar(
+                                radius: 14,
+                                displayName: _memberDisplayName(member),
+                                photoUrl: photoUrl.isNotEmpty ? photoUrl : null,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  _memberDisplayName(member),
+                                  style: GoogleFonts.inter(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: isDark
+                                        ? Colors.white
+                                        : const Color(0xFF1E293B),
+                                  ),
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: role == 'admin'
+                                      ? AppTheme.primary.withValues(alpha: 0.14)
+                                      : Colors.grey.withValues(alpha: 0.16),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  role == 'admin' ? 'Admin' : 'Member',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: role == 'admin'
+                                        ? AppTheme.primary
+                                        : AppTheme.textMuted,
+                                  ),
+                                ),
+                              ),
+                              if (email.toLowerCase() ==
+                                  widget.userEmail.toLowerCase())
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 6),
+                                  child: Text(
+                                    'You',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 11,
+                                      color: AppTheme.textMuted,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        );
+                      }),
+                      if (members.length > preview.length)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            '+${members.length - preview.length} more',
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              color: AppTheme.textMuted,
+                            ),
+                          ),
+                        ),
+                    ],
+                  );
+                },
               ),
 
               if (_isAdmin) ...[
@@ -1690,7 +1989,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                       _showManageMembersSheet();
                     },
                     icon: const Icon(Icons.group_outlined),
-                    label: const Text('Manage Members'),
+                    label: const Text('Manage Members / Make Admin'),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppTheme.primary,
                       side: BorderSide(
@@ -1905,7 +2204,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                   ),
                 ),
               ],
-            ],
+              ],
+            ),
           ),
         ),
       ),

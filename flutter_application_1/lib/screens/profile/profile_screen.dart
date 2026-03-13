@@ -19,6 +19,7 @@ import '../../services/download_service.dart';
 import 'settings_screen.dart';
 import 'explore_students_screen.dart';
 import 'ai_token_usage_screen.dart';
+import 'my_posts_screen.dart';
 import '../../models/user.dart';
 import '../../widgets/animated_counter.dart';
 import '../../data/academic_subjects_data.dart';
@@ -1819,14 +1820,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: () {
-          final target = _myPostsSectionKey.currentContext;
-          if (target == null) return;
-          Scrollable.ensureVisible(
-            target,
-            duration: const Duration(milliseconds: 350),
-            curve: Curves.easeOutCubic,
-            alignment: 0.08,
+        onTap: () async {
+          final email = _userEmail;
+          if (email.isEmpty) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Please sign in to view your posts.')),
+            );
+            return;
+          }
+
+          await Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => MyPostsScreen(
+                userEmail: email,
+                collegeDomain: widget.collegeDomain,
+              ),
+            ),
           );
         },
         borderRadius: BorderRadius.circular(

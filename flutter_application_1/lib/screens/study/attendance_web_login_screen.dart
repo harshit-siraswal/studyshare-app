@@ -30,17 +30,21 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
     if (uri.scheme != 'https') return false;
     final host = uri.host.toLowerCase();
     final isKietOrCybervidyaHost =
-      host == 'kiet.cybervidya.net' ||
-      host.endsWith('.kiet.cybervidya.net') ||
-      host == 'cybervidya.net' ||
-      host.endsWith('.cybervidya.net');
+        host == 'kiet.cybervidya.net' ||
+        host.endsWith('.kiet.cybervidya.net') ||
+        host == 'cybervidya.net' ||
+        host.endsWith('.cybervidya.net');
     return isKietOrCybervidyaHost ||
         host == 'www.google.com' ||
+        host.endsWith('.google.com') ||
         host == 'www.gstatic.com' ||
+        host.endsWith('.gstatic.com') ||
         host == 'www.recaptcha.net' ||
-      host == 'recaptcha.net' ||
-      host == 'www.google.co.in' ||
-      host == 'googleads.g.doubleclick.net';
+        host == 'recaptcha.net' ||
+        host.endsWith('.recaptcha.net') ||
+        host == 'www.google.co.in' ||
+        host == 'googleads.g.doubleclick.net' ||
+        host == 'www.googleadservices.com';
   }
 
   @override
@@ -100,28 +104,93 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
           }
           window.__studyshareKietBridgeInstalled = true;
 
-          function pushToken() {
+          function normalizeToken(rawValue) {
+            if (!rawValue) return '';
+            var value = String(rawValue).trim();
+            if (!value) return '';
+            if ((value.startsWith('"') && value.endsWith('"')) ||
+                (value.startsWith("'") && value.endsWith("'"))) {
+              value = value.slice(1, -1).trim();
+            }
+            if (!value) return '';
+            if ((value.startsWith('{') && value.endsWith('}')) ||
+                (value.startsWith('[') && value.endsWith(']'))) {
+              try {
+                var parsed = JSON.parse(value);
+                if (typeof parsed === 'string') {
+                  value = parsed.trim();
+                }
+              } catch (_) {}
+            }
+            return value;
+          }
+
+          function candidateFromStorage(storage) {
+            if (!storage) return '';
+            var direct = normalizeToken(storage.getItem('authenticationtoken'));
+            if (direct) return direct;
+
+            var fallback = '';
+            for (var i = 0; i < storage.length; i++) {
+              var key = storage.key(i);
+              if (!key) continue;
+              var lower = key.toLowerCase();
+              if (lower.indexOf('token') == -1 &&
+                  lower.indexOf('auth') == -1 &&
+                  lower.indexOf('session') == -1) {
+                continue;
+              }
+              var value = normalizeToken(storage.getItem(key));
+              if (!value) continue;
+              if (lower == 'authenticationtoken') {
+                return value;
+              }
+              if (!fallback) {
+                fallback = value;
+              }
+            }
+            return fallback;
+          }
+
+          function extractToken() {
+            var localToken = candidateFromStorage(window.localStorage);
+            if (localToken) return localToken;
+            return candidateFromStorage(window.sessionStorage);
+          }
+
+          function isLikelyAuthenticated() {
+            var url = String(window.location.href || '').toLowerCase();
+            return url.indexOf('/home') !== -1 ||
+                url.indexOf('dashboard') !== -1 ||
+                url.indexOf('attendance') !== -1;
+          }
+
+          function pushToken(force) {
             try {
-              var token = window.localStorage.getItem('authenticationtoken') || '';
-              KietAttendanceBridge.postMessage(token || '$_noTokenMessage');
+              var token = extractToken();
+              if (token && (force || isLikelyAuthenticated())) {
+                KietAttendanceBridge.postMessage(token);
+                return;
+              }
+              KietAttendanceBridge.postMessage('$_noTokenMessage');
             } catch (error) {
               KietAttendanceBridge.postMessage('$_noTokenMessage');
             }
           }
 
-          pushToken();
+          pushToken(true);
 
           var lastUrl = window.location.href;
           new MutationObserver(function() {
             if (window.location.href !== lastUrl) {
               lastUrl = window.location.href;
-              pushToken();
+              pushToken(false);
             }
           }).observe(document, { subtree: true, childList: true });
 
-          window.addEventListener('popstate', pushToken);
-          window.addEventListener('hashchange', pushToken);
-          setInterval(pushToken, 1000);
+          window.addEventListener('popstate', function() { pushToken(false); });
+          window.addEventListener('hashchange', function() { pushToken(false); });
+          setInterval(function() { pushToken(false); }, 1000);
         })();
       ''');
     } catch (_) {}
@@ -131,7 +200,57 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
     if (_didReturnToken) return;
     try {
       final result = await _controller.runJavaScriptReturningResult(
-        "window.localStorage.getItem('authenticationtoken') || ''",
+        '''
+        (function() {
+          function normalizeToken(rawValue) {
+            if (!rawValue) return '';
+            var value = String(rawValue).trim();
+            if (!value) return '';
+            if ((value.startsWith('"') && value.endsWith('"')) ||
+                (value.startsWith("'") && value.endsWith("'"))) {
+              value = value.slice(1, -1).trim();
+            }
+            if (!value) return '';
+            if ((value.startsWith('{') && value.endsWith('}')) ||
+                (value.startsWith('[') && value.endsWith(']'))) {
+              try {
+                var parsed = JSON.parse(value);
+                if (typeof parsed === 'string') {
+                  value = parsed.trim();
+                }
+              } catch (_) {}
+            }
+            return value;
+          }
+
+          function candidateFromStorage(storage) {
+            if (!storage) return '';
+            var direct = normalizeToken(storage.getItem('authenticationtoken'));
+            if (direct) return direct;
+
+            var fallback = '';
+            for (var i = 0; i < storage.length; i++) {
+              var key = storage.key(i);
+              if (!key) continue;
+              var lower = key.toLowerCase();
+              if (lower.indexOf('token') == -1 &&
+                  lower.indexOf('auth') == -1 &&
+                  lower.indexOf('session') == -1) {
+                continue;
+              }
+              var value = normalizeToken(storage.getItem(key));
+              if (!value) continue;
+              if (lower == 'authenticationtoken') return value;
+              if (!fallback) fallback = value;
+            }
+            return fallback;
+          }
+
+          var token = candidateFromStorage(window.localStorage) ||
+              candidateFromStorage(window.sessionStorage);
+          return token || '';
+        })();
+        ''',
       );
       _handleBridgeMessage(result.toString());
     } catch (_) {}

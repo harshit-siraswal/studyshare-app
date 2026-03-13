@@ -63,7 +63,38 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     );
     if (!mounted || token == null || token.trim().isEmpty) return;
 
-    await _syncWithToken(token.trim());
+    try {
+      await _syncWithToken(token.trim());
+    } catch (error) {
+      _showSyncError(error);
+    }
+  }
+
+  bool _isLikelyExpiredSessionError(Object error) {
+    if (error is AttendanceSyncException) {
+      return error.code == 'session_expired';
+    }
+
+    final message = error.toString().toLowerCase();
+    return message.contains('401') ||
+        message.contains('403') ||
+        message.contains('unauthorized') ||
+        message.contains('authentication required') ||
+        message.contains('invalid token') ||
+        message.contains('session expired') ||
+        message.contains('reconnect kiet');
+  }
+
+  void _showSyncError(Object error) {
+    if (!mounted) return;
+    final message = error is AttendanceSyncException
+        ? error.message
+        : error.toString().replaceFirst('Exception: ', '');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+      ),
+    );
   }
 
   Future<void> _syncWithSavedToken() async {
@@ -73,7 +104,24 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       await _connectAndSync();
       return;
     }
-    await _syncWithToken(token);
+    try {
+      await _syncWithToken(token);
+    } catch (error) {
+      if (_isLikelyExpiredSessionError(error)) {
+        await _attendanceService.clearSavedSession(widget.collegeId);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Your KIET session expired. Please login once to continue.',
+            ),
+          ),
+        );
+        await _connectAndSync();
+        return;
+      }
+      _showSyncError(error);
+    }
   }
 
   Future<void> _syncWithToken(String token) async {
@@ -89,13 +137,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       setState(() => _snapshot = snapshot);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('KIET attendance synced successfully.')),
-      );
-    } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(error.toString().replaceFirst('Exception: ', '')),
-        ),
       );
     } finally {
       if (mounted) setState(() => _isSyncing = false);
@@ -202,12 +243,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         },
       );
     } catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(error.toString().replaceFirst('Exception: ', '')),
-        ),
-      );
+      _showSyncError(error);
     } finally {
       if (mounted) setState(() => _isLoadingDaywise = false);
     }

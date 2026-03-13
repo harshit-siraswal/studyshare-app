@@ -92,6 +92,40 @@ class BackendApiService {
         lowered.contains('unavailable') ||
         lowered.contains('not supported');
   }
+
+  bool _isKietSyncTransientFailure(Object error) {
+    if (error is TimeoutException || error is SocketException) {
+      return true;
+    }
+
+    if (error is BackendApiHttpException) {
+      final status = error.statusCode;
+      return status == 408 ||
+          status == 425 ||
+          status == 429 ||
+          (status >= 500 && status <= 504) ||
+          _edgeNetworkErrorStatuses.contains(status);
+    }
+
+    final lowered = error.toString().toLowerCase();
+    return lowered.contains('timeout') ||
+        lowered.contains('timed out') ||
+        lowered.contains('temporarily unavailable') ||
+        lowered.contains('connection') ||
+        lowered.contains('network') ||
+        lowered.contains('socket') ||
+        lowered.contains('gateway') ||
+        lowered.contains('http 502') ||
+        lowered.contains('http 503') ||
+        lowered.contains('http 504') ||
+        lowered.contains('http 520') ||
+        lowered.contains('http 521') ||
+        lowered.contains('http 522') ||
+        lowered.contains('http 523') ||
+        lowered.contains('http 524') ||
+        lowered.contains('http 525') ||
+        lowered.contains('http 526');
+  }
   static final Map<String, DateTime> _bookmarkCheckRateLimitUntil =
       <String, DateTime>{};
   DateTime? _notificationsRateLimitUntil;
@@ -459,27 +493,43 @@ class BackendApiService {
     required String cybervidyaToken,
     required BuildContext context,
   }) async {
+    Future<Map<String, dynamic>> performSync({
+      required bool includeRecaptcha,
+    }) async {
+      const maxAttempts = 3;
+      for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          return await _requestJson(
+            '/api/attendance/kiet/sync',
+            method: 'POST',
+            body: {
+              'collegeId': collegeId,
+              'cybervidyaToken': cybervidyaToken,
+            },
+            securityContext: includeRecaptcha ? context : null,
+            includeRecaptchaToken: includeRecaptcha,
+            recaptchaAction: 'attendance_sync',
+            requireAuthToken: true,
+          );
+        } catch (error) {
+          final shouldRetry =
+              _isKietSyncTransientFailure(error) && attempt < maxAttempts;
+          if (!shouldRetry) rethrow;
+          final delay = Duration(milliseconds: 500 * attempt);
+          await Future<void>.delayed(delay);
+        }
+      }
+      throw Exception('Attendance sync failed after retries');
+    }
+
     try {
-      return await _requestJson(
-        '/api/attendance/kiet/sync',
-        method: 'POST',
-        body: {'collegeId': collegeId, 'cybervidyaToken': cybervidyaToken},
-        securityContext: context,
-        includeRecaptchaToken: true,
-        recaptchaAction: 'attendance_sync',
-        requireAuthToken: true,
-      );
-    } catch (e) {
-      if (!_isRecaptchaTransientFailure(e)) rethrow;
+      return await performSync(includeRecaptcha: true);
+    } catch (error) {
+      if (!_isRecaptchaTransientFailure(error)) rethrow;
       debugPrint(
-        'Attendance sync security check failed on mobile; retrying without recaptcha token: $e',
+        'Attendance sync security check failed on mobile; retrying without recaptcha token: $error',
       );
-      return _requestJson(
-        '/api/attendance/kiet/sync',
-        method: 'POST',
-        body: {'collegeId': collegeId, 'cybervidyaToken': cybervidyaToken},
-        requireAuthToken: true,
-      );
+      return performSync(includeRecaptcha: false);
     }
   }
 

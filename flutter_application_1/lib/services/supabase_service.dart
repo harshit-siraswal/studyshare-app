@@ -2273,6 +2273,129 @@ class SupabaseService {
     }
   }
 
+  /// Get posts authored by a user across all rooms.
+  Future<List<Map<String, dynamic>>> getUserPostsAcrossRooms(
+    String userEmail, {
+    int limit = 100,
+  }) async {
+    final normalizedEmail = _normalizeEmail(userEmail);
+    if (normalizedEmail.isEmpty) return [];
+
+    final merged = <String, Map<String, dynamic>>{};
+
+    void mergeRows(List<dynamic> rows) {
+      for (final raw in rows) {
+        final row = Map<String, dynamic>.from(raw as Map);
+        final id = row['id']?.toString().trim() ?? '';
+        if (id.isEmpty) continue;
+        row['comment_count'] = _normalizeCount(row['comment_count']);
+        merged[id] = row;
+      }
+    }
+
+    try {
+      final authorRows = await _client
+          .from('room_messages')
+          .select('*, comment_count:room_post_comments(count)')
+          .eq('author_email', normalizedEmail)
+          .order('created_at', ascending: false)
+          .range(0, limit - 1);
+      mergeRows(authorRows as List<dynamic>);
+    } catch (e) {
+      debugPrint('getUserPostsAcrossRooms author_email lookup failed: $e');
+    }
+
+    try {
+      final userRows = await _client
+          .from('room_messages')
+          .select('*, comment_count:room_post_comments(count)')
+          .eq('user_email', normalizedEmail)
+          .order('created_at', ascending: false)
+          .range(0, limit - 1);
+      mergeRows(userRows as List<dynamic>);
+    } catch (e) {
+      debugPrint('getUserPostsAcrossRooms user_email lookup failed: $e');
+    }
+
+    final posts = merged.values.toList();
+    if (posts.isEmpty) return [];
+
+    final usersByEmail = await _fetchUsersByEmails(
+      posts.map(
+        (post) =>
+            post['author_email']?.toString() ??
+            post['user_email']?.toString() ??
+            '',
+      ),
+    );
+
+    for (final post in posts) {
+      if ((post['author_email']?.toString().trim().isEmpty ?? true) &&
+          (post['user_email']?.toString().trim().isNotEmpty ?? false)) {
+        post['author_email'] = post['user_email'];
+      }
+
+      _applyProfileToRecord(
+        record: post,
+        emailKey: 'author_email',
+        outputNameKey: 'author_name',
+        outputPhotoKey: 'author_photo_url',
+        usersByEmail: usersByEmail,
+        existingNameKeys: const ['user_name', 'display_name'],
+        existingPhotoKeys: const [
+          'profile_photo_url',
+          'photo_url',
+          'avatar_url',
+        ],
+      );
+    }
+
+    final roomIds = posts
+        .map((post) => post['room_id']?.toString().trim() ?? '')
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+
+    final roomNameById = <String, String>{};
+    if (roomIds.isNotEmpty) {
+      try {
+        final roomRows = await _client
+            .from('chat_rooms')
+            .select('id, name')
+            .inFilter('id', roomIds);
+        for (final raw in (roomRows as List<dynamic>)) {
+          final room = Map<String, dynamic>.from(raw as Map);
+          final id = room['id']?.toString().trim() ?? '';
+          final name = room['name']?.toString().trim() ?? '';
+          if (id.isEmpty || name.isEmpty) continue;
+          roomNameById[id] = name;
+        }
+      } catch (e) {
+        debugPrint('getUserPostsAcrossRooms room lookup failed: $e');
+      }
+    }
+
+    for (final post in posts) {
+      final roomId = post['room_id']?.toString().trim() ?? '';
+      if (roomId.isEmpty) continue;
+      final roomName = roomNameById[roomId];
+      if (roomName != null && roomName.isNotEmpty) {
+        post['room_name'] = roomName;
+      }
+    }
+
+    posts.sort((a, b) {
+      final aTime = DateTime.tryParse(a['created_at']?.toString() ?? '');
+      final bTime = DateTime.tryParse(b['created_at']?.toString() ?? '');
+      if (aTime == null && bTime == null) return 0;
+      if (aTime == null) return 1;
+      if (bTime == null) return -1;
+      return bTime.compareTo(aTime);
+    });
+
+    return posts;
+  }
+
   /// Get comments for a post
   Future<List<Map<String, dynamic>>> getPostComments(String postId) async {
     List<Map<String, dynamic>> allComments = [];

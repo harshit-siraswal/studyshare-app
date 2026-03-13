@@ -7,6 +7,23 @@ import '../models/attendance_models.dart';
 import 'attendance_notification_service.dart';
 import 'backend_api_service.dart';
 
+class AttendanceSyncException implements Exception {
+  const AttendanceSyncException({
+    required this.code,
+    required this.message,
+    this.retryable = false,
+    this.cause,
+  });
+
+  final String code;
+  final String message;
+  final bool retryable;
+  final Object? cause;
+
+  @override
+  String toString() => message;
+}
+
 class AttendanceService {
   AttendanceService({BackendApiService? apiService})
     : _apiService = apiService ?? BackendApiService();
@@ -62,34 +79,48 @@ class AttendanceService {
     required String cybervidyaToken,
     required BuildContext context,
   }) async {
-    final response = await _apiService.syncKietAttendance(
-      collegeId: collegeId,
-      cybervidyaToken: cybervidyaToken,
-      context: context,
-    );
-    final snapshotRaw = response['snapshot'];
-    if (snapshotRaw is! Map) {
-      throw Exception('Attendance sync returned an invalid snapshot');
+    try {
+      final response = await _apiService.syncKietAttendance(
+        collegeId: collegeId,
+        cybervidyaToken: cybervidyaToken,
+        context: context,
+      );
+      final snapshotRaw = response['snapshot'];
+      if (snapshotRaw is! Map) {
+        throw const AttendanceSyncException(
+          code: 'invalid_snapshot',
+          message: 'Attendance sync returned an invalid snapshot.',
+        );
+      }
+
+      final snapshot = AttendanceSnapshot.fromJson(
+        Map<String, dynamic>.from(snapshotRaw),
+      );
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_tokenKey(collegeId), cybervidyaToken);
+      await prefs.setString(
+        _snapshotKey(collegeId),
+        jsonEncode(snapshot.toJson()),
+      );
+
+      await AttendanceNotificationService.instance.notifyLowAttendance(
+        collegeId: collegeId,
+        collegeName: collegeName,
+        lowAttendance: snapshot.lowAttendance,
+      );
+
+      return snapshot;
+    } on AttendanceSyncException {
+      rethrow;
+    } catch (error) {
+      final mapped = _mapAttendanceError(error, isDaywise: false);
+      debugPrint(
+        '[AttendanceService] syncKietAttendance failed '
+        '(code=${mapped.code}, retryable=${mapped.retryable}): $error',
+      );
+      throw mapped;
     }
-
-    final snapshot = AttendanceSnapshot.fromJson(
-      Map<String, dynamic>.from(snapshotRaw),
-    );
-
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_tokenKey(collegeId), cybervidyaToken);
-    await prefs.setString(
-      _snapshotKey(collegeId),
-      jsonEncode(snapshot.toJson()),
-    );
-
-    await AttendanceNotificationService.instance.notifyLowAttendance(
-      collegeId: collegeId,
-      collegeName: collegeName,
-      lowAttendance: snapshot.lowAttendance,
-    );
-
-    return snapshot;
   }
 
   Future<List<AttendanceLecture>> getDaywiseAttendance({
@@ -97,26 +128,132 @@ class AttendanceService {
     required AttendanceComponent component,
     required int studentId,
   }) async {
-    final token = await loadSavedToken(collegeId);
-    if (token == null || token.isEmpty) {
-      throw Exception('Please reconnect KIET ERP to load daywise attendance.');
+    try {
+      final token = await loadSavedToken(collegeId);
+      if (token == null || token.isEmpty) {
+        throw const AttendanceSyncException(
+          code: 'session_expired',
+          message: 'Please reconnect KIET ERP to load daywise attendance.',
+        );
+      }
+
+      final response = await _apiService.getKietAttendanceDaywise(
+        collegeId: collegeId,
+        cybervidyaToken: token,
+        courseId: component.courseId,
+        courseComponentId: component.courseComponentId,
+        studentId: studentId,
+      );
+
+      final lecturesRaw = (response['lectures'] as List?) ?? const [];
+      return lecturesRaw
+          .whereType<Map>()
+          .map(
+            (item) =>
+                AttendanceLecture.fromJson(Map<String, dynamic>.from(item)),
+          )
+          .toList();
+    } on AttendanceSyncException {
+      rethrow;
+    } catch (error) {
+      final mapped = _mapAttendanceError(error, isDaywise: true);
+      debugPrint(
+        '[AttendanceService] getDaywiseAttendance failed '
+        '(code=${mapped.code}, retryable=${mapped.retryable}): $error',
+      );
+      throw mapped;
+    }
+  }
+
+  AttendanceSyncException _mapAttendanceError(
+    Object error, {
+    required bool isDaywise,
+  }) {
+    if (error is AttendanceSyncException) return error;
+
+    final fallbackMessage = isDaywise
+        ? 'Failed to load daywise attendance. Please try again.'
+        : 'Failed to sync KIET attendance. Please try again.';
+
+    if (error is BackendApiHttpException) {
+      final statusCode = error.statusCode;
+      final message = error.message.trim().isEmpty
+          ? fallbackMessage
+          : error.message.trim();
+      if (statusCode == 401 || statusCode == 403) {
+        return AttendanceSyncException(
+          code: 'session_expired',
+          message: 'Your KIET session expired. Please login again.',
+          retryable: false,
+          cause: error,
+        );
+      }
+      if (statusCode == 429) {
+        return AttendanceSyncException(
+          code: 'rate_limited',
+          message: 'Too many attendance requests. Please retry shortly.',
+          retryable: true,
+          cause: error,
+        );
+      }
+      if (statusCode >= 500) {
+        return AttendanceSyncException(
+          code: 'backend_unavailable',
+          message: 'Attendance service is temporarily unavailable.',
+          retryable: true,
+          cause: error,
+        );
+      }
+      return AttendanceSyncException(
+        code: 'http_$statusCode',
+        message: message,
+        retryable: false,
+        cause: error,
+      );
     }
 
-    final response = await _apiService.getKietAttendanceDaywise(
-      collegeId: collegeId,
-      cybervidyaToken: token,
-      courseId: component.courseId,
-      courseComponentId: component.courseComponentId,
-      studentId: studentId,
-    );
+    final lowered = error.toString().toLowerCase();
+    if (lowered.contains('security check') || lowered.contains('recaptcha')) {
+      return AttendanceSyncException(
+        code: 'security_check',
+        message: 'Security verification failed. Please retry login once.',
+        retryable: true,
+        cause: error,
+      );
+    }
+    if (lowered.contains('timeout') || lowered.contains('timed out')) {
+      return AttendanceSyncException(
+        code: 'timeout',
+        message: 'Attendance request timed out. Please try again.',
+        retryable: true,
+        cause: error,
+      );
+    }
+    if (lowered.contains('connection') || lowered.contains('network')) {
+      return AttendanceSyncException(
+        code: 'network_error',
+        message: 'Network issue while syncing attendance. Check connection.',
+        retryable: true,
+        cause: error,
+      );
+    }
+    if (lowered.contains('authentication required') ||
+        lowered.contains('invalid token') ||
+        lowered.contains('session expired')) {
+      return AttendanceSyncException(
+        code: 'session_expired',
+        message: 'Your KIET session expired. Please login again.',
+        retryable: false,
+        cause: error,
+      );
+    }
 
-    final lecturesRaw = (response['lectures'] as List?) ?? const [];
-    return lecturesRaw
-        .whereType<Map>()
-        .map(
-          (item) => AttendanceLecture.fromJson(Map<String, dynamic>.from(item)),
-        )
-        .toList();
+    return AttendanceSyncException(
+      code: 'unknown',
+      message: fallbackMessage,
+      retryable: false,
+      cause: error,
+    );
   }
 
   String buildAiPrompt(AttendanceSnapshot snapshot) {
