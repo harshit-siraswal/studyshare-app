@@ -863,11 +863,10 @@ class _StickerPickerState extends State<StickerPicker>
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Meme templates need direct GIPHY access in this build.',
+            'Using meme search fallback in this build.',
           ),
         ),
       );
-      return;
     }
     setState(() {
       _giphyBrowseMode = mode;
@@ -883,7 +882,13 @@ class _StickerPickerState extends State<StickerPicker>
     setState(() => _giphyLoading = true);
     final effectiveQuery = _normalizedGiphyQuery(overrideQuery: query);
     final results = _giphyBrowseMode == _GiphyBrowseMode.memes
-        ? await _stickerService.fetchGiphyMemeTemplates(query: effectiveQuery)
+        ? (_supportsGiphyMemeTemplates
+              ? await _stickerService.fetchGiphyMemeTemplates(
+                  query: effectiveQuery,
+                )
+              : await _stickerService.fetchGiphyStickers(
+                  query: effectiveQuery ?? _memeTemplateQueries.first,
+                ))
         : await _stickerService.fetchGiphyStickers(query: effectiveQuery);
     if (!mounted) return;
     setState(() {
@@ -961,7 +966,6 @@ class _StickerPickerState extends State<StickerPicker>
           ),
           ButtonSegment<_GiphyBrowseMode>(
             value: _GiphyBrowseMode.memes,
-            enabled: _supportsGiphyMemeTemplates,
             icon: const Icon(Icons.mood_rounded, size: 16),
             label: const Text('Meme Templates'),
           ),
@@ -1013,18 +1017,6 @@ class _StickerPickerState extends State<StickerPicker>
           'Giphy stickers are currently unavailable.',
           textAlign: TextAlign.center,
           style: GoogleFonts.inter(color: mutedColor),
-        ),
-      );
-    }
-    if (isMemeMode && !_supportsGiphyMemeTemplates) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 28),
-          child: Text(
-            'Meme templates need direct GIPHY access in this build.',
-            textAlign: TextAlign.center,
-            style: GoogleFonts.inter(color: mutedColor),
-          ),
         ),
       );
     }
@@ -1088,7 +1080,9 @@ class _StickerPickerState extends State<StickerPicker>
                 ),
               ),
               child: Text(
-                'Tap any template to open it in the editor with draggable meme text.',
+                _supportsGiphyMemeTemplates
+                    ? 'Tap any template to open it in the editor with draggable meme text.'
+                    : 'Tap any result to edit as a meme. Using GIPHY sticker search fallback.',
                 style: GoogleFonts.inter(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
