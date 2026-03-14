@@ -12,6 +12,7 @@ class LocalAiChatMessage {
   final double? llmConfidenceScore;
   final double? combinedConfidence;
   final bool ocrFailureAffectsRetrieval;
+  final List<Map<String, dynamic>> ocrErrors;
   final String? actionType;
   final Map<String, dynamic>? actionPayload;
   final String createdAt;
@@ -26,6 +27,7 @@ class LocalAiChatMessage {
     this.llmConfidenceScore,
     this.combinedConfidence,
     this.ocrFailureAffectsRetrieval = false,
+    this.ocrErrors = const [],
     this.actionType,
     this.actionPayload,
     required this.createdAt,
@@ -33,6 +35,7 @@ class LocalAiChatMessage {
 
   factory LocalAiChatMessage.fromJson(Map<String, dynamic> json) {
     final rawSources = json['sources'];
+    final rawOcrErrors = json['ocr_errors'];
     final rawActionType = json['action_type']?.toString();
     final rawActionPayload = json['action_payload'];
     Map<String, dynamic>? normalizedActionPayload;
@@ -80,6 +83,12 @@ class LocalAiChatMessage {
           : double.tryParse(json['combined_confidence']?.toString() ?? ''),
       ocrFailureAffectsRetrieval:
           json['ocr_failure_affects_retrieval'] == true,
+      ocrErrors: rawOcrErrors is List
+          ? rawOcrErrors
+                .whereType<Map>()
+                .map((entry) => Map<String, dynamic>.from(entry))
+                .toList()
+          : const [],
       actionType: rawActionType == null || rawActionType.trim().isEmpty
           ? null
           : rawActionType.trim(),
@@ -102,6 +111,7 @@ class LocalAiChatMessage {
       if (combinedConfidence != null)
         'combined_confidence': combinedConfidence,
       'ocr_failure_affects_retrieval': ocrFailureAffectsRetrieval,
+      if (ocrErrors.isNotEmpty) 'ocr_errors': ocrErrors,
       if (actionType != null && actionType!.isNotEmpty)
         'action_type': actionType,
       if (actionPayload != null && actionPayload!.isNotEmpty)

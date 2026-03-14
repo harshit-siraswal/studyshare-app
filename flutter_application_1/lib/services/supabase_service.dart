@@ -222,6 +222,13 @@ class SupabaseService {
         message.contains('does not exist');
   }
 
+  bool _isOnConflictTargetMissingError(Object error) {
+    final message = error.toString().toLowerCase();
+    return message.contains('on conflict') &&
+        (message.contains('42p10') ||
+            message.contains('no unique or exclusion constraint'));
+  }
+
   bool _isStatusColumnMissingError(Object error) {
     return _isMissingColumnError(error, 'status');
   }
@@ -552,7 +559,9 @@ class SupabaseService {
     try {
       final rows = await _client
           .from('users')
-          .select('email, display_name, username, profile_photo_url, photo_url')
+          .select(
+            'email, display_name, username, profile_photo_url, photo_url, avatar_url',
+          )
           .inFilter('email', emails);
       final map = <String, Map<String, dynamic>>{};
       for (final row in (rows as List).whereType<Map>()) {
@@ -608,6 +617,7 @@ class SupabaseService {
     final fallbackPhoto = _firstNonEmptyValue(user, const [
       'profile_photo_url',
       'photo_url',
+      'avatar_url',
     ]);
     if (fallbackPhoto.isEmpty) return;
     record[outputPhotoKey] = fallbackPhoto;
@@ -1194,7 +1204,7 @@ class SupabaseService {
       final res = await _client
           .from('users')
           .select(
-            'id, email, display_name, profile_photo_url, username, bio, semester, branch, subject',
+            'id, email, display_name, profile_photo_url, photo_url, avatar_url, username, bio, semester, branch, subject',
           )
           .eq('email', email)
           .maybeSingle();
@@ -1292,10 +1302,22 @@ class SupabaseService {
           }
 
           final upsertPayload = <String, dynamic>{'email': email, ...updates};
-          await _client
-              .from('users')
-              .upsert(upsertPayload, onConflict: 'email')
-              .select();
+          try {
+            await _client
+                .from('users')
+                .upsert(upsertPayload, onConflict: 'email')
+                .select();
+          } catch (e) {
+            if (!_isOnConflictTargetMissingError(e)) {
+              rethrow;
+            }
+            final insertPayload = <String, dynamic>{
+              if (userId.isNotEmpty) 'id': userId,
+              'email': email,
+              ...updates,
+            };
+            await _client.from('users').insert(insertPayload).select();
+          }
 
           profile = await runSelect('email', email);
           if (profile == null && userId.isNotEmpty) {
@@ -1450,25 +1472,38 @@ class SupabaseService {
     String department = 'general',
     String? imageUrl,
     String? fileUrl,
+    String? fileType,
   }) async {
     final normalizedImageUrl = imageUrl?.trim() ?? '';
     final normalizedFileUrl = fileUrl?.trim() ?? '';
-    final canUseBackendApi =
-        normalizedFileUrl.isEmpty || normalizedFileUrl == normalizedImageUrl;
+    final normalizedFileType = fileType?.trim().toLowerCase() ?? '';
 
+    Object? backendError;
+    StackTrace? backendStackTrace;
     try {
-      if (canUseBackendApi) {
-        await _api.createNotice(
-          collegeId: collegeId,
-          title: title,
-          content: content,
-          department: department,
-          imageUrl: normalizedImageUrl.isEmpty ? null : normalizedImageUrl,
-        );
-        return;
-      }
-    } catch (e) {
+      await _api.createNotice(
+        collegeId: collegeId,
+        title: title,
+        content: content,
+        department: department,
+        imageUrl: normalizedImageUrl.isEmpty ? null : normalizedImageUrl,
+        fileUrl: normalizedFileUrl.isEmpty ? null : normalizedFileUrl,
+        fileType: normalizedFileType.isEmpty ? null : normalizedFileType,
+      );
+      return;
+    } catch (e, stackTrace) {
+      backendError = e;
+      backendStackTrace = stackTrace;
       debugPrint('Backend notice post failed, retrying via Supabase: $e');
+    }
+
+    final hasAttachment =
+        normalizedImageUrl.isNotEmpty || normalizedFileUrl.isNotEmpty;
+    if (hasAttachment && backendError != null) {
+      Error.throwWithStackTrace(
+        backendError,
+        backendStackTrace ?? StackTrace.current,
+      );
     }
 
     final email = _normalizeEmail(currentUserEmail);
@@ -1491,12 +1526,40 @@ class SupabaseService {
       'created_by_name': displayName,
       if (normalizedImageUrl.isNotEmpty) 'image_url': normalizedImageUrl,
       if (normalizedFileUrl.isNotEmpty) 'file_url': normalizedFileUrl,
+      if (normalizedFileType.isNotEmpty) 'file_type': normalizedFileType,
     };
 
     try {
       await _client.from('notices').insert(payload);
     } catch (e) {
       debugPrint('Error posting notice: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> setNoticeVisibility({
+    required String noticeId,
+    required bool isActive,
+  }) async {
+    if (noticeId.trim().isEmpty) {
+      throw Exception('Notice ID is required');
+    }
+    try {
+      await _api.setNoticeVisibility(noticeId: noticeId, isActive: isActive);
+    } catch (e) {
+      debugPrint('Error updating notice visibility: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> deleteNotice({required String noticeId}) async {
+    if (noticeId.trim().isEmpty) {
+      throw Exception('Notice ID is required');
+    }
+    try {
+      await _api.deleteNotice(noticeId: noticeId);
+    } catch (e) {
+      debugPrint('Error deleting notice: $e');
       rethrow;
     }
   }
@@ -2056,6 +2119,31 @@ class SupabaseService {
     }
   }
 
+  /// Get total posts and today's posts for a room.
+  Future<({int total, int today})> getRoomPostCounts(String roomId) async {
+    try {
+      final total = await _client
+          .from('room_messages')
+          .count(CountOption.exact)
+          .eq('room_id', roomId);
+
+      final now = DateTime.now();
+      final startOfDayLocal = DateTime(now.year, now.month, now.day);
+      final startOfDayUtc = startOfDayLocal.toUtc();
+
+      final today = await _client
+          .from('room_messages')
+          .count(CountOption.exact)
+          .eq('room_id', roomId)
+          .gte('created_at', startOfDayUtc.toIso8601String());
+
+      return (total: total, today: today);
+    } catch (e) {
+      debugPrint('Error fetching room post counts: $e');
+      return (total: 0, today: 0);
+    }
+  }
+
   /// Check if user is room admin
   Future<bool> isRoomAdmin(String roomId, String userEmail) async {
     try {
@@ -2530,6 +2618,27 @@ class SupabaseService {
       );
     } catch (e) {
       debugPrint('Error creating post: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> updatePost({
+    required String postId,
+    required String content,
+  }) async {
+    try {
+      await _api.updateChatMessage(messageId: postId, content: content);
+    } catch (e) {
+      debugPrint('Error updating post: $e');
+      rethrow;
+    }
+  }
+
+  Future<void> deletePost(String postId) async {
+    try {
+      await _api.deleteChatMessage(messageId: postId);
+    } catch (e) {
+      debugPrint('Error deleting post: $e');
       rethrow;
     }
   }
@@ -4343,13 +4452,14 @@ class SupabaseService {
 
   Future<List<Map<String, dynamic>>> getNotices({
     required String collegeId,
+    bool includeHidden = false,
   }) async {
     try {
-      final response = await _client
-          .from('notices')
-          .select()
-          .eq('college_id', collegeId)
-          .order('created_at', ascending: false);
+      var query = _client.from('notices').select().eq('college_id', collegeId);
+      if (!includeHidden) {
+        query = query.eq('is_active', true);
+      }
+      final response = await query.order('created_at', ascending: false);
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
       debugPrint('Error getting notices: $e');

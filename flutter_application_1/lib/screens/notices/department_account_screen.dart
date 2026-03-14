@@ -6,6 +6,7 @@ import '../../services/supabase_service.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/notice_card.dart';
 import '../../models/department_account.dart';
+import '../../utils/admin_access.dart';
 
 class DepartmentAccountScreen extends StatefulWidget {
   final DepartmentAccount account;
@@ -30,11 +31,30 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
   bool _isFollowing = false;
   int _followerCount = 0;
   bool _isFollowLoading = true;
+  bool _canManageNotices = false;
+
+  Future<void> _loadNoticeAccess() async {
+    try {
+      final profile = await _supabaseService.getCurrentUserProfile(
+        maxAttempts: 1,
+      );
+      final canManage = isTeacherOrAdminProfile(profile);
+      if (!mounted) return;
+      setState(() => _canManageNotices = canManage);
+    } catch (e) {
+      debugPrint('Failed to resolve notice access: $e');
+    }
+  }
+
+  Future<void> _loadAccessContextAndNotices() async {
+    await _loadNoticeAccess();
+    await _loadDepartmentNotices();
+  }
 
   @override
   void initState() {
     super.initState();
-    _loadDepartmentNotices();
+    _loadAccessContextAndNotices();
     _loadFollowData();
   }
 
@@ -115,6 +135,7 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
       final departmentId = widget.account.id;
       final allNotices = await _supabaseService.getNotices(
         collegeId: widget.collegeId,
+        includeHidden: _canManageNotices,
       );
       final departmentNotices = allNotices.where((notice) {
         final noticeDepartment =
@@ -311,6 +332,8 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
                   account: widget.account,
                   collegeId: widget.collegeId,
                   isDark: isDark,
+                  canManage: _canManageNotices,
+                  onNoticeUpdated: _loadDepartmentNotices,
                 ),
                 childCount: _notices.length,
               ),

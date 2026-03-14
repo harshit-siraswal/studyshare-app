@@ -8,6 +8,7 @@ import '../../config/theme.dart';
 import '../../utils/youtube_link_utils.dart';
 import '../../widgets/ai_study_tools_sheet.dart';
 import '../../widgets/branded_loader.dart';
+import '../ai_chat_screen.dart';
 
 class YoutubePlayerScreen extends StatefulWidget {
   final ParsedYoutubeLink youtubeLink;
@@ -17,6 +18,7 @@ class YoutubePlayerScreen extends StatefulWidget {
   final String? subject;
   final String? semester;
   final String? branch;
+  final String? collegeName;
 
   const YoutubePlayerScreen({
     super.key,
@@ -27,6 +29,7 @@ class YoutubePlayerScreen extends StatefulWidget {
     this.subject,
     this.semester,
     this.branch,
+    this.collegeName,
   });
 
   @override
@@ -584,168 +587,40 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
               child: _buildExternalActions(),
             ),
-            Expanded(
-              child: SingleChildScrollView(
-                physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(14, 14, 14, 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    // AI Actions Section
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(
-                              color: isDark
-                                  ? AppTheme.primaryColor.withValues(alpha: 0.2)
-                                  : AppTheme.primaryColor.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Icon(
-                              Icons.auto_awesome_rounded,
-                              size: 16,
-                              color: AppTheme.primaryColor,
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Text(
-                            'AI Studio Tools',
-                            style: GoogleFonts.inter(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                              color: isDark ? Colors.white : const Color(0xFF0F172A),
-                              letterSpacing: -0.5,
-                            ),
-                          ),
-                        ],
-                      ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+              child: SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _openAiStudioSheet,
+                  icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+                  label: const Text('Open AI Studio'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.primaryColor,
+                    foregroundColor: Colors.white,
+                    textStyle: GoogleFonts.inter(fontWeight: FontWeight.w700),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
                     ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      height: 140,
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
-                        physics: const BouncingScrollPhysics(),
-                        clipBehavior: Clip.none,
-                        children: [
-                          _buildAiActionCard(
-                            context: context,
-                            title: 'Transcript',
-                            subtitle: 'Smart Highlights',
-                            icon: Icons.subtitles_rounded,
-                            gradientColors: const [Color(0xFF8B5CF6), Color(0xFF6D28D9)],
-                            onTap: () => _openAiStudioSheet(
-                              initialTabIndex: 0,
-                              autoGenerateType: 'transcript',
-                            ),
-                          ),
-                          _buildAiActionCard(
-                            context: context,
-                            title: 'AI Notes',
-                            subtitle: 'Generate summary',
-                            icon: Icons.notes_rounded,
-                            gradientColors: const [Color(0xFF3B82F6), Color(0xFF1D4ED8)],
-                            onTap: () => _openAiStudioSheet(
-                              initialTabIndex: 0,
-                              autoGenerateType: 'notes',
-                            ),
-                          ),
-                          _buildAiActionCard(
-                            context: context,
-                            title: 'Ask AI',
-                            subtitle: 'Q&A on this video',
-                            icon: Icons.chat_bubble_rounded,
-                            gradientColors: const [Color(0xFFF59E0B), Color(0xFFD97706)],
-                            onTap: () => _openAiStudioSheet(initialTabIndex: 3),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 28),
-
-                    // Chapters Section
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: Text(
-                        'Video Chapters',
-                        style: GoogleFonts.inter(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: isDark ? Colors.white : const Color(0xFF334155),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: _chapterJumpSeconds().map((seconds) {
-                        final selected = _currentStartSeconds == seconds;
-                        return ChoiceChip(
-                          selected: selected,
-                          showCheckmark: false,
-                          labelStyle: GoogleFonts.inter(
-                            color: selected
-                                ? Colors.white
-                                : (isDark ? Colors.white70 : Colors.black87),
-                            fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                          ),
-                          selectedColor: AppTheme.primaryColor,
-                          backgroundColor:
-                              isDark ? AppTheme.darkCard : Colors.white,
-                          side: BorderSide(
-                            color: selected
-                                ? Colors.transparent
-                                : (isDark ? AppTheme.darkBorder : Colors.grey.shade300),
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 10),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(24),
-                          ),
-                          label: Text(_formatTimestamp(seconds)),
-                          onSelected: (_) => _jumpToSecond(seconds),
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 32),
-
-                    // Main CTA
-                    Container(
-                      decoration: BoxDecoration(
-                        boxShadow: [
-                          BoxShadow(
-                            color: AppTheme.primaryColor.withValues(alpha: 0.25),
-                            blurRadius: 12,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      width: double.infinity,
-                      height: 54,
-                      child: FilledButton.icon(
-                        onPressed: _openAiStudioSheet,
-                        icon: const Icon(Icons.auto_awesome_rounded, size: 20),
-                        label: const Text('Open Full AI Studio'),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppTheme.primaryColor,
-                          foregroundColor: Colors.white,
-                          textStyle: GoogleFonts.inter(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 15,
-                            letterSpacing: 0.2,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
+              ),
+            ),
+            Expanded(
+              child: AIChatScreen(
+                collegeId: widget.collegeId ?? '',
+                collegeName: widget.collegeName ?? '',
+                resourceContext: (widget.resourceId?.trim().isNotEmpty ?? false)
+                    ? ResourceContext(
+                        fileId: widget.resourceId!,
+                        title: widget.title,
+                        subject: widget.subject,
+                        semester: widget.semester,
+                        branch: widget.branch,
+                        videoUrl: _activeLink.watchUri.toString(),
+                      )
+                    : null,
+                embedded: true,
               ),
             ),
           ],

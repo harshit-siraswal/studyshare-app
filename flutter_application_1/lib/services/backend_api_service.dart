@@ -401,6 +401,32 @@ class BackendApiService {
     );
   }
 
+  Future<Map<String, dynamic>> updateChatMessage({
+    required String messageId,
+    required String content,
+    String? imageUrl,
+    BuildContext? context,
+  }) async {
+    return _requestJson(
+      '/api/chat/messages/${Uri.encodeComponent(messageId)}',
+      method: 'PUT',
+      body: <String, dynamic>{
+        'content': content,
+        'imageUrl': ?imageUrl,
+      },
+    );
+  }
+
+  Future<void> deleteChatMessage({
+    required String messageId,
+    BuildContext? context,
+  }) async {
+    await _requestJson(
+      '/api/chat/messages/${Uri.encodeComponent(messageId)}',
+      method: 'DELETE',
+    );
+  }
+
   Future<List<Map<String, dynamic>>> getChatComments(String messageId) async {
     final data = await _requestJson(
       '/api/chat/comments/${Uri.encodeComponent(messageId)}',
@@ -731,9 +757,11 @@ class BackendApiService {
     String department = 'general',
     String? imageUrl,
     String? fileUrl,
+    String? fileType,
   }) async {
     final normalizedImageUrl = imageUrl?.trim();
     final normalizedFileUrl = fileUrl?.trim();
+    final normalizedFileType = fileType?.trim().toLowerCase();
     final effectiveAttachmentUrl = (normalizedFileUrl?.isNotEmpty ?? false)
         ? normalizedFileUrl
         : ((normalizedImageUrl?.isNotEmpty ?? false)
@@ -752,9 +780,29 @@ class BackendApiService {
         // newer ones read 'fileUrl'.
         'imageUrl': ?effectiveAttachmentUrl,
         'fileUrl': ?effectiveAttachmentUrl,
+        'fileType': ?normalizedFileType,
       },
     );
   }
+
+  Future<Map<String, dynamic>> setNoticeVisibility({
+    required String noticeId,
+    required bool isActive,
+  }) async {
+    return _requestJson(
+      '${_noticePath(noticeId)}/visibility',
+      method: 'PATCH',
+      body: <String, dynamic>{'isActive': isActive},
+    );
+  }
+
+  Future<void> deleteNotice({required String noticeId}) async {
+    await _requestJson(
+      _noticePath(noticeId),
+      method: 'DELETE',
+    );
+  }
+
   // ----------------------------
   // Notice comments
   // ----------------------------
@@ -1534,6 +1582,7 @@ class BackendApiService {
     double? minScore,
     bool? allowWeb,
     String? fileId,
+    String? videoUrl,
     bool? useOcr,
     bool? forceOcr,
     String? ocrProvider,
@@ -1553,6 +1602,7 @@ class BackendApiService {
         'min_score': ?minScore,
         'allow_web': ?allowWeb,
         'file_id': ?fileId,
+        'video_url': ?videoUrl,
         'use_ocr': ?useOcr,
         'force_ocr': ?forceOcr,
         'ocr_provider': ?ocrProvider,
@@ -1685,6 +1735,7 @@ class BackendApiService {
     double? minScore,
     bool? allowWeb,
     String? fileId,
+    String? videoUrl,
     bool? useOcr,
     bool? forceOcr,
     String? ocrProvider,
@@ -1700,6 +1751,7 @@ class BackendApiService {
       minScore: minScore,
       allowWeb: allowWeb,
       fileId: fileId,
+      videoUrl: videoUrl,
       useOcr: useOcr,
       forceOcr: forceOcr,
       ocrProvider: ocrProvider,
@@ -1735,6 +1787,8 @@ class BackendApiService {
     final ocrFailureAffectsRetrieval =
         response['ocr_failure_affects_retrieval'] ??
         (data is Map ? data['ocr_failure_affects_retrieval'] : null);
+    final ocrErrors =
+        response['ocr_errors'] ?? (data is Map ? data['ocr_errors'] : null);
 
     if (normalizedSources.isNotEmpty || noLocal) {
       yield jsonEncode({
@@ -1746,6 +1800,7 @@ class BackendApiService {
           'llm_confidence_score': ?llmConfidenceScore,
           'combined_confidence': ?combinedConfidence,
           'ocr_failure_affects_retrieval': ?ocrFailureAffectsRetrieval,
+          'ocr_errors': ?ocrErrors,
         },
       });
     }
@@ -1769,6 +1824,7 @@ class BackendApiService {
     double? minScore,
     bool? allowWeb,
     String? fileId,
+    String? videoUrl,
     bool? useOcr,
     bool? forceOcr,
     String? ocrProvider,
@@ -1785,6 +1841,7 @@ class BackendApiService {
         minScore: minScore,
         allowWeb: allowWeb,
         fileId: fileId,
+        videoUrl: videoUrl,
         useOcr: useOcr,
         forceOcr: forceOcr,
         ocrProvider: ocrProvider,
@@ -1824,6 +1881,7 @@ class BackendApiService {
         'min_score': ?minScore,
         'allow_web': ?allowWeb,
         'file_id': ?fileId,
+        'video_url': ?videoUrl,
         'use_ocr': ?useOcr,
         'force_ocr': ?forceOcr,
         'ocr_provider': ?ocrProvider,

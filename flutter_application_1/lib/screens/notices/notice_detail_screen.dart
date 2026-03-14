@@ -61,6 +61,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
   bool _isLoading = true;
   bool _isPosting = false;
   bool _isSaved = false;
+  final Set<String> _expandedThreadIds = {};
 
   // Reply state
   String? _replyToId;
@@ -879,33 +880,78 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     // Check for replies array
     final replies =
         (comment['replies'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+    final commentId = comment['id']?.toString() ?? '';
+    final threadId =
+        commentId.isNotEmpty ? commentId : 'thread_${comment.hashCode}';
+    final hasReplies = replies.isNotEmpty;
+    final isExpanded = _expandedThreadIds.contains(threadId);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _buildCommentItem(comment, isDark, textColor, secondaryColor),
-        if (replies.isNotEmpty)
-          Container(
-            margin: const EdgeInsets.only(left: 16, top: 4, bottom: 4),
-            padding: const EdgeInsets.only(left: 12),
-            decoration: BoxDecoration(
-              border: Border(
-                left: BorderSide(
-                  color: isDark ? Colors.white24 : Colors.black12,
-                  width: 1.5,
+        if (hasReplies) ...[
+          const SizedBox(height: 6),
+          GestureDetector(
+            onTap: () {
+              setState(() {
+                if (isExpanded) {
+                  _expandedThreadIds.remove(threadId);
+                } else {
+                  _expandedThreadIds.add(threadId);
+                }
+              });
+            },
+            child: Row(
+              children: [
+                Icon(
+                  isExpanded
+                      ? Icons.keyboard_arrow_up_rounded
+                      : Icons.keyboard_arrow_down_rounded,
+                  size: 18,
+                  color: secondaryColor,
                 ),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: replies
-                  .map(
-                    (r) =>
-                        _buildCommentTree(r, isDark, textColor, secondaryColor),
-                  )
-                  .toList(),
+                const SizedBox(width: 4),
+                Text(
+                  isExpanded
+                      ? 'Hide replies'
+                      : 'View replies (${replies.length})',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: secondaryColor,
+                  ),
+                ),
+              ],
             ),
           ),
+          if (isExpanded)
+            Container(
+              margin: const EdgeInsets.only(left: 16, top: 6, bottom: 4),
+              padding: const EdgeInsets.only(left: 12),
+              decoration: BoxDecoration(
+                border: Border(
+                  left: BorderSide(
+                    color: isDark ? Colors.white24 : Colors.black12,
+                    width: 1.5,
+                  ),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: replies
+                    .map(
+                      (r) => _buildCommentTree(
+                        r,
+                        isDark,
+                        textColor,
+                        secondaryColor,
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
+        ],
       ],
     );
   }

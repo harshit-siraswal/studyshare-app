@@ -8,6 +8,7 @@ import '../data/academic_subjects_data.dart';
 import '../models/resource.dart';
 import '../screens/profile/user_profile_screen.dart';
 import '../screens/viewer/pdf_viewer_screen.dart';
+import '../screens/viewer/video_player_screen.dart';
 import '../services/download_service.dart';
 import '../services/subscription_service.dart';
 import '../services/supabase_service.dart';
@@ -424,12 +425,13 @@ class _ResourceCardState extends State<ResourceCard> {
   }
 
   Future<void> _openVideo() async {
-    final youtube = parseYoutubeLink(widget.resource.fileUrl);
-    if (youtube != null) {
+    final rawUrl = widget.resource.fileUrl;
+    final youtubeLink = parseYoutubeLink(rawUrl);
+    if (youtubeLink != null) {
       try {
         final opened = await openStudyShareLink(
           context,
-          rawUrl: widget.resource.fileUrl,
+          rawUrl: rawUrl,
           title: widget.resource.title,
           resourceId: widget.resource.id,
           collegeId: widget.resource.collegeId,
@@ -438,27 +440,36 @@ class _ResourceCardState extends State<ResourceCard> {
           branch: widget.resource.branch,
         );
         if (opened || !mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not open video link')),
-        );
       } catch (e) {
         debugPrint('openStudyShareLink error: $e');
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Failed to open video. Please try again.'),
-          ),
-        );
       }
+    } else {
+      final resolvedUri = buildStudyShareExternalUri(rawUrl);
+      final resolvedUrl = resolvedUri?.toString() ?? rawUrl;
+      if (!mounted) return;
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => VideoPlayerScreen(
+            videoUrl: resolvedUrl,
+            title: widget.resource.title,
+            resourceId: widget.resource.id,
+            collegeId: widget.resource.collegeId,
+            subject: widget.resource.subject,
+            semester: widget.resource.semester,
+            branch: widget.resource.branch,
+          ),
+        ),
+      );
       return;
     }
 
     final uri = _buildExternalVideoUri(widget.resource.fileUrl);
     if (uri == null) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Invalid video URL')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invalid video URL')),
+      );
       return;
     }
 
@@ -468,9 +479,9 @@ class _ResourceCardState extends State<ResourceCard> {
     final fallbackLaunched = await launchUrl(uri);
     if (fallbackLaunched || !mounted) return;
 
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Could not open video link')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Could not open video link')),
+    );
   }
 
   Uri? _buildExternalVideoUri(String rawUrl) {
@@ -511,7 +522,7 @@ class _ResourceCardState extends State<ResourceCard> {
         onTap: _openResource,
         borderRadius: BorderRadius.circular(12),
         child: Container(
-          padding: EdgeInsets.all(isCompactCard ? 10 : 12),
+          padding: EdgeInsets.all(isCompactCard ? 8 : 12),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
@@ -529,8 +540,8 @@ class _ResourceCardState extends State<ResourceCard> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                width: isCompactCard ? 40 : 48,
-                height: isCompactCard ? 40 : 48,
+                width: isCompactCard ? 36 : 48,
+                height: isCompactCard ? 36 : 48,
                 decoration: BoxDecoration(
                   color: _getTypeColor().withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(isCompactCard ? 8 : 10),
@@ -538,10 +549,10 @@ class _ResourceCardState extends State<ResourceCard> {
                 child: Icon(
                   _getTypeIcon(),
                   color: _getTypeColor(),
-                  size: isCompactCard ? 20 : 24,
+                  size: isCompactCard ? 18 : 24,
                 ),
               ),
-              SizedBox(width: isCompactCard ? 10 : 12),
+              SizedBox(width: isCompactCard ? 8 : 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -744,8 +755,8 @@ class _ResourceCardState extends State<ResourceCard> {
             style: OutlinedButton.styleFrom(
               foregroundColor: AppTheme.error,
               side: BorderSide(color: AppTheme.error.withValues(alpha: 0.45)),
-              minimumSize: const Size(0, 34),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              minimumSize: const Size(0, 30),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
               ),
@@ -771,8 +782,8 @@ class _ResourceCardState extends State<ResourceCard> {
             style: OutlinedButton.styleFrom(
               foregroundColor: AppTheme.warning,
               side: BorderSide(color: AppTheme.warning.withValues(alpha: 0.4)),
-              minimumSize: const Size(0, 34),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              minimumSize: const Size(0, 30),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
               ),
@@ -798,8 +809,8 @@ class _ResourceCardState extends State<ResourceCard> {
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.success,
               foregroundColor: Colors.white,
-              minimumSize: const Size(0, 34),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+              minimumSize: const Size(0, 30),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
               elevation: 0,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
@@ -915,8 +926,8 @@ class _ResourceCardState extends State<ResourceCard> {
       style: OutlinedButton.styleFrom(
         foregroundColor: AppTheme.primary,
         side: BorderSide(color: AppTheme.primary.withValues(alpha: 0.35)),
-        minimumSize: const Size(0, 34),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        minimumSize: const Size(0, 30),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
     );
@@ -934,8 +945,8 @@ class _ResourceCardState extends State<ResourceCard> {
       style: OutlinedButton.styleFrom(
         foregroundColor: AppTheme.error,
         side: BorderSide(color: AppTheme.error.withValues(alpha: 0.4)),
-        minimumSize: const Size(0, 34),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        minimumSize: const Size(0, 30),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       ),
     );

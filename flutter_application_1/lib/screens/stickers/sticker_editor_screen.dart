@@ -31,11 +31,13 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
   final StickerService _stickerService = StickerService();
   final GlobalKey _previewKey = GlobalKey();
   final TextEditingController _textController = TextEditingController();
+  static const Color _whatsappGreen = Color(0xFF25D366);
 
   late File _workingFile;
   DateTime _workingFileModified = DateTime.now();
   late List<_StickerTextLayer> _layers;
   String? _selectedLayerId;
+  _StickerEditorPanel _activePanel = _StickerEditorPanel.text;
   bool _isRemovingBg = false;
   bool _isSaving = false;
   bool _canRemoveBg = false;
@@ -560,23 +562,17 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
     String? subtitle,
     required Widget child,
   }) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = AppTheme.getTextColor(context);
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkCard : Colors.white,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppTheme.getBorderColor(context)),
-      ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             title,
             style: GoogleFonts.inter(
-              fontSize: 15,
-              fontWeight: FontWeight.w800,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
               color: textColor,
             ),
           ),
@@ -590,7 +586,7 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
               ),
             ),
           ],
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           child,
         ],
       ),
@@ -905,10 +901,152 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
     );
   }
 
+  void _setActivePanel(_StickerEditorPanel panel) {
+    if (_activePanel == panel) return;
+    setState(() => _activePanel = panel);
+  }
+
+  Widget _buildToolButton({
+    required _StickerEditorPanel panel,
+    required IconData icon,
+    required String label,
+    required bool isDark,
+  }) {
+    final isSelected = _activePanel == panel;
+    final textColor = AppTheme.getTextColor(context);
+    final bgColor = isSelected
+        ? _whatsappGreen.withValues(alpha: 0.18)
+        : (isDark ? Colors.white10 : const Color(0xFFF4F6FB));
+
+    return InkWell(
+      onTap: () => _setActivePanel(panel),
+      borderRadius: BorderRadius.circular(16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: bgColor,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: isSelected ? _whatsappGreen : Colors.transparent,
+                width: 1.4,
+              ),
+            ),
+            child: Icon(
+              icon,
+              color: isSelected
+                  ? _whatsappGreen
+                  : textColor.withValues(alpha: 0.7),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: isSelected
+                  ? _whatsappGreen
+                  : textColor.withValues(alpha: 0.6),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToolRow(bool isDark) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        _buildToolButton(
+          panel: _StickerEditorPanel.text,
+          icon: Icons.title_rounded,
+          label: 'Text',
+          isDark: isDark,
+        ),
+        _buildToolButton(
+          panel: _StickerEditorPanel.style,
+          icon: Icons.palette_outlined,
+          label: 'Style',
+          isDark: isDark,
+        ),
+        _buildToolButton(
+          panel: _StickerEditorPanel.position,
+          icon: Icons.open_with_rounded,
+          label: 'Move',
+          isDark: isDark,
+        ),
+        _buildToolButton(
+          panel: _StickerEditorPanel.tools,
+          icon: Icons.auto_fix_high_rounded,
+          label: 'Tools',
+          isDark: isDark,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActivePanel(bool isDark) {
+    switch (_activePanel) {
+      case _StickerEditorPanel.text:
+        return _buildLayerToolbar();
+      case _StickerEditorPanel.style:
+        return _buildStylePanel();
+      case _StickerEditorPanel.position:
+        return _buildPlacementPanel();
+      case _StickerEditorPanel.tools:
+        return _buildRemoveBgPanel(isDark);
+    }
+  }
+
+  Widget _buildBottomPanel(bool isDark, double height) {
+    final panelColor = isDark ? AppTheme.darkCard : Colors.white;
+    return Container(
+      height: height,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+      decoration: BoxDecoration(
+        color: panelColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        border: Border.all(color: AppTheme.getBorderColor(context)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.15),
+            blurRadius: 20,
+            offset: const Offset(0, -6),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          _buildToolRow(isDark),
+          const SizedBox(height: 10),
+          Expanded(
+            child: SingleChildScrollView(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                child: KeyedSubtree(
+                  key: ValueKey(_activePanel),
+                  child: _buildActivePanel(isDark),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bgColor = isDark ? AppTheme.darkBackground : AppTheme.lightBackground;
+    final panelHeight = (MediaQuery.of(context).size.height * 0.38)
+        .clamp(220.0, 320.0)
+        .toDouble();
 
     return Scaffold(
       backgroundColor: bgColor,
@@ -934,24 +1072,23 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
         ],
       ),
       body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+        child: Column(
           children: [
-            _buildPreview(),
-            const SizedBox(height: 16),
-            _buildLayerToolbar(),
-            const SizedBox(height: 14),
-            _buildStylePanel(),
-            const SizedBox(height: 14),
-            _buildPlacementPanel(),
-            const SizedBox(height: 14),
-            _buildRemoveBgPanel(isDark),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+                child: Center(child: _buildPreview()),
+              ),
+            ),
+            _buildBottomPanel(isDark, panelHeight),
           ],
         ),
       ),
     );
   }
 }
+
+enum _StickerEditorPanel { text, style, position, tools }
 
 enum _StickerTextStyle {
   clean('Clean'),

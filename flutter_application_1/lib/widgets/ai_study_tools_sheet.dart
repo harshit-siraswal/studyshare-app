@@ -13,6 +13,7 @@ import '../services/ai_output_local_service.dart';
 import '../services/backend_api_service.dart';
 import '../services/summary_pdf_service.dart';
 import '../services/supabase_service.dart';
+import 'ai_logo_mark.dart';
 import 'branded_loader.dart';
 import 'paywall_dialog.dart';
 
@@ -117,7 +118,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
   bool _useOcr = true;
   bool _forceOcr = false;
-  String _ocrProvider = 'google_vision';
+  String _ocrProvider = 'google';
   bool _showAnswers = false;
   final Map<int, String> _selectedAnswers = {};
   final Set<int> _flippedCardIndexes = <int>{};
@@ -133,7 +134,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
   String _ocrProviderLabelFor(String provider) {
     switch (provider) {
-      case 'google_vision':
+      case 'google':
         return 'Google Vision';
       case 'sarvam':
         return 'Sarvam';
@@ -1153,7 +1154,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                       child: SegmentedButton<String>(
                         segments: const [
                           ButtonSegment<String>(
-                            value: 'google_vision',
+                            value: 'google',
                             label: Text('Google'),
                             icon: Icon(Icons.visibility_rounded, size: 16),
                           ),
@@ -1210,17 +1211,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                     : Colors.white,
                 borderRadius: BorderRadius.circular(9),
               ),
-              child: Padding(
-                padding: const EdgeInsets.all(6),
-                child: Image.asset(
-                  'assets/images/ai_logo.png',
-                  fit: BoxFit.contain,
-                  errorBuilder: (context, error, stackTrace) => Icon(
-                    Icons.auto_awesome_rounded,
-                    color: isDark ? Colors.white : const Color(0xFF1E3A8A),
-                    size: 15,
-                  ),
-                ),
+              child: const Padding(
+                padding: EdgeInsets.all(6),
+                child: AiLogoMark(size: 18),
               ),
             ),
             const SizedBox(width: 8),

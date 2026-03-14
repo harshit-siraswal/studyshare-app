@@ -20,6 +20,7 @@ import 'settings_screen.dart';
 import 'explore_students_screen.dart';
 import 'ai_token_usage_screen.dart';
 import 'my_posts_screen.dart';
+import 'badge_stickers_screen.dart';
 import '../../models/user.dart';
 import '../../widgets/animated_counter.dart';
 import '../../data/academic_subjects_data.dart';
@@ -418,14 +419,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     _buildProfileHeader(textColor, subTextColor),
                     const SizedBox(height: 24),
                     _buildStatsRow(textColor, subTextColor),
+                    const SizedBox(height: 16),
+                    _buildBadgeStickerRow(textColor, subTextColor, isDark),
                     const SizedBox(height: 24),
                     _buildAiTokenUsageCard(textColor, subTextColor, isDark),
-                    const SizedBox(height: 24),
-                    _buildContributionBadgeCard(
-                      textColor,
-                      subTextColor,
-                      isDark,
-                    ),
                     const SizedBox(height: 24),
                     FutureBuilder<bool>(
                       future: _isPremiumFuture ??= _subscriptionService
@@ -825,6 +822,112 @@ class _ProfileScreenState extends State<ProfileScreen> {
           },
         ),
       ],
+    );
+  }
+
+  Widget _buildBadgeStickerRow(
+    Color textColor,
+    Color subTextColor,
+    bool isDark,
+  ) {
+    final tiers = ContributionBadgeCatalog.tiers;
+    final currentIndex =
+        tiers.indexWhere((tier) => tier.id == _contributionBadge.id);
+    final previewBadges = <ContributionBadge>[
+      if (currentIndex > 0) tiers[currentIndex - 1],
+      _contributionBadge,
+      if (currentIndex + 1 < tiers.length) tiers[currentIndex + 1],
+    ];
+
+    return InkWell(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => BadgeStickersScreen(
+              contributionCount: _uploadCount,
+              currentBadge: _contributionBadge,
+            ),
+          ),
+        );
+      },
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: isDark ? AppTheme.darkCard : Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+          ),
+          boxShadow: [
+            if (!isDark)
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 12,
+                offset: const Offset(0, 6),
+              ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Badge Stickers',
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: textColor,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${_contributionBadge.label} • $_uploadCount contributions',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      color: subTextColor,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Row(
+              children: [
+                for (final badge in previewBadges)
+                  Container(
+                    width: 30,
+                    height: 30,
+                    margin: const EdgeInsets.only(left: 6),
+                    decoration: BoxDecoration(
+                      color: badge.color,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: badge.color.withValues(alpha: 0.35),
+                          blurRadius: 8,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Icon(
+                      badge.icon,
+                      size: 16,
+                      color: Colors.white,
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(width: 8),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: subTextColor,
+            ),
+          ],
+        ),
+      ),
     );
   }
 

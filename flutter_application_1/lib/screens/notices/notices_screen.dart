@@ -13,6 +13,7 @@ import '../../models/department_account.dart';
 import '../../widgets/branded_loader.dart';
 import '../../services/home_widget_service.dart';
 import '../../models/notice.dart';
+import '../../utils/admin_access.dart';
 import 'package:intl/intl.dart';
 import 'dart:math' as math;
 
@@ -37,6 +38,7 @@ class _NoticesScreenState extends State<NoticesScreen>
 
   List<Map<String, dynamic>> _filteredNotices = [];
   bool _isLoading = true;
+  bool _canManageNotices = false;
 
   late TabController _tabController;
 
@@ -243,6 +245,8 @@ class _NoticesScreenState extends State<NoticesScreen>
                                   account: account,
                                   collegeId: widget.collegeId,
                                   isDark: isDark,
+                                  canManage: _canManageNotices,
+                                  onNoticeUpdated: _loadNotices,
                                 ),
                               );
                             },
@@ -264,11 +268,29 @@ class _NoticesScreenState extends State<NoticesScreen>
         .trim();
   }
 
+  Future<void> _loadNoticeAccess() async {
+    try {
+      final profile = await _supabaseService.getCurrentUserProfile(
+        maxAttempts: 1,
+      );
+      final canManage = isTeacherOrAdminProfile(profile);
+      if (!mounted) return;
+      setState(() => _canManageNotices = canManage);
+    } catch (e) {
+      debugPrint('Failed to resolve notice access: $e');
+    }
+  }
+
+  Future<void> _loadAccessContextAndNotices() async {
+    await _loadNoticeAccess();
+    await _loadNotices();
+  }
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _loadNotices();
+    _loadAccessContextAndNotices();
     _loadFollowedDepartments();
     _loadDepartmentFollowerCounts();
   }
@@ -283,7 +305,7 @@ class _NoticesScreenState extends State<NoticesScreen>
   void didUpdateWidget(covariant NoticesScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.refreshToken != oldWidget.refreshToken) {
-      _loadNotices();
+      _loadAccessContextAndNotices();
       _loadFollowedDepartments();
       _loadDepartmentFollowerCounts();
     }
@@ -401,7 +423,10 @@ class _NoticesScreenState extends State<NoticesScreen>
     try {
       final notices = await _supabaseService.getNotices(
         collegeId: widget.collegeId,
+        includeHidden: _canManageNotices,
       );
+      final activeNotices =
+          notices.where((notice) => notice['is_active'] != false).toList();
 
       // Filter by date range if set
       List<Map<String, dynamic>> filtered = notices;
@@ -426,7 +451,7 @@ class _NoticesScreenState extends State<NoticesScreen>
       // Sync the latest unfiltered notices to the home screen widget
       final List<Notice> noticeObjs = [];
       int failCount = 0;
-      for (final n in notices) {
+      for (final n in activeNotices) {
         try {
           noticeObjs.add(Notice.fromJson(n));
         } catch (e) {
@@ -612,6 +637,8 @@ class _NoticesScreenState extends State<NoticesScreen>
                                           account: account,
                                           collegeId: widget.collegeId,
                                           isDark: isDark,
+                                          canManage: _canManageNotices,
+                                          onNoticeUpdated: _loadNotices,
                                         ),
                                       ),
                                     ),

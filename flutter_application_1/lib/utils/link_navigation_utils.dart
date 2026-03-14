@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../config/app_config.dart';
 import '../screens/viewer/youtube_player_screen.dart';
+import '../screens/viewer/video_player_screen.dart';
 import 'youtube_link_utils.dart';
 
 /// Builds an absolute [Uri] for a StudyShare resource link.
@@ -41,6 +42,7 @@ Future<bool> openStudyShareLink(
   required String title,
   String? resourceId,
   String? collegeId,
+  String? collegeName,
   String? subject,
   String? semester,
   String? branch,
@@ -59,6 +61,7 @@ Future<bool> openStudyShareLink(
           subject: subject,
           semester: semester,
           branch: branch,
+          collegeName: collegeName,
         ),
       ),
     );
@@ -70,5 +73,29 @@ Future<bool> openStudyShareLink(
     fallbackBaseUrl: fallbackBaseUrl,
   );
   if (uri == null) return false;
+  if (_isDirectVideoUrl(uri)) {
+    if (!context.mounted) return false;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => VideoPlayerScreen(
+          videoUrl: uri.toString(),
+          title: title,
+          resourceId: resourceId,
+          collegeId: collegeId,
+          collegeName: collegeName,
+          subject: subject,
+          semester: semester,
+          branch: branch,
+        ),
+      ),
+    );
+    return true;
+  }
   return launchExternalUri(uri);
+}
+
+bool _isDirectVideoUrl(Uri uri) {
+  final lower = uri.path.toLowerCase();
+  const extensions = <String>{'.mp4', '.mov', '.m4v', '.webm', '.mkv', '.m3u8'};
+  return extensions.any(lower.endsWith);
 }

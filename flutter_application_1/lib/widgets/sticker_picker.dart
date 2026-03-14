@@ -12,6 +12,30 @@ import 'success_overlay.dart';
 
 enum _GiphyBrowseMode { stickers, memes }
 
+class _PackStripItem {
+  final String id;
+  final String label;
+  final String? previewUrl;
+  final File? previewFile;
+  final bool isAdd;
+  final bool isAll;
+
+  const _PackStripItem({
+    required this.id,
+    required this.label,
+    this.previewUrl,
+    this.previewFile,
+    this.isAdd = false,
+    this.isAll = false,
+  });
+
+  factory _PackStripItem.all() =>
+      const _PackStripItem(id: 'all', label: 'All', isAll: true);
+
+  factory _PackStripItem.add() =>
+      const _PackStripItem(id: '_add', label: 'Add', isAdd: true);
+}
+
 class StickerPicker extends StatefulWidget {
   final ValueChanged<File> onStickerSelected;
 
@@ -23,6 +47,7 @@ class StickerPicker extends StatefulWidget {
 
 class _StickerPickerState extends State<StickerPicker>
     with SingleTickerProviderStateMixin {
+  static const Color _whatsappGreen = Color(0xFF25D366);
   final StickerService _stickerService = StickerService();
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
@@ -34,6 +59,7 @@ class _StickerPickerState extends State<StickerPicker>
   String? _errorMessage;
   String? _packActionInProgress;
   String _stickerQuery = '';
+  String _activePackId = 'all';
 
   // Giphy state
   List<GiphyStickerItem> _giphyStickers = [];
@@ -58,8 +84,21 @@ class _StickerPickerState extends State<StickerPicker>
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(() {
-      if (_tabController.index == 2 && _giphyStickers.isEmpty) {
-        _loadGiphy();
+      if (_tabController.indexIsChanging) return;
+      if (_tabController.index == 1) {
+        if (_giphyBrowseMode != _GiphyBrowseMode.stickers) {
+          _setGiphyBrowseMode(_GiphyBrowseMode.stickers);
+        } else if (_giphyStickers.isEmpty) {
+          _loadGiphy();
+        }
+        return;
+      }
+      if (_tabController.index == 2) {
+        if (_giphyBrowseMode != _GiphyBrowseMode.memes) {
+          _setGiphyBrowseMode(_GiphyBrowseMode.memes);
+        } else if (_giphyStickers.isEmpty) {
+          _loadGiphy();
+        }
       }
     });
     _loadAll();
@@ -74,14 +113,19 @@ class _StickerPickerState extends State<StickerPicker>
   }
 
   List<File> get _filteredStickers {
-    if (_stickerQuery.trim().isEmpty) return _stickers;
-    final query = _stickerQuery.toLowerCase();
-    return _stickers
-        .where(
-          (file) =>
-              file.path.toLowerCase().contains(query) ||
-              file.uri.pathSegments.last.toLowerCase().contains(query),
-        )
+    final query = _stickerQuery.trim().toLowerCase();
+    final filtered = query.isEmpty
+        ? _stickers
+        : _stickers
+            .where(
+              (file) =>
+                  file.path.toLowerCase().contains(query) ||
+                  file.uri.pathSegments.last.toLowerCase().contains(query),
+            )
+            .toList();
+    if (_activePackId == 'all') return filtered;
+    return filtered
+        .where((file) => _extractPackIdFromPath(file.path) == _activePackId)
         .toList();
   }
 
@@ -107,6 +151,14 @@ class _StickerPickerState extends State<StickerPicker>
             _stickerService.supportsGiphyMemeTemplates;
         _isLoading = false;
       });
+      final previewMap = _buildPackPreviewMap();
+      final validPackIds = <String>{
+        ..._installedPacks,
+        ...previewMap.keys,
+      };
+      if (_activePackId != 'all' && !validPackIds.contains(_activePackId)) {
+        setState(() => _activePackId = 'all');
+      }
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -114,6 +166,152 @@ class _StickerPickerState extends State<StickerPicker>
         _errorMessage = 'Failed to load stickers';
       });
     }
+  }
+
+  String _extractPackIdFromPath(String rawPath) {
+    final normalized = rawPath.replaceAll('\\', '/');
+    final segments = normalized.split('/');
+    final packSegment = segments.firstWhere(
+      (segment) => segment.startsWith('pack_'),
+      orElse: () => '',
+    );
+    if (packSegment.isEmpty) return 'custom';
+    return packSegment.replaceFirst('pack_', '');
+  }
+
+  Map<String, File> _buildPackPreviewMap() {
+    final previews = <String, File>{};
+    for (final sticker in _stickers) {
+      final packId = _extractPackIdFromPath(sticker.path);
+      previews.putIfAbsent(packId, () => sticker);
+    }
+    return previews;
+  }
+
+  List<_PackStripItem> _buildPackStripItems() {
+    final items = <_PackStripItem>[_PackStripItem.all()];
+    final previews = _buildPackPreviewMap();
+    final availableById = {
+      for (final pack in StickerService.availablePacks) pack.id: pack,
+    };
+    final installed = <String>{..._installedPacks};
+    installed.addAll(previews.keys.where((id) => id != 'custom'));
+
+    if (previews.containsKey('custom')) {
+      items.add(
+        _PackStripItem(
+          id: 'custom',
+          label: 'Custom',
+          previewFile: previews['custom'],
+        ),
+      );
+    }
+
+    for (final pack in StickerService.availablePacks) {
+      if (!installed.contains(pack.id)) continue;
+      items.add(
+        _PackStripItem(
+          id: pack.id,
+          label: pack.name,
+          previewUrl: pack.previewUrl,
+          previewFile: previews[pack.id],
+        ),
+      );
+    }
+
+    for (final packId in installed) {
+      if (packId == 'custom' || availableById.containsKey(packId)) {
+        continue;
+      }
+      items.add(
+        _PackStripItem(
+          id: packId,
+          label: 'Imported',
+          previewFile: previews[packId],
+        ),
+      );
+    }
+
+    items.add(_PackStripItem.add());
+    return items;
+  }
+
+  void _setActivePack(String packId) {
+    if (_activePackId == packId) return;
+    setState(() => _activePackId = packId);
+  }
+
+  Future<void> _openPackManagerSheet() async {
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.75,
+          decoration: BoxDecoration(
+            color: AppTheme.getSurfaceColor(context),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              children: [
+                const SizedBox(height: 10),
+                Container(
+                  width: 44,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.white24 : Colors.black12,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                  child: Row(
+                    children: [
+                      Text(
+                        'Sticker Packs',
+                        style: GoogleFonts.inter(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16,
+                          color: AppTheme.getTextColor(context),
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        onPressed: () => Navigator.pop(context),
+                        icon: Icon(
+                          Icons.close_rounded,
+                          color: isDark ? Colors.white70 : Colors.black54,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _importPackFromFiles,
+                          icon: const Icon(Icons.folder_zip_rounded, size: 16),
+                          label: const Text('Import Pack'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(child: _buildPackList(isDark)),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _createFromGallery() async {
@@ -310,8 +508,9 @@ class _StickerPickerState extends State<StickerPicker>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final surfaceColor = AppTheme.getSurfaceColor(context);
     final textColor = AppTheme.getTextColor(context);
-    final mutedColor = textColor.withValues(alpha: 0.65);
     final sheetHeight = MediaQuery.of(context).size.height * 0.72;
+    final isStickersTab = _tabController.index == 0;
+    final isMemeTab = _tabController.index == 2;
 
     if (_isLoading) {
       return Container(
@@ -365,21 +564,18 @@ class _StickerPickerState extends State<StickerPicker>
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
             child: Row(
               children: [
-                const SizedBox(width: 36),
-                Expanded(
-                  child: Text(
-                    'Stickers',
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.inter(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 18,
-                      color: textColor,
-                    ),
+                Text(
+                  'Stickers',
+                  style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 18,
+                    color: textColor,
                   ),
                 ),
+                const Spacer(),
                 IconButton(
                   onPressed: () => Navigator.pop(context),
                   icon: Icon(
@@ -391,70 +587,113 @@ class _StickerPickerState extends State<StickerPicker>
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
-            child: Text(
-              'Create custom stickers, drag text anywhere, or turn GIPHY templates into memes.',
-              textAlign: TextAlign.center,
-              style: GoogleFonts.inter(fontSize: 12, color: mutedColor),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
             child: Row(
               children: [
-                _buildActionButton(
-                  icon: Icons.add_photo_alternate_rounded,
-                  onTap: _createFromGallery,
-                  tooltip: 'Create from gallery',
-                  isDark: isDark,
+                Expanded(
+                  child: _buildSearchField(
+                    isDark: isDark,
+                    isGiphy: !isStickersTab,
+                    isMemeTab: isMemeTab,
+                  ),
                 ),
-                const SizedBox(width: 8),
-                _buildActionButton(
-                  icon: Icons.folder_zip_rounded,
-                  onTap: _importPackFromFiles,
-                  tooltip: 'Import sticker pack',
-                  isDark: isDark,
-                ),
-                const SizedBox(width: 12),
-                Expanded(child: _buildSearchField(isDark)),
+                if (isStickersTab) ...[
+                  const SizedBox(width: 8),
+                  _buildActionButton(
+                    icon: Icons.add_photo_alternate_rounded,
+                    onTap: _createFromGallery,
+                    tooltip: 'Create from gallery',
+                    isDark: isDark,
+                  ),
+                  const SizedBox(width: 6),
+                  _buildActionButton(
+                    icon: Icons.add_circle_outline_rounded,
+                    onTap: _openPackManagerSheet,
+                    tooltip: 'Sticker packs',
+                    isDark: isDark,
+                  ),
+                ],
               ],
             ),
           ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Container(
+              padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(
-                color: isDark ? AppTheme.darkCard : const Color(0xFFF1F5F9),
-                borderRadius: BorderRadius.circular(16),
+                color: isDark
+                    ? Colors.white10
+                    : Colors.black.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: isDark ? Colors.white12 : Colors.black12,
+                ),
               ),
               child: TabBar(
                 controller: _tabController,
+                indicatorSize: TabBarIndicatorSize.tab,
                 indicator: BoxDecoration(
-                  color: AppTheme.primary.withValues(alpha: 0.18),
+                  color: isDark ? Colors.white12 : Colors.white,
                   borderRadius: BorderRadius.circular(14),
+                  boxShadow: [
+                    if (!isDark)
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.08),
+                        blurRadius: 8,
+                        offset: const Offset(0, 4),
+                      ),
+                  ],
                 ),
-                labelColor: AppTheme.primary,
-                unselectedLabelColor: isDark ? Colors.white70 : Colors.black54,
+                labelColor: _whatsappGreen,
+                unselectedLabelColor:
+                    isDark ? Colors.white70 : Colors.black54,
                 dividerColor: Colors.transparent,
                 labelStyle: GoogleFonts.inter(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 11,
                 ),
                 tabs: const [
-                  Tab(text: 'My Stickers'),
-                  Tab(text: 'Packs'),
-                  Tab(text: 'Giphy'),
+                  Tab(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.sticky_note_2_outlined, size: 16),
+                        SizedBox(width: 6),
+                        Text('Stickers'),
+                      ],
+                    ),
+                  ),
+                  Tab(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.gif_box_outlined, size: 16),
+                        SizedBox(width: 6),
+                        Text('GIFs'),
+                      ],
+                    ),
+                  ),
+                  Tab(
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.mood_rounded, size: 16),
+                        SizedBox(width: 6),
+                        Text('Memes'),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Expanded(
             child: TabBarView(
               controller: _tabController,
               children: [
-                _buildStickersGrid(isDark),
-                _buildPackList(isDark),
+                _buildStickerTab(isDark),
+                _buildGiphyTab(isDark),
                 _buildGiphyTab(isDark),
               ],
             ),
@@ -495,19 +734,43 @@ class _StickerPickerState extends State<StickerPicker>
     );
   }
 
-  Widget _buildSearchField(bool isDark) {
+  Widget _buildSearchField({
+    required bool isDark,
+    required bool isGiphy,
+    required bool isMemeTab,
+  }) {
+    final borderColor = isDark ? Colors.white12 : Colors.black12;
+    final controller = isGiphy ? _giphySearchController : _searchController;
+    final queryValue = isGiphy ? _giphySearchController.text : _stickerQuery;
     return TextField(
-      controller: _searchController,
-      onChanged: (value) => setState(() => _stickerQuery = value),
+      controller: controller,
+      textInputAction: isGiphy ? TextInputAction.search : TextInputAction.done,
+      onSubmitted: isGiphy
+          ? (value) => _loadGiphy(
+                query: value.trim().isEmpty ? null : value.trim(),
+              )
+          : null,
+      onChanged: (value) {
+        if (isGiphy) {
+          setState(() {});
+          if (value.trim().isEmpty) {
+            _loadGiphy();
+          }
+          return;
+        }
+        setState(() => _stickerQuery = value);
+      },
       decoration: InputDecoration(
-        hintText: 'Search stickers...',
+        hintText: isGiphy
+            ? (isMemeTab ? 'Search memes...' : 'Search GIFs...')
+            : 'Search stickers...',
         isDense: true,
         prefixIcon: Icon(
           Icons.search_rounded,
           size: 18,
           color: isDark ? Colors.white54 : Colors.black54,
         ),
-        suffixIcon: _stickerQuery.isEmpty
+        suffixIcon: queryValue.isEmpty
             ? null
             : IconButton(
                 icon: Icon(
@@ -516,30 +779,185 @@ class _StickerPickerState extends State<StickerPicker>
                   color: isDark ? Colors.white54 : Colors.black54,
                 ),
                 onPressed: () {
-                  _searchController.clear();
+                  controller.clear();
+                  if (isGiphy) {
+                    _loadGiphy();
+                    setState(() {});
+                    return;
+                  }
                   setState(() => _stickerQuery = '');
                 },
               ),
         filled: true,
-        fillColor: isDark ? Colors.white10 : const Color(0xFFF4F6FB),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(18),
-          borderSide: BorderSide.none,
+        fillColor: isDark ? Colors.white10 : const Color(0xFFF1F3F6),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(22),
+          borderSide: BorderSide(color: borderColor),
         ),
-        contentPadding: const EdgeInsets.symmetric(vertical: 12),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(22),
+          borderSide: const BorderSide(color: _whatsappGreen, width: 1.6),
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(22),
+          borderSide: BorderSide(color: borderColor),
+        ),
+        contentPadding: const EdgeInsets.symmetric(vertical: 10),
       ),
+    );
+  }
+
+  Widget _buildPackStrip(bool isDark) {
+    final items = _buildPackStripItems();
+    final textColor = AppTheme.getTextColor(context);
+    final borderColor = isDark ? Colors.white12 : Colors.black12;
+    final chipBg = isDark ? Colors.white10 : const Color(0xFFF4F6FB);
+
+    return SizedBox(
+      height: 66,
+      child: ListView.separated(
+        padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+        scrollDirection: Axis.horizontal,
+        itemCount: items.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (context, index) {
+          final item = items[index];
+          final isSelected =
+              _activePackId == item.id || (item.isAll && _activePackId == 'all');
+
+          Widget avatar;
+          if (item.isAdd) {
+            avatar = Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: chipBg,
+                shape: BoxShape.circle,
+                border: Border.all(color: borderColor),
+              ),
+              child: Icon(
+                Icons.add_rounded,
+                color: isDark ? Colors.white70 : Colors.black54,
+              ),
+            );
+          } else if (item.previewUrl != null && item.previewUrl!.isNotEmpty) {
+            avatar = ClipOval(
+              child: CachedNetworkImage(
+                imageUrl: item.previewUrl!,
+                width: 44,
+                height: 44,
+                fit: BoxFit.cover,
+                placeholder: (_, __) => Container(
+                  width: 44,
+                  height: 44,
+                  color: chipBg,
+                ),
+                errorWidget: (_, __, ___) => Container(
+                  width: 44,
+                  height: 44,
+                  color: chipBg,
+                  child: const Icon(Icons.broken_image, size: 18),
+                ),
+              ),
+            );
+          } else if (item.previewFile != null) {
+            avatar = ClipOval(
+              child: Image.file(
+                item.previewFile!,
+                width: 44,
+                height: 44,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => Container(
+                  width: 44,
+                  height: 44,
+                  color: chipBg,
+                  child: const Icon(Icons.broken_image, size: 18),
+                ),
+              ),
+            );
+          } else {
+            avatar = Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: chipBg,
+                shape: BoxShape.circle,
+                border: Border.all(color: borderColor),
+              ),
+              child: Icon(
+                item.isAll
+                    ? Icons.history_toggle_off_rounded
+                    : Icons.sticky_note_2_outlined,
+                color: isDark ? Colors.white70 : Colors.black54,
+              ),
+            );
+          }
+
+          return GestureDetector(
+            onTap: () {
+              if (item.isAdd) {
+                _openPackManagerSheet();
+                return;
+              }
+              _setActivePack(item.id);
+            },
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  padding: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: isSelected ? _whatsappGreen : Colors.transparent,
+                      width: 2,
+                    ),
+                  ),
+                  child: avatar,
+                ),
+                const SizedBox(height: 4),
+                SizedBox(
+                  width: 56,
+                  child: Text(
+                    item.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.inter(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: isSelected
+                          ? _whatsappGreen
+                          : textColor.withValues(alpha: 0.7),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildStickerTab(bool isDark) {
+    return Column(
+      children: [
+        _buildPackStrip(isDark),
+        Expanded(child: _buildStickersGrid(isDark)),
+      ],
     );
   }
 
   Widget _buildStickersGrid(bool isDark) {
     final filtered = _filteredStickers;
-    final items = <File?>[null, ...filtered];
 
     return Stack(
       children: [
         GridView.builder(
-          padding: const EdgeInsets.fromLTRB(14, 4, 14, 14),
-          itemCount: items.length,
+          padding: const EdgeInsets.fromLTRB(14, 6, 14, 14),
+          itemCount: filtered.length,
           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 4,
             mainAxisSpacing: 10,
@@ -547,10 +965,7 @@ class _StickerPickerState extends State<StickerPicker>
             childAspectRatio: 1,
           ),
           itemBuilder: (context, index) {
-            if (index == 0) {
-              return _buildCreateTile(isDark);
-            }
-            final sticker = items[index]!;
+            final sticker = filtered[index];
             return GestureDetector(
               onTap: () => widget.onStickerSelected(sticker),
               onLongPress: () => _deleteSticker(sticker),
@@ -590,9 +1005,12 @@ class _StickerPickerState extends State<StickerPicker>
   }
 
   Widget _buildStickerEmptyState() {
-    final message = _stickerQuery.trim().isEmpty
-        ? 'No stickers yet'
-        : 'No matching sticker found';
+    final hasQuery = _stickerQuery.trim().isNotEmpty;
+    final message = hasQuery
+        ? 'No matching sticker found'
+        : (_activePackId == 'all'
+              ? 'No stickers yet'
+              : 'No stickers in this pack');
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -618,7 +1036,7 @@ class _StickerPickerState extends State<StickerPicker>
             ),
           ),
           const SizedBox(height: 16),
-          if (_stickerQuery.trim().isEmpty)
+          if (!hasQuery)
             ElevatedButton.icon(
               onPressed: _createFromGallery,
               icon: const Icon(Icons.add_photo_alternate_rounded, size: 18),
@@ -633,25 +1051,6 @@ class _StickerPickerState extends State<StickerPicker>
               child: const Text('Clear search'),
             ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildCreateTile(bool isDark) {
-    final borderColor = isDark ? Colors.white24 : Colors.black12;
-    final iconColor = isDark ? Colors.white70 : Colors.black54;
-    return InkWell(
-      onTap: _createFromGallery,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: borderColor),
-          color: isDark ? Colors.white10 : Colors.white,
-        ),
-        child: Center(
-          child: Icon(Icons.add_rounded, size: 28, color: iconColor),
-        ),
       ),
     );
   }
@@ -954,38 +1353,6 @@ class _StickerPickerState extends State<StickerPicker>
     }
   }
 
-  Widget _buildGiphyModeToggle(bool isDark) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      child: SegmentedButton<_GiphyBrowseMode>(
-        segments: [
-          const ButtonSegment<_GiphyBrowseMode>(
-            value: _GiphyBrowseMode.stickers,
-            icon: Icon(Icons.sticky_note_2_outlined, size: 16),
-            label: Text('Stickers'),
-          ),
-          ButtonSegment<_GiphyBrowseMode>(
-            value: _GiphyBrowseMode.memes,
-            icon: const Icon(Icons.mood_rounded, size: 16),
-            label: const Text('Meme Templates'),
-          ),
-        ],
-        selected: {_giphyBrowseMode},
-        onSelectionChanged: (selection) {
-          _setGiphyBrowseMode(selection.first);
-        },
-        style: ButtonStyle(
-          backgroundColor: WidgetStateProperty.resolveWith((states) {
-            if (states.contains(WidgetState.selected)) {
-              return AppTheme.primary.withValues(alpha: 0.14);
-            }
-            return isDark ? Colors.white10 : const Color(0xFFF4F6FB);
-          }),
-        ),
-      ),
-    );
-  }
-
   Widget _buildMemeTemplateChips() {
     return SizedBox(
       height: 38,
@@ -1014,7 +1381,7 @@ class _StickerPickerState extends State<StickerPicker>
     if (!_hasGiphy) {
       return Center(
         child: Text(
-          'Giphy stickers are currently unavailable.',
+          'GIFs are currently unavailable.',
           textAlign: TextAlign.center,
           style: GoogleFonts.inter(color: mutedColor),
         ),
@@ -1022,50 +1389,7 @@ class _StickerPickerState extends State<StickerPicker>
     }
     return Column(
       children: [
-        _buildGiphyModeToggle(isDark),
         if (isMemeMode) _buildMemeTemplateChips(),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-          child: TextField(
-            controller: _giphySearchController,
-            onSubmitted: (q) =>
-                _loadGiphy(query: q.trim().isEmpty ? null : q.trim()),
-            textInputAction: TextInputAction.search,
-            decoration: InputDecoration(
-              hintText: isMemeMode
-                  ? 'Search meme templates...'
-                  : 'Search Giphy stickers...',
-              isDense: true,
-              prefixIcon: Icon(
-                Icons.search_rounded,
-                size: 18,
-                color: isDark ? Colors.white54 : Colors.black54,
-              ),
-              suffixIcon: _giphySearchController.text.isEmpty
-                  ? null
-                  : IconButton(
-                      icon: Icon(
-                        Icons.close_rounded,
-                        size: 16,
-                        color: isDark ? Colors.white54 : Colors.black54,
-                      ),
-                      onPressed: () {
-                        _giphySearchController.clear();
-                        _loadGiphy();
-                        setState(() {});
-                      },
-                    ),
-              filled: true,
-              fillColor: isDark ? Colors.white10 : const Color(0xFFF4F6FB),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(18),
-                borderSide: BorderSide.none,
-              ),
-              contentPadding: const EdgeInsets.symmetric(vertical: 12),
-            ),
-            onChanged: (_) => setState(() {}),
-          ),
-        ),
         if (isMemeMode)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -1110,14 +1434,14 @@ class _StickerPickerState extends State<StickerPicker>
                       Text(
                         isMemeMode
                             ? 'No meme templates found'
-                            : 'No stickers found',
+                            : 'No GIFs found',
                         style: GoogleFonts.inter(color: mutedColor),
                       ),
                       const SizedBox(height: 4),
                       TextButton(
                         onPressed: _loadGiphy,
                         child: Text(
-                          isMemeMode ? 'Load Templates' : 'Load Trending',
+                          isMemeMode ? 'Load Templates' : 'Load GIFs',
                         ),
                       ),
                     ],

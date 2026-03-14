@@ -14,11 +14,15 @@ import '../screens/notices/notice_detail_screen.dart';
 import 'notice_share_preview.dart';
 import '../utils/link_navigation_utils.dart';
 
+enum _NoticeManageAction { hide, show, delete }
+
 class NoticeCard extends StatefulWidget {
   final Map<String, dynamic> notice;
   final DepartmentAccount account;
   final String? collegeId;
   final bool isDark;
+  final bool canManage;
+  final VoidCallback? onNoticeUpdated;
 
   const NoticeCard({
     super.key,
@@ -26,6 +30,8 @@ class NoticeCard extends StatefulWidget {
     required this.account,
     this.collegeId,
     required this.isDark,
+    this.canManage = false,
+    this.onNoticeUpdated,
   });
 
   @override
@@ -38,6 +44,7 @@ class _NoticeCardState extends State<NoticeCard> {
 
   bool _isSaved = false;
   bool _isLoading = false;
+  bool _manageLoading = false;
 
   @override
   void initState() {
@@ -91,6 +98,99 @@ class _NoticeCardState extends State<NoticeCard> {
     }
   }
 
+  Future<void> _setNoticeVisibility(bool isActive) async {
+    final noticeId = widget.notice['id']?.toString().trim() ?? '';
+    if (noticeId.isEmpty) return;
+
+    setState(() => _manageLoading = true);
+    try {
+      await _supabaseService.setNoticeVisibility(
+        noticeId: noticeId,
+        isActive: isActive,
+      );
+      if (!mounted) return;
+      setState(() => widget.notice['is_active'] = isActive);
+      widget.onNoticeUpdated?.call();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            isActive ? 'Notice is now visible' : 'Notice hidden',
+          ),
+        ),
+      );
+    } catch (e, stackTrace) {
+      debugPrint('Error updating notice visibility: $e\n$stackTrace');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to update notice visibility right now.'),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _manageLoading = false);
+    }
+  }
+
+  Future<void> _deleteNotice() async {
+    final noticeId = widget.notice['id']?.toString().trim() ?? '';
+    if (noticeId.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete notice?'),
+        content: const Text('This will permanently remove the notice.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _manageLoading = true);
+    try {
+      await _supabaseService.deleteNotice(noticeId: noticeId);
+      if (!mounted) return;
+      widget.onNoticeUpdated?.call();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Notice deleted')));
+    } catch (e, stackTrace) {
+      debugPrint('Error deleting notice: $e\n$stackTrace');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to delete notice right now.'),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _manageLoading = false);
+    }
+  }
+
+  Future<void> _handleManageAction(_NoticeManageAction action) async {
+    switch (action) {
+      case _NoticeManageAction.hide:
+        await _setNoticeVisibility(false);
+        break;
+      case _NoticeManageAction.show:
+        await _setNoticeVisibility(true);
+        break;
+      case _NoticeManageAction.delete:
+        await _deleteNotice();
+        break;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final textColor = widget.isDark
@@ -109,6 +209,7 @@ class _NoticeCardState extends State<NoticeCard> {
     final createdAt = widget.notice['created_at'];
     final timeAgo = _formatTimeAgo(createdAt);
     final priority = widget.notice['priority']?.toString();
+    final isActive = widget.notice['is_active'] != false;
     final rawCount =
         widget.notice['comments'] ?? widget.notice['comment_count'];
     final commentCount = rawCount is int
@@ -129,6 +230,64 @@ class _NoticeCardState extends State<NoticeCard> {
     final paperBorder = widget.isDark
         ? borderColor.withValues(alpha: 0.85)
         : const Color(0xFFD8BE88);
+    final manageMenu = widget.canManage
+        ? Padding(
+            padding: const EdgeInsets.only(left: 6),
+            child: _manageLoading
+                ? SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppTheme.primary,
+                    ),
+                  )
+                : PopupMenuButton<_NoticeManageAction>(
+                    tooltip: 'Manage notice',
+                    padding: EdgeInsets.zero,
+                    color: widget.isDark
+                        ? const Color(0xFF111827)
+                        : Colors.white,
+                    elevation: 10,
+                    offset: const Offset(0, 10),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    onSelected: _handleManageAction,
+                    itemBuilder: (context) => [
+                      PopupMenuItem(
+                        value: isActive
+                            ? _NoticeManageAction.hide
+                            : _NoticeManageAction.show,
+                        child: Text(isActive ? 'Hide' : 'Show'),
+                      ),
+                      const PopupMenuDivider(),
+                      PopupMenuItem(
+                        value: _NoticeManageAction.delete,
+                        child: Text(
+                          'Delete',
+                          style: TextStyle(color: AppTheme.error),
+                        ),
+                      ),
+                    ],
+                    child: Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: widget.isDark
+                            ? Colors.white10
+                            : Colors.black.withValues(alpha: 0.06),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        Icons.more_horiz,
+                        size: 18,
+                        color: secondaryColor,
+                      ),
+                    ),
+                  ),
+          )
+        : null;
 
     void openDetail() {
       Navigator.push(
@@ -264,47 +423,57 @@ class _NoticeCardState extends State<NoticeCard> {
                                   children: <Widget>[
                                     Row(
                                       children: <Widget>[
-                                        Flexible(
-                                          child: Text(
-                                            widget.account.name,
-                                            style: GoogleFonts.inter(
-                                              fontSize: 13.5,
-                                              fontWeight: FontWeight.w600,
-                                              color: textColor,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 4),
-                                        Icon(
-                                          Icons.verified_rounded,
-                                          size: 12,
-                                          color: AppTheme.primary,
-                                        ),
-                                        const SizedBox(width: 6),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 8,
-                                            vertical: 2,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: widget.isDark
-                                                ? Colors.white10
-                                                : Colors.black.withValues(
-                                                    alpha: 0.05,
+                                        Expanded(
+                                          child: Row(
+                                            children: [
+                                              Flexible(
+                                                child: Text(
+                                                  widget.account.name,
+                                                  style: GoogleFonts.inter(
+                                                    fontSize: 13.5,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: textColor,
                                                   ),
-                                            borderRadius: BorderRadius.circular(
-                                              10,
-                                            ),
-                                          ),
-                                          child: Text(
-                                            widget.account.handle,
-                                            style: GoogleFonts.inter(
-                                              fontSize: 10,
-                                              color: secondaryColor,
-                                            ),
+                                                  overflow:
+                                                      TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Icon(
+                                                Icons.verified_rounded,
+                                                size: 12,
+                                                color: AppTheme.primary,
+                                              ),
+                                              const SizedBox(width: 6),
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 2,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: widget.isDark
+                                                      ? Colors.white10
+                                                      : Colors.black.withValues(
+                                                          alpha: 0.05,
+                                                        ),
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                        10,
+                                                      ),
+                                                ),
+                                                child: Text(
+                                                  widget.account.handle,
+                                                  style: GoogleFonts.inter(
+                                                    fontSize: 10,
+                                                    color: secondaryColor,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                         ),
+                                        if (manageMenu != null) manageMenu,
                                       ],
                                     ),
                                     const SizedBox(height: 4),
@@ -317,6 +486,32 @@ class _NoticeCardState extends State<NoticeCard> {
                                             color: secondaryColor,
                                           ),
                                         ),
+                                        if (!isActive) ...[
+                                          const SizedBox(width: 8),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 2,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: widget.isDark
+                                                  ? Colors.white12
+                                                  : Colors.black.withValues(
+                                                      alpha: 0.08,
+                                                    ),
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
+                                            ),
+                                            child: Text(
+                                              'HIDDEN',
+                                              style: GoogleFonts.inter(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w700,
+                                                color: secondaryColor,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
                                         if (priority == 'urgent') ...[
                                           const SizedBox(width: 8),
                                           Container(

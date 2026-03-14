@@ -26,6 +26,7 @@ import '../services/supabase_service.dart';
 import '../controllers/ai_chat_animation_controller.dart';
 import '../widgets/ai_chat_message_bubble.dart';
 import '../widgets/ai_formatted_text.dart';
+import '../widgets/ai_logo_mark.dart';
 import '../widgets/onboarding_overlay.dart';
 import '../widgets/paywall_dialog.dart';
 import '../utils/ai_token_budget_utils.dart';
@@ -82,6 +83,42 @@ class RagSource {
   }
 }
 
+class OcrErrorInfo {
+  final String name;
+  final String url;
+  final String provider;
+  final String code;
+  final String message;
+
+  const OcrErrorInfo({
+    required this.name,
+    required this.url,
+    required this.provider,
+    required this.code,
+    required this.message,
+  });
+
+  factory OcrErrorInfo.fromJson(Map<String, dynamic> json) {
+    return OcrErrorInfo(
+      name: json['name']?.toString() ?? 'Attachment',
+      url: json['url']?.toString() ?? '',
+      provider: json['provider']?.toString() ?? 'google',
+      code: json['code']?.toString() ?? 'ocr_failed',
+      message: json['message']?.toString() ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'url': url,
+      'provider': provider,
+      'code': code,
+      'message': message,
+    };
+  }
+}
+
 class AIChatMessage {
   final bool isUser;
   String content;
@@ -93,6 +130,7 @@ class AIChatMessage {
   double? llmConfidenceScore;
   double? combinedConfidence;
   bool ocrFailureAffectsRetrieval;
+  List<OcrErrorInfo> ocrErrors;
   AiQuestionPaper? quizActionPaper;
 
   AIChatMessage({
@@ -106,6 +144,7 @@ class AIChatMessage {
     this.llmConfidenceScore,
     this.combinedConfidence,
     this.ocrFailureAffectsRetrieval = false,
+    this.ocrErrors = const [],
     this.quizActionPaper,
   });
 }
@@ -144,6 +183,7 @@ class ResourceContext {
   final String? subject;
   final String? semester;
   final String? branch;
+  final String? videoUrl;
 
   const ResourceContext({
     required this.fileId,
@@ -151,6 +191,7 @@ class ResourceContext {
     this.subject,
     this.semester,
     this.branch,
+    this.videoUrl,
   });
 
   /// Human-readable label shown in the context banner.
@@ -167,6 +208,7 @@ class AIChatScreen extends StatefulWidget {
   final String collegeId;
   final String collegeName;
   final String? initialPrompt;
+  final bool embedded;
 
   /// Optional: if set, all RAG queries are pinned to this resource.
   final ResourceContext? resourceContext;
@@ -174,9 +216,10 @@ class AIChatScreen extends StatefulWidget {
   const AIChatScreen({
     super.key,
     required this.collegeId,
-    required this.collegeName,
+    this.collegeName = '',
     this.initialPrompt,
     this.resourceContext,
+    this.embedded = false,
   });
 
   @override
@@ -230,6 +273,7 @@ class _AIChatScreenState extends State<AIChatScreen>
   bool _userDismissedTokenBanner = false;
   bool _isAiTokenStatusLoading = false;
   bool _allowWebMode = false;
+  bool _searchAllPdfs = false;
   DateTime? _lastAiTokenTopUpSnackBarAt;
   String? _lastAiTokenTopUpSnackBarMessage;
   DateTime? _lastSourceLinkSnackBarAt;
@@ -496,9 +540,17 @@ class _AIChatScreenState extends State<AIChatScreen>
     required String userPrompt,
     required bool hasAttachments,
     bool preferLocalOnly = false,
+    bool searchAllPdfs = false,
   }) {
     final cleaned = userPrompt.trim();
     if (cleaned.isNotEmpty && preferLocalOnly) {
+      if (searchAllPdfs) {
+        return '$cleaned\n\n'
+            'Important: Search across all available study materials '
+            '(PDFs/notes) in your subject or semester, not just the pinned '
+            'file. Do not add outside web/general info. If nothing relevant '
+            'is found, say that clearly and ask what to upload.';
+      }
       return '$cleaned\n\n'
           'Important: Use only the uploaded/pinned study material context. '
           'Do not add outside web/general info. If the notes do not contain '
@@ -524,6 +576,41 @@ class _AIChatScreenState extends State<AIChatScreen>
         normalized.contains('from attached');
   }
 
+  bool _isPdfOverviewPrompt(String prompt) {
+    final normalized = prompt.toLowerCase();
+    return normalized.contains('what is this pdf about') ||
+        normalized.contains('what is this document about') ||
+        normalized.contains('what does this pdf cover') ||
+        normalized.contains('what does this document cover') ||
+        normalized.contains('which topics does this cover') ||
+        normalized.contains('what topics does this cover') ||
+        normalized.contains('outline this pdf') ||
+        normalized.contains('outline this document') ||
+        normalized.contains('summary of this pdf');
+  }
+
+  bool _promptRequestsAllPdfs(String prompt) {
+    final normalized = prompt.toLowerCase();
+    return normalized.contains('other pdf') ||
+        normalized.contains('another pdf') ||
+        normalized.contains('different pdf') ||
+        normalized.contains('wrong pdf') ||
+        normalized.contains('not the correct pdf') ||
+        normalized.contains('not the right pdf') ||
+        normalized.contains('this is not the pdf') ||
+        normalized.contains('other prf') ||
+        normalized.contains('other notes') ||
+        normalized.contains('another note') ||
+        normalized.contains('search all pdf') ||
+        normalized.contains('search all notes') ||
+        normalized.contains('all pdfs') ||
+        normalized.contains('all notes');
+  }
+
+  bool _shouldSearchAllPdfsForPrompt(String prompt) {
+    return _searchAllPdfs || _promptRequestsAllPdfs(prompt);
+  }
+
   Map<String, dynamic>? _buildContextFilters() {
     final resource = widget.resourceContext;
     if (resource == null) return null;
@@ -540,14 +627,25 @@ class _AIChatScreenState extends State<AIChatScreen>
     return filters.isEmpty ? null : filters;
   }
 
-  Future<Map<String, dynamic>?> _buildContextFiltersForRequest() async {
+  Future<Map<String, dynamic>?> _buildContextFiltersForRequest({
+    bool ignoreSubject = false,
+  }) async {
     final contextFilters = _buildContextFilters();
     if (contextFilters != null && contextFilters.isNotEmpty) {
+      if (ignoreSubject) {
+        final trimmed = Map<String, dynamic>.from(contextFilters);
+        trimmed.remove('subject');
+        return trimmed;
+      }
       return contextFilters;
     }
 
     if (_cachedProfileFilters != null && _cachedProfileFilters!.isNotEmpty) {
-      return Map<String, dynamic>.from(_cachedProfileFilters!);
+      final normalized = Map<String, dynamic>.from(_cachedProfileFilters!);
+      if (ignoreSubject) {
+        normalized.remove('subject');
+      }
+      return normalized;
     }
 
     final email = _auth.userEmail?.trim().toLowerCase();
@@ -842,6 +940,7 @@ class _AIChatScreenState extends State<AIChatScreen>
       llmConfidenceScore: message.llmConfidenceScore,
       combinedConfidence: message.combinedConfidence,
       ocrFailureAffectsRetrieval: message.ocrFailureAffectsRetrieval,
+      ocrErrors: message.ocrErrors.map((e) => e.toJson()).toList(),
       actionType: quizPayload == null ? null : 'start_quiz',
       actionPayload: quizPayload,
       createdAt: DateTime.now().toIso8601String(),
@@ -871,6 +970,9 @@ class _AIChatScreenState extends State<AIChatScreen>
       llmConfidenceScore: message.llmConfidenceScore,
       combinedConfidence: message.combinedConfidence,
       ocrFailureAffectsRetrieval: message.ocrFailureAffectsRetrieval,
+      ocrErrors: message.ocrErrors
+          .map((entry) => OcrErrorInfo.fromJson(entry))
+          .toList(),
       quizActionPaper: quizActionPaper,
     );
   }
@@ -1957,7 +2059,9 @@ class _AIChatScreenState extends State<AIChatScreen>
     required List<Map<String, dynamic>> attachments,
   }) async {
     if (attachments.isEmpty) return widget.resourceContext?.subject ?? '';
-    final contextFilters = await _buildContextFiltersForRequest();
+    final contextFilters = await _buildContextFiltersForRequest(
+      ignoreSubject: true,
+    );
     try {
       final response = await _api.queryRag(
         question:
@@ -1965,11 +2069,12 @@ class _AIChatScreenState extends State<AIChatScreen>
             'Return strict JSON only: {"subject":"<subject name>"}',
         collegeId: widget.collegeId,
         sessionId: _activeSessionId,
-        fileId: widget.resourceContext?.fileId,
+        fileId: null,
+        videoUrl: widget.resourceContext?.videoUrl,
         allowWeb: false,
         useOcr: true,
         forceOcr: true,
-        ocrProvider: 'google_vision',
+        ocrProvider: 'google',
         attachments: attachments,
         filters: contextFilters,
       );
@@ -2443,7 +2548,7 @@ Requirements:
 3) 4 options per question.
 4) Include one correct answer.
 5) Include concise explanation (one sentence, max 20 words).
-6) Include source mapping in "source" only if evidence is available from context.
+6) Do NOT add any sources or citations if they are not explicitly present in the notes.
 $qualityGate
 
 Return STRICT JSON only (no markdown). Schema:
@@ -2456,13 +2561,7 @@ Return STRICT JSON only (no markdown). Schema:
       "question": "<question statement>",
       "options": ["<option A>", "<option B>", "<option C>", "<option D>"],
       "answer": "<A|B|C|D>",
-      "explanation": "<short reason>",
-      "source": {
-        "title": "<document title or empty string>",
-        "section": "<chapter or topic or empty string>",
-        "pages": "<page range or empty string>",
-        "note": "<supporting note or empty string>"
-      }
+      "explanation": "<short reason>"
     }
   ]
 }
@@ -2492,6 +2591,28 @@ Return STRICT JSON only (no markdown). Schema:
       'exact subject name',
     };
     return templateTokens.contains(token);
+  }
+
+  String _labelForOcrProvider(String provider) {
+    switch (provider.toLowerCase()) {
+      case 'sarvam':
+        return 'Sarvam';
+      case 'google':
+      default:
+        return 'Google Vision';
+    }
+  }
+
+  String _labelForOcrCode(String code) {
+    switch (code.toLowerCase()) {
+      case 'ocr_empty':
+        return 'empty result';
+      case 'ocr_unavailable':
+        return 'unavailable';
+      case 'ocr_failed':
+      default:
+        return 'failed';
+    }
   }
 
   bool _isPlaceholderQuestion({
@@ -2696,7 +2817,10 @@ Return STRICT JSON only (no markdown). Schema:
     await _scrollToBottom();
 
     try {
-      final contextFilters = await _buildContextFiltersForRequest();
+      final searchAllForPrompt = _shouldSearchAllPdfsForPrompt(userPrompt);
+      final contextFilters = await _buildContextFiltersForRequest(
+        ignoreSubject: searchAllForPrompt,
+      );
       final inferredFromPrompt = _extractTopicFromPrompt(userPrompt);
       final inferredFromAttachments = await _inferSubjectFromAttachments(
         attachments: attachmentPayload,
@@ -2741,12 +2865,13 @@ Return STRICT JSON only (no markdown). Schema:
           question: prompt,
           collegeId: widget.collegeId,
           sessionId: _activeSessionId,
-          fileId: widget.resourceContext?.fileId,
+          fileId: searchAllForPrompt ? null : widget.resourceContext?.fileId,
+          videoUrl: widget.resourceContext?.videoUrl,
           allowWeb: allowWeb,
           useOcr: hasImageAttachments || forceOcr,
           forceOcr: forceOcr,
           ocrProvider: (hasImageAttachments || forceOcr)
-              ? 'google_vision'
+              ? 'google'
               : null,
           attachments: mergedAttachments,
           history: history,
@@ -2797,10 +2922,15 @@ Return STRICT JSON only (no markdown). Schema:
 
       if (paper == null) {
         setState(() {
-          aiMessage.content = lastAnswer.trim().isEmpty
-              ? 'Failed to generate a valid question paper. Try again with '
-                    'more specific subject details or add notes.'
-              : lastAnswer;
+          final fallback =
+              'Failed to generate a valid question paper. Try again with '
+              'a shorter topic, clearer notes, or upload additional material.';
+          if (_looksLikeQuizJsonPayload(lastAnswer)) {
+            aiMessage.content = fallback;
+          } else {
+            aiMessage.content =
+                lastAnswer.trim().isEmpty ? fallback : lastAnswer;
+          }
         });
         await _persistCurrentSession();
         return;
@@ -2850,11 +2980,15 @@ Return STRICT JSON only (no markdown). Schema:
     await _scrollToBottom();
 
     try {
-      final contextFilters = await _buildContextFiltersForRequest();
+      final searchAllForPrompt = _shouldSearchAllPdfsForPrompt(userPrompt);
+      final contextFilters = await _buildContextFiltersForRequest(
+        ignoreSubject: searchAllForPrompt,
+      );
       final prompt = _buildRagPrompt(
         userPrompt:
             '$userPrompt\n\nOutput instruction: generate a structured report-ready summary.',
         hasAttachments: attachmentPayload.isNotEmpty,
+        searchAllPdfs: searchAllForPrompt,
       );
       Map<String, dynamic>? response;
       String answer = '';
@@ -2867,11 +3001,12 @@ Return STRICT JSON only (no markdown). Schema:
             question: prompt,
             collegeId: widget.collegeId,
             sessionId: _activeSessionId,
-            fileId: widget.resourceContext?.fileId,
+            fileId: searchAllForPrompt ? null : widget.resourceContext?.fileId,
+            videoUrl: widget.resourceContext?.videoUrl,
             allowWeb: allowWeb,
             useOcr: true,
             forceOcr: true,
-            ocrProvider: 'google_vision',
+            ocrProvider: 'google',
             attachments: attachmentPayload,
             history: history,
             filters: contextFilters,
@@ -3033,10 +3168,13 @@ Return STRICT JSON only (no markdown). Schema:
         )) {
           return;
         }
+        final searchAllForPrompt = _shouldSearchAllPdfsForPrompt(userPrompt);
+        final isPdfOverviewPrompt = _isPdfOverviewPrompt(userPrompt);
         final localContextRequired =
             hasAttachments ||
             _isStudioChat ||
-            _promptRequiresLocalContext(userPrompt);
+            _promptRequiresLocalContext(userPrompt) ||
+            searchAllForPrompt;
         final attachmentPayload = effectiveAttachments
             .map(
               (item) => <String, dynamic>{
@@ -3050,10 +3188,21 @@ Return STRICT JSON only (no markdown). Schema:
           userPrompt: userPrompt,
           hasAttachments: hasAttachments,
           preferLocalOnly: localContextRequired,
+          searchAllPdfs: searchAllForPrompt,
         );
         final history = _buildStructuredHistory(pendingUserPrompt: userPrompt);
-        final contextFilters = await _buildContextFiltersForRequest();
-        final shouldForceVisionOcr = attachmentPayload.isNotEmpty;
+        final contextFilters = await _buildContextFiltersForRequest(
+          ignoreSubject: searchAllForPrompt,
+        );
+        final hasImageAttachments = attachmentPayload.any(
+          (item) => item['type']?.toString().toLowerCase() == 'image',
+        );
+        final shouldEnableOcr =
+            attachmentPayload.isNotEmpty ||
+            (widget.resourceContext != null &&
+                (widget.resourceContext?.videoUrl ?? '').isEmpty);
+        final minScore =
+            localContextRequired ? (isPdfOverviewPrompt ? 0.16 : 0.08) : null;
         final userVisible = turnAttachments.isEmpty
             ? userPrompt
             : '$userPrompt\n\n${turnAttachments.length} attachments added.';
@@ -3110,12 +3259,13 @@ Return STRICT JSON only (no markdown). Schema:
             question: sendPrompt,
             collegeId: widget.collegeId,
             sessionId: _activeSessionId,
-            minScore: localContextRequired ? 0.08 : null,
-            fileId: widget.resourceContext?.fileId,
+            minScore: minScore,
+            fileId: searchAllForPrompt ? null : widget.resourceContext?.fileId,
+            videoUrl: widget.resourceContext?.videoUrl,
             allowWeb: _allowWebMode && !localContextRequired,
-            useOcr: shouldForceVisionOcr,
-            forceOcr: shouldForceVisionOcr,
-            ocrProvider: shouldForceVisionOcr ? 'google_vision' : null,
+            useOcr: shouldEnableOcr,
+            forceOcr: hasImageAttachments,
+            ocrProvider: shouldEnableOcr ? 'google' : null,
             attachments: attachmentPayload,
             history: history,
             filters: contextFilters,
@@ -3132,10 +3282,18 @@ Return STRICT JSON only (no markdown). Schema:
               if (type == 'metadata') {
                 final data = chunk['data'] as Map<String, dynamic>? ?? {};
                 final sourcesRaw = (data['sources'] as List?) ?? const [];
+                final ocrErrorsRaw = (data['ocr_errors'] as List?) ?? const [];
                 final sources = sourcesRaw
                     .whereType<Map>()
                     .map(
                       (s) => RagSource.fromJson(Map<String, dynamic>.from(s)),
+                    )
+                    .toList();
+                final ocrErrors = ocrErrorsRaw
+                    .whereType<Map>()
+                    .map(
+                      (entry) =>
+                          OcrErrorInfo.fromJson(Map<String, dynamic>.from(entry)),
                     )
                     .toList();
                 final primarySource = _parsePrimarySource(
@@ -3161,6 +3319,7 @@ Return STRICT JSON only (no markdown). Schema:
                   );
                   aiMessage.ocrFailureAffectsRetrieval =
                       data['ocr_failure_affects_retrieval'] == true;
+                  aiMessage.ocrErrors = ocrErrors;
                 });
               } else if (type == 'chunk') {
                 final textChunk = chunk['text']?.toString() ?? '';
@@ -3518,6 +3677,59 @@ Return STRICT JSON only (no markdown). Schema:
     );
   }
 
+  Widget _buildOcrErrorDetails(
+    List<OcrErrorInfo> errors,
+    bool isDark,
+    bool isCompact,
+  ) {
+    if (errors.isEmpty) return const SizedBox.shrink();
+    final textColor = isDark ? Colors.white70 : Colors.black87;
+    final muted = isDark ? Colors.white54 : Colors.black54;
+    final visible = errors.take(3).toList();
+    final remaining = errors.length - visible.length;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final err in visible) ...[
+            Text(
+              '- ${err.name} (${_labelForOcrProvider(err.provider)}: ${_labelForOcrCode(err.code)})',
+              style: GoogleFonts.inter(
+                fontSize: isCompact ? 10.5 : 11,
+                color: textColor,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            if (err.message.trim().isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(left: 10, top: 2, bottom: 4),
+                child: Text(
+                  err.message.trim(),
+                  style: GoogleFonts.inter(
+                    fontSize: isCompact ? 10 : 10.5,
+                    color: muted,
+                  ),
+                ),
+              )
+            else
+              const SizedBox(height: 4),
+          ],
+          if (remaining > 0)
+            Text(
+              '+ $remaining more file${remaining == 1 ? '' : 's'}',
+              style: GoogleFonts.inter(
+                fontSize: isCompact ? 10 : 10.5,
+                color: muted,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMessageBubble(
     AIChatMessage msg,
     bool isDark,
@@ -3555,14 +3767,7 @@ Return STRICT JSON only (no markdown). Schema:
         if (!msg.isUser)
           Row(
             children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(5),
-                child: Image.asset(
-                  'assets/images/ai_logo.png',
-                  width: 15,
-                  height: 15,
-                ),
-              ),
+              const AiLogoMark(size: 15),
               const SizedBox(width: 6),
               Text(
                 _chatTitle,
@@ -3722,6 +3927,7 @@ Return STRICT JSON only (no markdown). Schema:
                     fontWeight: FontWeight.w600,
                   ),
                 ),
+                _buildOcrErrorDetails(msg.ocrErrors, isDark, isCompact),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 6,
@@ -4068,32 +4274,26 @@ Return STRICT JSON only (no markdown). Schema:
                           Container(
                             width: 118,
                             height: 118,
-                            padding: const EdgeInsets.all(15),
+                            padding: const EdgeInsets.all(18),
                             decoration: BoxDecoration(
                               color: isDark
                                   ? Colors.white.withValues(alpha: 0.08)
                                   : Colors.white.withValues(alpha: 0.92),
                               borderRadius: BorderRadius.circular(30),
                               border: Border.all(
-                                color: AppTheme.primary.withValues(alpha: 0.36),
+                                color: AppTheme.primary.withValues(alpha: 0.28),
                               ),
                               boxShadow: [
                                 BoxShadow(
                                   color: AppTheme.primary.withValues(
-                                    alpha: 0.24,
+                                    alpha: 0.22,
                                   ),
-                                  blurRadius: 38,
-                                  spreadRadius: 2,
+                                  blurRadius: 36,
+                                  spreadRadius: 1,
                                 ),
                               ],
                             ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(15),
-                              child: Image.asset(
-                                'assets/images/ai_logo.png',
-                                fit: BoxFit.cover,
-                              ),
-                            ),
+                            child: const AiLogoSpinner(size: 70),
                           ),
                           const SizedBox(height: 24),
                           Text(
@@ -4155,7 +4355,8 @@ Return STRICT JSON only (no markdown). Schema:
     final isCompact = screenWidth < 380;
     final isSmallPhone = screenWidth < 350;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final appBarBodyTopPadding = mediaQuery.padding.top + kToolbarHeight + 6;
+    final appBarBodyTopPadding =
+        widget.embedded ? 0.0 : mediaQuery.padding.top + kToolbarHeight + 6;
     final horizontalPagePadding = (screenWidth * 0.03)
         .clamp(8.0, 16.0)
         .toDouble();
@@ -4188,6 +4389,8 @@ Return STRICT JSON only (no markdown). Schema:
     final attachButtonSize = isSmallPhone ? 34.0 : (isCompact ? 36.0 : 38.0);
     final sendButtonSize = isSmallPhone ? 36.0 : (isCompact ? 38.0 : 42.0);
     final inputBorderRadius = isSmallPhone ? 20.0 : (isCompact ? 22.0 : 24.0);
+    final composerButtonRadius =
+        isSmallPhone ? 12.0 : (isCompact ? 13.0 : 14.0);
     final inputContainerPadding = EdgeInsets.fromLTRB(
       isSmallPhone ? 6 : (isCompact ? 8 : 10),
       isSmallPhone ? 3 : (isCompact ? 4 : 6),
@@ -4214,22 +4417,27 @@ Return STRICT JSON only (no markdown). Schema:
       fontWeight: FontWeight.w600,
     );
 
-    if (_showEntrySplash) {
+    if (_showEntrySplash && !widget.embedded) {
       return Scaffold(
         backgroundColor: isDark ? const Color(0xFF04070F) : Colors.white,
         body: _buildEntrySplash(isDark),
       );
     }
 
+    final chatBackground = isDark
+        ? const Color(0xFF000000)
+        : const Color(0xFFF2F2F7);
+    final effectiveCollegeName = widget.collegeName.trim().isEmpty
+        ? 'My College'
+        : widget.collegeName.trim();
+
     final chatScaffold = Scaffold(
-      backgroundColor: isDark
-          ? const Color(0xFF000000)
-          : const Color(0xFFF2F2F7),
-      extendBodyBehindAppBar: true,
-      appBar: AppBar(
-        backgroundColor:
-            (isDark ? const Color(0xFF000000) : const Color(0xFFF2F2F7))
-                .withValues(alpha: 0.78),
+      backgroundColor: chatBackground,
+      extendBodyBehindAppBar: !widget.embedded,
+      appBar: widget.embedded
+          ? null
+          : AppBar(
+              backgroundColor: chatBackground.withValues(alpha: 0.78),
         flexibleSpace: ClipRect(
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
@@ -4249,7 +4457,7 @@ Return STRICT JSON only (no markdown). Schema:
               ),
             ),
             Text(
-              _isStudioChat ? widget.collegeName : 'Smart study assistant',
+              _isStudioChat ? effectiveCollegeName : 'Smart study assistant',
               style: GoogleFonts.inter(
                 fontSize: isCompact ? 10 : 10.5,
                 letterSpacing: 0.1,
@@ -4292,7 +4500,7 @@ Return STRICT JSON only (no markdown). Schema:
             icon: const Icon(Icons.add_comment_outlined),
           ),
         ],
-      ),
+            ),
       body: Padding(
         padding: EdgeInsets.only(top: appBarBodyTopPadding),
         child: Column(
@@ -4338,15 +4546,7 @@ Return STRICT JSON only (no markdown). Schema:
                                       ),
                                     ],
                                   ),
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(
-                                      isCompact ? 10 : 12,
-                                    ),
-                                    child: Image.asset(
-                                      'assets/images/ai_logo.png',
-                                      fit: BoxFit.cover,
-                                    ),
-                                  ),
+                                  child: const AiLogoSpinner(size: 60),
                                 ),
                               ),
                             ),
@@ -4505,42 +4705,176 @@ Return STRICT JSON only (no markdown). Schema:
                           ),
                         Padding(
                           padding: const EdgeInsets.only(bottom: 8),
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: [
-                                ChoiceChip(
-                                  label: Text(
-                                    'Local',
-                                    style: GoogleFonts.inter(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Container(
+                                  padding: const EdgeInsets.all(3),
+                                  decoration: BoxDecoration(
+                                    color: isDark
+                                        ? Colors.white10
+                                        : Colors.black.withValues(alpha: 0.05),
+                                    borderRadius: BorderRadius.circular(999),
+                                    border: Border.all(
+                                      color: isDark
+                                          ? Colors.white12
+                                          : Colors.black12,
                                     ),
                                   ),
-                                  selected: !_allowWebMode,
-                                  onSelected: (selected) {
-                                    if (!selected || !mounted) return;
-                                    setState(() => _allowWebMode = false);
-                                  },
+                                  child: Row(
+                                    children: [
+                                      Expanded(
+                                        child: InkWell(
+                                          onTap: () {
+                                            if (!mounted) return;
+                                            setState(() => _allowWebMode = false);
+                                          },
+                                          borderRadius: BorderRadius.circular(999),
+                                          child: AnimatedContainer(
+                                            duration:
+                                                const Duration(milliseconds: 180),
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 6,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: !_allowWebMode
+                                                  ? (isDark
+                                                      ? Colors.white24
+                                                      : Colors.white)
+                                                  : Colors.transparent,
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
+                                            ),
+                                            child: Center(
+                                              child: Text(
+                                                'Local',
+                                                style: GoogleFonts.inter(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: !_allowWebMode
+                                                      ? (isDark
+                                                          ? Colors.white
+                                                          : Colors.black87)
+                                                      : (isDark
+                                                          ? Colors.white70
+                                                          : Colors.black54),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      Expanded(
+                                        child: InkWell(
+                                          onTap: () {
+                                            if (!mounted) return;
+                                            setState(() => _allowWebMode = true);
+                                          },
+                                          borderRadius: BorderRadius.circular(999),
+                                          child: AnimatedContainer(
+                                            duration:
+                                                const Duration(milliseconds: 180),
+                                            padding: const EdgeInsets.symmetric(
+                                              vertical: 6,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: _allowWebMode
+                                                  ? (isDark
+                                                      ? Colors.white24
+                                                      : Colors.white)
+                                                  : Colors.transparent,
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
+                                            ),
+                                            child: Center(
+                                              child: Text(
+                                                'Web',
+                                                style: GoogleFonts.inter(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: _allowWebMode
+                                                      ? (isDark
+                                                          ? Colors.white
+                                                          : Colors.black87)
+                                                      : (isDark
+                                                          ? Colors.white70
+                                                          : Colors.black54),
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                                ChoiceChip(
-                                  label: Text(
-                                    'Web',
-                                    style: GoogleFonts.inter(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
+                              ),
+                              if (widget.resourceContext != null) ...[
+                                const SizedBox(width: 8),
+                                InkWell(
+                                  borderRadius: BorderRadius.circular(999),
+                                  onTap: () {
+                                    if (!mounted) return;
+                                    setState(
+                                      () => _searchAllPdfs = !_searchAllPdfs,
+                                    );
+                                  },
+                                  child: AnimatedContainer(
+                                    duration: const Duration(milliseconds: 180),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 7,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: _searchAllPdfs
+                                          ? AppTheme.primary.withValues(
+                                              alpha: isDark ? 0.22 : 0.14,
+                                            )
+                                          : (isDark
+                                              ? Colors.white10
+                                              : Colors.black.withValues(
+                                                  alpha: 0.04,
+                                                )),
+                                      borderRadius: BorderRadius.circular(999),
+                                      border: Border.all(
+                                        color: _searchAllPdfs
+                                            ? AppTheme.primary
+                                            : (isDark
+                                                ? Colors.white12
+                                                : Colors.black12),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.layers_rounded,
+                                          size: 14,
+                                          color: _searchAllPdfs
+                                              ? AppTheme.primary
+                                              : (isDark
+                                                  ? Colors.white70
+                                                  : Colors.black54),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          'Search all PDFs',
+                                          style: GoogleFonts.inter(
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.w600,
+                                            color: _searchAllPdfs
+                                                ? AppTheme.primary
+                                                : (isDark
+                                                    ? Colors.white70
+                                                    : Colors.black54),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                  selected: _allowWebMode,
-                                  onSelected: (selected) {
-                                    if (!mounted) return;
-                                    setState(() => _allowWebMode = selected);
-                                  },
                                 ),
                               ],
-                            ),
+                            ],
                           ),
                         ),
                         if (_attachments.isNotEmpty)
@@ -4678,48 +5012,71 @@ Return STRICT JSON only (no markdown). Schema:
                           padding: inputContainerPadding,
                           decoration: BoxDecoration(
                             color: isDark
-                                ? const Color(0xFF2C2C2E)
+                                ? const Color(0xFF111827)
                                 : Colors.white,
                             borderRadius: BorderRadius.circular(
                               inputBorderRadius,
                             ),
                             border: Border.all(
                               color: isDark
-                                  ? Colors.transparent
-                                  : const Color(0xFFD1D1D6),
+                                  ? Colors.white12
+                                  : Colors.black12,
                             ),
+                            boxShadow: [
+                              if (!isDark)
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.05),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 4),
+                                ),
+                            ],
                           ),
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
-                              IconButton(
-                                key: _coachAttachKey,
-                                tooltip: 'Attach image or PDF',
-                                onPressed:
-                                    (_isLoading ||
-                                        _isUploadingAttachment ||
-                                        _isSendAttemptInProgress)
-                                    ? null
-                                    : _pickAttachment,
-                                padding: EdgeInsets.zero,
-                                constraints: BoxConstraints.tightFor(
-                                  width: attachButtonSize,
-                                  height: attachButtonSize,
+                              Container(
+                                decoration: BoxDecoration(
+                                  color: isDark
+                                      ? const Color(0xFF1F2937)
+                                      : Colors.black.withValues(alpha: 0.04),
+                                  borderRadius: BorderRadius.circular(
+                                    composerButtonRadius,
+                                  ),
+                                  border: Border.all(
+                                    color: isDark
+                                        ? Colors.white12
+                                        : Colors.black12,
+                                  ),
                                 ),
-                                icon: _isUploadingAttachment
-                                    ? const SizedBox(
-                                        width: 18,
-                                        height: 18,
-                                        child: CircularProgressIndicator(
-                                          strokeWidth: 2,
+                                child: IconButton(
+                                  key: _coachAttachKey,
+                                  tooltip: 'Attach image or PDF',
+                                  onPressed:
+                                      (_isLoading ||
+                                          _isUploadingAttachment ||
+                                          _isSendAttemptInProgress)
+                                      ? null
+                                      : _pickAttachment,
+                                  padding: EdgeInsets.zero,
+                                  constraints: BoxConstraints.tightFor(
+                                    width: attachButtonSize,
+                                    height: attachButtonSize,
+                                  ),
+                                  icon: _isUploadingAttachment
+                                      ? const SizedBox(
+                                          width: 18,
+                                          height: 18,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : Icon(
+                                          Icons.add_rounded,
+                                          color: isDark
+                                              ? Colors.white70
+                                              : AppTheme.primary,
                                         ),
-                                      )
-                                    : Icon(
-                                        Icons.add_rounded,
-                                        color: isDark
-                                            ? Colors.white70
-                                            : AppTheme.primary,
-                                      ),
+                                ),
                               ),
                               Expanded(
                                 child: TextField(
@@ -4751,7 +5108,9 @@ Return STRICT JSON only (no markdown). Schema:
                                           _isSendAttemptInProgress)
                                       ? Colors.grey
                                       : AppTheme.primary,
-                                  shape: BoxShape.circle,
+                                  borderRadius: BorderRadius.circular(
+                                    composerButtonRadius,
+                                  ),
                                 ),
                                 child: IconButton(
                                   onPressed:
@@ -4782,7 +5141,7 @@ Return STRICT JSON only (no markdown). Schema:
       ),
     );
 
-    if (!_showCoachMarks) {
+    if (widget.embedded || !_showCoachMarks) {
       return chatScaffold;
     }
 

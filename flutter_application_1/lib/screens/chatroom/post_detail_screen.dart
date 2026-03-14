@@ -65,6 +65,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   bool _hasAccessOverride = false;
   final Set<String> _expandedCommentIds = {};
   int _reactionRefreshTick = 0;
+  late Map<String, dynamic> _post;
+  final Map<String, String> _profilePhotoCache = {};
+  final Set<String> _profilePhotoFetchInFlight = {};
   static const List<String> _quickReactions = [
     '👍',
     '❤️',
@@ -169,13 +172,16 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   @override
   void initState() {
     super.initState();
-    _upvotes = widget.post['upvotes'] ?? 0;
-    _downvotes = widget.post['downvotes'] ?? 0;
+    _post = Map<String, dynamic>.from(widget.post);
+    _upvotes = _post['upvotes'] ?? 0;
+    _downvotes = _post['downvotes'] ?? 0;
+    _primePhotoCacheFromPost(_post);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _supabaseService.attachContext(context);
     });
     _loadWriterRole();
-    _loadData();  }
+    _loadData();
+  }
 
   void _initReadOnly() {
     if (_hasAccessOverride) {
@@ -210,6 +216,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         widget.post['id'].toString(),
         widget.userEmail,
       );
+      _primePhotoCacheFromComments(comments);
 
       if (mounted) {
         setState(() {
@@ -587,6 +594,236 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     );
   }
 
+  ({String title, String body}) _extractPostParts(Map<String, dynamic> post) {
+    final fullContent = post['content']?.toString() ?? '';
+    final dbTitle = post['title']?.toString() ?? '';
+    if (dbTitle.trim().isNotEmpty) {
+      return (title: dbTitle.trim(), body: fullContent.trim());
+    }
+    final lines = fullContent.split('\n');
+    if (lines.isEmpty) return (title: '', body: '');
+    final title = lines.first.trim();
+    final body = lines.length > 1 ? lines.sublist(1).join('\n').trim() : '';
+    return (title: title, body: body);
+  }
+
+  Future<void> _showEditPostSheet() async {
+    if (_isReadOnly) return;
+    final postId = _post['id']?.toString() ?? '';
+    if (postId.isEmpty) return;
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final parts = _extractPostParts(_post);
+    final titleController = TextEditingController(text: parts.title);
+    final contentController = TextEditingController(text: parts.body);
+    bool isSaving = false;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (_, setModalState) => Container(
+          height: MediaQuery.of(sheetCtx).size.height * 0.75,
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(sheetCtx),
+                      child: Text(
+                        'Cancel',
+                        style: GoogleFonts.inter(color: AppTheme.textMuted),
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      'Edit Post',
+                      style: GoogleFonts.inter(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : Colors.black,
+                      ),
+                    ),
+                    const Spacer(),
+                    ElevatedButton(
+                      onPressed: isSaving
+                          ? null
+                          : () async {
+                              final title = titleController.text.trim();
+                              final body = contentController.text.trim();
+                              if (title.isEmpty && body.isEmpty) {
+                                ScaffoldMessenger.of(sheetCtx).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Post cannot be empty.'),
+                                  ),
+                                );
+                                return;
+                              }
+                              setModalState(() => isSaving = true);
+                              final updatedContent = title.isNotEmpty
+                                  ? (body.isNotEmpty
+                                        ? '$title\n$body'
+                                        : title)
+                                  : body;
+                              try {
+                                await _supabaseService.updatePost(
+                                  postId: postId,
+                                  content: updatedContent,
+                                );
+                                if (!mounted) return;
+                                setState(() {
+                                  _post = Map<String, dynamic>.from(_post)
+                                    ..['content'] = updatedContent;
+                                  if (title.isNotEmpty) {
+                                    _post['title'] = title;
+                                  } else {
+                                    _post.remove('title');
+                                  }
+                                });
+                                if (sheetCtx.mounted) {
+                                  Navigator.pop(sheetCtx);
+                                }
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Post updated'),
+                                  ),
+                                );
+                              } catch (e) {
+                                if (sheetCtx.mounted) {
+                                  ScaffoldMessenger.of(sheetCtx).showSnackBar(
+                                    SnackBar(content: Text('Error: $e')),
+                                  );
+                                  setModalState(() => isSaving = false);
+                                }
+                              }
+                            },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                      ),
+                      child: isSaving
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : Text(
+                              'Save',
+                              style: GoogleFonts.inter(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    children: [
+                      TextField(
+                        controller: titleController,
+                        style: GoogleFonts.inter(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : Colors.black,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: 'Title (Optional)',
+                          hintStyle: GoogleFonts.inter(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white38 : Colors.black38,
+                          ),
+                          border: InputBorder.none,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: contentController,
+                        maxLines: 10,
+                        style: GoogleFonts.inter(
+                          fontSize: 15,
+                          color: isDark ? Colors.white : Colors.black,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: 'Update your post content...',
+                          hintStyle: GoogleFonts.inter(
+                            fontSize: 15,
+                            color: isDark ? Colors.white54 : Colors.black45,
+                          ),
+                          border: InputBorder.none,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmDeletePost() async {
+    if (_isReadOnly) return;
+    final postId = _post['id']?.toString() ?? '';
+    if (postId.isEmpty) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete post?'),
+        content: const Text('This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      await _supabaseService.deletePost(postId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Post deleted')),
+      );
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to delete: $e')),
+      );
+    }
+  }
+
   @override
   void dispose() {
     _commentController.dispose();
@@ -597,7 +834,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final post = widget.post;
+    final post = _post;
+    final authorEmail =
+        (post['author_email'] ?? post['user_email'] ?? '').toString();
+    final isAuthor =
+        authorEmail.isNotEmpty &&
+        authorEmail.toLowerCase() == widget.userEmail.toLowerCase();
+    final canEditPost = !_isReadOnly && isAuthor;
+    final canDeletePost = !_isReadOnly && (isAuthor || widget.isRoomAdmin);
 
     return Scaffold(
       backgroundColor: isDark
@@ -628,24 +872,99 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             ),
             onPressed: _toggleSave,
           ),
+          if (canEditPost || canDeletePost)
+            Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: PopupMenuButton<String>(
+                tooltip: 'Post actions',
+                padding: EdgeInsets.zero,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                onSelected: (value) async {
+                  if (value == 'edit') {
+                    await _showEditPostSheet();
+                  } else if (value == 'delete') {
+                    await _confirmDeletePost();
+                  }
+                },
+                child: Container(
+                  width: 34,
+                  height: 34,
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.white10
+                        : Colors.black.withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.more_horiz_rounded,
+                    size: 18,
+                    color: AppTheme.textMuted,
+                  ),
+                ),
+                itemBuilder: (context) => [
+                  if (canEditPost)
+                    PopupMenuItem(
+                      value: 'edit',
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.edit_rounded,
+                            size: 18,
+                            color: AppTheme.textPrimary,
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            'Edit Post',
+                            style: GoogleFonts.inter(
+                              color: AppTheme.textPrimary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  if (canDeletePost)
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.delete_outline_rounded,
+                            size: 18,
+                            color: Colors.redAccent,
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            'Delete Post',
+                            style: GoogleFonts.inter(
+                              color: Colors.redAccent,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
         ],
       ),
       body: Column(
         children: [
           Expanded(
             child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Post content
                   _buildPostContent(post, isDark),
 
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   Divider(
                     color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
 
                   // Comments section
                   Text(
@@ -696,25 +1015,36 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       }
     }
 
+    final authorEmail =
+        (post['author_email'] ?? post['user_email'] ?? '').toString();
     final authorName =
-        post['author_name'] ?? post['author_email']?.split('@')[0] ?? 'User';
-    final authorPhotoUrl = _resolvePhotoUrl(post, const [
+        post['author_name'] ?? authorEmail.split('@').first ?? 'User';
+    final normalizedEmail = _normalizeEmail(authorEmail);
+    final cachedPhoto = _profilePhotoCache[normalizedEmail];
+    final fallbackPhoto = _resolvePhotoUrl(post, const [
       'author_photo_url',
       'profile_photo_url',
       'photo_url',
       'avatar_url',
     ]);
-    final hasAuthorPhoto = authorPhotoUrl.isNotEmpty;
+    final resolvedPhoto =
+        (cachedPhoto != null && cachedPhoto.isNotEmpty)
+            ? cachedPhoto
+            : fallbackPhoto;
+    if (resolvedPhoto.isEmpty && normalizedEmail.isNotEmpty) {
+      _ensureProfilePhotoCached(normalizedEmail);
+    }
+    final hasAuthorPhoto = resolvedPhoto.isNotEmpty;
     final createdAt = post['created_at'] != null
         ? DateTime.parse(post['created_at'])
         : DateTime.now();
     final netVotes = _upvotes - _downvotes;
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: isDark ? AppTheme.darkCard : Colors.white,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
         ),
@@ -731,9 +1061,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     context,
                     MaterialPageRoute(
                       builder: (context) => UserProfileScreen(
-                        userEmail: post['author_email'] ?? '',
+                        userEmail: authorEmail,
                         userName: authorName,
-                        userPhotoUrl: hasAuthorPhoto ? authorPhotoUrl : null,
+                        userPhotoUrl: hasAuthorPhoto ? resolvedPhoto : null,
                       ),
                     ),
                   );
@@ -743,7 +1073,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     UserAvatar(
                       radius: 18,
                       displayName: authorName,
-                      photoUrl: hasAuthorPhoto ? authorPhotoUrl : null,
+                      photoUrl: hasAuthorPhoto ? resolvedPhoto : null,
                     ),
                     const SizedBox(width: 10),
                     Column(
@@ -760,7 +1090,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             ),
                             const SizedBox(width: 4),
                             UserBadge(
-                              email: post['author_email'] ?? '',
+                              email: authorEmail,
                               size: 14,
                             ),
                           ],
@@ -779,7 +1109,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
 
           // Title
           if (title.isNotEmpty)
@@ -791,7 +1121,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 color: isDark ? Colors.white : Colors.black,
               ),
             ),
-          if (title.isNotEmpty) const SizedBox(height: 8),
+          if (title.isNotEmpty) const SizedBox(height: 6),
 
           // Content
           Text(
@@ -807,7 +1137,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
           // Image (Added Fix)
           if ((post['image_url']?.toString() ?? '').isNotEmpty) ...[
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             Builder(builder: (context) {
               final imageUrl = post['image_url']!.toString();
               return GestureDetector(
@@ -890,7 +1220,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             );
             }),
           ],
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
 
           // Vote buttons
           Row(
@@ -1013,14 +1343,23 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 'User')
             .toString();
     final authorEmail = (comment['author_email'] ?? '').toString();
-    final authorPhotoUrl = _resolvePhotoUrl(comment, const [
+    final normalizedEmail = _normalizeEmail(authorEmail);
+    final cachedPhoto = _profilePhotoCache[normalizedEmail];
+    final fallbackPhoto = _resolvePhotoUrl(comment, const [
       'author_photo_url',
       'profile_photo_url',
       'photo_url',
       'avatar_url',
       'user_photo_url',
     ]);
-    final hasAuthorPhoto = authorPhotoUrl.isNotEmpty;
+    final resolvedPhoto =
+        (cachedPhoto != null && cachedPhoto.isNotEmpty)
+            ? cachedPhoto
+            : fallbackPhoto;
+    if (resolvedPhoto.isEmpty && normalizedEmail.isNotEmpty) {
+      _ensureProfilePhotoCached(normalizedEmail);
+    }
+    final hasAuthorPhoto = resolvedPhoto.isNotEmpty;
     final content = (comment['content'] ?? '').toString();
     final createdAt = comment['created_at'] != null
         ? DateTime.parse(comment['created_at'])
@@ -1094,7 +1433,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             userEmail: authorEmail,
                             userName: authorName,
                             userPhotoUrl: hasAuthorPhoto
-                                ? authorPhotoUrl
+                                ? resolvedPhoto
                                 : null,
                           ),
                         ),
@@ -1103,7 +1442,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     child: UserAvatar(
                       radius: 18,
                       displayName: authorName,
-                      photoUrl: hasAuthorPhoto ? authorPhotoUrl : null,
+                      photoUrl: hasAuthorPhoto ? resolvedPhoto : null,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1127,7 +1466,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                           userEmail: authorEmail,
                                           userName: authorName,
                                           userPhotoUrl: hasAuthorPhoto
-                                              ? authorPhotoUrl
+                                              ? resolvedPhoto
                                               : null,
                                         ),
                                       ),
@@ -1158,10 +1497,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             ),
                             const Spacer(),
                             PopupMenuButton<String>(
-                              icon: Icon(
-                                Icons.more_horiz_rounded,
-                                size: 16,
-                                color: AppTheme.textMuted,
+                              padding: EdgeInsets.zero,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
                               ),
                               onSelected: (value) {
                                 if (value == 'report') {
@@ -1178,6 +1516,21 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                   child: Text('Report'),
                                 ),
                               ],
+                              child: Container(
+                                width: 28,
+                                height: 28,
+                                decoration: BoxDecoration(
+                                  color: isDark
+                                      ? Colors.white10
+                                      : Colors.black.withValues(alpha: 0.06),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Icon(
+                                  Icons.more_horiz_rounded,
+                                  size: 16,
+                                  color: AppTheme.textMuted,
+                                ),
+                              ),
                             ),
                           ],
                         ),
@@ -1322,6 +1675,75 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         ),
       ),
     );
+  }
+
+  String _normalizeEmail(String value) => value.trim().toLowerCase();
+
+  void _primePhotoCacheFromPost(Map<String, dynamic> post) {
+    final email = _normalizeEmail(
+      post['author_email']?.toString() ?? post['user_email']?.toString() ?? '',
+    );
+    if (email.isEmpty || _profilePhotoCache.containsKey(email)) return;
+    final resolved = _resolvePhotoUrl(post, const [
+      'author_photo_url',
+      'profile_photo_url',
+      'photo_url',
+      'avatar_url',
+    ]);
+    if (resolved.isNotEmpty) {
+      _profilePhotoCache[email] = resolved;
+    }
+  }
+
+  void _primePhotoCacheFromComments(List<Map<String, dynamic>> comments) {
+    for (final comment in comments) {
+      final email =
+          _normalizeEmail(comment['author_email']?.toString() ?? '');
+      if (email.isNotEmpty && !_profilePhotoCache.containsKey(email)) {
+        final resolved = _resolvePhotoUrl(comment, const [
+          'author_photo_url',
+          'profile_photo_url',
+          'photo_url',
+          'avatar_url',
+          'user_photo_url',
+        ]);
+        if (resolved.isNotEmpty) {
+          _profilePhotoCache[email] = resolved;
+        }
+      }
+
+      final replies = comment['replies'];
+      if (replies is List && replies.isNotEmpty) {
+        final mapped = replies.whereType<Map>().map((item) {
+          return Map<String, dynamic>.from(item);
+        }).toList();
+        if (mapped.isNotEmpty) {
+          _primePhotoCacheFromComments(mapped);
+        }
+      }
+    }
+  }
+
+  Future<void> _ensureProfilePhotoCached(String email) async {
+    final normalized = _normalizeEmail(email);
+    if (normalized.isEmpty ||
+        _profilePhotoCache.containsKey(normalized) ||
+        _profilePhotoFetchInFlight.contains(normalized)) {
+      return;
+    }
+    _profilePhotoFetchInFlight.add(normalized);
+    try {
+      final profile = await _supabaseService.getUserInfo(normalized);
+      final resolved = resolveProfilePhotoUrl(profile) ?? '';
+      if (!mounted) return;
+      setState(() {
+        _profilePhotoCache[normalized] = resolved;
+      });
+    } catch (e) {
+      debugPrint('Failed to resolve profile photo for $normalized: $e');
+    } finally {
+      _profilePhotoFetchInFlight.remove(normalized);
+    }
   }
 
   static String _resolvePhotoUrl(

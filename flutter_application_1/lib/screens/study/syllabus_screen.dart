@@ -9,6 +9,7 @@ import '../../services/supabase_service.dart';
 import '../viewer/pdf_viewer_screen.dart';
 import '../../data/academic_subjects_data.dart';
 import '../../utils/admin_access.dart';
+import 'syllabus_upload_screen.dart';
 
 class SyllabusScreen extends StatefulWidget {
   final String collegeId;
@@ -329,17 +330,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
       child: Material(
         color: Colors.transparent,
         child: InkWell(
-          onTap: canUpload
-              ? () => _showUploadSyllabusDialog(isDark)
-              : () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Select semester and subject before adding a syllabus PDF.',
-                      ),
-                    ),
-                  );
-                },
+          onTap: _openUploadFlow,
           borderRadius: BorderRadius.circular(20),
           child: Ink(
             decoration: BoxDecoration(
@@ -383,7 +374,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Post syllabus',
+                          'Upload syllabus',
                           style: GoogleFonts.inter(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
@@ -393,7 +384,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
                         const SizedBox(height: 4),
                         Text(
                           canUpload
-                              ? 'Sem $_selectedSemester • ${_selectedSubject ?? ''}'
+                              ? 'Sem $_selectedSemester - ${_selectedSubject ?? ''}'
                               : 'Select semester and subject first',
                           style: GoogleFonts.inter(
                             fontSize: 12,
@@ -419,6 +410,46 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _openUploadFlow() async {
+    final normalizedDepartment = normalizeBranchCode(widget.department);
+    final resolvedDepartment = normalizedDepartment.isEmpty
+        ? widget.department
+        : normalizedDepartment;
+
+    final result = await Navigator.push<Map<String, String>>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SyllabusUploadScreen(
+          collegeId: widget.collegeId,
+          department: resolvedDepartment,
+          departmentName: widget.departmentName,
+          departmentColor: widget.departmentColor,
+          initialSemester: _selectedSemester,
+          initialSubject: _selectedSubject,
+        ),
+      ),
+    );
+
+    if (!mounted || result == null) return;
+    if (result['didUpload'] != 'true') return;
+
+    final semester = result['semester'];
+    final subject = result['subject'];
+    if (semester != null && semester.trim().isNotEmpty) {
+      setState(() {
+        _selectedSemester = semester.trim();
+        _availableSubjects = getSubjectsForBranchAndSemester(
+          widget.department,
+          _selectedSemester,
+        );
+        _selectedSubject =
+            subject != null && subject.trim().isNotEmpty ? subject.trim() : null;
+      });
+    }
+
+    await _fetchSyllabus();
   }
 
   Widget _buildDropdown({

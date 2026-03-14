@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../config/theme.dart';
 import '../models/department_option.dart';
 import '../services/cloudinary_service.dart';
+import '../services/backend_api_service.dart';
 import '../services/supabase_service.dart';
 
 Future<bool> showPostNoticeDialog({
@@ -27,12 +28,6 @@ Future<bool> showPostNoticeDialog({
     'webp',
     'gif',
     'pdf',
-    'doc',
-    'docx',
-    'ppt',
-    'pptx',
-    'xls',
-    'xlsx',
   ];
   const maxAttachmentBytes = 10 * 1024 * 1024;
 
@@ -66,7 +61,7 @@ Future<bool> showPostNoticeDialog({
 
   bool isDocumentAttachment(PlatformFile file) {
     final ext = fileExtension(file.name);
-    return ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx'].contains(ext);
+    return ext == 'pdf';
   }
 
   bool isImageAttachment(PlatformFile file) =>
@@ -280,7 +275,7 @@ Future<bool> showPostNoticeDialog({
                       const SizedBox(height: 6),
                       Text(
                         selectedAttachment == null
-                            ? 'Optional. Add an image, PDF, Word, Excel, or PPT. It will open inside the app.'
+                            ? 'Optional. Add an image or PDF. It will open inside the app.'
                             : '${isDocumentAttachment(selectedAttachment!) ? 'Document' : 'Image'} • ${formatBytes(selectedAttachment!.size)}',
                         style: GoogleFonts.inter(
                           fontSize: 12,
@@ -372,8 +367,11 @@ Future<bool> showPostNoticeDialog({
                   setDialogState(() => isSubmitting = true);
                   String? uploadedFileUrl;
                   String? uploadedImageUrl;
+                  String? uploadedFileType;
                   final attachment = selectedAttachment;
                   if (attachment != null) {
+                    final ext = fileExtension(attachment.name);
+                    uploadedFileType = ext == 'pdf' ? 'pdf' : 'image';
                     uploadedFileUrl = await CloudinaryService.uploadFile(
                       attachment,
                       timeout: const Duration(seconds: 90),
@@ -390,6 +388,7 @@ Future<bool> showPostNoticeDialog({
                     department: normalizedDept,
                     imageUrl: uploadedImageUrl,
                     fileUrl: uploadedFileUrl,
+                    fileType: uploadedFileType,
                   );
                   posted = true;
                   if (!parentCtx.mounted) return;
@@ -402,9 +401,16 @@ Future<bool> showPostNoticeDialog({
                 } catch (e) {
                   debugPrint('Post notice failed: $e');
                   if (!parentCtx.mounted) return;
+                  final errorMessage = e is BackendApiHttpException
+                      ? e.message.trim()
+                      : e.toString().replaceFirst('Exception: ', '').trim();
                   ScaffoldMessenger.of(parentCtx).showSnackBar(
-                    const SnackBar(
-                      content: Text('Failed to post notice. Please try again.'),
+                    SnackBar(
+                      content: Text(
+                        errorMessage.isNotEmpty
+                            ? errorMessage
+                            : 'Failed to post notice. Please try again.',
+                      ),
                     ),
                   );
                 } finally {

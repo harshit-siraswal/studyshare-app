@@ -22,6 +22,7 @@ import '../../widgets/full_screen_image_viewer.dart';
 import '../profile/user_profile_screen.dart';
 import '../../widgets/user_badge.dart';
 import 'post_detail_screen.dart';
+import 'room_details_screen.dart';
 import '../../services/cloudinary_service.dart';
 import '../../services/subscription_service.dart';
 import '../../config/app_config.dart';
@@ -79,6 +80,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   // Track user votes: local state for optimistic updates
   // postId -> vote direction (1, -1, 0)
   final Map<String, int> _userVotes = {};
+  final Map<String, String> _profilePhotoCache = {};
+  final Set<String> _profilePhotoFetchInFlight = {};
 
   // Realtime subscription
   RealtimeChannel? _subscription;
@@ -171,6 +174,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
           _userVotes[postId] = userVotes[postId] ?? 0;
         }
       }
+      _primePhotoCacheFromPosts(posts);
 
       if (mounted && requestId == _loadRequestId) {
         final bool prevFABVisible = !_isMember && !_isLoading && !_isReadOnly;
@@ -532,7 +536,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                 },
               )
             : InkWell(
-                onTap: _showRoomInfo,
+                onTap: _openRoomDetails,
                 borderRadius: BorderRadius.circular(8),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 2),
@@ -577,11 +581,29 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
           ),
           if (!_isSearching)
             PopupMenuButton<String>(
-              icon: Icon(
-                Icons.more_vert,
-                color: isDark ? Colors.white70 : Colors.black54,
+              tooltip: 'Room options',
+              padding: EdgeInsets.zero,
+              child: Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? Colors.white10
+                      : Colors.black.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.more_vert,
+                  color: isDark ? Colors.white70 : Colors.black54,
+                  size: 18,
+                ),
               ),
-              color: isDark ? const Color(0xFF1E293B) : Colors.white,
+              color: isDark ? const Color(0xFF111827) : Colors.white,
+              elevation: 8,
+              offset: const Offset(0, 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
               onSelected: (value) async {
                 if (value == 'sort_recent') {
                   if (_sortBy == 'recent') return;
@@ -650,7 +672,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
               },
               itemBuilder: (context) => [
                 PopupMenuItem(
+                  enabled: false,
+                  height: 36,
+                  child: Text(
+                    'Sort posts',
+                    style: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white60 : Colors.black54,
+                    ),
+                  ),
+                ),
+                PopupMenuItem(
                   value: 'sort_recent',
+                  height: 44,
                   child: Row(
                     children: [
                       Icon(
@@ -662,7 +697,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                       ),
                       const SizedBox(width: 10),
                       Text(
-                        'Sort: Recent',
+                        'Most Recent',
                         style: GoogleFonts.inter(
                           color: isDark ? Colors.white : Colors.black87,
                         ),
@@ -672,6 +707,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                 ),
                 PopupMenuItem(
                   value: 'sort_top',
+                  height: 44,
                   child: Row(
                     children: [
                       Icon(
@@ -683,7 +719,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                       ),
                       const SizedBox(width: 10),
                       Text(
-                        'Sort: Top',
+                        'Top Voted',
                         style: GoogleFonts.inter(
                           color: isDark ? Colors.white : Colors.black87,
                         ),
@@ -691,8 +727,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                     ],
                   ),
                 ),
+                const PopupMenuDivider(),
                 PopupMenuItem(
                   value: 'refresh',
+                  height: 44,
                   child: Row(
                     children: [
                       Icon(
@@ -710,9 +748,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                     ],
                   ),
                 ),
-                if (_isMember)
+                if (_isMember) ...[
+                  const PopupMenuDivider(),
                   PopupMenuItem(
                     value: 'leave',
+                    height: 44,
                     child: Row(
                       children: [
                         const Icon(
@@ -728,6 +768,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                       ],
                     ),
                   ),
+                ],
               ],
             ),
         ],
@@ -940,16 +981,23 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   }
 
   Widget _buildPostCard(Map<String, dynamic> post, bool isDark) {
-    final postId = post['id'].toString();
-    final fullContent = post['content'] as String? ?? '';
-    final dbTitle = post['title'] as String?;
-    final titleText = (dbTitle ?? '').trim();
-    final bodyText = fullContent.trim();
-    final displayContent = titleText.isEmpty
-        ? bodyText
-        : '$titleText\n$bodyText';
+    final postId = post['id']?.toString() ?? '';
+    final parts = _extractPostParts(post);
+    final titleText = parts.title;
+    final bodyText = parts.body;
+    final displayContent = [
+      if (titleText.isNotEmpty) titleText,
+      if (bodyText.isNotEmpty) bodyText,
+    ].join('\n');
 
     final authorName = post['author_name'] ?? 'User';
+    final authorEmail =
+        (post['author_email'] ?? post['user_email'] ?? '').toString();
+    final isAuthor =
+        authorEmail.isNotEmpty &&
+        authorEmail.toLowerCase() == widget.userEmail.toLowerCase();
+    final canEdit = !_isReadOnly && isAuthor;
+    final canDelete = !_isReadOnly && (isAuthor || _isAdmin);
     final createdAt =
         DateTime.tryParse(post['created_at']?.toString() ?? '') ??
         DateTime.now();
@@ -989,13 +1037,22 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
           children: [
             Builder(
               builder: (context) {
+                final normalizedEmail = _normalizeEmail(authorEmail);
+                final cachedPhoto = _profilePhotoCache[normalizedEmail];
                 final photoUrl = _resolvePhotoUrl(post, const [
                   'author_photo_url',
                   'profile_photo_url',
                   'photo_url',
                   'avatar_url',
                 ]);
-                final bool hasPhoto = photoUrl.isNotEmpty;
+                final resolvedPhoto =
+                    (cachedPhoto != null && cachedPhoto.isNotEmpty)
+                        ? cachedPhoto
+                        : photoUrl;
+                if (resolvedPhoto.isEmpty && normalizedEmail.isNotEmpty) {
+                  _ensureProfilePhotoCached(normalizedEmail);
+                }
+                final bool hasPhoto = resolvedPhoto.isNotEmpty;
 
                 return GestureDetector(
                   onTap: () {
@@ -1003,9 +1060,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                       context,
                       MaterialPageRoute(
                         builder: (context) => UserProfileScreen(
-                          userEmail: post['author_email'] ?? '',
+                          userEmail: authorEmail,
                           userName: authorName,
-                          userPhotoUrl: hasPhoto ? photoUrl : null,
+                          userPhotoUrl: hasPhoto ? resolvedPhoto : null,
                         ),
                       ),
                     );
@@ -1013,7 +1070,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                   child: UserAvatar(
                     radius: 18,
                     displayName: authorName,
-                    photoUrl: hasPhoto ? photoUrl : null,
+                    photoUrl: hasPhoto ? resolvedPhoto : null,
                   ),
                 );
               },
@@ -1038,7 +1095,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                         ),
                       ),
                       const SizedBox(width: 4),
-                      UserBadge(email: post['author_email'] ?? '', size: 14),
+                      UserBadge(email: authorEmail, size: 14),
                       const SizedBox(width: 8),
                       Text(
                         _formatTime(createdAt),
@@ -1049,13 +1106,30 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                       ),
                       const SizedBox(width: 4),
                       PopupMenuButton<String>(
-                        icon: Icon(
-                          Icons.more_horiz_rounded,
-                          color: secondaryTextColor,
-                          size: 20,
+                        tooltip: 'Post options',
+                        padding: EdgeInsets.zero,
+                        color: isDark ? const Color(0xFF111827) : Colors.white,
+                        elevation: 10,
+                        offset: const Offset(0, 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
                         ),
-                        color: isDark ? const Color(0xFF1E293B) : Colors.white,
-                        onSelected: (value) {
+                        child: Container(
+                          width: 30,
+                          height: 30,
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? Colors.white10
+                                : Colors.black.withValues(alpha: 0.06),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(
+                            Icons.more_horiz_rounded,
+                            color: secondaryTextColor,
+                            size: 18,
+                          ),
+                        ),
+                        onSelected: (value) async {
                           if (value == 'copy') {
                             Clipboard.setData(
                               ClipboardData(text: displayContent),
@@ -1065,6 +1139,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                                 content: Text('Copied to clipboard'),
                               ),
                             );
+                          } else if (value == 'edit') {
+                            await _showEditPostSheet(post);
+                          } else if (value == 'delete') {
+                            await _confirmDeletePost(post);
                           } else if (value == 'report') {
                             _showReportDialog(
                               context,
@@ -1073,44 +1151,98 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                             );
                           }
                         },
-                        itemBuilder: (context) => [
-                          PopupMenuItem(
-                            value: 'copy',
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.copy_rounded,
-                                  color: textColor,
-                                  size: 18,
-                                ),
-                                const SizedBox(width: 10),
-                                Text(
-                                  'Copy Text',
-                                  style: GoogleFonts.inter(color: textColor),
-                                ),
-                              ],
-                            ),
-                          ),
-                          PopupMenuItem(
-                            value: 'report',
-                            child: Row(
-                              children: [
-                                const Icon(
-                                  Icons.flag_outlined,
-                                  color: Colors.redAccent,
-                                  size: 18,
-                                ),
-                                const SizedBox(width: 10),
-                                Text(
-                                  'Report',
-                                  style: GoogleFonts.inter(
-                                    color: Colors.redAccent,
+                        itemBuilder: (context) {
+                          final items = <PopupMenuEntry<String>>[
+                            PopupMenuItem(
+                              value: 'copy',
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    Icons.copy_rounded,
+                                    color: textColor,
+                                    size: 18,
                                   ),
-                                ),
-                              ],
+                                  const SizedBox(width: 10),
+                                  Text(
+                                    'Copy Text',
+                                    style: GoogleFonts.inter(color: textColor),
+                                  ),
+                                ],
+                              ),
                             ),
-                          ),
-                        ],
+                          ];
+
+                          if (canEdit) {
+                            items.add(
+                              PopupMenuItem(
+                                value: 'edit',
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.edit_rounded,
+                                      color: textColor,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Text(
+                                      'Edit Post',
+                                      style: GoogleFonts.inter(color: textColor),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }
+
+                          if (canDelete) {
+                            items.add(
+                              PopupMenuItem(
+                                value: 'delete',
+                                child: Row(
+                                  children: [
+                                    const Icon(
+                                      Icons.delete_outline_rounded,
+                                      color: Colors.redAccent,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Text(
+                                      'Delete Post',
+                                      style: GoogleFonts.inter(
+                                        color: Colors.redAccent,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }
+
+                          items.add(const PopupMenuDivider());
+                          items.add(
+                            PopupMenuItem(
+                              value: 'report',
+                              child: Row(
+                                children: [
+                                  const Icon(
+                                    Icons.flag_outlined,
+                                    color: Colors.redAccent,
+                                    size: 18,
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Text(
+                                    'Report',
+                                    style: GoogleFonts.inter(
+                                      color: Colors.redAccent,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+
+                          return items;
+                        },
                       ),
                     ],
                   ),
@@ -1762,6 +1894,269 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
 
     if (!mounted) return false;
     return _subscriptionService.isPremium();
+  }
+
+  Future<void> _showEditPostSheet(Map<String, dynamic> post) async {
+    if (_isReadOnly) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Read-only users cannot edit posts. Use your college email to unlock.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final postId = post['id']?.toString() ?? '';
+    if (postId.isEmpty) return;
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final parts = _extractPostParts(post);
+    final titleController = TextEditingController(text: parts.title);
+    final contentController = TextEditingController(text: parts.body);
+    bool isSaving = false;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetCtx) => StatefulBuilder(
+        builder: (_, setModalState) => Container(
+          height: MediaQuery.of(sheetCtx).size.height * 0.75,
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(sheetCtx),
+                      child: Text(
+                        'Cancel',
+                        style: GoogleFonts.inter(color: AppTheme.textMuted),
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      'Edit Post',
+                      style: GoogleFonts.inter(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : Colors.black,
+                      ),
+                    ),
+                    const Spacer(),
+                    ElevatedButton(
+                      onPressed: isSaving
+                          ? null
+                          : () async {
+                              final title = titleController.text.trim();
+                              final body = contentController.text.trim();
+                              if (title.isEmpty && body.isEmpty) {
+                                ScaffoldMessenger.of(sheetCtx).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Post cannot be empty.'),
+                                  ),
+                                );
+                                return;
+                              }
+                              setModalState(() => isSaving = true);
+                              final updatedContent = title.isNotEmpty
+                                  ? (body.isNotEmpty
+                                        ? '$title\n$body'
+                                        : title)
+                                  : body;
+                              try {
+                                await _supabaseService.updatePost(
+                                  postId: postId,
+                                  content: updatedContent,
+                                );
+                                if (!mounted) return;
+                                setState(() {
+                                  final index = _posts.indexWhere(
+                                    (entry) =>
+                                        entry['id']?.toString() == postId,
+                                  );
+                                  if (index != -1) {
+                                    final updated = Map<String, dynamic>.from(
+                                      _posts[index],
+                                    );
+                                    updated['content'] = updatedContent;
+                                    if (title.isNotEmpty) {
+                                      updated['title'] = title;
+                                    } else {
+                                      updated.remove('title');
+                                    }
+                                    _posts[index] = updated;
+                                  }
+                                });
+                                if (sheetCtx.mounted) {
+                                  Navigator.pop(sheetCtx);
+                                }
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Post updated'),
+                                  ),
+                                );
+                              } catch (e) {
+                                if (sheetCtx.mounted) {
+                                  ScaffoldMessenger.of(sheetCtx).showSnackBar(
+                                    SnackBar(content: Text('Error: $e')),
+                                  );
+                                  setModalState(() => isSaving = false);
+                                }
+                              }
+                            },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                      ),
+                      child: isSaving
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : Text(
+                              'Save',
+                              style: GoogleFonts.inter(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    children: [
+                      TextField(
+                        controller: titleController,
+                        style: GoogleFonts.inter(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: isDark ? Colors.white : Colors.black,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: 'Title (Optional)',
+                          hintStyle: GoogleFonts.inter(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white38 : Colors.black38,
+                          ),
+                          border: InputBorder.none,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: contentController,
+                        maxLines: 10,
+                        style: GoogleFonts.inter(
+                          fontSize: 15,
+                          color: isDark ? Colors.white : Colors.black,
+                        ),
+                        decoration: InputDecoration(
+                          hintText: 'Update your post content...',
+                          hintStyle: GoogleFonts.inter(
+                            fontSize: 15,
+                            color: isDark ? Colors.white54 : Colors.black45,
+                          ),
+                          border: InputBorder.none,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmDeletePost(Map<String, dynamic> post) async {
+    if (_isReadOnly) return;
+    final postId = post['id']?.toString() ?? '';
+    if (postId.isEmpty) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete post?'),
+        content: const Text('This action cannot be undone.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    try {
+      await _supabaseService.deletePost(postId);
+      if (!mounted) return;
+      setState(() {
+        _posts.removeWhere((entry) => entry['id']?.toString() == postId);
+        _savedPosts.remove(postId);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Post deleted')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to delete: $e')),
+      );
+    }
+  }
+
+  Future<void> _openRoomDetails() async {
+    final didLeave = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (context) => RoomDetailsScreen(
+          roomId: widget.roomId,
+          roomName: widget.roomName,
+          description: widget.description,
+          userEmail: widget.userEmail,
+          isAdmin: _isAdmin,
+          isMember: _isMember,
+          activeMemberCount: _activeMemberCount,
+          initialRoomInfo: _roomInfo,
+          onManageMembers: _isAdmin ? _showManageMembersSheet : null,
+        ),
+      ),
+    );
+
+    if (!mounted || didLeave != true) return;
+    if (!mounted) return;
+    Navigator.pop(context);
   }
 
   void _showRoomInfo() {
@@ -2622,6 +3017,48 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
     );
   }
 
+  String _normalizeEmail(String value) => value.trim().toLowerCase();
+
+  void _primePhotoCacheFromPosts(List<Map<String, dynamic>> posts) {
+    for (final post in posts) {
+      final email = _normalizeEmail(
+        post['author_email']?.toString() ?? post['user_email']?.toString() ?? '',
+      );
+      if (email.isEmpty || _profilePhotoCache.containsKey(email)) continue;
+      final resolved = _resolvePhotoUrl(post, const [
+        'author_photo_url',
+        'profile_photo_url',
+        'photo_url',
+        'avatar_url',
+      ]);
+      if (resolved.isNotEmpty) {
+        _profilePhotoCache[email] = resolved;
+      }
+    }
+  }
+
+  Future<void> _ensureProfilePhotoCached(String email) async {
+    final normalized = _normalizeEmail(email);
+    if (normalized.isEmpty ||
+        _profilePhotoCache.containsKey(normalized) ||
+        _profilePhotoFetchInFlight.contains(normalized)) {
+      return;
+    }
+    _profilePhotoFetchInFlight.add(normalized);
+    try {
+      final profile = await _supabaseService.getUserInfo(normalized);
+      final resolved = resolveProfilePhotoUrl(profile) ?? '';
+      if (!mounted) return;
+      setState(() {
+        _profilePhotoCache[normalized] = resolved;
+      });
+    } catch (e) {
+      debugPrint('Failed to resolve profile photo for $normalized: $e');
+    } finally {
+      _profilePhotoFetchInFlight.remove(normalized);
+    }
+  }
+
   String _resolvePhotoUrl(Map<String, dynamic> data, List<String> keys) {
     return resolveProfilePhotoUrl(data, preferredKeys: keys) ?? '';
   }
@@ -2702,6 +3139,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         child: child,
       ),
     );
+  }
+
+  ({String title, String body}) _extractPostParts(Map<String, dynamic> post) {
+    final fullContent = post['content']?.toString() ?? '';
+    final dbTitle = post['title']?.toString() ?? '';
+    if (dbTitle.trim().isNotEmpty) {
+      return (title: dbTitle.trim(), body: fullContent.trim());
+    }
+
+    final lines = fullContent.split('\n');
+    if (lines.isEmpty) return (title: '', body: '');
+    final title = lines.first.trim();
+    final body = lines.length > 1 ? lines.sublist(1).join('\n').trim() : '';
+    return (title: title, body: body);
   }
 
   String _formatTime(DateTime dateTime) {

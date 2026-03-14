@@ -24,30 +24,24 @@ class NoticeSharePreview extends StatelessWidget {
     final content = (notice['content'] ?? '').toString().trim();
     final mediaCount = _mediaUrls.length;
     final hasPdf = _documentUrl.isNotEmpty;
+    final hasAttachments = mediaCount > 0 || hasPdf;
 
     return Material(
-      color: const Color(0xFFF8FAFC),
+      color: Colors.white,
       child: Container(
-        width: 420,
-        padding: const EdgeInsets.all(24),
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: <Color>[Color(0xFFF8FAFC), Color(0xFFEFF6FF)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
+        width: 440,
+        padding: const EdgeInsets.all(20),
         child: Container(
-          padding: const EdgeInsets.all(22),
+          padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
           decoration: BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: const Color(0xFFE5E7EB)),
             boxShadow: <BoxShadow>[
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.06),
-                blurRadius: 28,
-                offset: const Offset(0, 14),
+                color: Colors.black.withValues(alpha: 0.08),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
               ),
             ],
           ),
@@ -58,18 +52,18 @@ class NoticeSharePreview extends StatelessWidget {
               Row(
                 children: [
                   Container(
-                    width: 48,
-                    height: 48,
+                    width: 46,
+                    height: 46,
                     decoration: BoxDecoration(
                       color: account.color,
-                      borderRadius: BorderRadius.circular(16),
+                      shape: BoxShape.circle,
                     ),
                     alignment: Alignment.center,
                     child: Text(
                       account.avatarLetter,
                       style: GoogleFonts.inter(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
                         color: Colors.white,
                       ),
                     ),
@@ -79,134 +73,96 @@ class NoticeSharePreview extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          account.name,
-                          style: GoogleFonts.inter(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                            color: const Color(0xFF0F172A),
-                          ),
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                account.name,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.inter(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                  color: const Color(0xFF0F172A),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Icon(
+                              Icons.verified_rounded,
+                              size: 16,
+                              color: const Color(0xFF8B5CF6),
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 2),
+                        const SizedBox(height: 4),
                         Text(
-                          brandLabel,
+                          '${account.handle} \u00b7 $timestampLabel',
                           style: GoogleFonts.inter(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
-                            color: const Color(0xFF64748B),
+                            color: const Color(0xFF94A3B8),
                           ),
                         ),
                       ],
                     ),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primary.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: Text(
-                      'Notice',
-                      style: GoogleFonts.inter(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        color: AppTheme.primary,
-                      ),
-                    ),
-                  ),
                 ],
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 18),
               Text(
                 title,
                 style: GoogleFonts.inter(
-                  fontSize: 24,
-                  height: 1.2,
-                  fontWeight: FontWeight.w800,
+                  fontSize: 22,
+                  height: 1.25,
+                  fontWeight: FontWeight.w700,
                   color: const Color(0xFF0F172A),
                 ),
               ),
               if (content.isNotEmpty) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
                 Text(
                   content,
                   style: GoogleFonts.inter(
                     fontSize: 15,
-                    height: 1.55,
-                    color: const Color(0xFF334155),
+                    height: 1.5,
+                    color: const Color(0xFF475569),
                   ),
                 ),
               ],
-              if (mediaCount > 0 || hasPdf) ...[
-                const SizedBox(height: 18),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Attachments',
-                        style: GoogleFonts.inter(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                          color: const Color(0xFF0F172A),
-                        ),
+              if (hasAttachments) ...[
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (mediaCount > 0)
+                      _buildAttachmentChip(
+                        icon: Icons.image_rounded,
+                        color: const Color(0xFF38BDF8),
+                        label: mediaCount == 1
+                            ? '1 image'
+                            : '$mediaCount images',
                       ),
-                      const SizedBox(height: 10),
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        children: [
-                          if (mediaCount > 0)
-                            _buildAttachmentChip(
-                              icon: Icons.image_rounded,
-                              color: const Color(0xFF0EA5E9),
-                              label: mediaCount == 1
-                                  ? '1 image attached'
-                                  : '$mediaCount images attached',
-                            ),
-                          if (hasPdf)
-                            _buildAttachmentChip(
-                              icon: Icons.picture_as_pdf_rounded,
-                              color: const Color(0xFFDC2626),
-                              label: 'PDF attached',
-                            ),
-                        ],
+                    if (hasPdf)
+                      _buildAttachmentChip(
+                        icon: Icons.picture_as_pdf_rounded,
+                        color: const Color(0xFFF97316),
+                        label: 'PDF attached',
                       ),
-                    ],
-                  ),
+                  ],
                 ),
               ],
-              const SizedBox(height: 22),
-              Row(
-                children: [
-                  Text(
-                    'via $brandLabel',
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      color: AppTheme.primary,
-                    ),
+              const SizedBox(height: 18),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Text(
+                  'via $brandLabel',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontStyle: FontStyle.italic,
+                    color: const Color(0xFF94A3B8),
                   ),
-                  const Spacer(),
-                  Text(
-                    timestampLabel,
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: const Color(0xFF64748B),
-                    ),
-                  ),
-                ],
+                ),
               ),
             ],
           ),

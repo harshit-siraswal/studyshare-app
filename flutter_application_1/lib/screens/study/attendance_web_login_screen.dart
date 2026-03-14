@@ -1,7 +1,9 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../config/theme.dart';
@@ -17,8 +19,11 @@ class AttendanceWebLoginScreen extends StatefulWidget {
 class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
   late final WebViewController _controller;
   Timer? _tokenPollTimer;
+  final TextEditingController _manualTokenController = TextEditingController();
   bool _isLoading = true;
   bool _didReturnToken = false;
+  String? _manualTokenError;
+  bool _manualEntryExpanded = false;
 
   static const String _loginUrl = 'https://kiet.cybervidya.net/';
   static const String _noTokenMessage = '__NO_TOKEN__';
@@ -50,6 +55,11 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
   @override
   void initState() {
     super.initState();
+    if (kIsWeb) {
+      _isLoading = false;
+      return;
+    }
+
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..addJavaScriptChannel(
@@ -76,9 +86,17 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
           },
           onWebResourceError: (error) {
             if (!mounted) return;
-            ScaffoldMessenger.of(
-              context,
-            ).showSnackBar(SnackBar(content: Text(error.description)));
+            final description = error.description.toLowerCase();
+            if (description.contains('err_blocked_by_orb')) {
+              if (!_manualEntryExpanded && mounted) {
+                setState(() => _manualEntryExpanded = true);
+              }
+              return;
+            }
+            if (!error.isForMainFrame) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(error.description)),
+            );
           },
         ),
       )
@@ -92,7 +110,131 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
   @override
   void dispose() {
     _tokenPollTimer?.cancel();
+    _manualTokenController.dispose();
     super.dispose();
+  }
+
+  Future<void> _openKietLoginInBrowser() async {
+    final uri = Uri.parse(_loginUrl);
+    final didLaunch = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    if (!didLaunch && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open KIET ERP in browser.')),
+      );
+    }
+  }
+
+  void _submitManualToken() {
+    final token = _manualTokenController.text.trim();
+    if (token.length < 8) {
+      setState(
+        () =>
+            _manualTokenError = 'Enter a valid KIET authentication token.',
+      );
+      return;
+    }
+    if (!mounted) return;
+    Navigator.of(context).pop(token);
+  }
+
+  Widget _buildManualFallback(bool isDark) {
+    final textColor = isDark ? Colors.white : Colors.black87;
+    final secondary = isDark ? Colors.white70 : Colors.black54;
+    final panelColor = isDark ? const Color(0xFF1F1F22) : Colors.white;
+    final borderColor = isDark ? Colors.white12 : Colors.black12;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      curve: Curves.easeOutCubic,
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
+      decoration: BoxDecoration(
+        color: panelColor.withValues(alpha: 0.96),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.12),
+            blurRadius: 16,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.help_outline, size: 18, color: secondary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Having trouble with the in-app login?',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: textColor,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () =>
+                    setState(() => _manualEntryExpanded = !_manualEntryExpanded),
+                child: Text(
+                  _manualEntryExpanded ? 'Hide' : 'Use token',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          if (_manualEntryExpanded) ...[
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _openKietLoginInBrowser,
+              icon: const Icon(Icons.open_in_new_rounded, size: 16),
+              label: Text(
+                'Open KIET ERP',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _manualTokenController,
+              decoration: InputDecoration(
+                labelText: 'KIET authentication token',
+                hintText: 'Paste authenticationtoken value',
+                errorText: _manualTokenError,
+                border: const OutlineInputBorder(),
+              ),
+              maxLines: 2,
+              minLines: 1,
+              onChanged: (_) {
+                if (_manualTokenError != null) {
+                  setState(() => _manualTokenError = null);
+                }
+              },
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Tip: In the KIET ERP tab, open devtools and copy localStorage.authenticationtoken.',
+                style: GoogleFonts.inter(fontSize: 11, color: secondary),
+              ),
+            ),
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              onPressed: _submitManualToken,
+              icon: const Icon(Icons.check_circle_outline_rounded, size: 18),
+              label: Text(
+                'Continue with token',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 
   Future<void> _installBridge() async {
@@ -274,6 +416,82 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
+    if (kIsWeb) {
+      return Scaffold(
+        backgroundColor: isDark
+            ? AppTheme.darkBackground
+            : AppTheme.lightBackground,
+        appBar: AppBar(
+          title: Text(
+            'Connect KIET ERP',
+            style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+          ),
+        ),
+        body: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.all(20),
+            children: [
+              Text(
+                'Browser security blocks embedded KIET ERP on web. Use KIET ERP in a new tab, then paste your authentication token below.',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  height: 1.45,
+                  color: isDark
+                      ? AppTheme.darkTextSecondary
+                      : AppTheme.lightTextSecondary,
+                ),
+              ),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: _openKietLoginInBrowser,
+                icon: const Icon(Icons.open_in_new_rounded),
+                label: Text(
+                  'Open KIET ERP',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                ),
+              ),
+              const SizedBox(height: 20),
+              TextField(
+                controller: _manualTokenController,
+                decoration: InputDecoration(
+                  labelText: 'KIET authentication token',
+                  hintText: 'Paste authenticationtoken value',
+                  errorText: _manualTokenError,
+                  border: const OutlineInputBorder(),
+                ),
+                maxLines: 2,
+                minLines: 1,
+                onChanged: (_) {
+                  if (_manualTokenError != null) {
+                    setState(() => _manualTokenError = null);
+                  }
+                },
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Tip: In KIET ERP tab, open browser devtools and copy localStorage.authenticationtoken.',
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  color: isDark
+                      ? AppTheme.darkTextSecondary
+                      : AppTheme.lightTextSecondary,
+                ),
+              ),
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                onPressed: _submitManualToken,
+                icon: const Icon(Icons.check_circle_outline_rounded),
+                label: Text(
+                  'Continue with token',
+                  style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: isDark
           ? AppTheme.darkBackground
@@ -315,6 +533,13 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
                 ),
               ),
             ),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: SafeArea(
+              top: false,
+              child: _buildManualFallback(isDark),
+            ),
+          ),
         ],
       ),
     );
