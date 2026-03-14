@@ -2859,8 +2859,7 @@ Return STRICT JSON only (no markdown). Schema:
           contextResourcesCount: totalAttachmentCount,
           strictAntiPlaceholder: strictMode,
         );
-        final allowWeb =
-          _allowWebMode && ((attempt == 2) || (mergedAttachments.isEmpty && attempt > 0));
+        final allowWeb = _allowWebMode;
         final response = await _api.queryRag(
           question: prompt,
           collegeId: widget.collegeId,
@@ -2995,7 +2994,7 @@ Return STRICT JSON only (no markdown). Schema:
       Object? lastError;
 
       for (var attempt = 0; attempt < 2; attempt++) {
-        final allowWeb = _allowWebMode && attempt > 0;
+        final allowWeb = _allowWebMode;
         try {
           final candidate = await _api.queryRag(
             question: prompt,
@@ -3187,7 +3186,7 @@ Return STRICT JSON only (no markdown). Schema:
         final sendPrompt = _buildRagPrompt(
           userPrompt: userPrompt,
           hasAttachments: hasAttachments,
-          preferLocalOnly: localContextRequired,
+          preferLocalOnly: localContextRequired && !_allowWebMode,
           searchAllPdfs: searchAllForPrompt,
         );
         final history = _buildStructuredHistory(pendingUserPrompt: userPrompt);
@@ -3262,7 +3261,7 @@ Return STRICT JSON only (no markdown). Schema:
             minScore: minScore,
             fileId: searchAllForPrompt ? null : widget.resourceContext?.fileId,
             videoUrl: widget.resourceContext?.videoUrl,
-            allowWeb: _allowWebMode && !localContextRequired,
+            allowWeb: _allowWebMode,
             useOcr: shouldEnableOcr,
             forceOcr: hasImageAttachments,
             ocrProvider: shouldEnableOcr ? 'google' : null,

@@ -93,7 +93,7 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
               }
               return;
             }
-            if (!error.isForMainFrame) return;
+            if (error.isForMainFrame != true) return;
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text(error.description)),
             );
