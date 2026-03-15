@@ -783,9 +783,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   IconData _getFabIcon() {
-    if (_currentIndex == 0 && _isStudySyllabusTab) {
-      return Icons.upload_file_rounded;
-    }
     if (_currentIndex == 1) {
       return Icons.search_rounded;
     }
@@ -839,14 +836,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     bool isDark,
     double bottomPadding,
   ) {
-    final isSyllabusUploadAction =
-        _currentIndex == 0 && _isStudySyllabusTab && _canUploadSyllabusFromStudy;
     final isSyllabusUploadDisabled =
         _currentIndex == 0 &&
         _isStudySyllabusTab &&
         !_canUploadSyllabusFromStudy;
-    final fabWidth = isSyllabusUploadAction ? 154.0 : 56.0;
-    const fabHeight = 52.0;
+    const fabWidth = 56.0;
+    const fabHeight = 56.0;
 
     final gradientColors = isSyllabusUploadDisabled
         ? <Color>[
@@ -883,14 +878,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                 curve: Curves.easeOutCubic,
                 width: fabWidth,
                 height: fabHeight,
-                padding: EdgeInsets.symmetric(
-                  horizontal: isSyllabusUploadAction ? 10 : 0,
-                ),
                 decoration: BoxDecoration(
-                  borderRadius:
-                      isSyllabusUploadAction ? BorderRadius.circular(999) : null,
-                  shape:
-                      isSyllabusUploadAction ? BoxShape.rectangle : BoxShape.circle,
+                  shape: BoxShape.circle,
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
@@ -904,39 +893,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                     ),
                   ],
                 ),
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 300),
-                  transitionBuilder: (child, animation) => FadeTransition(
-                    opacity: animation,
-                    child: ScaleTransition(scale: animation, child: child),
-                  ),
-                  child: isSyllabusUploadAction
-                      ? Row(
-                          key: const ValueKey<String>('fab_upload_syllabus'),
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(
-                              Icons.upload_file_rounded,
-                              color: Colors.white,
-                              size: 19,
-                            ),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Upload Syllabus',
-                              style: GoogleFonts.inter(
-                                color: Colors.white,
-                                fontSize: 11.2,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        )
-                      : Icon(
-                          _getFabIcon(),
-                          key: ValueKey<IconData>(_getFabIcon()),
-                          color: Colors.white,
-                          size: 28,
-                        ),
+                child: Icon(
+                  _getFabIcon(),
+                  key: ValueKey<IconData>(_getFabIcon()),
+                  color: Colors.white,
+                  size: 28,
                 ),
               ),
             ),
