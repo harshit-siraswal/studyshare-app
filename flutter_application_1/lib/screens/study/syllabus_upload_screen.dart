@@ -193,7 +193,7 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
         backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
         elevation: 0,
         title: Text(
-          'Upload Syllabus',
+          'Compose Syllabus',
           style: GoogleFonts.inter(
             fontWeight: FontWeight.w700,
             color: isDark ? Colors.white : Colors.black,
@@ -331,17 +331,6 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
             ),
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _sectionTitle(String text, bool isDark) {
-    return Text(
-      text,
-      style: GoogleFonts.inter(
-        fontSize: 13,
-        fontWeight: FontWeight.w700,
-        color: isDark ? Colors.white70 : Colors.black54,
       ),
     );
   }

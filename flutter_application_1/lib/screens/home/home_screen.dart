@@ -26,6 +26,9 @@ import '../../widgets/success_overlay.dart';
 import '../../widgets/post_notice_dialog.dart';
 import '../../widgets/paywall_dialog.dart';
 import '../../models/user.dart';
+import '../../data/departments_data.dart';
+import '../../data/academic_subjects_data.dart';
+import '../study/syllabus_upload_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final String collegeId;
@@ -63,6 +66,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   int _noticesRefreshToken = 0;
   StreamSubscription<IncomingSharePayload>? _shareSubscription;
   bool _isHandlingIncomingShare = false;
+  bool _isStudySyllabusTab = false;
+  bool _canUploadSyllabusFromStudy = false;
 
   String get _effectiveUserEmail {
     final authEmail = (_authService.userEmail ?? '').trim();
@@ -123,7 +128,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   void _onNavTapped(int index) {
-    setState(() => _currentIndex = index);
+    setState(() {
+      _currentIndex = index;
+      if (index != 0) {
+        _isStudySyllabusTab = false;
+      }
+    });
   }
 
   Future<void> _loadComposerAccess() async {
@@ -153,6 +163,185 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       widget.collegeId,
       _effectiveUserEmail,
       prefilledFile: prefilledFile,
+    );
+  }
+
+  void _onStudySyllabusContextChanged(
+    bool isSyllabusTab,
+    bool canUploadSyllabus,
+  ) {
+    if (!mounted) return;
+    if (_isStudySyllabusTab == isSyllabusTab &&
+        _canUploadSyllabusFromStudy == canUploadSyllabus) {
+      return;
+    }
+    setState(() {
+      _isStudySyllabusTab = isSyllabusTab;
+      _canUploadSyllabusFromStudy = canUploadSyllabus;
+    });
+  }
+
+  Future<DepartmentData?> _showSyllabusDepartmentPicker(
+    List<DepartmentData> departments,
+    bool isDark,
+  ) async {
+    if (departments.isEmpty) return null;
+
+    DepartmentData? profileDepartment;
+    try {
+      final profile = await _supabaseService.getCurrentUserProfile(
+        maxAttempts: 1,
+      );
+      final branchCode = normalizeBranchCode(profile['branch']?.toString());
+      if (branchCode.isNotEmpty) {
+        for (final dept in departments) {
+          if (dept.name.toLowerCase() == branchCode.toLowerCase()) {
+            profileDepartment = dept;
+            break;
+          }
+        }
+      }
+    } catch (_) {
+      profileDepartment = null;
+    }
+
+    final sortedDepartments = List<DepartmentData>.from(departments);
+    if (profileDepartment != null) {
+      sortedDepartments.remove(profileDepartment);
+      sortedDepartments.insert(0, profileDepartment);
+    }
+    if (!mounted) return null;
+
+    final recommendedDepartmentName = profileDepartment?.name;
+
+    return showModalBottomSheet<DepartmentData>(
+      context: context,
+      backgroundColor: isDark ? AppTheme.darkCard : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 18, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 42,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white24 : Colors.black12,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              'Upload Syllabus',
+              style: GoogleFonts.inter(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: isDark ? Colors.white : Colors.black,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Choose a department to compose syllabus upload.',
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                color: isDark ? Colors.white60 : Colors.black54,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: sortedDepartments.length,
+                separatorBuilder: (context, index) =>
+                    const SizedBox(height: 8),
+                itemBuilder: (context, i) {
+                  final dept = sortedDepartments[i];
+                  final isRecommended = recommendedDepartmentName != null &&
+                      dept.name == recommendedDepartmentName;
+                  return ListTile(
+                    tileColor: isDark ? AppTheme.darkBackground : Colors.grey[50],
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    leading: CircleAvatar(
+                      backgroundColor: dept.color.withValues(alpha: 0.16),
+                      child: Text(
+                        dept.name,
+                        style: GoogleFonts.inter(
+                          color: dept.color,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 10,
+                        ),
+                      ),
+                    ),
+                    title: Text(
+                      dept.full,
+                      style: GoogleFonts.inter(
+                        color: isDark ? Colors.white : Colors.black,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    subtitle: isRecommended
+                        ? Text(
+                            'Recommended for your profile',
+                            style: GoogleFonts.inter(
+                              color: isDark ? Colors.white60 : Colors.black54,
+                              fontSize: 11,
+                            ),
+                          )
+                        : null,
+                    onTap: () => Navigator.pop(ctx, dept),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openSyllabusUploadFlowFromFab() async {
+    if (!_canUploadSyllabusFromStudy) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Only admins/teachers can upload syllabus.'),
+        ),
+      );
+      return;
+    }
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final departments = await DepartmentsProvider.getDepartments();
+    if (!mounted) return;
+
+    if (departments.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No departments available right now.')),
+      );
+      return;
+    }
+
+    final department = await _showSyllabusDepartmentPicker(departments, isDark);
+    if (!mounted || department == null) return;
+
+    await Navigator.push<Map<String, String>>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SyllabusUploadScreen(
+          collegeId: widget.collegeId,
+          department: department.name,
+          departmentName: department.full,
+          departmentColor: department.color,
+        ),
+      ),
     );
   }
 
@@ -311,6 +500,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           collegeName: widget.collegeName,
           userEmail: _effectiveUserEmail,
           onChangeCollege: widget.onChangeCollege,
+          onSyllabusContextChanged: _onStudySyllabusContextChanged,
         );
       case 1:
         return ChatroomListScreen(
@@ -338,6 +528,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           collegeName: widget.collegeName,
           userEmail: _effectiveUserEmail,
           onChangeCollege: widget.onChangeCollege,
+          onSyllabusContextChanged: _onStudySyllabusContextChanged,
         );
     }
   }
@@ -591,11 +782,24 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  IconData _getFabIcon() =>
-      _currentIndex == 1 ? Icons.search_rounded : Icons.add_rounded;
+  IconData _getFabIcon() {
+    if (_currentIndex == 0 && _isStudySyllabusTab) {
+      return Icons.upload_file_rounded;
+    }
+    if (_currentIndex == 1) {
+      return Icons.search_rounded;
+    }
+    return Icons.add_rounded;
+  }
 
   Future<void> _handleFabTap() async {
     if (_roleLoading) return;
+    if (_currentIndex == 0 && _isStudySyllabusTab) {
+      if (_canUploadSyllabusFromStudy) {
+        await _openSyllabusUploadFlowFromFab();
+      }
+      return;
+    }
     if (_currentIndex == 2) {
       if (!_canPostNotices) {
         return;
@@ -635,69 +839,104 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     bool isDark,
     double bottomPadding,
   ) {
-    // Show on all tabs
-    // 0: Resources, 1: Rooms, 2: Notices, 3: Profile
+    final isSyllabusUploadAction =
+        _currentIndex == 0 && _isStudySyllabusTab && _canUploadSyllabusFromStudy;
+    final isSyllabusUploadDisabled =
+        _currentIndex == 0 &&
+        _isStudySyllabusTab &&
+        !_canUploadSyllabusFromStudy;
+    final fabWidth = isSyllabusUploadAction ? 154.0 : 56.0;
+    const fabHeight = 52.0;
 
-    // Position Calculations (Centered by default per user request "remain at bottom bar")
-    // Show on all tabs
-    // 0: Resources, 1: Rooms, 2: Notices, 3: Profile
+    final gradientColors = isSyllabusUploadDisabled
+        ? <Color>[
+            isDark ? const Color(0xFF4B5563) : const Color(0xFF94A3B8),
+            isDark ? const Color(0xFF374151) : const Color(0xFF64748B),
+          ]
+        : <Color>[AppTheme.primary, AppTheme.primaryDark];
 
-    // FAB is center-docked on all tabs; repositions to bottom-right only within individual room screens
+    final shadowColor = (isSyllabusUploadDisabled
+            ? Colors.black
+            : AppTheme.primary)
+        .withValues(alpha: 0.35);
 
     final screenWidth = MediaQuery.of(context).size.width;
-    final double left =
-        (screenWidth - 56) / 2; // Center horizontally (56 = FAB width)
-    final double bottom = bottomPadding + 16 + 8; // Above the floating nav bar
+    final left = (screenWidth - fabWidth) / 2;
+    final bottom = bottomPadding + 26.0;
 
     return Positioned(
       left: left,
       bottom: bottom,
       child: IgnorePointer(
-        ignoring: _roleLoading,
+        ignoring: _roleLoading || isSyllabusUploadDisabled,
         child: Opacity(
-          opacity: _roleLoading ? 0.6 : 1.0,
+          opacity: (_roleLoading || isSyllabusUploadDisabled) ? 0.6 : 1.0,
           child: Hero(
-            tag: 'fab_main', // Static tag
+            tag: 'fab_main',
             child: GestureDetector(
               onTap: () async {
                 HapticFeedback.mediumImpact();
                 await _handleFabTap();
               },
-              child: Container(
-                width: 56,
-                height: 56,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 260),
+                curve: Curves.easeOutCubic,
+                width: fabWidth,
+                height: fabHeight,
+                padding: EdgeInsets.symmetric(
+                  horizontal: isSyllabusUploadAction ? 10 : 0,
+                ),
                 decoration: BoxDecoration(
+                  borderRadius:
+                      isSyllabusUploadAction ? BorderRadius.circular(999) : null,
+                  shape:
+                      isSyllabusUploadAction ? BoxShape.rectangle : BoxShape.circle,
                   gradient: LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [AppTheme.primary, AppTheme.primaryDark],
+                    colors: gradientColors,
                   ),
-                  shape: BoxShape.circle,
-                  boxShadow: [
+                  boxShadow: <BoxShadow>[
                     BoxShadow(
-                      color: AppTheme.primary.withValues(alpha: 0.4),
+                      color: shadowColor,
                       blurRadius: 12,
                       offset: const Offset(0, 4),
                     ),
                   ],
                 ),
                 child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 350),
-                  transitionBuilder: (child, animation) {
-                    return RotationTransition(
-                      turns: Tween<double>(
-                        begin: 0.0,
-                        end: 0.25,
-                      ).animate(animation),
-                      child: ScaleTransition(scale: animation, child: child),
-                    );
-                  },
-                  child: Icon(
-                    _getFabIcon(),
-                    key: ValueKey<IconData>(_getFabIcon()),
-                    color: Colors.white,
-                    size: 28,
+                  duration: const Duration(milliseconds: 300),
+                  transitionBuilder: (child, animation) => FadeTransition(
+                    opacity: animation,
+                    child: ScaleTransition(scale: animation, child: child),
                   ),
+                  child: isSyllabusUploadAction
+                      ? Row(
+                          key: const ValueKey<String>('fab_upload_syllabus'),
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(
+                              Icons.upload_file_rounded,
+                              color: Colors.white,
+                              size: 19,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Upload Syllabus',
+                              style: GoogleFonts.inter(
+                                color: Colors.white,
+                                fontSize: 11.2,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        )
+                      : Icon(
+                          _getFabIcon(),
+                          key: ValueKey<IconData>(_getFabIcon()),
+                          color: Colors.white,
+                          size: 28,
+                        ),
                 ),
               ),
             ),

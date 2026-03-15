@@ -26,7 +26,6 @@ import '../../data/academic_subjects_data.dart';
 import '../../data/departments_data.dart'; // Added for DepartmentData and DepartmentsProvider
 import '../../utils/admin_access.dart';
 import 'attendance_screen.dart';
-import 'syllabus_screen.dart';
 
 class StudyScreen extends StatefulWidget {
   final String collegeId;
@@ -34,6 +33,8 @@ class StudyScreen extends StatefulWidget {
   final String collegeName;
   final String userEmail;
   final VoidCallback? onChangeCollege;
+  final void Function(bool isSyllabusTab, bool canUploadSyllabus)?
+  onSyllabusContextChanged;
 
   const StudyScreen({
     super.key,
@@ -42,6 +43,7 @@ class StudyScreen extends StatefulWidget {
     required this.collegeName,
     required this.userEmail,
     this.onChangeCollege,
+    this.onSyllabusContextChanged,
   });
 
   @override
@@ -119,6 +121,13 @@ class _StudyScreenState extends State<StudyScreen>
 
   int _unreadNotificationCount = 0;
 
+  void _notifySyllabusContextChanged() {
+    widget.onSyllabusContextChanged?.call(
+      _tabController.index == 2,
+      _canUploadSyllabus,
+    );
+  }
+
   bool get _isKietCollege {
     final collegeName = widget.collegeName.trim().toLowerCase();
     final collegeDomain = widget.collegeDomain.trim().toLowerCase();
@@ -181,7 +190,9 @@ class _StudyScreenState extends State<StudyScreen>
       if (_tabController.index == 1) {
         _loadFollowingFeed();
       }
+      _notifySyllabusContextChanged();
     });
+    _notifySyllabusContextChanged();
     _loadFilters();
     _departmentsFuture = DepartmentsProvider.getDepartments();
     _scrollController.addListener(_onScroll);
@@ -224,6 +235,7 @@ class _StudyScreenState extends State<StudyScreen>
           _canManageAdminResources = canManageAdminResources;
           _canUploadSyllabus = canUploadSyllabus;
         });
+        _notifySyllabusContextChanged();
       }
     } catch (e) {
       debugPrint('Error loading user profile in StudyScreen: $e');
@@ -1465,283 +1477,46 @@ class _StudyScreenState extends State<StudyScreen>
         }
         final departments = snapshot.data!;
 
-        return Stack(
-          children: [
-            SingleChildScrollView(
-              padding: EdgeInsets.fromLTRB(
-                16,
-                16,
-                16,
-                _canUploadSyllabus ? 100 : 32,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Select Department',
-                    style: GoogleFonts.inter(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: textColor,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'View syllabus by department',
-                    style: GoogleFonts.inter(
-                      fontSize: 13,
-                      color: secondaryColor,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-
-                  // Department Grid
-                  GridView(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          crossAxisSpacing: 12,
-                          mainAxisSpacing: 12,
-                          childAspectRatio: 1.4,
-                        ),
-                    children: [
-                      ...departments.map((dept) {
-                        return _buildDepartmentCard(dept, isDark: isDark);
-                      }),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
-            // Floating "Add Syllabus" button for teachers / admins
-            if (_canUploadSyllabus)
-              Positioned(
-                left: 20,
-                right: 20,
-                bottom: 16,
-                child: _buildAddSyllabusButton(isDark, departments),
-              ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildAddSyllabusButton(
-    bool isDark,
-    List<DepartmentData> departments,
-  ) {
-    // Try to match the user's branch to a department
-    DepartmentData? userDept;
-    if (_userBranch.isNotEmpty) {
-      final lowerBranch = _userBranch.toLowerCase();
-      userDept = departments.cast<DepartmentData?>().firstWhere(
-        (d) => d!.name.toLowerCase() == lowerBranch,
-        orElse: () => null,
-      );
-    }
-
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: () {
-          if (userDept != null) {
-            // Navigate directly to the user's department SyllabusScreen
-            final dept = userDept;
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => SyllabusScreen(
-                  collegeId: widget.collegeId,
-                  department: dept.name,
-                  departmentName: dept.full,
-                  departmentColor: dept.color,
-                  canUploadSyllabus: true,
+        return SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Select Department',
+                style: GoogleFonts.inter(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: textColor,
                 ),
               ),
-            );
-          } else {
-            // Show a bottom sheet to pick a department
-            _showDepartmentPicker(isDark, departments);
-          }
-        },
-        borderRadius: BorderRadius.circular(18),
-        child: Ink(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: <Color>[
-                AppTheme.primary,
-                Color.lerp(AppTheme.primary, Colors.black, 0.18)!,
-              ],
-            ),
-            borderRadius: BorderRadius.circular(18),
-            boxShadow: <BoxShadow>[
-              BoxShadow(
-                color: AppTheme.primary.withValues(alpha: isDark ? 0.28 : 0.18),
-                blurRadius: 20,
-                offset: const Offset(0, 8),
+              const SizedBox(height: 8),
+              Text(
+                'View syllabus by department',
+                style: GoogleFonts.inter(fontSize: 13, color: secondaryColor),
+              ),
+              const SizedBox(height: 20),
+
+              // Department Grid
+              GridView(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                  childAspectRatio: 1.4,
+                ),
+                children: [
+                  ...departments.map((dept) {
+                    return _buildDepartmentCard(dept, isDark: isDark);
+                  }),
+                ],
               ),
             ],
           ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-            child: Row(
-              children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.18),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(
-                    Icons.library_add_rounded,
-                    color: Colors.white,
-                    size: 22,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Add Syllabus',
-                        style: GoogleFonts.inter(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        userDept != null
-                            ? 'Upload to ${userDept.full}'
-                            : 'Choose department to upload',
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: Colors.white.withValues(alpha: 0.85),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const Icon(
-                  Icons.arrow_forward_ios_rounded,
-                  color: Colors.white,
-                  size: 18,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showDepartmentPicker(bool isDark, List<DepartmentData> departments) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: isDark ? AppTheme.darkCard : Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: isDark ? Colors.white24 : Colors.black12,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'Select Department',
-              style: GoogleFonts.inter(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : Colors.black,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Choose a department to upload syllabus',
-              style: GoogleFonts.inter(fontSize: 13, color: AppTheme.textMuted),
-            ),
-            const SizedBox(height: 16),
-            Flexible(
-              child: ListView.separated(
-                shrinkWrap: true,
-                itemCount: departments.length,
-                separatorBuilder: (context2, _) => const SizedBox(height: 8),
-                itemBuilder: (context3, i) {
-                  final dept = departments[i];
-                  return ListTile(
-                    leading: Container(
-                      width: 36,
-                      height: 36,
-                      decoration: BoxDecoration(
-                        color: dept.color.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Center(
-                        child: Text(
-                          dept.name,
-                          style: GoogleFonts.inter(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            color: dept.color,
-                          ),
-                        ),
-                      ),
-                    ),
-                    title: Text(
-                      dept.full,
-                      style: GoogleFonts.inter(
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white : Colors.black,
-                      ),
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    tileColor: isDark
-                        ? AppTheme.darkBackground
-                        : Colors.grey[50],
-                    onTap: () {
-                      Navigator.pop(ctx); // close picker
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => SyllabusScreen(
-                            collegeId: widget.collegeId,
-                            department: dept.name,
-                            departmentName: dept.full,
-                            departmentColor: dept.color,
-                            canUploadSyllabus: true,
-                          ),
-                        ),
-                      );
-                    },
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
+        );
+      },
     );
   }
 
