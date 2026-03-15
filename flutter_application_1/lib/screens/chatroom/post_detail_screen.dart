@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'dart:io';
 import 'package:google_fonts/google_fonts.dart';
 import '../../config/theme.dart';
@@ -12,6 +13,7 @@ import '../../services/subscription_service.dart';
 import '../../widgets/comment_input_box.dart';
 
 import 'package:flutter_linkify/flutter_linkify.dart';
+import 'package:path/path.dart' as p;
 import '../../widgets/full_screen_image_viewer.dart';
 import '../../widgets/user_avatar.dart';
 import '../../utils/sticker_comment_codec.dart';
@@ -101,31 +103,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           tag: 'sticker_${stickerUrl.hashCode}_$commentId',
           child: ClipRRect(
             borderRadius: BorderRadius.circular(12),
-            child: Image.network(
-              stickerUrl,
-              width: 150,
-              height: 150,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) =>
-                  Text(content, style: GoogleFonts.inter(color: textColor)),
-              loadingBuilder: (context, child, loadingProgress) {
-                if (loadingProgress == null) return child;
-                return Container(
-                  width: 150,
-                  height: 150,
-                  color: isDark ? Colors.white10 : Colors.grey.shade200,
-                  child: Center(
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      value: loadingProgress.expectedTotalBytes != null
-                          ? loadingProgress.cumulativeBytesLoaded /
-                                loadingProgress.expectedTotalBytes!
-                          : null,
-                    ),
-                  ),
-                );
-              },
-            ),
+            child: _buildStickerImage(stickerUrl, isDark, textColor),
           ),
         ),
       );
@@ -594,6 +572,37 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     );
   }
 
+  Widget _buildStickerImage(String url, bool isDark, Color textColor) {
+    if (url.startsWith('asset://')) {
+      final assetPath = url.replaceFirst('asset://', '');
+      return Image.asset(
+        assetPath,
+        width: 120,
+        height: 120,
+        fit: BoxFit.contain,
+        errorBuilder: (context, error, stackTrace) => Text(
+          url,
+          style: GoogleFonts.inter(color: textColor),
+        ),
+      );
+    }
+    return CachedNetworkImage(
+      imageUrl: url,
+      width: 120,
+      height: 120,
+      fit: BoxFit.contain,
+      placeholder: (_, __) => SizedBox(
+        width: 120,
+        height: 120,
+        child: Container(
+          color: isDark ? Colors.white10 : Colors.grey.shade200,
+        ),
+      ),
+      errorWidget: (_, __, ___) =>
+          const Icon(Icons.broken_image_outlined),
+    );
+  }
+
   ({String title, String body}) _extractPostParts(Map<String, dynamic> post) {
     final fullContent = post['content']?.toString() ?? '';
     final dbTitle = post['title']?.toString() ?? '';
@@ -881,6 +890,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14),
                 ),
+                icon: Icon(
+                  Icons.more_horiz_rounded,
+                  size: 20,
+                  color: AppTheme.textMuted,
+                ),
                 onSelected: (value) async {
                   if (value == 'edit') {
                     await _showEditPostSheet();
@@ -888,21 +902,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                     await _confirmDeletePost();
                   }
                 },
-                child: Container(
-                  width: 34,
-                  height: 34,
-                  decoration: BoxDecoration(
-                    color: isDark
-                        ? Colors.white10
-                        : Colors.black.withValues(alpha: 0.06),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    Icons.more_horiz_rounded,
-                    size: 18,
-                    color: AppTheme.textMuted,
-                  ),
-                ),
                 itemBuilder: (context) => [
                   if (canEditPost)
                     PopupMenuItem(
@@ -1501,6 +1500,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),
+                              icon: Icon(
+                                Icons.more_horiz_rounded,
+                                size: 18,
+                                color: AppTheme.textMuted,
+                              ),
                               onSelected: (value) {
                                 if (value == 'report') {
                                   _showReportDialog(
@@ -1516,21 +1520,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                   child: Text('Report'),
                                 ),
                               ],
-                              child: Container(
-                                width: 28,
-                                height: 28,
-                                decoration: BoxDecoration(
-                                  color: isDark
-                                      ? Colors.white10
-                                      : Colors.black.withValues(alpha: 0.06),
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                                child: Icon(
-                                  Icons.more_horiz_rounded,
-                                  size: 16,
-                                  color: AppTheme.textMuted,
-                                ),
-                              ),
                             ),
                           ],
                         ),
@@ -1582,7 +1571,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
                         // Threaded Replies Toggle
                         if (hasReplies) ...[
-                          const SizedBox(height: 12),
+                          const SizedBox(height: 10),
                           GestureDetector(
                             onTap: () {
                               setState(() {
@@ -1596,7 +1585,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             child: Row(
                               children: [
                                 Container(
-                                  width: 24,
+                                  width: 30,
                                   height: 1, // Line
                                   color: AppTheme.textMuted.withValues(
                                     alpha: 0.5,
@@ -1623,6 +1612,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               ],
                             ),
                           ),
+                          const SizedBox(height: 4),
                         ],
                       ],
                     ),
@@ -1650,24 +1640,35 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                           itemCount: replies.length,
                           separatorBuilder: (_, index) =>
                               const SizedBox(height: 12),
-                          itemBuilder: (context, index) => _buildCommentCard(
+                        itemBuilder: (context, index) => _buildCommentCard(
                             replies[index],
                             isDark,
                             depth: depth + 1,
                           ),
                         )
-                      : TextButton(
-                          onPressed: () {
-                            // Navigate to thread detail or expand further (not implemented)
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Deep thread view not implemented',
-                                ),
+                      : Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 0,
+                                vertical: 6,
                               ),
-                            );
-                          },
-                          child: Text('View ${replies.length} more replies'),
+                              minimumSize: const Size(0, 34),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            onPressed: () {
+                              // Navigate to thread detail or expand further (not implemented)
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Deep thread view not implemented',
+                                  ),
+                                ),
+                              );
+                            },
+                            child: Text('View ${replies.length} more replies'),
+                          ),
                         ),
                 ),
             ],
@@ -1798,7 +1799,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         throw Exception('Sticker is too large (max 5MB).');
       }
       final bytes = await stickerFile.readAsBytes();
-      final filename = 'sticker_${DateTime.now().millisecondsSinceEpoch}.png';
+      final rawExt = p.extension(stickerFile.path).toLowerCase();
+      final ext = {'.gif', '.webp', '.png', '.jpg', '.jpeg'}.contains(rawExt)
+          ? rawExt
+          : '.png';
+      final filename = 'sticker_${DateTime.now().millisecondsSinceEpoch}$ext';
 
       final url = await CloudinaryService.uploadBytes(bytes, filename);
 

@@ -42,6 +42,10 @@ class StickerCommentCodec {
       url = url.substring(1, url.length - 1).trim();
     }
 
+    if (url.startsWith('asset://')) {
+      return url;
+    }
+
     if (!(url.startsWith('http://') || url.startsWith('https://'))) {
       return null;
     }
