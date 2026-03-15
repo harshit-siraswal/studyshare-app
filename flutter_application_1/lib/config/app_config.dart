@@ -119,6 +119,10 @@ class AppConfig {
     defaultValue: _defaultRemoveBgApiKey,
   );
 
+  static const String imgflipUsername = 'HarshitPal';
+  static const String imgflipPassword = 'Kumar@1234';
+  static const String tenorApiKey = 'AIzaSyAyimkuYQYF_FXVALexPzpFtfOMYBHJzks';
+
   static String get removeBgApiKeyOrThrow {
     if (removeBgApiKey.isEmpty) {
       throw Exception(
