@@ -315,6 +315,11 @@ class BackendApiService {
     } catch (_) {}
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
+      if (path == '/api/users/profile' && normalizedMethod == 'PUT') {
+        debugPrint(
+          '[ProfileUpdate] HTTP ${res.statusCode} body: ${res.body}',
+        );
+      }
       final msg =
           data?['message']?.toString() ?? data?['error']?.toString() ?? '';
       if (msg.trim().isNotEmpty) {
@@ -398,6 +403,69 @@ class BackendApiService {
         'imageUrl': ?imageUrl,
         'authorName': ?authorName,
       },
+    );
+  }
+
+  Future<Map<String, dynamic>> getChatRoomInfo(String roomId) async {
+    return _requestJson(
+      '/api/chat/rooms/${Uri.encodeComponent(roomId)}/info',
+      method: 'GET',
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getChatRoomMembers(String roomId) async {
+    final data = await _requestJson(
+      '/api/chat/rooms/${Uri.encodeComponent(roomId)}/members',
+      method: 'GET',
+    );
+    final list = (data['members'] as List?) ?? const [];
+    return list.map((entry) => Map<String, dynamic>.from(entry as Map)).toList();
+  }
+
+  Future<Map<String, dynamic>> deleteChatRoom(String roomId) async {
+    return _requestJson(
+      '/api/chat/rooms/${Uri.encodeComponent(roomId)}',
+      method: 'DELETE',
+    );
+  }
+
+  Future<Map<String, dynamic>> banRoomMember({
+    required String roomId,
+    required String targetEmail,
+  }) async {
+    return _requestJson(
+      '/api/chat/rooms/${Uri.encodeComponent(roomId)}/ban',
+      method: 'POST',
+      body: {'targetEmail': targetEmail},
+    );
+  }
+
+  Future<Map<String, dynamic>> unbanRoomMember({
+    required String roomId,
+    required String targetEmail,
+  }) async {
+    return _requestJson(
+      '/api/chat/rooms/${Uri.encodeComponent(roomId)}/unban',
+      method: 'POST',
+      body: {'targetEmail': targetEmail},
+    );
+  }
+
+  Future<Map<String, dynamic>> regenerateChatRoomCode(String roomId) async {
+    return _requestJson(
+      '/api/chat/rooms/${Uri.encodeComponent(roomId)}/regenerate-code',
+      method: 'POST',
+    );
+  }
+
+  Future<Map<String, dynamic>> toggleChatRoomMute({
+    required String roomId,
+    required bool muted,
+  }) async {
+    return _requestJson(
+      '/api/chat/rooms/${Uri.encodeComponent(roomId)}/mute',
+      method: 'POST',
+      body: {'muted': muted},
     );
   }
 
@@ -564,7 +632,7 @@ class BackendApiService {
     required String cybervidyaToken,
     required int courseId,
     required int courseComponentId,
-    required int studentId,
+    int? studentId,
   }) async {
     return _requestJson(
       '/api/attendance/kiet/daywise',
@@ -574,7 +642,7 @@ class BackendApiService {
         'cybervidyaToken': cybervidyaToken,
         'courseId': courseId,
         'courseComponentId': courseComponentId,
-        'studentId': studentId,
+        'studentId': ?studentId,
       },
       requireAuthToken: true,
     );
@@ -1589,6 +1657,10 @@ class BackendApiService {
     List<Map<String, dynamic>>? attachments,
     List<Map<String, String>>? history,
     Map<String, dynamic>? filters,
+    bool? sourceSwitchForTurn,
+    List<String>? excludeFileIds,
+    String? dialectIntensity,
+    String? languageHint,
   }) async {
     return _requestJson(
       '/api/rag/query',
@@ -1601,6 +1673,8 @@ class BackendApiService {
         'top_k': ?topK,
         'min_score': ?minScore,
         'allow_web': ?allowWeb,
+        // TODO: replace with searchMode enum after Section B UI
+        'retrieval_mode': allowWeb == true ? 'web' : 'local',
         'file_id': ?fileId,
         'video_url': ?videoUrl,
         'use_ocr': ?useOcr,
@@ -1609,6 +1683,10 @@ class BackendApiService {
         'attachments': ?attachments,
         'history': ?history,
         'filters': ?filters,
+        'source_switch_for_turn': ?sourceSwitchForTurn,
+        'exclude_file_ids': ?excludeFileIds,
+        'dialect_intensity': ?dialectIntensity,
+        'language_hint': ?languageHint,
       },
     );
   }
@@ -1742,6 +1820,10 @@ class BackendApiService {
     List<Map<String, dynamic>>? attachments,
     List<Map<String, String>>? history,
     Map<String, dynamic>? filters,
+    bool? sourceSwitchForTurn,
+    List<String>? excludeFileIds,
+    String? dialectIntensity,
+    String? languageHint,
   }) async* {
     final response = await queryRag(
       question: question,
@@ -1758,6 +1840,10 @@ class BackendApiService {
       attachments: attachments,
       history: history,
       filters: filters,
+      sourceSwitchForTurn: sourceSwitchForTurn,
+      excludeFileIds: excludeFileIds,
+      dialectIntensity: dialectIntensity,
+      languageHint: languageHint,
     );
 
     List<dynamic> sourcesRaw = const [];
@@ -1789,16 +1875,38 @@ class BackendApiService {
         (data is Map ? data['ocr_failure_affects_retrieval'] : null);
     final ocrErrors =
         response['ocr_errors'] ?? (data is Map ? data['ocr_errors'] : null);
+    final primarySource =
+        response['primary_source'] ?? (data is Map ? data['primary_source'] : null);
+    final primarySourceFileId =
+        response['primary_source_file_id'] ??
+        (data is Map ? data['primary_source_file_id'] : null);
+    final sourceSwitchApplied =
+        response['source_switch_applied'] ??
+        (data is Map ? data['source_switch_applied'] : null);
+    final retrievalMode =
+        response['retrieval_mode'] ?? (data is Map ? data['retrieval_mode'] : null);
+    final dialectIntensityUsed =
+        response['dialect_intensity_used'] ??
+        (data is Map ? data['dialect_intensity_used'] : null);
+    final toneProfileUsed =
+        response['tone_profile_used'] ??
+        (data is Map ? data['tone_profile_used'] : null);
 
     if (normalizedSources.isNotEmpty || noLocal) {
       yield jsonEncode({
         'type': 'metadata',
         'data': <String, dynamic>{
           'sources': normalizedSources,
+          'primary_source': ?primarySource,
+          'primary_source_file_id': ?primarySourceFileId,
           'no_local': noLocal,
           'retrieval_score': ?retrievalScore,
           'llm_confidence_score': ?llmConfidenceScore,
           'combined_confidence': ?combinedConfidence,
+          'source_switch_applied': ?sourceSwitchApplied,
+          'retrieval_mode': ?retrievalMode,
+          'dialect_intensity_used': ?dialectIntensityUsed,
+          'tone_profile_used': ?toneProfileUsed,
           'ocr_failure_affects_retrieval': ?ocrFailureAffectsRetrieval,
           'ocr_errors': ?ocrErrors,
         },
@@ -1831,6 +1939,10 @@ class BackendApiService {
     List<Map<String, dynamic>>? attachments,
     List<Map<String, String>>? history,
     Map<String, dynamic>? filters,
+    bool? sourceSwitchForTurn,
+    List<String>? excludeFileIds,
+    String? dialectIntensity,
+    String? languageHint,
   }) async* {
     Stream<String> fallbackStream() {
       return _queryRagAsSyntheticStream(
@@ -1848,6 +1960,10 @@ class BackendApiService {
         attachments: attachments,
         history: history,
         filters: filters,
+        sourceSwitchForTurn: sourceSwitchForTurn,
+        excludeFileIds: excludeFileIds,
+        dialectIntensity: dialectIntensity,
+        languageHint: languageHint,
       );
     }
 
@@ -1880,6 +1996,8 @@ class BackendApiService {
         'top_k': ?topK,
         'min_score': ?minScore,
         'allow_web': ?allowWeb,
+        // TODO: replace with searchMode enum after Section B UI
+        'retrieval_mode': allowWeb == true ? 'web' : 'local',
         'file_id': ?fileId,
         'video_url': ?videoUrl,
         'use_ocr': ?useOcr,
@@ -1888,6 +2006,10 @@ class BackendApiService {
         'attachments': ?attachments,
         'history': ?history,
         'filters': ?filters,
+        'source_switch_for_turn': ?sourceSwitchForTurn,
+        'exclude_file_ids': ?excludeFileIds,
+        'dialect_intensity': ?dialectIntensity,
+        'language_hint': ?languageHint,
       });
 
     http.StreamedResponse response;
