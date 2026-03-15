@@ -72,24 +72,46 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
 
     try {
       final results = await Future.wait<dynamic>([
-        _supabaseService.getRoomInfo(widget.roomId),
-        _supabaseService.getRoomMembers(widget.roomId),
+        _backendApiService.getChatRoomInfo(widget.roomId),
+        _backendApiService.getChatRoomMembers(widget.roomId),
         _supabaseService.getRoomPostCounts(widget.roomId),
       ]);
+
+      final roomPayload = (results[0] as Map?) ?? const {};
+      final roomMapRaw = roomPayload['room'];
+      final roomMap = roomMapRaw is Map
+          ? Map<String, dynamic>.from(roomMapRaw)
+          : Map<String, dynamic>.from(roomPayload);
+      final membersRaw = (results[1] as List?) ?? const [];
+      final members = membersRaw
+          .whereType<Map>()
+          .map((member) => Map<String, dynamic>.from(member))
+          .toList();
+
+      // Keep local room info shape compatible with existing UI fallbacks.
+      roomMap['isMember'] = roomPayload['isMember'] == true;
+      roomMap['isAdmin'] = roomPayload['isAdmin'] == true;
+      if (roomMap['created_by_email'] == null && roomMap['created_by'] != null) {
+        roomMap['created_by_email'] = roomMap['created_by'];
+      }
+      if (roomMap['member_count'] == null) {
+        roomMap['member_count'] = members.length;
+      }
 
       if (!mounted) return;
 
       setState(() {
-        _roomInfo = results[0] as Map<String, dynamic>?;
-        _members = (results[1] as List<Map<String, dynamic>>?) ?? [];
+        _roomInfo = roomMap;
+        _members = members;
         _postCounts = results[2] as ({int total, int today});
         _isLoading = false;
       });
     } catch (e) {
+      debugPrint('ROOM_DETAILS_ERROR: $e');
       if (!mounted) return;
       setState(() {
         _isLoading = false;
-        _loadError = 'Failed to load room details';
+        _loadError = 'Failed to load room details: $e';
       });
     }
   }
@@ -121,34 +143,6 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
     if (!_isSameUser(member, email)) return false;
     final role = (member['role'] ?? 'member').toString().toLowerCase();
     return role == 'admin';
-  }
-
-  String _createdAtLabel() {
-    final raw = _roomInfo?['created_at'] ?? _roomInfo?['createdAt'];
-    final parsed = DateTime.tryParse(raw?.toString() ?? '');
-    if (parsed == null) return 'Unknown';
-    final local = parsed.toLocal();
-    return '${local.day.toString().padLeft(2, '0')} '
-        '${_monthLabel(local.month)} ${local.year}';
-  }
-
-  String _monthLabel(int month) {
-    const months = <String>[
-      'Jan',
-      'Feb',
-      'Mar',
-      'Apr',
-      'May',
-      'Jun',
-      'Jul',
-      'Aug',
-      'Sep',
-      'Oct',
-      'Nov',
-      'Dec',
-    ];
-    if (month < 1 || month > 12) return '';
-    return months[month - 1];
   }
 
   Future<void> _handleLeaveRoom() async {
@@ -195,87 +189,91 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
     }
   }
 
-  Widget _metricTile({
-    required IconData icon,
-    required String label,
-    required String value,
-    required bool isDark,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF111827) : Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isDark ? Colors.white12 : Colors.grey.shade200,
+  Future<void> _handleDeleteRoom() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete room?'),
+        content: const Text(
+          'This will permanently delete this room and all room posts.',
         ),
-        boxShadow: [
-          if (!isDark)
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: AppTheme.primary.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(icon, color: AppTheme.primary, size: 18),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    color: isDark ? Colors.white60 : Colors.black54,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  value,
-                  style: GoogleFonts.inter(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
-                ),
-              ],
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: Colors.red),
             ),
           ),
         ],
       ),
     );
+
+    if (confirm != true || !mounted) return;
+
+    try {
+      await _backendApiService.deleteChatRoom(widget.roomId);
+      if (!mounted) return;
+      Navigator.pop(context, true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Room deleted')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to delete room: $e')));
+    }
   }
 
-  Widget _memberTile(Map<String, dynamic> member, bool isDark) {
-    final email = (member['user_email'] ?? '').toString().trim();
+  Widget _pill({
+    required String label,
+    required bool isDark,
+    Color? background,
+    Color? foreground,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: background ??
+            (isDark ? Colors.white12 : Colors.black.withValues(alpha: 0.06)),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.inter(
+          fontSize: 10.5,
+          fontWeight: FontWeight.w600,
+          color: foreground ?? (isDark ? Colors.white70 : Colors.black54),
+        ),
+      ),
+    );
+  }
+
+  Widget _memberTile(
+    Map<String, dynamic> member,
+    bool isDark, {
+    bool showFounderBadge = false,
+  }) {
     final role = (member['role'] ?? 'member').toString().toLowerCase();
+    final isFounder =
+        member['is_founder'] == true ||
+        showFounderBadge ||
+        _isSameUser(member, (_roomInfo?['created_by_email'] ?? '').toString());
     final photoUrl = _resolvePhotoUrl(member, const [
       'profile_photo_url',
       'photo_url',
       'avatar_url',
     ]);
 
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF111827) : Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark ? Colors.white12 : Colors.grey.shade200,
-        ),
-      ),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           UserAvatar(
             radius: 18,
@@ -287,53 +285,37 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  _memberDisplayName(member),
-                  style: GoogleFonts.inter(
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? Colors.white : Colors.black87,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  email.isNotEmpty ? email : 'Unknown email',
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    color: isDark ? Colors.white60 : Colors.black54,
-                  ),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      _memberDisplayName(member),
+                      style: GoogleFonts.inter(
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    if (isFounder)
+                      _pill(
+                        label: 'Founder',
+                        isDark: isDark,
+                        background: const Color(0x268B5CF6),
+                        foreground: const Color(0xFF8B5CF6),
+                      ),
+                    if (!isFounder && role == 'admin')
+                      _pill(
+                        label: 'Admin',
+                        isDark: isDark,
+                        background: const Color(0x261EAEDB),
+                        foreground: const Color(0xFF1EAEDB),
+                      ),
+                  ],
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 8),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: role == 'admin'
-                  ? AppTheme.primary.withValues(alpha: 0.14)
-                  : Colors.grey.withValues(alpha: 0.16),
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Text(
-              role == 'admin' ? 'Admin' : 'Member',
-              style: GoogleFonts.inter(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: role == 'admin' ? AppTheme.primary : AppTheme.textMuted,
-              ),
-            ),
-          ),
-          if (_isSameUser(member, widget.userEmail))
-            Padding(
-              padding: const EdgeInsets.only(left: 6),
-              child: Text(
-                'You',
-                style: GoogleFonts.inter(
-                  fontSize: 11,
-                  color: AppTheme.textMuted,
-                ),
-              ),
-            ),
         ],
       ),
     );
@@ -367,23 +349,44 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
       );
     }
 
-    final createdBy =
-        (_roomInfo?['created_by'] ?? _roomInfo?['createdBy'] ?? 'Unknown')
-            .toString();
+    final createdByEmail = ((_roomInfo?['created_by_email'] ??
+                _roomInfo?['created_by'] ??
+                _roomInfo?['createdBy'] ??
+                '')
+            .toString())
+        .trim()
+        .toLowerCase();
     final memberCount =
-        _members.isNotEmpty ? _members.length : (_roomInfo?['member_count'] ?? 0);
+        _members.isNotEmpty
+            ? _members.length
+            : (_roomInfo?['member_count'] ?? 0);
     final activeLabel = widget.activeMemberCount != null
         ? widget.activeMemberCount == 0
             ? 'No active members'
             : '${widget.activeMemberCount} active now'
         : null;
 
-    final admins = _members
-        .where((m) => (m['role'] ?? '').toString().toLowerCase() == 'admin')
-        .toList();
+    final admins = _members.where((member) {
+      final role = (member['role'] ?? '').toString().toLowerCase();
+      return role == 'admin' ||
+          member['is_founder'] == true ||
+          _isSameUser(member, createdByEmail);
+    }).toList();
+    final nonAdmins = _members.where((member) {
+      final role = (member['role'] ?? '').toString().toLowerCase();
+      final isFounder =
+          member['is_founder'] == true || _isSameUser(member, createdByEmail);
+      return role != 'admin' && !isFounder;
+    }).toList();
+    final roomCode = ((_roomInfo?['room_code'] ?? _roomInfo?['code'] ?? '')
+            .toString())
+        .trim();
+    final isPrivate = _roomInfo?['is_private'] == true ||
+        _roomInfo?['is_private'] == 'true';
+    final dividerColor = isDark ? Colors.white12 : Colors.black12;
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0B1015) : const Color(0xFFF5F5F7),
+      backgroundColor: isDark ? const Color(0xFF0B1015) : Colors.white,
       appBar: AppBar(
         title: const Text('Room Page'),
         backgroundColor: isDark ? const Color(0xFF0B1015) : Colors.white,
@@ -401,7 +404,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
         onRefresh: _loadDetails,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+          padding: const EdgeInsets.fromLTRB(18, 12, 18, 26),
           children: [
             if (_isLoading)
               const LinearProgressIndicator(minHeight: 2),
@@ -423,7 +426,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
             ),
             if (widget.description.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.only(top: 6),
+                padding: const EdgeInsets.only(top: 8),
                 child: Text(
                   widget.description,
                   style: GoogleFonts.inter(
@@ -434,7 +437,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
               ),
             if (activeLabel != null)
               Padding(
-                padding: const EdgeInsets.only(top: 8),
+                padding: const EdgeInsets.only(top: 6),
                 child: Text(
                   activeLabel,
                   style: GoogleFonts.inter(
@@ -443,110 +446,111 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                   ),
                 ),
               ),
-            const SizedBox(height: 18),
-            _metricTile(
-              icon: Icons.people_outline,
-              label: 'Members',
-              value: memberCount.toString(),
-              isDark: isDark,
-            ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 16),
             Row(
               children: [
                 Expanded(
-                  child: _metricTile(
-                    icon: Icons.forum_outlined,
-                    label: 'Total Posts',
-                    value: _postCounts.total.toString(),
-                    isDark: isDark,
+                  child: Text(
+                    'Members $memberCount',
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white70 : Colors.black54,
+                    ),
+                  ),
+                ),
+                Text(
+                  'Posts ${_postCounts.total}',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white70 : Colors.black54,
                   ),
                 ),
                 const SizedBox(width: 12),
-                Expanded(
-                  child: _metricTile(
-                    icon: Icons.today_outlined,
-                    label: 'Posts Today',
-                    value: _postCounts.today.toString(),
-                    isDark: isDark,
+                Text(
+                  'Today ${_postCounts.today}',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: isDark ? Colors.white70 : Colors.black54,
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 18),
-            _sectionTitle('Room Details', isDark),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF111827) : Colors.white,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: isDark ? Colors.white12 : Colors.grey.shade200,
-                ),
-              ),
-              child: Column(
-                children: [
-                  _detailRow('Created by', createdBy, isDark),
-                  const SizedBox(height: 8),
-                  _detailRow('Created on', _createdAtLabel(), isDark),
-                  if (admins.isNotEmpty) ...[
-                    const SizedBox(height: 8),
-                    _detailRow(
-                      'Admins',
-                      admins.map(_memberDisplayName).join(', '),
-                      isDark,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            if (_isAdmin &&
-                (_roomInfo?['is_private'] == true ||
-                    _roomInfo?['is_private'] == 'true')) ...[
-              const SizedBox(height: 18),
-              _sectionTitle('Room Code', isDark),
+            const SizedBox(height: 10),
+            Divider(color: dividerColor, height: 1),
+            if (_isAdmin && isPrivate && roomCode.isNotEmpty) ...[
               const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: AppTheme.primary.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: AppTheme.primary.withValues(alpha: 0.3),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.vpn_key_outlined, color: AppTheme.primary),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        (_roomInfo?['code'] ?? 'N/A').toString(),
-                        style: GoogleFonts.inter(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: AppTheme.primary,
-                          letterSpacing: 2,
-                        ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Room code: $roomCode',
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.primary,
                       ),
                     ),
-                    IconButton(
-                      onPressed: () {
-                        Clipboard.setData(
-                          ClipboardData(text: _roomInfo?['code']?.toString() ?? ''),
-                        );
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Code copied!')),
-                        );
-                      },
-                      icon: Icon(Icons.copy_rounded, color: AppTheme.primary),
-                    ),
-                  ],
+                  ),
+                  IconButton(
+                    tooltip: 'Copy room code',
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: roomCode));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Code copied')),
+                      );
+                    },
+                    icon: Icon(Icons.copy_rounded, color: AppTheme.primary),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 14),
+            _sectionTitle('Admins', isDark),
+            const SizedBox(height: 4),
+            if (admins.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  'No admins found',
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: isDark ? Colors.white60 : Colors.black54,
+                  ),
                 ),
+              )
+            else
+              ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: admins.length,
+                separatorBuilder: (_, __) => Divider(color: dividerColor),
+                itemBuilder: (context, index) => _memberTile(
+                  admins[index],
+                  isDark,
+                  showFounderBadge: admins[index]['is_founder'] == true ||
+                      _isSameUser(admins[index], createdByEmail),
+                ),
+              ),
+            if (nonAdmins.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Divider(color: dividerColor, height: 1),
+              const SizedBox(height: 14),
+              _sectionTitle('Members', isDark),
+              const SizedBox(height: 4),
+              ListView.separated(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: nonAdmins.length,
+                separatorBuilder: (_, __) => Divider(color: dividerColor),
+                itemBuilder: (context, index) =>
+                    _memberTile(nonAdmins[index], isDark),
               ),
             ],
             if (_isAdmin && widget.onManageMembers != null) ...[
-              const SizedBox(height: 18),
+              const SizedBox(height: 20),
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
@@ -555,7 +559,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                     widget.onManageMembers?.call();
                   },
                   icon: const Icon(Icons.group_outlined),
-                  label: const Text('Manage Members / Make Admin'),
+                  label: const Text('Manage Members'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppTheme.primary,
                     side: BorderSide(
@@ -569,28 +573,27 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                 ),
               ),
             ],
-            const SizedBox(height: 18),
-            _sectionTitle('Members', isDark),
-            const SizedBox(height: 8),
-            if (_members.isEmpty)
-              Text(
-                'No members found',
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  color: isDark ? Colors.white60 : Colors.black54,
+            if (_isAdmin) ...[
+              const SizedBox(height: 10),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _handleDeleteRoom,
+                  icon: const Icon(Icons.delete_forever_rounded),
+                  label: const Text('Delete Room'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.redAccent,
+                    side: const BorderSide(color: Colors.redAccent),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
                 ),
-              )
-            else
-              ListView.separated(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: _members.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 10),
-                itemBuilder: (context, index) =>
-                    _memberTile(_members[index], isDark),
               ),
+            ],
             if (_isMember) ...[
-              const SizedBox(height: 24),
+              const SizedBox(height: 10),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
@@ -611,35 +614,6 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
           ],
         ),
       ),
-    );
-  }
-
-  Widget _detailRow(String label, String value, bool isDark) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 92,
-          child: Text(
-            label,
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              color: isDark ? Colors.white60 : Colors.black54,
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Text(
-            value,
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: isDark ? Colors.white : Colors.black87,
-            ),
-          ),
-        ),
-      ],
     );
   }
 }
