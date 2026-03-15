@@ -274,6 +274,8 @@ class _AIChatScreenState extends State<AIChatScreen>
   bool _isAiTokenStatusLoading = false;
   bool _allowWebMode = false;
   bool _searchAllPdfs = false;
+  String? _lastPrimarySourceFileId;
+  bool _hasText = false;
   DateTime? _lastAiTokenTopUpSnackBarAt;
   String? _lastAiTokenTopUpSnackBarMessage;
   DateTime? _lastSourceLinkSnackBarAt;
@@ -350,6 +352,12 @@ class _AIChatScreenState extends State<AIChatScreen>
     _aiNotificationService.initialize();
     _prepareCoachMarks();
     _refreshAiTokenStatus();
+    _controller.addListener(() {
+      final hasText = _controller.text.trim().isNotEmpty;
+      if (hasText != _hasText) {
+        setState(() => _hasText = hasText);
+      }
+    });
 
     // Defer splash animation until after stored sessions load
     _loadStoredSessions();
@@ -598,6 +606,19 @@ class _AIChatScreenState extends State<AIChatScreen>
         normalized.contains('not the correct pdf') ||
         normalized.contains('not the right pdf') ||
         normalized.contains('this is not the pdf') ||
+        normalized.contains('galat pdf') ||
+        normalized.contains('galat book') ||
+        normalized.contains('doosri pdf') ||
+        normalized.contains('dusri pdf') ||
+        normalized.contains('dusra notes') ||
+        normalized.contains('doosra notes') ||
+        normalized.contains('aa wali nahi') ||
+        normalized.contains('doosri aali') ||
+        normalized.contains('dusri aali') ||
+        normalized.contains('yeh na chahiye') ||
+        normalized.contains('badal de') ||
+        normalized.contains('aur aali dikh') ||
+        normalized.contains('theek nahi yeh') ||
         normalized.contains('other prf') ||
         normalized.contains('other notes') ||
         normalized.contains('another note') ||
@@ -609,6 +630,27 @@ class _AIChatScreenState extends State<AIChatScreen>
 
   bool _shouldSearchAllPdfsForPrompt(String prompt) {
     return _searchAllPdfs || _promptRequestsAllPdfs(prompt);
+  }
+
+  bool _shouldForceEnglish(String prompt) {
+    final normalized = prompt.toLowerCase();
+    return normalized.contains('reply in english') ||
+        normalized.contains('answer in english') ||
+        normalized.contains('english only') ||
+        normalized.contains('in english');
+  }
+
+  String _detectDialectIntensity(String prompt) {
+    final normalized = prompt.toLowerCase();
+    if (normalized.contains('strong haryanvi') ||
+        normalized.contains('kadak haryanvi') ||
+        normalized.contains('hard haryanvi') ||
+        normalized.contains('full haryanvi') ||
+        normalized.contains('pure haryanvi') ||
+        normalized.contains('desi haryanvi')) {
+      return 'strong';
+    }
+    return 'light';
   }
 
   Map<String, dynamic>? _buildContextFilters() {
@@ -1513,6 +1555,44 @@ class _AIChatScreenState extends State<AIChatScreen>
     );
   }
 
+  void _showSourcePicker() {
+    showModalBottomSheet(
+      context: context,
+      builder: (_) => Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(
+              Icons.description_outlined,
+              color: Color(0xFF8B5CF6),
+            ),
+            title: const Text('My Notes'),
+            subtitle: const Text('Search uploaded PDFs and study material'),
+            selected: !_allowWebMode,
+            onTap: () {
+              setState(() => _allowWebMode = false);
+              Navigator.pop(context);
+            },
+          ),
+          ListTile(
+            leading: const Icon(
+              Icons.language,
+              color: Color(0xFF1EAEDB),
+            ),
+            title: const Text('Web Search'),
+            subtitle: const Text('Search the internet for answers'),
+            selected: _allowWebMode,
+            onTap: () {
+              setState(() => _allowWebMode = true);
+              Navigator.pop(context);
+            },
+          ),
+          const SizedBox(height: 16),
+        ],
+      ),
+    );
+  }
+
   _LongResponseTracker _startLongResponseTracker(String taskLabel) {
     final tracker = _LongResponseTracker();
     _activeLongResponseTrackers.add(tracker);
@@ -1695,6 +1775,17 @@ class _AIChatScreenState extends State<AIChatScreen>
         response['response']?.toString() ??
         response['data']?.toString() ??
         '';
+  }
+
+  String? _extractPrimarySourceFileId(Map<String, dynamic> response) {
+    final direct = response['primary_source_file_id']?.toString().trim();
+    if (direct != null && direct.isNotEmpty) return direct;
+    final data = response['data'];
+    if (data is Map) {
+      final nested = data['primary_source_file_id']?.toString().trim();
+      if (nested != null && nested.isNotEmpty) return nested;
+    }
+    return null;
   }
 
   bool _responseIndicatesNoLocal(Map<String, dynamic> response) {
@@ -2077,6 +2168,7 @@ class _AIChatScreenState extends State<AIChatScreen>
         ocrProvider: 'google',
         attachments: attachments,
         filters: contextFilters,
+        languageHint: 'en',
       );
       final answer = _extractRagAnswer(response);
       final decoded = _decodeJsonMapFromText(answer);
@@ -2821,6 +2913,16 @@ Return STRICT JSON only (no markdown). Schema:
       final contextFilters = await _buildContextFiltersForRequest(
         ignoreSubject: searchAllForPrompt,
       );
+      final sourceSwitchForTurn = _promptRequestsAllPdfs(userPrompt);
+      final languageHint = _shouldForceEnglish(userPrompt) ? 'en' : 'auto';
+      final dialectIntensity = languageHint == 'en'
+          ? null
+          : (_detectDialectIntensity(userPrompt) == 'strong'
+              ? 'strong'
+              : null);
+      final excludeFileIds = (_lastPrimarySourceFileId ?? '').trim().isNotEmpty
+          ? <String>[_lastPrimarySourceFileId!.trim()]
+          : null;
       final inferredFromPrompt = _extractTopicFromPrompt(userPrompt);
       final inferredFromAttachments = await _inferSubjectFromAttachments(
         attachments: attachmentPayload,
@@ -2866,16 +2968,24 @@ Return STRICT JSON only (no markdown). Schema:
           sessionId: _activeSessionId,
           fileId: searchAllForPrompt ? null : widget.resourceContext?.fileId,
           videoUrl: widget.resourceContext?.videoUrl,
-          allowWeb: allowWeb,
-          useOcr: hasImageAttachments || forceOcr,
-          forceOcr: forceOcr,
-          ocrProvider: (hasImageAttachments || forceOcr)
-              ? 'google'
-              : null,
-          attachments: mergedAttachments,
-          history: history,
-          filters: contextFilters,
+            allowWeb: allowWeb,
+            useOcr: hasImageAttachments || forceOcr,
+            forceOcr: forceOcr,
+            ocrProvider: (hasImageAttachments || forceOcr)
+                ? 'google'
+                : null,
+            attachments: mergedAttachments,
+            history: history,
+            filters: contextFilters,
+            sourceSwitchForTurn: sourceSwitchForTurn,
+            excludeFileIds: excludeFileIds,
+          dialectIntensity: dialectIntensity,
+          languageHint: languageHint,
         );
+        final primarySourceFileId = _extractPrimarySourceFileId(response);
+        if (primarySourceFileId != null && primarySourceFileId.isNotEmpty) {
+          _lastPrimarySourceFileId = primarySourceFileId;
+        }
         aiInvoked = true;
         final answer = _extractRagAnswer(response);
         lastAnswer = answer;
@@ -2983,6 +3093,16 @@ Return STRICT JSON only (no markdown). Schema:
       final contextFilters = await _buildContextFiltersForRequest(
         ignoreSubject: searchAllForPrompt,
       );
+      final sourceSwitchForTurn = _promptRequestsAllPdfs(userPrompt);
+      final languageHint = _shouldForceEnglish(userPrompt) ? 'en' : 'auto';
+      final dialectIntensity = languageHint == 'en'
+          ? null
+          : (_detectDialectIntensity(userPrompt) == 'strong'
+              ? 'strong'
+              : null);
+      final excludeFileIds = (_lastPrimarySourceFileId ?? '').trim().isNotEmpty
+          ? <String>[_lastPrimarySourceFileId!.trim()]
+          : null;
       final prompt = _buildRagPrompt(
         userPrompt:
             '$userPrompt\n\nOutput instruction: generate a structured report-ready summary.',
@@ -3009,7 +3129,15 @@ Return STRICT JSON only (no markdown). Schema:
             attachments: attachmentPayload,
             history: history,
             filters: contextFilters,
+            sourceSwitchForTurn: sourceSwitchForTurn,
+            excludeFileIds: excludeFileIds,
+            dialectIntensity: dialectIntensity,
+            languageHint: languageHint,
           );
+          final primarySourceFileId = _extractPrimarySourceFileId(candidate);
+          if (primarySourceFileId != null && primarySourceFileId.isNotEmpty) {
+            _lastPrimarySourceFileId = primarySourceFileId;
+          }
           final candidateAnswer = _sanitizeAssistantAnswerText(
             _extractRagAnswer(candidate).trim(),
           );
@@ -3174,6 +3302,16 @@ Return STRICT JSON only (no markdown). Schema:
             _isStudioChat ||
             _promptRequiresLocalContext(userPrompt) ||
             searchAllForPrompt;
+        final sourceSwitchForTurn = _promptRequestsAllPdfs(userPrompt);
+        final languageHint = _shouldForceEnglish(userPrompt) ? 'en' : 'auto';
+        final dialectIntensity = languageHint == 'en'
+            ? null
+            : (_detectDialectIntensity(userPrompt) == 'strong'
+                ? 'strong'
+                : null);
+        final excludeFileIds = (_lastPrimarySourceFileId ?? '').trim().isNotEmpty
+            ? <String>[_lastPrimarySourceFileId!.trim()]
+            : null;
         final attachmentPayload = effectiveAttachments
             .map(
               (item) => <String, dynamic>{
@@ -3268,6 +3406,10 @@ Return STRICT JSON only (no markdown). Schema:
             attachments: attachmentPayload,
             history: history,
             filters: contextFilters,
+            sourceSwitchForTurn: sourceSwitchForTurn,
+            excludeFileIds: excludeFileIds,
+            dialectIntensity: dialectIntensity,
+            languageHint: languageHint,
           );
           aiInvoked = true;
 
@@ -3302,6 +3444,12 @@ Return STRICT JSON only (no markdown). Schema:
                   primarySource,
                   sources,
                 );
+                final primarySourceFileIdRaw =
+                    data['primary_source_file_id']?.toString().trim();
+                final primarySourceFileId = primarySourceFileIdRaw != null &&
+                        primarySourceFileIdRaw.isNotEmpty
+                    ? primarySourceFileIdRaw
+                    : primarySource?.fileId;
 
                 setState(() {
                   aiMessage.primarySource = primarySource;
@@ -3319,6 +3467,10 @@ Return STRICT JSON only (no markdown). Schema:
                   aiMessage.ocrFailureAffectsRetrieval =
                       data['ocr_failure_affects_retrieval'] == true;
                   aiMessage.ocrErrors = ocrErrors;
+                  if (primarySourceFileId != null &&
+                      primarySourceFileId.trim().isNotEmpty) {
+                    _lastPrimarySourceFileId = primarySourceFileId.trim();
+                  }
                 });
               } else if (type == 'chunk') {
                 final textChunk = chunk['text']?.toString() ?? '';
@@ -3355,6 +3507,12 @@ Return STRICT JSON only (no markdown). Schema:
                     primarySource,
                     sources,
                   );
+                  final primarySourceFileIdRaw =
+                      chunk['primary_source_file_id']?.toString().trim();
+                  final primarySourceFileId = primarySourceFileIdRaw != null &&
+                          primarySourceFileIdRaw.isNotEmpty
+                      ? primarySourceFileIdRaw
+                      : primarySource?.fileId;
                   if (sources.isNotEmpty) {
                     setState(() {
                       aiMessage.primarySource = primarySource;
@@ -3371,6 +3529,10 @@ Return STRICT JSON only (no markdown). Schema:
                       );
                       aiMessage.ocrFailureAffectsRetrieval =
                           chunk['ocr_failure_affects_retrieval'] == true;
+                      if (primarySourceFileId != null &&
+                          primarySourceFileId.trim().isNotEmpty) {
+                        _lastPrimarySourceFileId = primarySourceFileId.trim();
+                      }
                     });
                   }
                 }
@@ -4270,29 +4432,22 @@ Return STRICT JSON only (no markdown). Schema:
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Container(
-                            width: 118,
-                            height: 118,
-                            padding: const EdgeInsets.all(18),
-                            decoration: BoxDecoration(
-                              color: isDark
-                                  ? Colors.white.withValues(alpha: 0.08)
-                                  : Colors.white.withValues(alpha: 0.92),
-                              borderRadius: BorderRadius.circular(30),
-                              border: Border.all(
-                                color: AppTheme.primary.withValues(alpha: 0.28),
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: AppTheme.primary.withValues(
-                                    alpha: 0.22,
+                          SizedBox(
+                            width: 94,
+                            height: 94,
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: AppTheme.primary.withValues(
+                                      alpha: 0.18,
+                                    ),
+                                    blurRadius: 26,
                                   ),
-                                  blurRadius: 36,
-                                  spreadRadius: 1,
-                                ),
-                              ],
+                                ],
+                              ),
+                              child: const AiLogoSpinner(size: 72),
                             ),
-                            child: const AiLogoSpinner(size: 70),
                           ),
                           const SizedBox(height: 24),
                           Text(
@@ -4388,8 +4543,6 @@ Return STRICT JSON only (no markdown). Schema:
     final attachButtonSize = isSmallPhone ? 34.0 : (isCompact ? 36.0 : 38.0);
     final sendButtonSize = isSmallPhone ? 36.0 : (isCompact ? 38.0 : 42.0);
     final inputBorderRadius = isSmallPhone ? 20.0 : (isCompact ? 22.0 : 24.0);
-    final composerButtonRadius =
-        isSmallPhone ? 12.0 : (isCompact ? 13.0 : 14.0);
     final inputContainerPadding = EdgeInsets.fromLTRB(
       isSmallPhone ? 6 : (isCompact ? 8 : 10),
       isSmallPhone ? 3 : (isCompact ? 4 : 6),
@@ -4519,33 +4672,22 @@ Return STRICT JSON only (no markdown). Schema:
                               position: _iconSlideAnimation,
                               child: ScaleTransition(
                                 scale: _iconScaleAnimation,
-                                child: Container(
-                                  width: isCompact ? 82 : 92,
-                                  height: isCompact ? 82 : 92,
-                                  padding: EdgeInsets.all(isCompact ? 12 : 14),
-                                  decoration: BoxDecoration(
-                                    color: isDark
-                                        ? Colors.white.withValues(alpha: 0.08)
-                                        : Colors.white.withValues(alpha: 0.92),
-                                    borderRadius: BorderRadius.circular(
-                                      isCompact ? 22 : 24,
-                                    ),
-                                    border: Border.all(
-                                      color: AppTheme.primary.withValues(
-                                        alpha: 0.2,
-                                      ),
-                                    ),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: AppTheme.primary.withValues(
-                                          alpha: isDark ? 0.18 : 0.12,
+                                child: SizedBox(
+                                  width: isCompact ? 72 : 78,
+                                  height: isCompact ? 72 : 78,
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: AppTheme.primary.withValues(
+                                            alpha: isDark ? 0.18 : 0.12,
+                                          ),
+                                          blurRadius: 22,
                                         ),
-                                        blurRadius: 26,
-                                        spreadRadius: 1,
-                                      ),
-                                    ],
+                                      ],
+                                    ),
+                                    child: const AiLogoSpinner(size: 60),
                                   ),
-                                  child: const AiLogoSpinner(size: 60),
                                 ),
                               ),
                             ),
@@ -4706,106 +4848,103 @@ Return STRICT JSON only (no markdown). Schema:
                           padding: const EdgeInsets.only(bottom: 8),
                           child: Row(
                             children: [
-                              Expanded(
-                                child: Container(
-                                  padding: const EdgeInsets.all(3),
-                                  decoration: BoxDecoration(
-                                    color: isDark
-                                        ? Colors.white10
-                                        : Colors.black.withValues(alpha: 0.05),
-                                    borderRadius: BorderRadius.circular(999),
-                                    border: Border.all(
-                                      color: isDark
-                                          ? Colors.white12
-                                          : Colors.black12,
+                              Container(
+                                width: 126,
+                                padding: const EdgeInsets.all(2),
+                                decoration: BoxDecoration(
+                                  color: isDark
+                                      ? Colors.white10
+                                      : Colors.black.withValues(alpha: 0.05),
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(
+                                    color: isDark ? Colors.white12 : Colors.black12,
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: InkWell(
+                                        onTap: () {
+                                          if (!mounted) return;
+                                          setState(() => _allowWebMode = false);
+                                        },
+                                        borderRadius: BorderRadius.circular(999),
+                                        child: AnimatedContainer(
+                                          duration:
+                                              const Duration(milliseconds: 150),
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 4,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: !_allowWebMode
+                                                ? (isDark
+                                                    ? Colors.white24
+                                                    : Colors.white)
+                                                : Colors.transparent,
+                                            borderRadius:
+                                                BorderRadius.circular(999),
+                                          ),
+                                          child: Center(
+                                            child: Text(
+                                              'Local',
+                                              style: GoogleFonts.inter(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w600,
+                                                color: !_allowWebMode
+                                                    ? (isDark
+                                                        ? Colors.white
+                                                        : Colors.black87)
+                                                    : (isDark
+                                                        ? Colors.white70
+                                                        : Colors.black54),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
                                     ),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Expanded(
-                                        child: InkWell(
-                                          onTap: () {
-                                            if (!mounted) return;
-                                            setState(() => _allowWebMode = false);
-                                          },
-                                          borderRadius: BorderRadius.circular(999),
-                                          child: AnimatedContainer(
-                                            duration:
-                                                const Duration(milliseconds: 180),
-                                            padding: const EdgeInsets.symmetric(
-                                              vertical: 6,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: !_allowWebMode
-                                                  ? (isDark
-                                                      ? Colors.white24
-                                                      : Colors.white)
-                                                  : Colors.transparent,
-                                              borderRadius:
-                                                  BorderRadius.circular(999),
-                                            ),
-                                            child: Center(
-                                              child: Text(
-                                                'Local',
-                                                style: GoogleFonts.inter(
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: !_allowWebMode
-                                                      ? (isDark
-                                                          ? Colors.white
-                                                          : Colors.black87)
-                                                      : (isDark
-                                                          ? Colors.white70
-                                                          : Colors.black54),
-                                                ),
+                                    Expanded(
+                                      child: InkWell(
+                                        onTap: () {
+                                          if (!mounted) return;
+                                          setState(() => _allowWebMode = true);
+                                        },
+                                        borderRadius: BorderRadius.circular(999),
+                                        child: AnimatedContainer(
+                                          duration:
+                                              const Duration(milliseconds: 150),
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 4,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: _allowWebMode
+                                                ? (isDark
+                                                    ? Colors.white24
+                                                    : Colors.white)
+                                                : Colors.transparent,
+                                            borderRadius:
+                                                BorderRadius.circular(999),
+                                          ),
+                                          child: Center(
+                                            child: Text(
+                                              'Web',
+                                              style: GoogleFonts.inter(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w600,
+                                                color: _allowWebMode
+                                                    ? (isDark
+                                                        ? Colors.white
+                                                        : Colors.black87)
+                                                    : (isDark
+                                                        ? Colors.white70
+                                                        : Colors.black54),
                                               ),
                                             ),
                                           ),
                                         ),
                                       ),
-                                      Expanded(
-                                        child: InkWell(
-                                          onTap: () {
-                                            if (!mounted) return;
-                                            setState(() => _allowWebMode = true);
-                                          },
-                                          borderRadius: BorderRadius.circular(999),
-                                          child: AnimatedContainer(
-                                            duration:
-                                                const Duration(milliseconds: 180),
-                                            padding: const EdgeInsets.symmetric(
-                                              vertical: 6,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: _allowWebMode
-                                                  ? (isDark
-                                                      ? Colors.white24
-                                                      : Colors.white)
-                                                  : Colors.transparent,
-                                              borderRadius:
-                                                  BorderRadius.circular(999),
-                                            ),
-                                            child: Center(
-                                              child: Text(
-                                                'Web',
-                                                style: GoogleFonts.inter(
-                                                  fontSize: 11,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: _allowWebMode
-                                                      ? (isDark
-                                                          ? Colors.white
-                                                          : Colors.black87)
-                                                      : (isDark
-                                                          ? Colors.white70
-                                                          : Colors.black54),
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                                    ),
+                                  ],
                                 ),
                               ),
                               if (widget.resourceContext != null) ...[
@@ -5003,64 +5142,33 @@ Return STRICT JSON only (no markdown). Schema:
                               ),
                             ),
                           ),
-                        Container(
-                          constraints: BoxConstraints(
-                            minHeight: composerMinHeight,
-                            maxHeight: inputMaxHeight,
-                          ),
-                          padding: inputContainerPadding,
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? const Color(0xFF111827)
-                                : Colors.white,
-                            borderRadius: BorderRadius.circular(
-                              inputBorderRadius,
-                            ),
-                            border: Border.all(
-                              color: isDark
-                                  ? Colors.white12
-                                  : Colors.black12,
-                            ),
-                            boxShadow: [
-                              if (!isDark)
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.05),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 4),
-                                ),
-                            ],
-                          ),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              Container(
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            SizedBox(
+                              width: 44,
+                              height: 44,
+                              child: Container(
                                 decoration: BoxDecoration(
                                   color: isDark
-                                      ? const Color(0xFF1F2937)
-                                      : Colors.black.withValues(alpha: 0.04),
-                                  borderRadius: BorderRadius.circular(
-                                    composerButtonRadius,
-                                  ),
+                                      ? const Color(0xFF23262D)
+                                      : Colors.white,
+                                  shape: BoxShape.circle,
                                   border: Border.all(
-                                    color: isDark
-                                        ? Colors.white12
-                                        : Colors.black12,
+                                    color:
+                                        isDark ? Colors.white12 : Colors.black12,
                                   ),
                                 ),
                                 child: IconButton(
                                   key: _coachAttachKey,
                                   tooltip: 'Attach image or PDF',
-                                  onPressed:
-                                      (_isLoading ||
+                                  onPressed: (_isLoading ||
                                           _isUploadingAttachment ||
                                           _isSendAttemptInProgress)
                                       ? null
                                       : _pickAttachment,
                                   padding: EdgeInsets.zero,
-                                  constraints: BoxConstraints.tightFor(
-                                    width: attachButtonSize,
-                                    height: attachButtonSize,
-                                  ),
+                                  iconSize: 22,
                                   icon: _isUploadingAttachment
                                       ? const SizedBox(
                                           width: 18,
@@ -5073,61 +5181,134 @@ Return STRICT JSON only (no markdown). Schema:
                                           Icons.add_rounded,
                                           color: isDark
                                               ? Colors.white70
-                                              : AppTheme.primary,
+                                              : Colors.black87,
                                         ),
                                 ),
                               ),
-                              Expanded(
-                                child: TextField(
-                                  key: _coachInputKey,
-                                  controller: _controller,
-                                  minLines: 1,
-                                  maxLines: 6,
-                                  textInputAction: TextInputAction.send,
-                                  onSubmitted: (_) => _sendMessage(),
-                                  style: textFieldStyle,
-                                  decoration: InputDecoration(
-                                    hintText: 'Message AI...',
-                                    hintStyle: hintStyle,
-                                    border: InputBorder.none,
-                                    isDense: true,
-                                    contentPadding: inputContentPadding,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  minHeight: composerMinHeight,
+                                  maxHeight: inputMaxHeight,
+                                ),
+                                child: Padding(
+                                  padding: inputContainerPadding,
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Expanded(
+                                        child: TextField(
+                                          key: _coachInputKey,
+                                          controller: _controller,
+                                          minLines: 1,
+                                          maxLines: 6,
+                                          textInputAction: TextInputAction.send,
+                                          onSubmitted: (_) => _sendMessage(),
+                                          style: textFieldStyle,
+                                          decoration: InputDecoration(
+                                            hintText: 'Message',
+                                            hintStyle: hintStyle,
+                                            border: InputBorder.none,
+                                            isDense: true,
+                                            contentPadding: inputContentPadding,
+                                            prefix: GestureDetector(
+                                              onTap: _showSourcePicker,
+                                              child: Padding(
+                                                padding:
+                                                    const EdgeInsets.only(right: 6),
+                                                child: Chip(
+                                                  label: Text(
+                                                    _allowWebMode ? 'Web' : 'Notes',
+                                                    style: TextStyle(
+                                                      fontSize: 11,
+                                                      color: _allowWebMode
+                                                          ? const Color(0xFF1EAEDB)
+                                                          : const Color(
+                                                              0xFF8B5CF6,
+                                                            ),
+                                                    ),
+                                                  ),
+                                                  backgroundColor: _allowWebMode
+                                                      ? const Color(0x261EAEDB)
+                                                      : const Color(0x268B5CF6),
+                                                  side: BorderSide(
+                                                    color: _allowWebMode
+                                                        ? const Color(0xFF1EAEDB)
+                                                        : const Color(
+                                                            0xFF8B5CF6,
+                                                          ),
+                                                    width: 1,
+                                                  ),
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                    horizontal: 4,
+                                                    vertical: 0,
+                                                  ),
+                                                  materialTapTargetSize:
+                                                      MaterialTapTargetSize
+                                                          .shrinkWrap,
+                                                  visualDensity:
+                                                      VisualDensity.compact,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 4),
+                                      AnimatedSwitcher(
+                                        duration:
+                                            const Duration(milliseconds: 180),
+                                        child: _hasText
+                                            ? SizedBox(
+                                                key: const ValueKey('send'),
+                                                width: sendButtonSize,
+                                                height: sendButtonSize,
+                                                child: Container(
+                                                  decoration: const BoxDecoration(
+                                                    color: AppTheme.primary,
+                                                    shape: BoxShape.circle,
+                                                  ),
+                                                  child: IconButton(
+                                                    onPressed: (_isLoading ||
+                                                            _isUploadingAttachment ||
+                                                            _isSendAttemptInProgress)
+                                                        ? null
+                                                        : _sendMessage,
+                                                    padding: EdgeInsets.zero,
+                                                    icon: Icon(
+                                                      Icons.arrow_upward_rounded,
+                                                      size: sendIconSize,
+                                                      color: Colors.white,
+                                                    ),
+                                                  ),
+                                                ),
+                                              )
+                                            : SizedBox(
+                                                key: const ValueKey('mic'),
+                                                width: sendButtonSize,
+                                                height: sendButtonSize,
+                                                child: IconButton(
+                                                  onPressed: null,
+                                                  padding: EdgeInsets.zero,
+                                                  icon: Icon(
+                                                    Icons.mic_none_rounded,
+                                                    size: sendIconSize,
+                                                    color: isDark
+                                                        ? Colors.white38
+                                                        : Colors.black38,
+                                                  ),
+                                                ),
+                                              ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                              Container(
-                                key: _coachSendKey,
-                                width: sendButtonSize,
-                                height: sendButtonSize,
-                                decoration: BoxDecoration(
-                                  color:
-                                      (_isLoading ||
-                                          _isUploadingAttachment ||
-                                          _isSendAttemptInProgress)
-                                      ? Colors.grey
-                                      : AppTheme.primary,
-                                  borderRadius: BorderRadius.circular(
-                                    composerButtonRadius,
-                                  ),
-                                ),
-                                child: IconButton(
-                                  onPressed:
-                                      (_isLoading ||
-                                          _isUploadingAttachment ||
-                                          _isSendAttemptInProgress)
-                                      ? null
-                                      : _sendMessage,
-                                  padding: EdgeInsets.zero,
-                                  icon: Icon(
-                                    Icons.arrow_upward_rounded,
-                                    size: sendIconSize,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
