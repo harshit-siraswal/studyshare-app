@@ -1,4 +1,5 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
+import 'package:add_2_calendar/add_2_calendar.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../config/theme.dart';
@@ -28,6 +29,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   bool _isLoading = true;
   bool _isSyncing = false;
   bool _isLoadingDaywise = false;
+  bool _autoSyncAttempted = false;
 
   bool get _isKietCollege => _attendanceService.isKietCollege(
     collegeId: widget.collegeId,
@@ -53,6 +55,21 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       _snapshot = snapshot;
       _isLoading = false;
     });
+    _triggerBackgroundSyncIfPossible();
+  }
+
+  Future<void> _triggerBackgroundSyncIfPossible() async {
+    if (_autoSyncAttempted || !_isKietCollege) return;
+    _autoSyncAttempted = true;
+
+    final token = await _attendanceService.loadSavedToken(widget.collegeId);
+    if (!mounted || token == null || token.isEmpty) return;
+
+    try {
+      await _syncWithToken(token, showSuccessToast: false);
+    } catch (error) {
+      debugPrint('Attendance background sync skipped: $error');
+    }
   }
 
   Future<void> _connectAndSync() async {
@@ -97,11 +114,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     );
   }
 
-  Future<void> _syncWithSavedToken() async {
+  Future<void> _syncWithSavedToken({bool promptIfMissingToken = true}) async {
     final token = await _attendanceService.loadSavedToken(widget.collegeId);
     if (!mounted) return;
     if (token == null || token.isEmpty) {
-      await _connectAndSync();
+      if (promptIfMissingToken) {
+        await _connectAndSync();
+      }
       return;
     }
     try {
@@ -117,14 +136,19 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             ),
           ),
         );
-        await _connectAndSync();
+        if (promptIfMissingToken) {
+          await _connectAndSync();
+        }
         return;
       }
       _showSyncError(error);
     }
   }
 
-  Future<void> _syncWithToken(String token) async {
+  Future<void> _syncWithToken(
+    String token, {
+    bool showSuccessToast = true,
+  }) async {
     setState(() => _isSyncing = true);
     try {
       final snapshot = await _attendanceService.syncKietAttendance(
@@ -135,9 +159,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       );
       if (!mounted) return;
       setState(() => _snapshot = snapshot);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('KIET attendance synced successfully.')),
-      );
+      if (showSuccessToast) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('KIET attendance synced successfully.')),
+        );
+      }
     } finally {
       if (mounted) setState(() => _isSyncing = false);
     }
@@ -146,7 +172,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   Future<void> _openDaywiseSheet(AttendanceComponent component) async {
     final snapshot = _snapshot;
     final studentId = snapshot?.student.studentId;
-    if (snapshot == null || studentId == null) {
+    if (snapshot == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Sync attendance first to load daywise data.'),
@@ -177,7 +203,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${component.courseName} · ${component.componentName}',
+                      '${component.courseName} • ${component.componentName}',
                       style: GoogleFonts.inter(
                         fontSize: 18,
                         fontWeight: FontWeight.w700,
@@ -208,13 +234,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                 return ListTile(
                                   contentPadding: EdgeInsets.zero,
                                   title: Text(
-                                    lecture.lectureDate,
+                                    _formatDate(lecture.lectureDate),
                                     style: GoogleFonts.inter(
                                       fontWeight: FontWeight.w600,
                                     ),
                                   ),
                                   subtitle: Text(
-                                    '${lecture.dayName} · ${lecture.timeSlot}',
+                                    '${lecture.dayName} • ${lecture.timeSlot}',
                                     style: GoogleFonts.inter(),
                                   ),
                                   trailing: Text(
@@ -263,6 +289,160 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     );
   }
 
+  String _formatDate(String rawDate) {
+    return _attendanceService.formatDateDdMmYyyy(rawDate);
+  }
+
+  List<AttendanceScheduleEntry> _upcomingScheduleEntries(
+    AttendanceSnapshot snapshot,
+  ) {
+    final today = DateTime.now();
+    final startOfToday = DateTime(today.year, today.month, today.day);
+    final entries = List<AttendanceScheduleEntry>.from(snapshot.schedule.entries)
+      ..sort((a, b) {
+        final aDate = _attendanceService.tryParseDate(a.lectureDate) ??
+            DateTime.fromMillisecondsSinceEpoch(0);
+        final bDate = _attendanceService.tryParseDate(b.lectureDate) ??
+            DateTime.fromMillisecondsSinceEpoch(0);
+        final dateCmp = aDate.compareTo(bDate);
+        if (dateCmp != 0) return dateCmp;
+        return a.start.compareTo(b.start);
+      });
+
+    final upcoming = entries.where((entry) {
+      final parsed = _attendanceService.tryParseDate(entry.lectureDate);
+      if (parsed == null) return false;
+      final dayDate = DateTime(parsed.year, parsed.month, parsed.day);
+      return !dayDate.isBefore(startOfToday);
+    }).toList();
+
+    return upcoming.isNotEmpty ? upcoming : entries;
+  }
+
+  DateTime _parseEntryDateTime(String dateRaw, String timeRaw) {
+    final baseDate =
+        _attendanceService.tryParseDate(dateRaw) ?? DateTime.now();
+    final parts = timeRaw.split(':');
+    final hour = parts.isNotEmpty ? int.tryParse(parts[0]) ?? 9 : 9;
+    final minute = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
+    return DateTime(baseDate.year, baseDate.month, baseDate.day, hour, minute);
+  }
+
+  Future<void> _addAllToCalendar(List<AttendanceScheduleEntry> entries) async {
+    if (entries.isEmpty) return;
+    for (final entry in entries) {
+      final start = _parseEntryDateTime(entry.lectureDate, entry.start);
+      final end = _parseEntryDateTime(entry.lectureDate, entry.end);
+      final safeEnd =
+          end.isAfter(start) ? end : start.add(const Duration(hours: 1));
+      final title = entry.courseName.isEmpty
+          ? (entry.title.isEmpty ? 'Class' : entry.title)
+          : entry.courseName;
+      final description =
+          '${entry.courseComponentName} • ${entry.facultyName}'.trim();
+      final event = Event(
+        title: title,
+        description: description,
+        location: entry.classRoom,
+        startDate: start,
+        endDate: safeEnd,
+      );
+      await Add2Calendar.addEvent2Cal(event);
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('All classes added to your calendar')),
+      );
+    }
+  }
+
+  Future<void> _openWeeklyScheduleSheet() async {
+    final snapshot = _snapshot;
+    if (snapshot == null) return;
+
+    final entries = _upcomingScheduleEntries(snapshot);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+            child: SizedBox(
+              height: MediaQuery.of(context).size.height * 0.72,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Weekly Schedule',
+                    style: GoogleFonts.inter(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: isDark
+                          ? AppTheme.darkTextPrimary
+                          : AppTheme.lightTextPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${_formatDate(snapshot.schedule.weekStartDate)} - ${_formatDate(snapshot.schedule.weekEndDate)}',
+                    style: GoogleFonts.inter(
+                      color: isDark
+                          ? AppTheme.darkTextSecondary
+                          : AppTheme.lightTextSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: entries.isEmpty
+                        ? Center(
+                            child: Text(
+                              'No classes in this week schedule.',
+                              style: GoogleFonts.inter(
+                                color: isDark
+                                    ? AppTheme.darkTextSecondary
+                                    : AppTheme.lightTextSecondary,
+                              ),
+                            ),
+                          )
+                        : ListView.separated(
+                            itemCount: entries.length,
+                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            itemBuilder: (context, index) {
+                              final entry = entries[index];
+                              final title = entry.courseName.isEmpty
+                                  ? (entry.title.isEmpty ? 'Class' : entry.title)
+                                  : entry.courseName;
+                              final location = entry.classRoom.isEmpty
+                                  ? 'Classroom TBA'
+                                  : entry.classRoom;
+                              return ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: Text(
+                                  title,
+                                  style: GoogleFonts.inter(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                subtitle: Text(
+                                  '${_formatDate(entry.lectureDate)} • ${entry.start} - ${entry.end}\n$location',
+                                  style: GoogleFonts.inter(height: 1.3),
+                                ),
+                                trailing: null,
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -278,6 +458,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         ),
         actions: _isKietCollege
             ? [
+                IconButton(
+                  tooltip: 'Weekly schedule',
+                  onPressed: _snapshot == null ? null : _openWeeklyScheduleSheet,
+                  icon: const Icon(Icons.calendar_month_rounded),
+                ),
                 IconButton(
                   onPressed: _isSyncing ? null : _syncWithSavedToken,
                   icon: _isSyncing
@@ -408,6 +593,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               ),
             ],
           ),
+          const SizedBox(height: 12),
+          if (_upcomingScheduleEntries(snapshot).isNotEmpty)
+            ElevatedButton.icon(
+              icon: const Icon(Icons.calendar_month_rounded),
+              label: const Text('Add All Classes to Calendar'),
+              onPressed: () =>
+                  _addAllToCalendar(_upcomingScheduleEntries(snapshot)),
+            ),
           const SizedBox(height: 20),
           Text(
             'Subjects',
@@ -428,10 +621,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               ),
             ),
           ),
-          if (snapshot.schedule.entries.isNotEmpty) ...[
+          if (_upcomingScheduleEntries(snapshot).isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(
-              'This Week',
+              'Upcoming Classes',
               style: GoogleFonts.inter(
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
@@ -441,7 +634,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               ),
             ),
             const SizedBox(height: 12),
-            ...snapshot.schedule.entries
+            ..._upcomingScheduleEntries(snapshot)
                 .take(5)
                 .map(
                   (entry) => ListTile(
@@ -451,16 +644,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                       style: GoogleFonts.inter(fontWeight: FontWeight.w600),
                     ),
                     subtitle: Text(
-                      '${entry.lectureDate} · ${entry.start} - ${entry.end}',
+                      '${_formatDate(entry.lectureDate)} • ${entry.start} - ${entry.end}',
                       style: GoogleFonts.inter(),
-                    ),
-                    trailing: Text(
-                      entry.classRoom,
-                      style: GoogleFonts.inter(
-                        color: isDark
-                            ? AppTheme.darkTextSecondary
-                            : AppTheme.lightTextSecondary,
-                      ),
                     ),
                   ),
                 ),
@@ -492,7 +677,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            '${snapshot.student.branchShortName} · ${snapshot.student.semesterName} · ${snapshot.student.sectionName}',
+            '${snapshot.student.branchShortName} • ${snapshot.student.semesterName} • ${snapshot.student.sectionName}',
             style: GoogleFonts.inter(
               color: isDark
                   ? AppTheme.darkTextSecondary
@@ -559,8 +744,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             (component) => Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(
-                '${component.courseName} (${component.componentName}) · '
-                '${component.percentage.toStringAsFixed(2)}% · '
+                '${component.courseName} (${component.componentName}) • '
+                '${component.percentage.toStringAsFixed(2)}% • '
                 'Need ${component.classesNeededForThreshold} classes to recover',
                 style: GoogleFonts.inter(
                   color: isDark
@@ -604,7 +789,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${component.componentName} · ${component.courseCode}',
+                      '${component.componentName} • ${component.courseCode}',
                       style: GoogleFonts.inter(
                         color: isDark
                             ? AppTheme.darkTextSecondary
@@ -635,7 +820,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           ),
           const SizedBox(height: 12),
           Text(
-            '${component.attendedClasses}/${component.totalClasses} attended · '
+            '${component.attendedClasses}/${component.totalClasses} attended • '
             '${component.extraAttendance} extra attendance',
             style: GoogleFonts.inter(
               color: isDark
@@ -685,3 +870,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     return '${difference.inDays} day ago';
   }
 }
+
+
+
