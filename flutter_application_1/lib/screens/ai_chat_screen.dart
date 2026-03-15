@@ -3928,7 +3928,11 @@ Return STRICT JSON only (no markdown). Schema:
         if (!msg.isUser)
           Row(
             children: [
-              const AiLogoMark(size: 15),
+              Image.asset(
+                'assets/images/ai_logo.png',
+                width: 15,
+                height: 15,
+              ),
               const SizedBox(width: 6),
               Text(
                 _chatTitle,
@@ -4446,7 +4450,12 @@ Return STRICT JSON only (no markdown). Schema:
                                   ),
                                 ],
                               ),
-                              child: const AiLogoSpinner(size: 72),
+                              child: Image.asset(
+                                'assets/images/ai_logo.png',
+                                width: 72,
+                                height: 72,
+                                fit: BoxFit.contain,
+                              ),
                             ),
                           ),
                           const SizedBox(height: 24),
@@ -4686,7 +4695,12 @@ Return STRICT JSON only (no markdown). Schema:
                                         ),
                                       ],
                                     ),
-                                    child: const AiLogoSpinner(size: 60),
+                                    child: Image.asset(
+                                      'assets/images/ai_logo.png',
+                                      width: 60,
+                                      height: 60,
+                                      fit: BoxFit.contain,
+                                    ),
                                   ),
                                 ),
                               ),
