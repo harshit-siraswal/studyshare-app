@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:ui';
@@ -175,10 +176,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         _canUploadSyllabusFromStudy == canUploadSyllabus) {
       return;
     }
-    setState(() {
-      _isStudySyllabusTab = isSyllabusTab;
-      _canUploadSyllabusFromStudy = canUploadSyllabus;
-    });
+    void applyUpdate() {
+      if (!mounted) return;
+      setState(() {
+        _isStudySyllabusTab = isSyllabusTab;
+        _canUploadSyllabusFromStudy = canUploadSyllabus;
+      });
+    }
+
+    final phase = SchedulerBinding.instance.schedulerPhase;
+    if (phase == SchedulerPhase.persistentCallbacks ||
+        phase == SchedulerPhase.midFrameMicrotasks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => applyUpdate());
+      return;
+    }
+    applyUpdate();
   }
 
   Future<DepartmentData?> _showSyllabusDepartmentPicker(
