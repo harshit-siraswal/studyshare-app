@@ -380,9 +380,9 @@ class _StickerPickerState extends State<StickerPicker>
     String? query,
     int limit = 25,
   }) async {
+    final effectiveQuery =
+        (query == null || query.trim().isEmpty) ? 'trending' : query.trim();
     try {
-      final effectiveQuery =
-          (query == null || query.trim().isEmpty) ? 'trending' : query.trim();
       final v2Uri = Uri.parse(
         'https://tenor.googleapis.com/v2/search?q=$effectiveQuery&key=${AppConfig.tenorApiKey}&limit=$limit&media_filter=gif',
       );
