@@ -10,6 +10,7 @@ import 'package:image_cropper/image_cropper.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/services.dart' show rootBundle;
 
 import '../config/app_config.dart';
 
@@ -105,6 +106,9 @@ class StickerPackImportResult {
 class StickerService {
   static const String _stickerDirName = 'stickers';
   static const String _installedPacksKey = 'installed_sticker_packs_v1';
+  static const String _telegramPacksKey = 'telegram_packs_v1_downloaded';
+  static const String _autoInstallVersionKey = 'sticker_auto_install_version';
+  static const int _autoInstallVersion = 3;
   static const Set<String> _supportedStickerExtensions = {
     '.png',
     '.jpg',
@@ -124,56 +128,115 @@ class StickerService {
   static bool _lastCapabilityAttemptHadToken = false;
   static const Duration _capabilityRetryBackoff = Duration(seconds: 30);
 
+  static const List<String> defaultTelegramPacks = [
+    'HotCherry',
+    'EasterAnimals',
+    'UtyaStickers',
+  ];
+
   static const List<StickerPack> availablePacks = [
     StickerPack(
-      id: 'study_essentials',
-      name: 'Study Essentials',
-      author: 'Noto Emoji',
-      source: 'github.com/googlefonts/noto-emoji',
+      id: 'animated_reaction_loop',
+      name: 'Animated Reactions',
+      author: 'StudyShare',
+      source: 'generated from github.com/googlefonts/noto-emoji',
       stickerUrls: [
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f4da.png',
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f4d6.png',
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f4dd.png',
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u270f.png',
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f4a1.png',
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f3af.png',
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f4c5.png',
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f393.png',
+        'asset://assets/stickers/animated_reactions/01_like.gif',
+        'asset://assets/stickers/animated_reactions/02_clap.gif',
+        'asset://assets/stickers/animated_reactions/03_heart.gif',
+        'asset://assets/stickers/animated_reactions/04_mindblown.gif',
+        'asset://assets/stickers/animated_reactions/05_cool.gif',
+        'asset://assets/stickers/animated_reactions/06_party.gif',
+        'asset://assets/stickers/animated_reactions/07_laugh.gif',
+        'asset://assets/stickers/animated_reactions/08_happy.gif',
+        'asset://assets/stickers/animated_reactions/09_wink.gif',
+        'asset://assets/stickers/animated_reactions/10_love.gif',
+        'asset://assets/stickers/animated_reactions/11_hug.gif',
+        'asset://assets/stickers/animated_reactions/12_pray.gif',
       ],
     ),
     StickerPack(
-      id: 'reaction_burst',
-      name: 'Reaction Burst',
-      author: 'Noto Emoji',
-      source: 'github.com/googlefonts/noto-emoji',
+      id: 'animated_study_loop',
+      name: 'Animated Study Vibes',
+      author: 'StudyShare',
+      source: 'generated from github.com/googlefonts/noto-emoji',
       stickerUrls: [
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f44d.png',
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f44f.png',
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f525.png',
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f389.png',
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f60e.png',
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f92f.png',
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f4af.png',
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f64c.png',
+        'asset://assets/stickers/animated_study/01_book.gif',
+        'asset://assets/stickers/animated_study/02_notes.gif',
+        'asset://assets/stickers/animated_study/03_lamp.gif',
+        'asset://assets/stickers/animated_study/04_target.gif',
+        'asset://assets/stickers/animated_study/05_calendar.gif',
+        'asset://assets/stickers/animated_study/06_grad.gif',
+        'asset://assets/stickers/animated_study/07_rocket.gif',
+        'asset://assets/stickers/animated_study/08_trophy.gif',
+        'asset://assets/stickers/animated_study/09_brain.gif',
+        'asset://assets/stickers/animated_study/10_fire.gif',
+        'asset://assets/stickers/animated_study/11_check.gif',
+        'asset://assets/stickers/animated_study/12_sparkles.gif',
       ],
     ),
     StickerPack(
-      id: 'cute_vibes',
-      name: 'Cute Vibes',
-      author: 'Noto Emoji',
-      source: 'github.com/googlefonts/noto-emoji',
+      id: 'animated_celebration_loop',
+      name: 'Animated Celebration',
+      author: 'StudyShare',
+      source: 'generated from github.com/googlefonts/noto-emoji',
       stickerUrls: [
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f970.png',
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f60d.png',
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f63b.png',
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f917.png',
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f496.png',
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f308.png',
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f31f.png',
-        'https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f31a.png',
+        'asset://assets/stickers/animated_celebration/01_party.gif',
+        'asset://assets/stickers/animated_celebration/02_confetti.gif',
+        'asset://assets/stickers/animated_celebration/03_gift.gif',
+        'asset://assets/stickers/animated_celebration/04_trophy.gif',
+        'asset://assets/stickers/animated_celebration/05_fireworks.gif',
+        'asset://assets/stickers/animated_celebration/06_balloon.gif',
+        'asset://assets/stickers/animated_celebration/07_medal.gif',
+        'asset://assets/stickers/animated_celebration/08_crown.gif',
+        'asset://assets/stickers/animated_celebration/09_sparkles.gif',
+        'asset://assets/stickers/animated_celebration/10_clinking.gif',
+        'asset://assets/stickers/animated_celebration/11_starstruck.gif',
+        'asset://assets/stickers/animated_celebration/12_rocket.gif',
       ],
     ),
-  ];
+      StickerPack(
+        id: 'animated_moods_loop',
+        name: 'Animated Moods',
+        author: 'StudyShare',
+        source: 'generated from github.com/googlefonts/noto-emoji',
+        stickerUrls: [
+          'asset://assets/stickers/animated_moods/01_thinking.gif',
+          'asset://assets/stickers/animated_moods/02_shocked.gif',
+          'asset://assets/stickers/animated_moods/03_sleepy.gif',
+          'asset://assets/stickers/animated_moods/04_angry.gif',
+          'asset://assets/stickers/animated_moods/05_cry.gif',
+          'asset://assets/stickers/animated_moods/06_mindblown.gif',
+          'asset://assets/stickers/animated_moods/07_nerd.gif',
+          'asset://assets/stickers/animated_moods/08_wink.gif',
+          'asset://assets/stickers/animated_moods/09_grin.gif',
+          'asset://assets/stickers/animated_moods/10_smirk.gif',
+          'asset://assets/stickers/animated_moods/11_pleading.gif',
+          'asset://assets/stickers/animated_moods/12_melting.gif',
+        ],
+      ),
+      StickerPack(
+        id: 'HotCherry',
+        name: 'Hot Cherry',
+        author: 'Telegram',
+        source: 'Telegram',
+        stickerUrls: const [],
+      ),
+      StickerPack(
+        id: 'EasterAnimals',
+        name: 'Easter Animals',
+        author: 'Telegram',
+        source: 'Telegram',
+        stickerUrls: const [],
+      ),
+      StickerPack(
+        id: 'UtyaStickers',
+        name: 'Utya Stickers',
+        author: 'Telegram',
+        source: 'Telegram',
+        stickerUrls: const [],
+      ),
+    ];
 
   // ─── Giphy Sticker API ────────────────────────────────────────────────────
 
@@ -562,7 +625,17 @@ class StickerService {
 
   /// Deletes legacy sticker packs from disk and preferences.
   Future<void> purgeLegacyPacks() async {
-    const legacyIds = {'study_pack', 'express_pack'};
+    const legacyIds = {
+      'study_pack',
+      'express_pack',
+      'study_essentials',
+      'reaction_burst',
+      'cute_vibes',
+      'wa_kesslan_reacts',
+      'wa_gurl_vibes',
+      'wa_snowden_moods',
+      'wa_agent_reacts',
+    };
     try {
       final dir = await getStickerDirectory();
       for (final legacyId in legacyIds) {
@@ -580,6 +653,143 @@ class StickerService {
         prefs.getStringList(_installedPacksKey)?.toSet() ?? <String>{};
     current.removeAll(legacyIds);
     await prefs.setStringList(_installedPacksKey, current.toList());
+  }
+
+  /// Auto-installs a few modern animated packs on first run after upgrades.
+  Future<int> ensureDefaultAnimatedPacksInstalled({int packCount = 3}) async {
+    if (packCount <= 0) return 0;
+    final prefs = await SharedPreferences.getInstance();
+    final currentVersion = prefs.getInt(_autoInstallVersionKey) ?? 0;
+    if (currentVersion >= _autoInstallVersion) {
+      return 0;
+    }
+
+    final preferredPackIds = <String>[
+      'animated_reaction_loop',
+      'animated_study_loop',
+      'animated_moods_loop',
+      'animated_celebration_loop',
+    ];
+
+    final installed = await getInstalledPackIds();
+    var installedNow = 0;
+
+    for (final packId in preferredPackIds.take(packCount)) {
+      if (installed.contains(packId)) {
+        installedNow++;
+        continue;
+      }
+      final pack = availablePacks.firstWhere(
+        (value) => value.id == packId,
+        orElse: () => const StickerPack(
+          id: '',
+          name: '',
+          author: '',
+          source: '',
+          stickerUrls: [],
+        ),
+      );
+      if (pack.id.isEmpty) continue;
+      final count = await installPack(pack);
+      if (count > 0) {
+        installedNow++;
+      }
+    }
+
+    if (installedNow > 0) {
+      await prefs.setInt(_autoInstallVersionKey, _autoInstallVersion);
+    }
+
+    return installedNow;
+  }
+
+  /// Downloads default Telegram packs once per device.
+  Future<void> ensureDefaultTelegramPacksInstalled() async {
+    final prefs = await SharedPreferences.getInstance();
+    final alreadyDone = prefs.getBool(_telegramPacksKey) ?? false;
+    if (alreadyDone) return;
+
+    for (final packName in defaultTelegramPacks) {
+      await installTelegramPack(packName);
+    }
+
+    await prefs.setBool(_telegramPacksKey, true);
+  }
+
+  /// Installs a Telegram sticker pack into the local sticker directory.
+  Future<int> installTelegramPack(String packName) async {
+    final files = await fetchTelegramStickerPack(packName);
+    if (files.isEmpty) return 0;
+    final prefs = await SharedPreferences.getInstance();
+    final current =
+        prefs.getStringList(_installedPacksKey)?.toSet() ?? <String>{};
+    current.add(packName);
+    await prefs.setStringList(_installedPacksKey, current.toList());
+    return files.length;
+  }
+
+  /// Fetches a Telegram sticker pack and saves it locally (static webp only).
+  Future<List<File>> fetchTelegramStickerPack(String packName) async {
+    final token = AppConfig.telegramBotToken.trim();
+    if (token.isEmpty) return [];
+
+    final setUri = Uri.parse(
+      'https://api.telegram.org/bot$token/getStickerSet?name=$packName',
+    );
+    final setRes = await http.get(setUri).timeout(const Duration(seconds: 20));
+    if (setRes.statusCode != 200) return [];
+    final decoded = jsonDecode(setRes.body) as Map<String, dynamic>;
+    if (decoded['ok'] != true) return [];
+
+    final stickers = (decoded['result']?['stickers'] as List? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .where((sticker) {
+      final isAnimated = sticker['is_animated'] == true;
+      final isVideo = sticker['is_video'] == true;
+      return !isAnimated && !isVideo;
+    }).toList();
+
+    if (stickers.isEmpty) return [];
+
+    final dir = await getStickerDirectory();
+    final packDir = Directory(path.join(dir.path, 'pack_$packName'));
+    if (!await packDir.exists()) {
+      await packDir.create(recursive: true);
+    }
+
+    final files = <File>[];
+    for (final sticker in stickers.take(30)) {
+      final fileId = sticker['file_id']?.toString() ?? '';
+      if (fileId.isEmpty) continue;
+
+      final fileInfoUri = Uri.parse(
+        'https://api.telegram.org/bot$token/getFile?file_id=$fileId',
+      );
+      final fileInfoRes =
+          await http.get(fileInfoUri).timeout(const Duration(seconds: 20));
+      if (fileInfoRes.statusCode != 200) continue;
+      final fileInfo = jsonDecode(fileInfoRes.body) as Map<String, dynamic>;
+      final filePath = fileInfo['result']?['file_path']?.toString() ?? '';
+      if (filePath.isEmpty) continue;
+      if (filePath.endsWith('.webm') || filePath.endsWith('.tgs')) continue;
+
+      final downloadUri = Uri.parse(
+        'https://api.telegram.org/file/bot$token/$filePath',
+      );
+      final downloadRes =
+          await http.get(downloadUri).timeout(const Duration(seconds: 20));
+      if (downloadRes.statusCode != 200) continue;
+
+      final ext = path.extension(filePath).toLowerCase();
+      final safeExt = ext.isEmpty ? '.webp' : ext;
+      final localFile = File(
+        path.join(packDir.path, 'tg_${packName}_${fileId.hashCode}$safeExt'),
+      );
+      await localFile.writeAsBytes(downloadRes.bodyBytes, flush: true);
+      files.add(localFile);
+    }
+
+    return files;
   }
 
   Future<List<File>> getLocalStickers() async {
@@ -861,11 +1071,18 @@ class StickerService {
       final index = entry.key;
       final url = entry.value;
       try {
-        final response = await dio.get<List<int>>(
-          url,
-          options: Options(responseType: ResponseType.bytes),
-        );
-        final bytes = response.data;
+        List<int>? bytes;
+        if (url.startsWith('asset://')) {
+          final assetPath = url.replaceFirst('asset://', '');
+          final asset = await rootBundle.load(assetPath);
+          bytes = asset.buffer.asUint8List();
+        } else {
+          final response = await dio.get<List<int>>(
+            url,
+            options: Options(responseType: ResponseType.bytes),
+          );
+          bytes = response.data;
+        }
         if (bytes == null || bytes.isEmpty) return false;
 
         final ext = _safeExtensionFromUrl(url);
@@ -1006,8 +1223,10 @@ class StickerService {
   }
 
   String _safeExtensionFromUrl(String url) {
-    final uri = Uri.tryParse(url);
-    final ext = path.extension(uri?.path ?? '').toLowerCase();
+    final rawPath = url.startsWith('asset://')
+        ? url.replaceFirst('asset://', '')
+        : (Uri.tryParse(url)?.path ?? '');
+    final ext = path.extension(rawPath).toLowerCase();
     if (_supportedStickerExtensions.contains(ext)) {
       return ext;
     }

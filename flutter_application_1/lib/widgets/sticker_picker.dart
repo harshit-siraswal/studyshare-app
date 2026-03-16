@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
+import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
@@ -103,6 +104,7 @@ class _StickerPickerState extends State<StickerPicker>
   final TextEditingController _gifSearchController = TextEditingController();
 
   List<File> _stickers = [];
+  Set<String> _installedPackIds = {};
   bool _isLoading = true;
   String? _errorMessage;
 
@@ -189,23 +191,40 @@ class _StickerPickerState extends State<StickerPicker>
       _errorMessage = null;
     });
 
-    try {
-      await _stickerService.warmUpCapabilities();
-      await _stickerService.purgeLegacyPacks();
-      await _stickerService.ensureDefaultAnimatedPacksInstalled(packCount: 3);
-      final stickers = await _stickerService.getLocalStickers();
-      if (!mounted) return;
-      setState(() {
-        _stickers = stickers;
-        _isLoading = false;
-      });
-    } catch (_) {
+      try {
+        await _stickerService.warmUpCapabilities();
+        await _stickerService.purgeLegacyPacks();
+        await _stickerService.ensureDefaultAnimatedPacksInstalled(packCount: 3);
+        final stickers = await _stickerService.getLocalStickers();
+        final installed = await _stickerService.getInstalledPackIds();
+        if (!mounted) return;
+        setState(() {
+          _stickers = stickers;
+          _installedPackIds = installed;
+          _isLoading = false;
+        });
+        unawaited(
+          _stickerService
+              .ensureDefaultTelegramPacksInstalled()
+              .then((_) => _refreshLocalStickers()),
+        );
+      } catch (_) {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
         _errorMessage = 'Failed to load stickers';
       });
     }
+  }
+
+  Future<void> _refreshLocalStickers() async {
+    final stickers = await _stickerService.getLocalStickers();
+    final installed = await _stickerService.getInstalledPackIds();
+    if (!mounted) return;
+    setState(() {
+      _stickers = stickers;
+      _installedPackIds = installed;
+    });
   }
 
   Future<void> _loadGiphy({String? query}) async {
@@ -629,6 +648,168 @@ class _StickerPickerState extends State<StickerPicker>
       widget.onStickerSelected(savedFile);
       navigator.pop();
     }
+  }
+
+  Future<void> _pickStickerFromDevice() async {
+    final picker = ImagePicker();
+    final picked = await picker.pickImage(source: ImageSource.gallery);
+    if (!mounted || picked == null) return;
+    widget.onStickerSelected(File(picked.path));
+    Navigator.pop(context);
+  }
+
+  Future<void> _showTelegramPackSheet() async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final packs = StickerService.defaultTelegramPacks;
+    final installing = <String>{};
+
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return SafeArea(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const SizedBox(height: 8),
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.white24 : Colors.black12,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                    child: Row(
+                      children: [
+                        Text(
+                          'Telegram Sticker Packs',
+                          style: GoogleFonts.inter(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          onPressed: () => Navigator.pop(context),
+                          icon: Icon(
+                            Icons.close_rounded,
+                            color: isDark ? Colors.white70 : Colors.black54,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                      itemCount: packs.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final packName = packs[index];
+                        final isInstalled =
+                            _installedPackIds.contains(packName);
+                        final isInstalling = installing.contains(packName);
+
+                        return Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isDark ? Colors.white10 : Colors.black12,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      packName,
+                                      style: GoogleFonts.inter(
+                                        fontWeight: FontWeight.w600,
+                                        color: isDark
+                                            ? Colors.white
+                                            : Colors.black87,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'Download from Telegram',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 12,
+                                        color: isDark
+                                            ? Colors.white54
+                                            : Colors.black45,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (isInstalled)
+                                Icon(
+                                  Icons.check_circle,
+                                  color: Colors.green.shade400,
+                                )
+                              else if (isInstalling)
+                                SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: AppTheme.primary,
+                                  ),
+                                )
+                              else
+                                ElevatedButton(
+                                  onPressed: () async {
+                                    setSheetState(
+                                      () => installing.add(packName),
+                                    );
+                                    await _stickerService
+                                        .installTelegramPack(packName);
+                                    await _refreshLocalStickers();
+                                    setSheetState(
+                                      () => installing.remove(packName),
+                                    );
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: AppTheme.primary,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 8,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                  ),
+                                  child: const Text('Install'),
+                                ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _createStickerFromImage() async {
@@ -1270,32 +1451,73 @@ class _StickerPickerState extends State<StickerPicker>
                           );
                         },
                       ),
-                      const SizedBox(height: 10),
-                      if (_stickerQuery.trim().isEmpty) ...[
-                        SizedBox(
-                          width: double.infinity,
-                          child: OutlinedButton.icon(
-                            onPressed: _createStickerFromImage,
-                            icon: const Icon(Icons.add_photo_alternate_rounded),
-                            label: const Text('Create Sticker'),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: AppTheme.primary,
-                              side: BorderSide(
-                                color: AppTheme.primary.withValues(alpha: 0.4),
+                        const SizedBox(height: 10),
+                        if (_stickerQuery.trim().isEmpty) ...[
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: _createStickerFromImage,
+                                  icon: const Icon(
+                                    Icons.add_photo_alternate_rounded,
+                                  ),
+                                  label: const Text('Create Sticker'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: AppTheme.primary,
+                                    side: BorderSide(
+                                      color:
+                                          AppTheme.primary.withValues(alpha: 0.4),
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 12,
+                                    ),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                  ),
+                                ),
                               ),
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(999),
+                              const SizedBox(width: 8),
+                              SizedBox(
+                                width: 44,
+                                height: 44,
+                                child: IconButton(
+                                  tooltip: 'From device',
+                                  onPressed: _pickStickerFromDevice,
+                                  icon: Icon(
+                                    Icons.phone_android_rounded,
+                                    color: isDark
+                                        ? Colors.white70
+                                        : Colors.black54,
+                                  ),
+                                  style: IconButton.styleFrom(
+                                    backgroundColor: isDark
+                                        ? Colors.white10
+                                        : Colors.black12,
+                                    shape: const CircleBorder(),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                        ],
+                        if (_stickerQuery.trim().isEmpty) ...[
+                          _buildStickerPackStrip(isDark),
+                          const SizedBox(height: 6),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton.icon(
+                              onPressed: _showTelegramPackSheet,
+                              icon: const Icon(Icons.add_circle_outline_rounded),
+                              label: const Text('Get More Stickers'),
+                              style: TextButton.styleFrom(
+                                foregroundColor: AppTheme.primary,
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 10),
-                      ],
-                      if (_stickerQuery.trim().isEmpty) ...[
-                        _buildStickerPackStrip(isDark),
-                        const SizedBox(height: 10),
-                      ],
+                          const SizedBox(height: 10),
+                        ],
                       Expanded(child: _buildStickerGrid(isDark)),
                     ],
                   ),

@@ -5,6 +5,7 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   audioplayers_linux
   dynamic_color
+  file_selector_linux
   gtk
   open_file_linux
   syncfusion_pdfviewer_linux
