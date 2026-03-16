@@ -3928,11 +3928,7 @@ Return STRICT JSON only (no markdown). Schema:
         if (!msg.isUser)
           Row(
             children: [
-              Image.asset(
-                'assets/images/ai_logo.png',
-                width: 15,
-                height: 15,
-              ),
+              const AiLogoMark(size: 15, useSvg: true),
               const SizedBox(width: 6),
               Text(
                 _chatTitle,
@@ -4450,12 +4446,7 @@ Return STRICT JSON only (no markdown). Schema:
                                   ),
                                 ],
                               ),
-                              child: Image.asset(
-                                'assets/images/ai_logo.png',
-                                width: 72,
-                                height: 72,
-                                fit: BoxFit.contain,
-                              ),
+                              child: const AiLogoSpinner(size: 72),
                             ),
                           ),
                           const SizedBox(height: 24),
@@ -4695,12 +4686,7 @@ Return STRICT JSON only (no markdown). Schema:
                                         ),
                                       ],
                                     ),
-                                    child: Image.asset(
-                                      'assets/images/ai_logo.png',
-                                      width: 60,
-                                      height: 60,
-                                      fit: BoxFit.contain,
-                                    ),
+                                    child: const AiLogoSpinner(size: 60),
                                   ),
                                 ),
                               ),
@@ -5156,173 +5142,197 @@ Return STRICT JSON only (no markdown). Schema:
                               ),
                             ),
                           ),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            SizedBox(
-                              width: 44,
-                              height: 44,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: isDark
-                                      ? const Color(0xFF23262D)
-                                      : Colors.white,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color:
-                                        isDark ? Colors.white12 : Colors.black12,
-                                  ),
-                                ),
-                                child: IconButton(
-                                  key: _coachAttachKey,
-                                  tooltip: 'Attach image or PDF',
-                                  onPressed: (_isLoading ||
-                                          _isUploadingAttachment ||
-                                          _isSendAttemptInProgress)
-                                      ? null
-                                      : _pickAttachment,
-                                  padding: EdgeInsets.zero,
-                                  iconSize: 22,
-                                  icon: _isUploadingAttachment
-                                      ? const SizedBox(
-                                          width: 18,
-                                          height: 18,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                          ),
-                                        )
-                                      : Icon(
-                                          Icons.add_rounded,
-                                          color: isDark
-                                              ? Colors.white70
-                                              : Colors.black87,
-                                        ),
-                                ),
-                              ),
+                        Container(
+                          padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+                          decoration: BoxDecoration(
+                            color:
+                                isDark ? const Color(0xFF1F2023) : Colors.white,
+                            borderRadius: BorderRadius.circular(
+                              inputBorderRadius,
                             ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: ConstrainedBox(
-                                constraints: BoxConstraints(
-                                  minHeight: composerMinHeight,
-                                  maxHeight: inputMaxHeight,
+                            border: Border.all(
+                              color: isDark
+                                  ? const Color(0xFF444444)
+                                  : Colors.black12,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(
+                                  alpha: isDark ? 0.35 : 0.08,
                                 ),
-                                child: Padding(
-                                  padding: inputContainerPadding,
-                                  child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.end,
-                                    children: [
-                                      Expanded(
-                                        child: TextField(
-                                          key: _coachInputKey,
-                                          controller: _controller,
-                                          minLines: 1,
-                                          maxLines: 6,
-                                          textInputAction: TextInputAction.send,
-                                          onSubmitted: (_) => _sendMessage(),
-                                          style: textFieldStyle,
-                                          decoration: InputDecoration(
-                                            hintText: 'Message',
-                                            hintStyle: hintStyle,
-                                            border: InputBorder.none,
-                                            isDense: true,
-                                            contentPadding: inputContentPadding,
-                                            prefix: GestureDetector(
-                                              onTap: _showSourcePicker,
-                                              child: Padding(
-                                                padding:
-                                                    const EdgeInsets.only(right: 6),
-                                                child: Chip(
-                                                  label: Text(
-                                                    _allowWebMode ? 'Web' : 'Notes',
-                                                    style: TextStyle(
-                                                      fontSize: 11,
-                                                      color: _allowWebMode
-                                                          ? const Color(0xFF1EAEDB)
-                                                          : const Color(
-                                                              0xFF8B5CF6,
-                                                            ),
-                                                    ),
-                                                  ),
-                                                  backgroundColor: _allowWebMode
-                                                      ? const Color(0x261EAEDB)
-                                                      : const Color(0x268B5CF6),
-                                                  side: BorderSide(
+                                blurRadius: 20,
+                                offset: const Offset(0, 10),
+                              ),
+                            ],
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Expanded(
+                                    child: ConstrainedBox(
+                                      constraints: BoxConstraints(
+                                        minHeight: composerMinHeight,
+                                        maxHeight: inputMaxHeight,
+                                      ),
+                                      child: TextField(
+                                        key: _coachInputKey,
+                                        controller: _controller,
+                                        minLines: 1,
+                                        maxLines: 6,
+                                        textInputAction: TextInputAction.send,
+                                        onSubmitted: (_) => _sendMessage(),
+                                        style: textFieldStyle,
+                                        decoration: InputDecoration(
+                                          hintText: 'Type your message here...',
+                                          hintStyle: hintStyle.copyWith(
+                                            color: isDark
+                                                ? Colors.white54
+                                                : Colors.black45,
+                                          ),
+                                          border: InputBorder.none,
+                                          isDense: true,
+                                          contentPadding: inputContentPadding,
+                                          prefix: GestureDetector(
+                                            onTap: _showSourcePicker,
+                                            child: Padding(
+                                              padding:
+                                                  const EdgeInsets.only(right: 6),
+                                              child: Chip(
+                                                label: Text(
+                                                  _allowWebMode
+                                                      ? 'Web'
+                                                      : 'Notes',
+                                                  style: TextStyle(
+                                                    fontSize: 11,
                                                     color: _allowWebMode
                                                         ? const Color(0xFF1EAEDB)
                                                         : const Color(
                                                             0xFF8B5CF6,
                                                           ),
-                                                    width: 1,
                                                   ),
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                    horizontal: 4,
-                                                    vertical: 0,
-                                                  ),
-                                                  materialTapTargetSize:
-                                                      MaterialTapTargetSize
-                                                          .shrinkWrap,
-                                                  visualDensity:
-                                                      VisualDensity.compact,
                                                 ),
+                                                backgroundColor: _allowWebMode
+                                                    ? const Color(0x261EAEDB)
+                                                    : const Color(0x268B5CF6),
+                                                side: BorderSide(
+                                                  color: _allowWebMode
+                                                      ? const Color(0xFF1EAEDB)
+                                                      : const Color(
+                                                          0xFF8B5CF6,
+                                                        ),
+                                                  width: 1,
+                                                ),
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                  horizontal: 4,
+                                                  vertical: 0,
+                                                ),
+                                                materialTapTargetSize:
+                                                    MaterialTapTargetSize
+                                                        .shrinkWrap,
+                                                visualDensity:
+                                                    VisualDensity.compact,
                                               ),
                                             ),
                                           ),
                                         ),
                                       ),
-                                      const SizedBox(width: 4),
-                                      AnimatedSwitcher(
-                                        duration:
-                                            const Duration(milliseconds: 180),
-                                        child: _hasText
-                                            ? SizedBox(
-                                                key: const ValueKey('send'),
-                                                width: sendButtonSize,
-                                                height: sendButtonSize,
-                                                child: Container(
-                                                  decoration: const BoxDecoration(
-                                                    color: AppTheme.primary,
-                                                    shape: BoxShape.circle,
-                                                  ),
-                                                  child: IconButton(
-                                                    onPressed: (_isLoading ||
-                                                            _isUploadingAttachment ||
-                                                            _isSendAttemptInProgress)
-                                                        ? null
-                                                        : _sendMessage,
-                                                    padding: EdgeInsets.zero,
-                                                    icon: Icon(
-                                                      Icons.arrow_upward_rounded,
-                                                      size: sendIconSize,
-                                                      color: Colors.white,
-                                                    ),
-                                                  ),
-                                                ),
-                                              )
-                                            : SizedBox(
-                                                key: const ValueKey('mic'),
-                                                width: sendButtonSize,
-                                                height: sendButtonSize,
-                                                child: IconButton(
-                                                  onPressed: null,
-                                                  padding: EdgeInsets.zero,
-                                                  icon: Icon(
-                                                    Icons.mic_none_rounded,
-                                                    size: sendIconSize,
-                                                    color: isDark
-                                                        ? Colors.white38
-                                                        : Colors.black38,
-                                                  ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  AnimatedSwitcher(
+                                    duration:
+                                        const Duration(milliseconds: 180),
+                                    child: _hasText
+                                        ? SizedBox(
+                                            key: const ValueKey('send'),
+                                            width: sendButtonSize,
+                                            height: sendButtonSize,
+                                            child: Container(
+                                              decoration: BoxDecoration(
+                                                color: isDark
+                                                    ? Colors.white
+                                                    : AppTheme.primary,
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: IconButton(
+                                                onPressed: (_isLoading ||
+                                                        _isUploadingAttachment ||
+                                                        _isSendAttemptInProgress)
+                                                    ? null
+                                                    : _sendMessage,
+                                                padding: EdgeInsets.zero,
+                                                icon: Icon(
+                                                  Icons.arrow_upward_rounded,
+                                                  size: sendIconSize,
+                                                  color: isDark
+                                                      ? const Color(0xFF1F2023)
+                                                      : Colors.white,
                                                 ),
                                               ),
-                                      ),
-                                    ],
+                                            ),
+                                          )
+                                        : SizedBox(
+                                            key: const ValueKey('empty'),
+                                            width: sendButtonSize,
+                                            height: sendButtonSize,
+                                          ),
                                   ),
-                                ),
+                                ],
                               ),
-                            ),
-                          ],
+                              const SizedBox(height: 8),
+                              Row(
+                                children: [
+                                  SizedBox(
+                                    width: attachButtonSize,
+                                    height: attachButtonSize,
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: isDark
+                                            ? const Color(0xFF2E3033)
+                                            : const Color(0xFFF1F5F9),
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: isDark
+                                              ? const Color(0xFF3C4046)
+                                              : Colors.black12,
+                                        ),
+                                      ),
+                                      child: IconButton(
+                                        key: _coachAttachKey,
+                                        tooltip: 'Attach image or PDF',
+                                        onPressed: (_isLoading ||
+                                                _isUploadingAttachment ||
+                                                _isSendAttemptInProgress)
+                                            ? null
+                                            : _pickAttachment,
+                                        padding: EdgeInsets.zero,
+                                        iconSize: 18,
+                                        icon: _isUploadingAttachment
+                                            ? const SizedBox(
+                                                width: 16,
+                                                height: 16,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                  strokeWidth: 2,
+                                                ),
+                                              )
+                                            : Icon(
+                                                Icons.attach_file_rounded,
+                                                color: isDark
+                                                    ? Colors.white70
+                                                    : Colors.black87,
+                                              ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),
