@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -12,6 +13,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../config/app_config.dart';
 import '../config/theme.dart';
+import '../screens/stickers/sticker_editor_screen.dart';
 import '../services/sticker_service.dart';
 
 class ImgflipTemplate {
@@ -114,11 +116,18 @@ class _StickerPickerState extends State<StickerPicker>
   bool _gifLoading = false;
   String _gifQuery = '';
   String? _gifError;
+  int _gifOffset = 0;
+  bool _gifLoadingMore = false;
+  bool _gifHasMore = true;
+  final ScrollController _gifScrollController = ScrollController();
 
   List<ImgflipTemplate> _imgflipTemplates = [];
   List<TenorGifItem> _tenorGifs = [];
   bool _memesLoading = false;
   String? _memeError;
+  String? _tenorNextPos;
+  bool _tenorLoadingMore = false;
+  final ScrollController _tenorScrollController = ScrollController();
   ImgflipTemplate? _activeTemplate;
   List<TextEditingController> _memeTextControllers = [];
   bool _memeSubmitting = false;
@@ -130,6 +139,8 @@ class _StickerPickerState extends State<StickerPicker>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _gifScrollController.addListener(_handleGifScroll);
+    _tenorScrollController.addListener(_handleTenorScroll);
     _loadAll();
     _loadMemes();
     _loadGiphy();
@@ -141,12 +152,34 @@ class _StickerPickerState extends State<StickerPicker>
     _tabController.dispose();
     _stickerSearchController.dispose();
     _gifSearchController.dispose();
+    _gifScrollController.dispose();
+    _tenorScrollController.dispose();
     for (final controller in _memeTextControllers) {
       controller.dispose();
     }
     _stickerSearchDebounce?.cancel();
     _gifSearchDebounce?.cancel();
     super.dispose();
+  }
+
+  void _handleGifScroll() {
+    if (!_gifHasMore || _gifLoading || _gifLoadingMore) return;
+    if (!_gifScrollController.hasClients) return;
+    final threshold =
+        _gifScrollController.position.maxScrollExtent - 300;
+    if (_gifScrollController.position.pixels >= threshold) {
+      _loadGiphyGifs(query: _gifQuery, append: true);
+    }
+  }
+
+  void _handleTenorScroll() {
+    if (_tenorLoadingMore || _tenorNextPos == null) return;
+    if (!_tenorScrollController.hasClients) return;
+    final threshold =
+        _tenorScrollController.position.maxScrollExtent - 300;
+    if (_tenorScrollController.position.pixels >= threshold) {
+      _loadMoreTenorGifs();
+    }
   }
 
   Future<void> _loadAll() async {
@@ -190,66 +223,273 @@ class _StickerPickerState extends State<StickerPicker>
     });
   }
 
-  Future<void> _loadGiphyGifs({String? query}) async {
-    final key = AppConfig.giphyApiKey.trim();
-    if (key.isEmpty) {
+  Future<void> _loadGiphyGifs({String? query, bool append = false}) async {
+    if (append && _gifLoadingMore) return;
+    if (!append) {
       setState(() {
-        _gifError = 'GIPHY key not configured.';
-        _giphyGifResults = [];
+        _gifLoading = true;
+        _gifError = null;
+        _gifOffset = 0;
+        _gifHasMore = true;
       });
-      return;
+    } else {
+      setState(() => _gifLoadingMore = true);
     }
 
-    setState(() {
-      _gifLoading = true;
-      _gifError = null;
-    });
-
-    final endpoint = (query == null || query.trim().isEmpty)
-        ? 'https://api.giphy.com/v1/gifs/trending'
-        : 'https://api.giphy.com/v1/gifs/search';
-    final params = {
-      'api_key': key,
-      'limit': '25',
-      if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
-    };
-
     try {
-      final uri = Uri.parse(endpoint).replace(queryParameters: params);
-      final res = await http.get(uri).timeout(const Duration(seconds: 15));
-      if (res.statusCode != 200) {
-        throw Exception('GIPHY error ${res.statusCode}');
-      }
-      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-      final data = (decoded['data'] as List?) ?? [];
-      final items = data.map((item) {
-        final images = item['images'] as Map<String, dynamic>? ?? {};
-        final fixed = images['fixed_width'] as Map<String, dynamic>? ?? {};
-        final original = images['original'] as Map<String, dynamic>? ?? {};
-        final fixedUrl = fixed['url']?.toString() ?? '';
-        final origUrl = original['url']?.toString() ?? '';
-        final width = double.tryParse(fixed['width']?.toString() ?? '') ?? 1;
-        final height = double.tryParse(fixed['height']?.toString() ?? '') ?? 1;
-        return GiphyGifItem(
-          id: item['id']?.toString() ?? '',
-          title: item['title']?.toString() ?? '',
-          fixedWidthUrl: fixedUrl,
-          originalUrl: origUrl.isEmpty ? fixedUrl : origUrl,
-          aspectRatio: width / (height == 0 ? 1 : height),
-        );
-      }).where((item) => item.fixedWidthUrl.isNotEmpty).toList();
-
+      final trimmedQuery = query?.trim();
+      final key = AppConfig.giphyApiKey.trim();
+      final items = key.isNotEmpty
+          ? await _fetchGiphyGifsDirect(
+              key: key,
+              query: trimmedQuery,
+              offset: _gifOffset,
+            )
+          : await _fetchGiphyGifsViaProxy(
+              query: trimmedQuery,
+              offset: _gifOffset,
+            );
       if (!mounted) return;
       setState(() {
-        _giphyGifResults = items;
-        _gifLoading = false;
+        if (append) {
+          _giphyGifResults.addAll(items);
+          _gifLoadingMore = false;
+        } else {
+          _giphyGifResults = items;
+          _gifLoading = false;
+        }
+        _gifOffset += items.length;
+        if (items.length < 25) {
+          _gifHasMore = false;
+        }
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _gifError = 'Failed to load GIFs';
         _gifLoading = false;
+        _gifLoadingMore = false;
       });
+    }
+  }
+
+  Future<List<GiphyGifItem>> _fetchGiphyGifsDirect({
+    required String key,
+    String? query,
+    int offset = 0,
+  }) async {
+    final endpoint = (query == null || query.trim().isEmpty)
+        ? 'https://api.giphy.com/v1/gifs/trending'
+        : 'https://api.giphy.com/v1/gifs/search';
+    final params = {
+      'api_key': key,
+      'limit': '25',
+      'offset': '$offset',
+      if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
+    };
+    final uri = Uri.parse(endpoint).replace(queryParameters: params);
+    final res = await http.get(uri).timeout(const Duration(seconds: 15));
+    if (res.statusCode != 200) {
+      throw Exception('GIPHY error ${res.statusCode}');
+    }
+    return _parseGiphyGifItems(res.body);
+  }
+
+  Future<List<GiphyGifItem>> _fetchGiphyGifsViaProxy({
+    String? query,
+    int offset = 0,
+  }) async {
+    final token = await _getIdToken();
+    final headers = {
+      'Content-Type': 'application/json',
+      if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+    };
+    final endpoint = (query == null || query.trim().isEmpty)
+        ? '/api/stickers/giphy/trending'
+        : '/api/stickers/giphy/search';
+    final uris = _backendUris(endpoint, {
+      'limit': '25',
+      'offset': '$offset',
+      if (query != null && query.trim().isNotEmpty) 'q': query.trim(),
+    });
+
+    for (final uri in uris) {
+      final res = await http
+          .get(uri, headers: headers)
+          .timeout(const Duration(seconds: 15));
+      if (res.statusCode != 200) continue;
+      return _parseGiphyGifItems(res.body);
+    }
+    return [];
+  }
+
+  List<GiphyGifItem> _parseGiphyGifItems(String body) {
+    final decoded = jsonDecode(body) as Map<String, dynamic>;
+    final data = (decoded['data'] as List?) ?? [];
+    return data.map((item) {
+      final images = item['images'] as Map<String, dynamic>? ?? {};
+      final fixed = images['fixed_width'] as Map<String, dynamic>? ?? {};
+      final original = images['original'] as Map<String, dynamic>? ?? {};
+      final fixedUrl = fixed['url']?.toString() ?? '';
+      final origUrl = original['url']?.toString() ?? '';
+      final width = double.tryParse(fixed['width']?.toString() ?? '') ?? 1;
+      final height = double.tryParse(fixed['height']?.toString() ?? '') ?? 1;
+      return GiphyGifItem(
+        id: item['id']?.toString() ?? '',
+        title: item['title']?.toString() ?? '',
+        fixedWidthUrl: fixedUrl,
+        originalUrl: origUrl.isEmpty ? fixedUrl : origUrl,
+        aspectRatio: width / (height == 0 ? 1 : height),
+      );
+    }).where((item) => item.fixedWidthUrl.isNotEmpty).toList();
+  }
+
+  Iterable<Uri> _backendUris(String endpoint, Map<String, String> params) sync* {
+    final normalized = endpoint.startsWith('/') ? endpoint : '/$endpoint';
+    for (final base in AppConfig.apiBaseUrls) {
+      final uri = Uri.parse('$base$normalized');
+      yield uri.replace(queryParameters: params);
+    }
+  }
+
+  Future<String?> _getIdToken() async {
+    final user = firebase_auth.FirebaseAuth.instance.currentUser;
+    return user?.getIdToken();
+  }
+
+  Future<List<GiphyGifItem>> _fetchTenorGifs({
+    String? query,
+    int limit = 25,
+  }) async {
+    try {
+      final effectiveQuery =
+          (query == null || query.trim().isEmpty) ? 'trending' : query.trim();
+      final v2Uri = Uri.parse(
+        'https://tenor.googleapis.com/v2/search?q=$effectiveQuery&key=${AppConfig.tenorApiKey}&limit=$limit&media_filter=gif',
+      );
+      final res = await http.get(v2Uri).timeout(const Duration(seconds: 12));
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+        final results = (decoded['results'] as List? ?? [])
+            .map((e) => TenorGifItem.fromJson(e as Map<String, dynamic>))
+            .where((e) => e.url.isNotEmpty)
+            .toList();
+        return results
+            .map(
+              (item) => GiphyGifItem(
+                id: item.url,
+                title: 'GIF',
+                fixedWidthUrl: item.url,
+                originalUrl: item.url,
+                aspectRatio:
+                    item.width / (item.height == 0 ? 1 : item.height),
+              ),
+            )
+            .toList();
+      }
+    } catch (_) {
+      // Fall through to legacy Tenor endpoint.
+    }
+    try {
+      final legacyUri = Uri.parse(
+        'https://g.tenor.com/v1/search?q=$effectiveQuery&key=LIVDSRZULELA&limit=$limit',
+      );
+      final res =
+          await http.get(legacyUri).timeout(const Duration(seconds: 12));
+      if (res.statusCode != 200) return [];
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+      final results = (decoded['results'] as List?) ?? [];
+      final items = <GiphyGifItem>[];
+      for (final raw in results) {
+        if (raw is! Map) continue;
+        final mediaList = (raw['media'] as List?) ?? const [];
+        if (mediaList.isEmpty) continue;
+        final media = mediaList.first as Map? ?? const {};
+        final gif =
+            (media['gif'] ?? media['mediumgif'] ?? media['tinygif']) as Map? ??
+                const {};
+        final url = gif['url']?.toString() ?? '';
+        final dims = (gif['dims'] as List?) ?? const [0, 0];
+        if (url.isEmpty) continue;
+        final width =
+            dims.isNotEmpty ? int.tryParse('${dims.first}') ?? 1 : 1;
+        final height = dims.length > 1
+            ? int.tryParse('${dims[1]}') ?? 1
+            : 1;
+        items.add(
+          GiphyGifItem(
+            id: url,
+            title: 'GIF',
+            fixedWidthUrl: url,
+            originalUrl: url,
+            aspectRatio: width / (height == 0 ? 1 : height),
+          ),
+        );
+      }
+      return items;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<(List<TenorGifItem>, String?)> _fetchTenorMemesPage({
+    int limit = 20,
+    String? pos,
+  }) async {
+    try {
+      final queryParams = [
+        'q=meme',
+        'key=${AppConfig.tenorApiKey}',
+        'limit=$limit',
+        'media_filter=gif',
+        if (pos != null && pos.isNotEmpty) 'pos=$pos',
+      ].join('&');
+      final v2Uri =
+          Uri.parse('https://tenor.googleapis.com/v2/search?$queryParams');
+      final res = await http.get(v2Uri).timeout(const Duration(seconds: 12));
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+        final results = (decoded['results'] as List? ?? [])
+            .map((e) => TenorGifItem.fromJson(e as Map<String, dynamic>))
+            .where((e) => e.url.isNotEmpty)
+            .toList();
+        final next = decoded['next']?.toString();
+        return (results, next);
+      }
+    } catch (_) {
+      // Fall back below.
+    }
+    try {
+      final legacyUri = Uri.parse(
+        'https://g.tenor.com/v1/search?q=meme&key=LIVDSRZULELA&limit=$limit',
+      );
+      final res =
+          await http.get(legacyUri).timeout(const Duration(seconds: 12));
+      if (res.statusCode != 200) return (<TenorGifItem>[], null);
+      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+      final results = (decoded['results'] as List?) ?? [];
+      final items = <TenorGifItem>[];
+      for (final raw in results) {
+        if (raw is! Map) continue;
+        final mediaList = (raw['media'] as List?) ?? const [];
+        if (mediaList.isEmpty) continue;
+        final media = mediaList.first as Map? ?? const {};
+        final gif =
+            (media['gif'] ?? media['mediumgif'] ?? media['tinygif']) as Map? ??
+                const {};
+        final url = gif['url']?.toString() ?? '';
+        final dims = (gif['dims'] as List?) ?? const [0, 0];
+        if (url.isEmpty) continue;
+        final width =
+            dims.isNotEmpty ? int.tryParse('${dims.first}') ?? 1 : 1;
+        final height = dims.length > 1
+            ? int.tryParse('${dims[1]}') ?? 1
+            : 1;
+        items.add(TenorGifItem(url: url, width: width, height: height));
+      }
+      return (items, null);
+    } catch (_) {
+      return (<TenorGifItem>[], null);
     }
   }
 
@@ -269,21 +509,13 @@ class _StickerPickerState extends State<StickerPicker>
               .map((e) => ImgflipTemplate.fromJson(e as Map<String, dynamic>))
               .toList();
 
-      final tenorUri = Uri.parse(
-        'https://tenor.googleapis.com/v2/search?q=meme&key=${AppConfig.tenorApiKey}&limit=20&media_filter=gif',
-      );
-      final tenorRes =
-          await http.get(tenorUri).timeout(const Duration(seconds: 15));
-      final tenorDecoded = jsonDecode(tenorRes.body) as Map<String, dynamic>;
-      final tenorResults = (tenorDecoded['results'] as List? ?? [])
-          .map((e) => TenorGifItem.fromJson(e as Map<String, dynamic>))
-          .where((e) => e.url.isNotEmpty)
-          .toList();
+      final tenorPage = await _fetchTenorMemesPage(limit: 20);
 
       if (!mounted) return;
       setState(() {
-        _imgflipTemplates = templates.take(20).toList();
-        _tenorGifs = tenorResults;
+        _imgflipTemplates = templates;
+        _tenorGifs = tenorPage.$1;
+        _tenorNextPos = tenorPage.$2;
         _memesLoading = false;
       });
     } catch (_) {
@@ -292,6 +524,26 @@ class _StickerPickerState extends State<StickerPicker>
         _memesLoading = false;
         _memeError = 'Failed to load memes';
       });
+    }
+  }
+
+  Future<void> _loadMoreTenorGifs() async {
+    if (_tenorLoadingMore || _tenorNextPos == null) return;
+    setState(() => _tenorLoadingMore = true);
+    try {
+      final page = await _fetchTenorMemesPage(
+        limit: 20,
+        pos: _tenorNextPos,
+      );
+      if (!mounted) return;
+      setState(() {
+        _tenorGifs.addAll(page.$1);
+        _tenorNextPos = page.$2;
+        _tenorLoadingMore = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _tenorLoadingMore = false);
     }
   }
 
@@ -357,18 +609,45 @@ class _StickerPickerState extends State<StickerPicker>
     widget.onStickerSelected(file);
   }
 
-  Future<void> _openMemeEditor(ImgflipTemplate template) async {
-    for (final controller in _memeTextControllers) {
-      controller.dispose();
-    }
-    _memeTextControllers = List.generate(
-      template.boxCount > 2 ? 2 : template.boxCount,
-      (_) => TextEditingController(),
+  Future<void> _openStickerEditorFromFile(
+    File sourceFile, {
+    bool startWithMemeLayout = false,
+    String? sourceLabel,
+  }) async {
+    final navigator = Navigator.of(context);
+    final savedFile = await navigator.push<File>(
+      MaterialPageRoute(
+        builder: (_) => StickerEditorScreen(
+          sourceFile: sourceFile,
+          startWithMemeLayout: startWithMemeLayout,
+          sourceLabel: sourceLabel,
+        ),
+      ),
     );
-    setState(() {
-      _activeTemplate = template;
-      _memeSubmitting = false;
-    });
+    if (!mounted) return;
+    if (savedFile != null) {
+      widget.onStickerSelected(savedFile);
+      navigator.pop();
+    }
+  }
+
+  Future<void> _createStickerFromImage() async {
+    final file = await _stickerService.importSticker(enableEditing: true);
+    if (!mounted || file == null) return;
+    await _openStickerEditorFromFile(file, sourceLabel: 'Custom sticker');
+  }
+
+  Future<void> _openMemeEditor(ImgflipTemplate template) async {
+    final file = await _downloadToTempFile(
+      template.url,
+      'imgflip_template',
+    );
+    if (file == null) return;
+    await _openStickerEditorFromFile(
+      file,
+      startWithMemeLayout: true,
+      sourceLabel: template.name,
+    );
   }
 
   Future<void> _submitMeme() async {
@@ -467,38 +746,40 @@ class _StickerPickerState extends State<StickerPicker>
     required String hint,
     required ValueChanged<String> onChanged,
   }) {
-    return Container(
-      height: 40,
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
-        borderRadius: BorderRadius.circular(20),
+    return TextField(
+      controller: controller,
+      style: TextStyle(
+        color: isDark ? Colors.white : Colors.black87,
+        fontSize: 14,
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Row(
-        children: [
-          Icon(Icons.search,
-              size: 18, color: isDark ? Colors.white54 : Colors.black45),
-          const SizedBox(width: 8),
-          Expanded(
-            child: TextField(
-              controller: controller,
-              style: TextStyle(
-                color: isDark ? Colors.white : Colors.black87,
-                fontSize: 14,
-              ),
-              decoration: InputDecoration(
-                hintText: hint,
-                hintStyle: TextStyle(
-                  color: isDark ? Colors.white38 : Colors.black38,
-                ),
-                border: InputBorder.none,
-                isDense: true,
-              ),
-              onChanged: onChanged,
-            ),
-          ),
-        ],
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: TextStyle(
+          color: isDark ? Colors.white38 : Colors.black38,
+        ),
+        prefixIcon: Icon(
+          Icons.search,
+          size: 18,
+          color: isDark ? Colors.white54 : Colors.black45,
+        ),
+        filled: true,
+        fillColor: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(20),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(20),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(20),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding: const EdgeInsets.symmetric(vertical: 10),
+        isDense: true,
       ),
+      onChanged: onChanged,
     );
   }
 
@@ -641,16 +922,30 @@ class _StickerPickerState extends State<StickerPicker>
         ),
       );
     }
-    return MasonryGridView.count(
-      padding: const EdgeInsets.only(top: 8),
-      crossAxisCount: 2,
-      mainAxisSpacing: 6,
-      crossAxisSpacing: 6,
-      itemCount: _giphyGifResults.length,
-      itemBuilder: (context, index) {
-        final item = _giphyGifResults[index];
-        return GestureDetector(
-          onTap: () async {
+      return MasonryGridView.count(
+        controller: _gifScrollController,
+        padding: const EdgeInsets.only(top: 8),
+        crossAxisCount: 2,
+        mainAxisSpacing: 6,
+        crossAxisSpacing: 6,
+        itemCount:
+            _giphyGifResults.length + (_gifLoadingMore ? 1 : 0),
+        itemBuilder: (context, index) {
+          if (index >= _giphyGifResults.length) {
+            return Center(
+              child: SizedBox(
+                height: 18,
+                width: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: isDark ? Colors.white70 : Colors.black45,
+                ),
+              ),
+            );
+          }
+          final item = _giphyGifResults[index];
+          return GestureDetector(
+            onTap: () async {
             final navigator = Navigator.of(context);
             await _sendRemoteMedia(item.originalUrl, prefix: 'giphy_gif');
             if (!mounted) return;
@@ -767,79 +1062,113 @@ class _StickerPickerState extends State<StickerPicker>
       );
     }
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return SizedBox(
-          height: constraints.maxHeight,
-          child: Stack(
-            children: [
-              ListView(
-                children: [
-                  const SizedBox(height: 10),
-                  if (_imgflipTemplates.isNotEmpty)
-                    SizedBox(
-                      height: 120,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        itemCount: _imgflipTemplates.length,
-                        separatorBuilder: (context, index) =>
-                            const SizedBox(width: 8),
-                        itemBuilder: (context, index) {
-                          final template = _imgflipTemplates[index];
-                          return GestureDetector(
-                            onTap: () => _openMemeEditor(template),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(10),
-                              child: CachedNetworkImage(
-                                imageUrl: template.url,
-                                width: 140,
-                                height: 120,
-                                fit: BoxFit.cover,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                  const SizedBox(height: 12),
-                  MasonryGridView.count(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    crossAxisCount: 2,
-                    mainAxisSpacing: 6,
-                    crossAxisSpacing: 6,
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    itemCount: _tenorGifs.length,
-                    itemBuilder: (context, index) {
-                      final item = _tenorGifs[index];
-                      return GestureDetector(
-                        onTap: () async {
-                          final navigator = Navigator.of(context);
-                          await _sendRemoteMedia(item.url, prefix: 'tenor');
-                          if (!mounted) return;
-                          navigator.pop();
-                        },
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(12),
-                          child: CachedNetworkImage(
-                            imageUrl: item.url,
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 20),
-                ],
+      return ListView(
+        controller: _tenorScrollController,
+        children: [
+        const SizedBox(height: 10),
+        if (_imgflipTemplates.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Text(
+              'Templates',
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white70 : Colors.black54,
               ),
-              _buildMemeEditor(isDark),
-            ],
+            ),
           ),
-        );
-      },
-    );
-  }
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 120,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              itemCount: _imgflipTemplates.length,
+              separatorBuilder: (context, index) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                final template = _imgflipTemplates[index];
+                return GestureDetector(
+                  onTap: () => _openMemeEditor(template),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: CachedNetworkImage(
+                      imageUrl: template.url,
+                      width: 140,
+                      height: 120,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+        const SizedBox(height: 12),
+        if (_tenorGifs.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Text(
+              'Trending Memes',
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: isDark ? Colors.white70 : Colors.black54,
+              ),
+            ),
+          ),
+        if (_tenorGifs.isNotEmpty) const SizedBox(height: 8),
+          MasonryGridView.count(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisCount: 2,
+            mainAxisSpacing: 6,
+            crossAxisSpacing: 6,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            itemCount: _tenorGifs.length,
+            itemBuilder: (context, index) {
+            final item = _tenorGifs[index];
+            return GestureDetector(
+              onTap: () async {
+                final file = await _downloadToTempFile(
+                  item.url,
+                  'tenor_meme',
+                );
+                if (!mounted || file == null) return;
+                await _openStickerEditorFromFile(
+                  file,
+                  startWithMemeLayout: true,
+                  sourceLabel: 'Trending meme',
+                );
+              },
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: CachedNetworkImage(
+                  imageUrl: item.url,
+                  fit: BoxFit.cover,
+                ),
+                ),
+              );
+            },
+          ),
+          if (_tenorLoadingMore)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              child: Center(
+                child: SizedBox(
+                  height: 18,
+                  width: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: isDark ? Colors.white70 : Colors.black45,
+                  ),
+                ),
+              ),
+            ),
+          const SizedBox(height: 20),
+        ],
+      );
+    }
 
   @override
   Widget build(BuildContext context) {
@@ -942,6 +1271,27 @@ class _StickerPickerState extends State<StickerPicker>
                         },
                       ),
                       const SizedBox(height: 10),
+                      if (_stickerQuery.trim().isEmpty) ...[
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: _createStickerFromImage,
+                            icon: const Icon(Icons.add_photo_alternate_rounded),
+                            label: const Text('Create Sticker'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppTheme.primary,
+                              side: BorderSide(
+                                color: AppTheme.primary.withValues(alpha: 0.4),
+                              ),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                      ],
                       if (_stickerQuery.trim().isEmpty) ...[
                         _buildStickerPackStrip(isDark),
                         const SizedBox(height: 10),
