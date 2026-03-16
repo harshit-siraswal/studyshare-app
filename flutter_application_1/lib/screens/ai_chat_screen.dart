@@ -4540,15 +4540,8 @@ Return STRICT JSON only (no markdown). Schema:
       horizontal: isSmallPhone ? 8 : 10,
       vertical: isSmallPhone ? 5 : 6,
     );
-    final attachButtonSize = isSmallPhone ? 34.0 : (isCompact ? 36.0 : 38.0);
+    final attachButtonSize = 44.0;
     final sendButtonSize = isSmallPhone ? 36.0 : (isCompact ? 38.0 : 42.0);
-    final inputBorderRadius = isSmallPhone ? 20.0 : (isCompact ? 22.0 : 24.0);
-    final inputContainerPadding = EdgeInsets.fromLTRB(
-      isSmallPhone ? 6 : (isCompact ? 8 : 10),
-      isSmallPhone ? 3 : (isCompact ? 4 : 6),
-      isSmallPhone ? 5 : (isCompact ? 6 : 8),
-      isSmallPhone ? 3 : (isCompact ? 4 : 6),
-    );
     final sendIconSize = isSmallPhone ? 16.0 : 17.0;
     final textFieldStyle = GoogleFonts.inter(
       color: isDark ? Colors.white : Colors.black87,
@@ -5142,29 +5135,8 @@ Return STRICT JSON only (no markdown). Schema:
                               ),
                             ),
                           ),
-                        Container(
-                          padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-                          decoration: BoxDecoration(
-                            color:
-                                isDark ? const Color(0xFF1F2023) : Colors.white,
-                            borderRadius: BorderRadius.circular(
-                              inputBorderRadius,
-                            ),
-                            border: Border.all(
-                              color: isDark
-                                  ? const Color(0xFF444444)
-                                  : Colors.black12,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(
-                                  alpha: isDark ? 0.35 : 0.08,
-                                ),
-                                blurRadius: 20,
-                                offset: const Offset(0, 10),
-                              ),
-                            ],
-                          ),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -5276,9 +5248,20 @@ Return STRICT JSON only (no markdown). Schema:
                                             ),
                                           )
                                         : SizedBox(
-                                            key: const ValueKey('empty'),
+                                            key: const ValueKey('mic'),
                                             width: sendButtonSize,
                                             height: sendButtonSize,
+                                            child: IconButton(
+                                              onPressed: null,
+                                              padding: EdgeInsets.zero,
+                                              icon: Icon(
+                                                Icons.mic_none_rounded,
+                                                size: sendIconSize,
+                                                color: isDark
+                                                    ? Colors.white38
+                                                    : Colors.black38,
+                                              ),
+                                            ),
                                           ),
                                   ),
                                 ],
