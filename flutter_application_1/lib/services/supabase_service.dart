@@ -557,12 +557,18 @@ class SupabaseService {
     if (emails.isEmpty) return const {};
 
     try {
+      final filters = emails
+          .map(
+            (email) =>
+                'email.ilike.${email.replaceAll('%', '\\%').replaceAll('_', '\\_')}',
+          )
+          .join(',');
       final rows = await _client
           .from('users')
           .select(
             'email, display_name, username, profile_photo_url, photo_url, avatar_url',
           )
-          .inFilter('email', emails);
+          .or(filters);
       final map = <String, Map<String, dynamic>>{};
       for (final row in (rows as List).whereType<Map>()) {
         final entry = Map<String, dynamic>.from(row);
@@ -1113,6 +1119,13 @@ class SupabaseService {
 
   // Delete a room (admin only)
   Future<void> deleteRoom(String roomId) async {
+    try {
+      await _api.deleteChatRoom(roomId);
+      return;
+    } catch (e) {
+      debugPrint('Backend deleteRoom failed, trying RPC fallback: $e');
+    }
+
     try {
       final response = await _client.rpc(
         'delete_room',
@@ -2108,6 +2121,22 @@ class SupabaseService {
   /// Get room info
   Future<Map<String, dynamic>?> getRoomInfo(String roomId) async {
     try {
+      final payload = await _api.getChatRoomInfo(roomId);
+      final roomRaw = payload['room'];
+      if (roomRaw is Map) {
+        final room = Map<String, dynamic>.from(roomRaw);
+        room['isMember'] = payload['isMember'] == true;
+        room['isAdmin'] = payload['isAdmin'] == true;
+        if (room['created_by_email'] == null && room['created_by'] != null) {
+          room['created_by_email'] = room['created_by'];
+        }
+        return room;
+      }
+    } catch (e) {
+      debugPrint('Backend getRoomInfo failed, using direct fallback: $e');
+    }
+
+    try {
       final response = await _client
           .from('chat_rooms')
           .select()
@@ -2147,6 +2176,13 @@ class SupabaseService {
   /// Check if user is room admin
   Future<bool> isRoomAdmin(String roomId, String userEmail) async {
     try {
+      final payload = await _api.getChatRoomInfo(roomId);
+      if (payload['isAdmin'] == true) {
+        return true;
+      }
+    } catch (_) {}
+
+    try {
       final response = await _client
           .from('room_members')
           .select('role')
@@ -2162,6 +2198,48 @@ class SupabaseService {
 
   /// Get members of a room with role and join metadata.
   Future<List<Map<String, dynamic>>> getRoomMembers(String roomId) async {
+    try {
+      final members = await _api.getChatRoomMembers(roomId);
+      if (members.isNotEmpty) {
+        return members.map((entry) {
+          final normalized = Map<String, dynamic>.from(entry);
+          final email = _normalizeEmail(
+            normalized['user_email']?.toString() ??
+                normalized['email']?.toString() ??
+                '',
+          );
+          normalized['user_email'] = email;
+          normalized['role'] =
+              (normalized['role'] ?? 'member').toString().toLowerCase();
+          final resolvedPhoto = _firstNonEmptyValue(normalized, const [
+            'profile_photo_url',
+            'photo_url',
+            'avatar_url',
+          ]);
+          if (resolvedPhoto.isNotEmpty) {
+            normalized['profile_photo_url'] = resolvedPhoto;
+            normalized['photo_url'] = resolvedPhoto;
+            normalized['avatar_url'] = resolvedPhoto;
+          }
+          final fallbackName = email.contains('@')
+              ? email.split('@').first
+              : 'Member';
+          final displayName = _firstNonEmptyValue(normalized, const [
+            'display_name',
+            'user_name',
+            'full_name',
+            'name',
+          ]);
+          normalized['display_name'] = displayName.isEmpty
+              ? fallbackName
+              : displayName;
+          return normalized;
+        }).toList();
+      }
+    } catch (e) {
+      debugPrint('Backend getRoomMembers failed, using direct fallback: $e');
+    }
+
     try {
       final response = await _client
           .from('room_members')
