@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../../config/theme.dart';
 import '../../utils/youtube_link_utils.dart';
@@ -88,7 +89,10 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
     final token = _playerLoadToken;
     final controller = WebViewController();
     await controller.setJavaScriptMode(JavaScriptMode.unrestricted);
-    await controller.setMediaPlaybackRequiresUserGesture(false);
+    final platform = controller.platform;
+    if (platform is AndroidWebViewController) {
+      await platform.setMediaPlaybackRequiresUserGesture(false);
+    }
     await controller.setBackgroundColor(Colors.black);
     await controller.addJavaScriptChannel(
       'StudySharePlayer',
