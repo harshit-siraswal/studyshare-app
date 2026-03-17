@@ -234,7 +234,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         collegeId: widget.collegeId,
         useOcr: true,
         forceOcr: true,
-        ocrProvider: 'google',
       );
 
       if (!mounted || requestId != _searchSequence) return;

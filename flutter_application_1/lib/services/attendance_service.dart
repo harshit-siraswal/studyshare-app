@@ -256,6 +256,58 @@ class AttendanceService {
     );
   }
 
+  /// Parses a KIET date string into a [DateTime] when possible.
+  DateTime? tryParseDate(String rawDate) {
+    final trimmed = rawDate.trim();
+    if (trimmed.isEmpty) return null;
+
+    final iso = DateTime.tryParse(trimmed);
+    if (iso != null) return iso;
+
+    final normalized = trimmed.replaceAll('.', '/').replaceAll('-', '/');
+    final parts = normalized.split('/');
+    if (parts.length != 3) return null;
+
+    final p0 = int.tryParse(parts[0]);
+    final p1 = int.tryParse(parts[1]);
+    final p2 = int.tryParse(parts[2]);
+    if (p0 == null || p1 == null || p2 == null) return null;
+
+    if (parts[0].length == 4) {
+      return DateTime(p0, p1, p2);
+    }
+
+    if (parts[2].length == 4) {
+      final year = p2;
+      int day;
+      int month;
+      if (p0 > 12) {
+        day = p0;
+        month = p1;
+      } else if (p1 > 12) {
+        day = p1;
+        month = p0;
+      } else {
+        day = p0;
+        month = p1;
+      }
+      return DateTime(year, month, day);
+    }
+
+    return null;
+  }
+
+  /// Formats a date string as `dd/MM/yyyy` for display.
+  String formatDateDdMmYyyy(String rawDate) {
+    final parsed = tryParseDate(rawDate);
+    if (parsed == null) return rawDate;
+
+    String twoDigits(int value) => value.toString().padLeft(2, '0');
+    final day = twoDigits(parsed.day);
+    final month = twoDigits(parsed.month);
+    return '$day/$month/${parsed.year}';
+  }
+
   String buildAiPrompt(AttendanceSnapshot snapshot) {
     final lowAttendanceLines = snapshot.lowAttendance.isEmpty
         ? 'No subjects are currently below 75% attendance.'

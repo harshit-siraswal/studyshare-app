@@ -1,5 +1,6 @@
 ﻿import 'dart:async';
 
+
 import 'package:flutter/material.dart';
 import 'package:add_2_calendar/add_2_calendar.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -198,6 +199,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Sync attendance first to load daywise data.'),
+        ),
+      );
+      return;
+    }
+    if (studentId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Student ID unavailable. Please sync again.'),
         ),
       );
       return;
