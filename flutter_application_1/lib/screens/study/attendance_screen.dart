@@ -1,4 +1,6 @@
-﻿import 'package:flutter/material.dart';
+﻿import 'dart:async';
+
+import 'package:flutter/material.dart';
 import 'package:add_2_calendar/add_2_calendar.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -28,6 +30,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   AttendanceSnapshot? _snapshot;
   bool _isLoading = true;
   bool _isSyncing = false;
+  bool _isManualSyncing = false;
   bool _isLoadingDaywise = false;
   bool _autoSyncAttempted = false;
 
@@ -81,7 +84,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     if (!mounted || token == null || token.trim().isEmpty) return;
 
     try {
-      await _syncWithToken(token.trim());
+      await _syncWithToken(token.trim(), isManualSync: true);
     } catch (error) {
       _showSyncError(error);
     }
@@ -124,7 +127,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       return;
     }
     try {
-      await _syncWithToken(token);
+      await _syncWithToken(token, isManualSync: true);
     } catch (error) {
       if (_isLikelyExpiredSessionError(error)) {
         await _attendanceService.clearSavedSession(widget.collegeId);
@@ -148,15 +151,29 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   Future<void> _syncWithToken(
     String token, {
     bool showSuccessToast = true,
+    bool isManualSync = false,
   }) async {
+    if (isManualSync) {
+      setState(() => _isManualSyncing = true);
+    }
     setState(() => _isSyncing = true);
     try {
-      final snapshot = await _attendanceService.syncKietAttendance(
-        collegeId: widget.collegeId,
-        collegeName: widget.collegeName,
-        cybervidyaToken: token,
-        context: context,
+      Future<AttendanceSnapshot> doSync() {
+        return _attendanceService.syncKietAttendance(
+          collegeId: widget.collegeId,
+          collegeName: widget.collegeName,
+          cybervidyaToken: token,
+          context: context,
+        );
+      }
+      final results = await Future.wait([
+        doSync(),
+        Future.delayed(const Duration(milliseconds: 800)),
+      ]).timeout(
+        const Duration(seconds: 30),
+        onTimeout: () => throw TimeoutException('Sync timed out'),
       );
+      final snapshot = results.first as AttendanceSnapshot;
       if (!mounted) return;
       setState(() => _snapshot = snapshot);
       if (showSuccessToast) {
@@ -165,7 +182,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         );
       }
     } finally {
-      if (mounted) setState(() => _isSyncing = false);
+      if (mounted) {
+        setState(() {
+          _isSyncing = false;
+          if (isManualSync) _isManualSyncing = false;
+        });
+      }
     }
   }
 
@@ -464,7 +486,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   icon: const Icon(Icons.calendar_month_rounded),
                 ),
                 IconButton(
-                  onPressed: _isSyncing ? null : _syncWithSavedToken,
+                  onPressed: _isManualSyncing ? null : _syncWithSavedToken,
                   icon: _isSyncing
                       ? const SizedBox(
                           width: 18,
@@ -547,7 +569,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           ),
           const SizedBox(height: 24),
           FilledButton.icon(
-            onPressed: _isSyncing ? null : _connectAndSync,
+            onPressed: _isManualSyncing ? null : _connectAndSync,
             icon: const Icon(Icons.login_rounded),
             label: Text(
               _isSyncing ? 'Syncing...' : 'Connect KIET ERP',
@@ -572,7 +594,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             children: [
               Expanded(
                 child: FilledButton.icon(
-                  onPressed: _isSyncing ? null : _syncWithSavedToken,
+                  onPressed: _isManualSyncing ? null : _syncWithSavedToken,
                   icon: const Icon(Icons.sync_rounded),
                   label: Text(
                     'Sync now',
