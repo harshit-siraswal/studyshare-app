@@ -13,7 +13,7 @@ import '../services/ai_output_local_service.dart';
 import '../services/backend_api_service.dart';
 import '../services/summary_pdf_service.dart';
 import '../services/supabase_service.dart';
-import 'ai_logo_mark.dart';
+import 'ai_logo.dart';
 import 'branded_loader.dart';
 import 'paywall_dialog.dart';
 
@@ -1210,7 +1210,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
               ),
               child: const Padding(
                 padding: EdgeInsets.all(6),
-                child: AiLogoMark(size: 18),
+                child: AiLogo(size: 18, animate: true),
               ),
             ),
             const SizedBox(width: 8),
@@ -2401,7 +2401,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
             child: Container(
-              height: 44,
+              height: 50,
               decoration: BoxDecoration(
                 color: isDark
                     ? const Color(0xFF111A2A)
@@ -2415,6 +2415,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
               ),
               child: TabBar(
                 controller: _tabController,
+                labelPadding: EdgeInsets.zero,
                 labelColor: isDark ? Colors.white : _studioBlueDark,
                 unselectedLabelColor: isDark
                     ? Colors.white70
@@ -2430,20 +2431,36 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                         : _studioBlue.withValues(alpha: 0.28),
                   ),
                 ),
+                indicatorSize: TabBarIndicatorSize.tab,
+                indicatorPadding: const EdgeInsets.all(3),
                 dividerColor: Colors.transparent,
                 labelStyle: GoogleFonts.inter(
                   fontWeight: FontWeight.w700,
                   fontSize: 11,
                 ),
+                unselectedLabelStyle: GoogleFonts.inter(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 11,
+                ),
                 tabs: const [
                   Tab(
-                    icon: Icon(Icons.summarize_rounded, size: 14),
+                    icon: Icon(Icons.summarize_rounded, size: 15),
+                    iconMargin: EdgeInsets.only(bottom: 2),
                     text: 'Summary',
                   ),
-                  Tab(icon: Icon(Icons.quiz_rounded, size: 14), text: 'Quiz'),
-                  Tab(icon: Icon(Icons.style_rounded, size: 14), text: 'Cards'),
                   Tab(
-                    icon: Icon(Icons.chat_bubble_rounded, size: 14),
+                    icon: Icon(Icons.quiz_rounded, size: 15),
+                    iconMargin: EdgeInsets.only(bottom: 2),
+                    text: 'Quiz',
+                  ),
+                  Tab(
+                    icon: Icon(Icons.style_rounded, size: 15),
+                    iconMargin: EdgeInsets.only(bottom: 2),
+                    text: 'Cards',
+                  ),
+                  Tab(
+                    icon: Icon(Icons.chat_bubble_rounded, size: 15),
+                    iconMargin: EdgeInsets.only(bottom: 2),
                     text: 'Chat',
                   ),
                 ],

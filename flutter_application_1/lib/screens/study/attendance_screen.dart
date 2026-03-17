@@ -1,16 +1,13 @@
-﻿import 'dart:async';
-
-
-import 'package:flutter/material.dart';
+import 'dart:async';
 import 'package:add_2_calendar/add_2_calendar.dart';
+import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../config/theme.dart';
 import '../../models/attendance_models.dart';
 import '../../services/attendance_service.dart';
-import '../ai_chat_screen.dart';
 import 'attendance_web_login_screen.dart';
-
 class AttendanceScreen extends StatefulWidget {
   final String collegeId;
   final String collegeName;
@@ -40,6 +37,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     collegeName: widget.collegeName,
   );
 
+  String get _autoSyncKey => 'attendance_auto_sync_${widget.collegeId}';
+
   @override
   void initState() {
     super.initState();
@@ -66,11 +65,17 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     if (_autoSyncAttempted || !_isKietCollege) return;
     _autoSyncAttempted = true;
 
+    final prefs = await SharedPreferences.getInstance();
+    final todayKey = DateTime.now().toIso8601String().split('T').first;
+    final lastSyncedDate = prefs.getString(_autoSyncKey);
+    if (lastSyncedDate == todayKey) return;
+
     final token = await _attendanceService.loadSavedToken(widget.collegeId);
     if (!mounted || token == null || token.isEmpty) return;
 
     try {
       await _syncWithToken(token, showSuccessToast: false);
+      await prefs.setString(_autoSyncKey, todayKey);
     } catch (error) {
       debugPrint('Attendance background sync skipped: $error');
     }
@@ -149,6 +154,18 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }
   }
 
+  Future<void> _logoutKietSession() async {
+    await _attendanceService.clearSavedSession(widget.collegeId);
+    if (!mounted) return;
+    setState(() {
+      _snapshot = null;
+      _autoSyncAttempted = false;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('KIET session cleared.')),
+    );
+  }
+
   Future<void> _syncWithToken(
     String token, {
     bool showSuccessToast = true,
@@ -170,10 +187,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       final results = await Future.wait([
         doSync(),
         Future.delayed(const Duration(milliseconds: 800)),
-      ]).timeout(
-        const Duration(seconds: 30),
-        onTimeout: () => throw TimeoutException('Sync timed out'),
-      );
+      ]);
       final snapshot = results.first as AttendanceSnapshot;
       if (!mounted) return;
       setState(() => _snapshot = snapshot);
@@ -306,20 +320,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }
   }
 
-  void _openAttendanceAi() {
-    final snapshot = _snapshot;
-    if (snapshot == null) return;
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => AIChatScreen(
-          collegeId: widget.collegeId,
-          collegeName: widget.collegeName,
-          initialPrompt: _attendanceService.buildAiPrompt(snapshot),
-        ),
-      ),
-    );
-  }
-
   String _formatDate(String rawDate) {
     return _attendanceService.formatDateDdMmYyyy(rawDate);
   }
@@ -340,20 +340,72 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         return a.start.compareTo(b.start);
       });
 
+    final weekStart =
+        _attendanceService.tryParseDate(snapshot.schedule.weekStartDate);
+    final weekEnd =
+        _attendanceService.tryParseDate(snapshot.schedule.weekEndDate);
+
     final upcoming = entries.where((entry) {
       final parsed = _attendanceService.tryParseDate(entry.lectureDate);
       if (parsed == null) return false;
       final dayDate = DateTime(parsed.year, parsed.month, parsed.day);
+      if (weekStart != null && dayDate.isBefore(weekStart)) return false;
+      if (weekEnd != null && dayDate.isAfter(weekEnd)) return false;
       return !dayDate.isBefore(startOfToday);
     }).toList();
 
-    return upcoming.isNotEmpty ? upcoming : entries;
+    return upcoming;
+  }
+
+  List<AttendanceScheduleEntry> _weeklyScheduleEntries(
+    AttendanceSnapshot snapshot,
+  ) {
+    final entries = List<AttendanceScheduleEntry>.from(snapshot.schedule.entries)
+      ..sort((a, b) {
+        final aDate = _attendanceService.tryParseDate(a.lectureDate) ??
+            DateTime.fromMillisecondsSinceEpoch(0);
+        final bDate = _attendanceService.tryParseDate(b.lectureDate) ??
+            DateTime.fromMillisecondsSinceEpoch(0);
+        final dateCmp = aDate.compareTo(bDate);
+        if (dateCmp != 0) return dateCmp;
+        return a.start.compareTo(b.start);
+      });
+    final weekStart =
+        _attendanceService.tryParseDate(snapshot.schedule.weekStartDate);
+    final weekEnd =
+        _attendanceService.tryParseDate(snapshot.schedule.weekEndDate);
+    if (weekStart == null && weekEnd == null) return entries;
+
+    return entries.where((entry) {
+      final parsed = _attendanceService.tryParseDate(entry.lectureDate);
+      if (parsed == null) return false;
+      final dayDate = DateTime(parsed.year, parsed.month, parsed.day);
+      if (weekStart != null && dayDate.isBefore(weekStart)) return false;
+      if (weekEnd != null && dayDate.isAfter(weekEnd)) return false;
+      return true;
+    }).toList();
   }
 
   DateTime _parseEntryDateTime(String dateRaw, String timeRaw) {
     final baseDate =
         _attendanceService.tryParseDate(dateRaw) ?? DateTime.now();
-    final parts = timeRaw.split(':');
+    final trimmed = timeRaw.trim();
+    if (trimmed.isEmpty) {
+      return DateTime(baseDate.year, baseDate.month, baseDate.day, 9);
+    }
+
+    final amPmMatch = RegExp(r'(\d{1,2}):(\d{2})\s*([AaPp][Mm])')
+        .firstMatch(trimmed);
+    if (amPmMatch != null) {
+      final hourRaw = int.tryParse(amPmMatch.group(1) ?? '') ?? 9;
+      final minute = int.tryParse(amPmMatch.group(2) ?? '') ?? 0;
+      final meridiem = amPmMatch.group(3)!.toLowerCase();
+      var hour = hourRaw % 12;
+      if (meridiem == 'pm') hour += 12;
+      return DateTime(baseDate.year, baseDate.month, baseDate.day, hour, minute);
+    }
+
+    final parts = trimmed.split(':');
     final hour = parts.isNotEmpty ? int.tryParse(parts[0]) ?? 9 : 9;
     final minute = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
     return DateTime(baseDate.year, baseDate.month, baseDate.day, hour, minute);
@@ -379,6 +431,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         endDate: safeEnd,
       );
       await Add2Calendar.addEvent2Cal(event);
+      await Future.delayed(const Duration(milliseconds: 300));
     }
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -391,7 +444,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final snapshot = _snapshot;
     if (snapshot == null) return;
 
-    final entries = _upcomingScheduleEntries(snapshot);
+    final entries = _weeklyScheduleEntries(snapshot);
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -495,6 +548,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   icon: const Icon(Icons.calendar_month_rounded),
                 ),
                 IconButton(
+                  tooltip: 'Sync now',
                   onPressed: _isManualSyncing ? null : _syncWithSavedToken,
                   icon: _isSyncing
                       ? const SizedBox(
@@ -503,6 +557,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.sync_rounded),
+                ),
+                IconButton(
+                  tooltip: 'Log out',
+                  onPressed:
+                      _isManualSyncing || _snapshot == null ? null : _logoutKietSession,
+                  icon: const Icon(Icons.logout_rounded),
                 ),
               ]
             : null,
@@ -599,38 +659,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             _buildLowAttendanceCard(snapshot, isDark),
             const SizedBox(height: 16),
           ],
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: _isManualSyncing ? null : _syncWithSavedToken,
-                  icon: const Icon(Icons.sync_rounded),
-                  label: Text(
-                    'Sync now',
-                    style: GoogleFonts.inter(fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _openAttendanceAi,
-                  icon: const Icon(Icons.auto_awesome_rounded),
-                  label: Text(
-                    'Ask AI',
-                    style: GoogleFonts.inter(fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (_upcomingScheduleEntries(snapshot).isNotEmpty)
+          if (_weeklyScheduleEntries(snapshot).isNotEmpty)
             ElevatedButton.icon(
               icon: const Icon(Icons.calendar_month_rounded),
               label: const Text('Add All Classes to Calendar'),
               onPressed: () =>
-                  _addAllToCalendar(_upcomingScheduleEntries(snapshot)),
+                  _addAllToCalendar(_weeklyScheduleEntries(snapshot)),
             ),
           const SizedBox(height: 20),
           Text(
