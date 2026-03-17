@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import '../config/app_config.dart';
@@ -391,6 +392,7 @@ class BackendApiService {
     required String roomId,
     required String content,
     String? imageUrl,
+    String? imageFileId,
     String? authorName,
     required BuildContext context,
   }) async {
@@ -401,9 +403,66 @@ class BackendApiService {
         'roomId': roomId,
         'content': content,
         'imageUrl': ?imageUrl,
+        'imageFileId': ?imageFileId,
         'authorName': ?authorName,
       },
     );
+  }
+
+  Future<Map<String, dynamic>> uploadChatImage({
+    required PlatformFile file,
+  }) async {
+    final token = await _getIdToken();
+    final uri = Uri.parse('$_baseUrl/api/chat/messages/upload-image');
+    final request = http.MultipartRequest('POST', uri);
+
+    if (token != null && token.isNotEmpty) {
+      request.headers['Authorization'] = 'Bearer $token';
+    }
+
+    if (file.bytes != null) {
+      request.files.add(
+        http.MultipartFile.fromBytes(
+          'image',
+          file.bytes!,
+          filename: file.name,
+        ),
+      );
+    } else if (file.path != null) {
+      request.files.add(
+        await http.MultipartFile.fromPath('image', file.path!, filename: file.name),
+      );
+    } else {
+      throw BackendApiHttpException(
+        statusCode: 400,
+        message: 'Image data is unavailable for upload.',
+      );
+    }
+
+    final streamed = await _sendStreamedRequest(request);
+    final body = await streamed.stream.bytesToString();
+    Map<String, dynamic> data;
+    try {
+      data = jsonDecode(body) as Map<String, dynamic>;
+    } catch (_) {
+      throw BackendApiHttpException(
+        statusCode: streamed.statusCode,
+        message: 'Chat image upload failed (${streamed.statusCode}): $body',
+      );
+    }
+
+    if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
+      final message =
+          data['message']?.toString() ??
+          data['error']?.toString() ??
+          'Chat image upload failed';
+      throw BackendApiHttpException(
+        statusCode: streamed.statusCode,
+        message: message,
+      );
+    }
+
+    return data;
   }
 
   Future<Map<String, dynamic>> getChatRoomInfo(String roomId) async {
@@ -1543,7 +1602,6 @@ class BackendApiService {
     String? collegeId,
     bool? useOcr,
     bool? forceOcr,
-    String? ocrProvider,
     bool? force,
     bool? includeSource,
     String? videoUrl,
@@ -1557,7 +1615,6 @@ class BackendApiService {
         'college_id': ?collegeId,
         'use_ocr': ?useOcr,
         'force_ocr': ?forceOcr,
-        'ocr_provider': ?ocrProvider,
         'force': ?force,
         'include_source': ?includeSource,
         'video_url': ?videoUrl,
@@ -1570,7 +1627,6 @@ class BackendApiService {
     String? collegeId,
     bool? useOcr,
     bool? forceOcr,
-    String? ocrProvider,
     bool? force,
     bool? includeSource,
     String? videoUrl,
@@ -1584,7 +1640,6 @@ class BackendApiService {
         'college_id': ?collegeId,
         'use_ocr': ?useOcr,
         'force_ocr': ?forceOcr,
-        'ocr_provider': ?ocrProvider,
         'force': ?force,
         'include_source': ?includeSource,
         'video_url': ?videoUrl,
@@ -1597,7 +1652,6 @@ class BackendApiService {
     String? collegeId,
     bool? useOcr,
     bool? forceOcr,
-    String? ocrProvider,
     bool? force,
     bool? includeSource,
     String? videoUrl,
@@ -1611,7 +1665,6 @@ class BackendApiService {
         'college_id': ?collegeId,
         'use_ocr': ?useOcr,
         'force_ocr': ?forceOcr,
-        'ocr_provider': ?ocrProvider,
         'force': ?force,
         'include_source': ?includeSource,
         'video_url': ?videoUrl,
@@ -1625,7 +1678,6 @@ class BackendApiService {
     String? collegeId,
     bool? useOcr,
     bool? forceOcr,
-    String? ocrProvider,
   }) async {
     return _requestJson(
       '/api/ai/find',
@@ -1637,7 +1689,6 @@ class BackendApiService {
         'college_id': ?collegeId,
         'use_ocr': ?useOcr,
         'force_ocr': ?forceOcr,
-        'ocr_provider': ?ocrProvider,
       },
     );
   }
@@ -1653,7 +1704,6 @@ class BackendApiService {
     String? videoUrl,
     bool? useOcr,
     bool? forceOcr,
-    String? ocrProvider,
     List<Map<String, dynamic>>? attachments,
     List<Map<String, String>>? history,
     Map<String, dynamic>? filters,
@@ -1672,14 +1722,13 @@ class BackendApiService {
         'session_id': ?sessionId,
         'top_k': ?topK,
         'min_score': ?minScore,
-        'allow_web': ?allowWeb,
+        'allow_web': allowWeb == true,
         // TODO: replace with searchMode enum after Section B UI
         'retrieval_mode': allowWeb == true ? 'web' : 'local',
         'file_id': ?fileId,
         'video_url': ?videoUrl,
         'use_ocr': ?useOcr,
         'force_ocr': ?forceOcr,
-        'ocr_provider': ?ocrProvider,
         'attachments': ?attachments,
         'history': ?history,
         'filters': ?filters,
@@ -1816,7 +1865,6 @@ class BackendApiService {
     String? videoUrl,
     bool? useOcr,
     bool? forceOcr,
-    String? ocrProvider,
     List<Map<String, dynamic>>? attachments,
     List<Map<String, String>>? history,
     Map<String, dynamic>? filters,
@@ -1836,7 +1884,6 @@ class BackendApiService {
       videoUrl: videoUrl,
       useOcr: useOcr,
       forceOcr: forceOcr,
-      ocrProvider: ocrProvider,
       attachments: attachments,
       history: history,
       filters: filters,
@@ -1935,7 +1982,6 @@ class BackendApiService {
     String? videoUrl,
     bool? useOcr,
     bool? forceOcr,
-    String? ocrProvider,
     List<Map<String, dynamic>>? attachments,
     List<Map<String, String>>? history,
     Map<String, dynamic>? filters,
@@ -1956,7 +2002,6 @@ class BackendApiService {
         videoUrl: videoUrl,
         useOcr: useOcr,
         forceOcr: forceOcr,
-        ocrProvider: ocrProvider,
         attachments: attachments,
         history: history,
         filters: filters,
@@ -2002,7 +2047,6 @@ class BackendApiService {
         'video_url': ?videoUrl,
         'use_ocr': ?useOcr,
         'force_ocr': ?forceOcr,
-        'ocr_provider': ?ocrProvider,
         'attachments': ?attachments,
         'history': ?history,
         'filters': ?filters,
