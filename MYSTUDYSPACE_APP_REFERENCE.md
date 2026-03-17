@@ -1,12 +1,12 @@
-# MyStudySpace App Reference (Mobile + AI)
+# Studyshare App Reference (Mobile + AI)
 
 Last updated: March 1, 2026
 
-This document is a practical technical reference for the `mystudyspace-app` Flutter project, with extra depth on AI capabilities.
+This document is a practical technical reference for the `studyshare-app` Flutter project, with extra depth on AI capabilities.
 
 ## 1. Product Snapshot
 
-MyStudySpace is a college-scoped study platform with:
+Studyshare is a college-scoped study platform with:
 - Study resources (notes, PYQs, videos, syllabus)
 - Social graph (follow/following)
 - Chatrooms and threaded discussion
@@ -261,7 +261,7 @@ Bookmarks routes:
 
 ## 8. Teacher/Admin Mapping from Dashboard Context
 
-Based on `<repo-root>/admin-studyspace` docs and code:
+Based on `<repo-root>/admin-studyshare` docs and code:
 - Admin dashboard supports resource moderation, notice management, syllabus upload, and user moderation.
 - Mobile app role logic treats users with `admin_key` as teacher-capable in many flows.
 - Mobile moderation endpoint aligns with dashboard/admin path style (`/api/admin/resources/.../status`).
@@ -320,7 +320,7 @@ Project docs used:
 - `FEATURE_DOCUMENTATION.md`
 - `AI_CHAT_MODERNIZATION_PLAN.md`
 - `N8N_AI_AUTOMATION_IMPLEMENTATION_GUIDE.md`
-- `<repo-root>/admin-studyspace/PRD.md`
-- `<repo-root>/admin-studyspace/TRD.md`
+- `<repo-root>/admin-studyshare/PRD.md`
+- `<repo-root>/admin-studyshare/TRD.md`
 
 

@@ -1,14 +1,14 @@
-# MyStudySpace APK — Full Audit Report (Functionality + Database + UI/UX)
+# Studyshare APK — Full Audit Report (Functionality + Database + UI/UX)
 
 **Date:** 2026-01-28  
-**Scope:** Android APK (Flutter app) vs existing Web app (`<PROJECT_ROOT>/Studyspace`)  
+**Scope:** Android APK (Flutter app) vs existing Web app (`<PROJECT_ROOT>/Studyshare`)  
 **Current status (reported):** “Only able to view resources; almost all other actions fail (loading / PostgREST errors / non-functional UI).”
 
 ---
 
 ## Executive Summary
 
-Your **database security model** (as implemented in `Studyspace` SQL files) is:
+Your **database security model** (as implemented in `Studyshare` SQL files) is:
 - **Firebase Auth** is the identity provider (NOT Supabase Auth).
 - **Frontend clients (website + APK) use Supabase anon key for READ operations**.
 - **All WRITE operations must go through a privileged backend (service-role / admin client)**.
@@ -25,8 +25,8 @@ Your **database security model** (as implemented in `Studyspace` SQL files) is:
 
 ## Repository Sources Used (Ground Truth)
 
-### Web / Architecture / SQL (Studyspace)
-Located at: `<PROJECT_ROOT>/Studyspace`
+### Web / Architecture / SQL (Studyshare)
+Located at: `<PROJECT_ROOT>/Studyshare`
 
 Key files used in this audit:
 - `UNIFIED_RLS.sql` — defines the **core security architecture**
@@ -38,8 +38,8 @@ Key files used in this audit:
 - `src/lib/api.ts` — website’s backend API client (Firebase token + recaptcha)
 - `.env` — includes `VITE_API_URL` and reCAPTCHA site key
 
-### Flutter / APK (mystudyspace-app)
-Located at: `<PROJECT_ROOT>/mystudyspace-app`
+### Flutter / APK (studyshare-app)
+Located at: `<PROJECT_ROOT>/studyshare-app`
 
 Note: Replace `<PROJECT_ROOT>` with your local workspace root (for example
 `D:\Projects` or `~/dev`). If you need per-developer overrides, store them in a
@@ -62,7 +62,7 @@ Key files referenced:
 
 ---
 
-## Database Architecture (from Studyspace SQL) — What the App MUST follow
+## Database Architecture (from Studyshare SQL) — What the App MUST follow
 
 ### Identity model
 From `UNIFIED_RLS.sql`:
@@ -153,7 +153,7 @@ If the APK performs direct Supabase writes, you will see errors like:
 
 **Observed:**
 - comments fail (RLS 42501 / unauthorized)
-- share behavior missing (must be PNG + watermark `viamystudyspace`)
+- share behavior missing (must be PNG + watermark `viastudyshare`)
 
 **Root causes:**
 - DB `notice_comments` is designed **read-only for frontend** (`NOTICE_COMMENTS_SETUP.sql`)
@@ -169,7 +169,7 @@ If the APK performs direct Supabase writes, you will see errors like:
 **Share as PNG + watermark requirement (must be re-added):**
 - Implement “Share” as:
   1. Render a “share card” widget (notice content + author + date + optional media thumbnail)
-  2. Add watermark text: **`viamystudyspace`** (bottom-right, semi-transparent)
+  2. Add watermark text: **`viastudyshare`** (bottom-right, semi-transparent)
   3. Capture as image via `screenshot` package
   4. Share using `share_plus`
 
@@ -360,7 +360,7 @@ Recommended constant:
 3. Add rate limiting (backend) for all writes.
 
 ### Phase 4 — Share as PNG with watermark
-1. Create share card widget with watermark `viamystudyspace`
+1. Create share card widget with watermark `viastudyshare`
 2. Capture via screenshot
 3. Share via `share_plus`
 
@@ -407,7 +407,7 @@ Recommended constant:
 
 ### Option B (automatic .docx generation)
 If you want me to generate a real `.docx` file automatically, approve installing `python-docx` locally and I’ll generate:
-- `MyStudySpace_APK_Audit_Report.docx`
+- `Studyshare_APK_Audit_Report.docx`
 
 
 

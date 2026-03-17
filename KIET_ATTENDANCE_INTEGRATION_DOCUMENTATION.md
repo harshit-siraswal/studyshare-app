@@ -2,15 +2,15 @@
 
 ## 1. Purpose
 
-This document defines how to integrate the KIET attendance feature set from the original `AmanDevelops/attendance-kiet` project into MyStudySpace at `D:\StudyspaceProjects\mystudyspace-app`.
+This document defines how to integrate the KIET attendance feature set from the original `AmanDevelops/attendance-kiet` project into Studyshare at `D:\StudyshareProjects\studyshare-app`.
 
 This is an implementation-grade integration specification, not a marketing overview. It covers:
 
 - analysis of the original GitHub repository first
-- mapping to the current MyStudySpace Flutter architecture
+- mapping to the current Studyshare Flutter architecture
 - all attendance feature requirements from the source project
 - a new low-attendance notification feature for subjects below 75%
-- AI access to attendance data inside the existing MyStudySpace AI system
+- AI access to attendance data inside the existing Studyshare AI system
 - required frontend, backend, and Supabase changes
 - rollout, risk, and testing strategy
 
@@ -18,7 +18,7 @@ This is an implementation-grade integration specification, not a marketing overv
 
 The original KIET attendance project is a standalone React + Vite client that reads a KIET CyberVidya authentication token via a browser extension, then calls CyberVidya APIs directly from the client to show attendance and schedule data.
 
-MyStudySpace is a Flutter application with these relevant properties:
+Studyshare is a Flutter application with these relevant properties:
 
 - college-aware application flow via `collegeId`
 - Firebase auth and a custom backend API layer
@@ -26,11 +26,11 @@ MyStudySpace is a Flutter application with these relevant properties:
 - existing generic notifications, push notifications, local notifications, and app badges
 - an existing AI chat feature that already consumes backend and local context
 
-Because of that difference, MyStudySpace should not embed the original repository as-is. The correct approach is:
+Because of that difference, Studyshare should not embed the original repository as-is. The correct approach is:
 
 1. Reimplement the feature set as a KIET-specific module inside the Flutter app.
 2. Replace the browser-extension token model with a mobile- and backend-compatible auth bridge.
-3. Persist normalized attendance snapshots in MyStudySpace-owned storage.
+3. Persist normalized attendance snapshots in Studyshare-owned storage.
 4. Reuse the existing backend API, notification infrastructure, and AI entry points.
 
 ## 3. Analysis of the Original Repository
@@ -150,7 +150,7 @@ Important source structures include:
 
 ### 3.7 Limitations and Risks of the Original Repo
 
-The original repository cannot be integrated directly into MyStudySpace without redesign because:
+The original repository cannot be integrated directly into Studyshare without redesign because:
 
 1. It is browser-extension dependent.
 2. It assumes a web browser environment and DOM marker injection.
@@ -158,20 +158,20 @@ The original repository cannot be integrated directly into MyStudySpace without 
 4. It directly calls third-party APIs from the client.
 5. It is a standalone web shell, not a reusable feature module.
 6. It includes repo-specific branding, legal text, and extension instructions that do not map cleanly to Flutter mobile flows.
-7. The token handoff via URL query parameter is not appropriate as the long-term transport in MyStudySpace.
+7. The token handoff via URL query parameter is not appropriate as the long-term transport in Studyshare.
 
 ### 3.8 Integration Conclusion from the Original Repo Analysis
 
 The original repository should be treated as a feature blueprint and API behavior reference, not as code to embed.
 
-The correct deliverable for MyStudySpace is:
+The correct deliverable for Studyshare is:
 
 - a KIET attendance feature module implemented natively in Flutter
 - a backend-controlled ERP auth bridge
-- normalized attendance storage in MyStudySpace infrastructure
+- normalized attendance storage in Studyshare infrastructure
 - AI and notification integration built on top of the persisted attendance snapshot
 
-## 4. Current MyStudySpace Architecture Relevant to This Feature
+## 4. Current Studyshare Architecture Relevant to This Feature
 
 The current app is a Flutter application located under:
 
@@ -232,9 +232,9 @@ Verified implementation touchpoints:
 4. AI chat already exists and should consume attendance context through backend APIs, not by scraping the client state.
 5. The app already has both FCM and local-notification patterns available.
 
-## 5. Product Goal for MyStudySpace
+## 5. Product Goal for Studyshare
 
-For users whose selected college is KIET, MyStudySpace should provide a secure attendance module that supports:
+For users whose selected college is KIET, Studyshare should provide a secure attendance module that supports:
 
 1. KIET ERP authentication handoff.
 2. Attendance sync from CyberVidya.
@@ -251,7 +251,7 @@ For non-KIET colleges, the module should remain hidden or show a feature-unavail
 
 ## 6.1 High-Level Product Positioning
 
-Do not add this as a separate app inside MyStudySpace.
+Do not add this as a separate app inside Studyshare.
 
 Instead, add it as a KIET-only feature under the college-scoped Study experience.
 
@@ -259,7 +259,7 @@ Recommended UX:
 
 1. Show a KIET Attendance card or hero action inside `StudyScreen` when `collegeId` maps to KIET.
 2. Open a dedicated `KietAttendanceScreen` from there.
-3. Persist synced attendance in MyStudySpace backend and Supabase.
+3. Persist synced attendance in Studyshare backend and Supabase.
 4. Feed low-attendance states into the existing notification center and app badge system.
 5. Feed attendance insights into the existing AI chat system.
 
@@ -274,25 +274,25 @@ Recommended UX:
 
 This avoids adding a new bottom tab or fragmenting the navigation model in `HomeScreen`.
 
-## 7. Detailed Feature Scope for MyStudySpace
+## 7. Detailed Feature Scope for Studyshare
 
-This section lists the full source feature set plus required MyStudySpace additions.
+This section lists the full source feature set plus required Studyshare additions.
 
 ### 7.1 Feature A: KIET ERP Auth Bridge
 
-MyStudySpace must support ERP login and attendance sync without copying the original browser-extension flow directly.
+Studyshare must support ERP login and attendance sync without copying the original browser-extension flow directly.
 
 Required capability:
 
 - initiate KIET ERP authentication from the app
-- retrieve a valid CyberVidya session or token via a MyStudySpace-controlled bridge
+- retrieve a valid CyberVidya session or token via a Studyshare-controlled bridge
 - strip credentials from the app client as early as possible
 
 Recommended implementation:
 
 1. Preferred path:
    - backend-managed auth bridge using a secure WebView or external browser handoff
-   - backend exchanges session information and returns a short-lived MyStudySpace attendance session id
+   - backend exchanges session information and returns a short-lived Studyshare attendance session id
 
 2. Fallback path for web only:
    - browser extension support can be added later for Flutter web, but should not be the primary integration path
@@ -313,7 +313,7 @@ Replicate these core views from the source repo:
 4. Component-level attendance if multiple components exist
 5. threshold-aware highlighting around 75%
 
-Additional MyStudySpace improvements:
+Additional Studyshare improvements:
 
 - college-consistent design system
 - pull-to-refresh sync
@@ -342,7 +342,7 @@ Bring over the source repo's projection concept:
 - allow user to mark future classes they may miss
 - show projected attendance effect at subject level
 
-Additional MyStudySpace enhancements:
+Additional Studyshare enhancements:
 
 - show subject risk labels: Safe, Warning, Critical
 - allow AI to explain projection impact in natural language
@@ -371,7 +371,7 @@ Users should be able to:
 
 ### 7.7 Feature G: Low Attendance Notifications Below 75%
 
-This is a new MyStudySpace requirement and must be first-class.
+This is a new Studyshare requirement and must be first-class.
 
 Required behavior:
 
@@ -401,9 +401,9 @@ The AI should be able to answer questions such as:
 - Create a recovery plan for low-attendance subjects.
 - Compare present attendance with projected attendance.
 
-AI must only access normalized attendance snapshots stored in MyStudySpace systems. It must not access raw CyberVidya credentials or live ERP tokens.
+AI must only access normalized attendance snapshots stored in Studyshare systems. It must not access raw CyberVidya credentials or live ERP tokens.
 
-## 8. Proposed UX in MyStudySpace
+## 8. Proposed UX in Studyshare
 
 ### 8.1 Entry Placement
 
@@ -478,7 +478,7 @@ Recommended backend endpoints:
    - starts the ERP auth bridge flow
 
 2. `POST /api/attendance/kiet/auth/complete`
-   - completes bridge and issues MyStudySpace attendance session
+   - completes bridge and issues Studyshare attendance session
 
 3. `POST /api/attendance/kiet/sync`
    - pulls latest data from CyberVidya and persists normalized snapshot
@@ -520,7 +520,7 @@ Use Supabase for canonical attendance persistence after sync.
 
 Purpose:
 
-- links a MyStudySpace user to a KIET attendance identity
+- links a Studyshare user to a KIET attendance identity
 
 Suggested columns:
 
@@ -858,7 +858,7 @@ This section maps the feature to the current codebase.
 
 ### 13.2 Backend Changes
 
-In `studyspace-backend`, add:
+In `studyshare-backend`, add:
 
 - attendance auth bridge endpoints
 - attendance sync worker/service
@@ -932,7 +932,7 @@ Recommended RLS principle:
 
 These requirements are mandatory.
 
-1. Do not store KIET ERP password in MyStudySpace.
+1. Do not store KIET ERP password in Studyshare.
 2. Do not expose raw CyberVidya token to AI or notification payloads.
 3. Do not rely on long-lived client storage of ERP tokens.
 4. Remove or rotate attendance session artifacts aggressively.
@@ -991,7 +991,7 @@ Recommended UX:
 
 The KIET attendance integration is complete when:
 
-1. KIET users can connect ERP and sync attendance inside MyStudySpace.
+1. KIET users can connect ERP and sync attendance inside Studyshare.
 2. Users can view subject-wise, component-wise, and daywise attendance.
 3. Users can run weekly projections and export schedule to calendar.
 4. Low-attendance alerts appear for any subject below 75%.
@@ -1001,7 +1001,7 @@ The KIET attendance integration is complete when:
 
 ## 19. Final Recommendation
 
-Implement this as a KIET-specific academic feature under the existing Study experience, backed by MyStudySpace-controlled sync, storage, notifications, and AI context.
+Implement this as a KIET-specific academic feature under the existing Study experience, backed by Studyshare-controlled sync, storage, notifications, and AI context.
 
 Do not port the original browser-extension architecture directly.
 
@@ -1019,4 +1019,4 @@ Do not reuse directly:
 - cookie-based token ownership model
 - source branding or repo-specific legal copy
 
-This approach gives MyStudySpace a durable, mobile-compatible, AI-ready, and notification-aware attendance feature while preserving the value of the original attendance project.
+This approach gives Studyshare a durable, mobile-compatible, AI-ready, and notification-aware attendance feature while preserving the value of the original attendance project.

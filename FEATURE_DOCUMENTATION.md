@@ -1,4 +1,4 @@
-# MyStudySpace - Complete Feature Documentation
+# Studyshare - Complete Feature Documentation
 
 > **Version:** 1.0  
 > **Last Updated:** January 27, 2026  
@@ -26,7 +26,7 @@
 
 ## Overview
 
-**MyStudySpace** is a college-centric educational platform that combines resource sharing, community discussion, and academic announcements into a unified experience. The platform is designed with **college isolation** – users can only interact with content and users from their own institution.
+**Studyshare** is a college-centric educational platform that combines resource sharing, community discussion, and academic announcements into a unified experience. The platform is designed with **college isolation** – users can only interact with content and users from their own institution.
 
 ### Core Principles
 - 🏫 **College-Centric**: All content is isolated per college
@@ -109,7 +109,7 @@ graph TD
 ┌─────────────────────────────────────┐
 │ 🔒 Account Banned                   │
 ├─────────────────────────────────────┤
-│ Your access to MyStudySpace has     │
+│ Your access to Studyshare has     │
 │ been suspended.                     │
 │                                     │
 │ Reason: Violation of community      │
@@ -829,6 +829,6 @@ DU student sees:
 
 ---
 
-*This documentation covers all major features of MyStudySpace as of January 2026. For technical implementation details, refer to the codebase documentation.*
+*This documentation covers all major features of Studyshare as of January 2026. For technical implementation details, refer to the codebase documentation.*
 
 
