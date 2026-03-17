@@ -49,6 +49,14 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
     _selectedSemester = widget.initialSemester;
     _selectedSubject = widget.initialSubject;
     _availableSubjects = _getSubjectsForBranch();
+    if (_availableSubjects.isNotEmpty) {
+      if (_selectedSubject == null ||
+          !_availableSubjects.contains(_selectedSubject)) {
+        _selectedSubject = _availableSubjects.first;
+      }
+    } else {
+      _selectedSubject = null;
+    }
   }
 
   @override
@@ -69,8 +77,12 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
     if (normalized.isEmpty || normalized == _selectedSemester) return;
     setState(() {
       _selectedSemester = normalized;
-      _selectedSubject = null;
       _availableSubjects = _getSubjectsForBranch();
+      if (_availableSubjects.isNotEmpty) {
+        _selectedSubject = _availableSubjects.first;
+      } else {
+        _selectedSubject = null;
+      }
     });
   }
 
@@ -269,7 +281,6 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
           ],
         ],
       ),
-      bottomNavigationBar: _bottomUploadBar(isDark),
     );
   }
 
@@ -348,7 +359,7 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
         color: isDark ? AppTheme.darkCard : Colors.white,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: isDark ? Colors.white12 : Colors.grey.shade200,
+          color: isDark ? Colors.white24 : Colors.grey.shade200,
         ),
         boxShadow: [
           if (!isDark)
@@ -667,106 +678,5 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
     );
   }
 
-  Widget _bottomUploadBar(bool isDark) {
-    final canUpload = _canUpload && !_isUploading;
-    final disabledStart = isDark
-        ? const Color(0xFF3A3A3C)
-        : const Color(0xFFE2E8F0);
-    final disabledEnd = isDark
-        ? const Color(0xFF2C2C2E)
-        : const Color(0xFFCBD5E1);
-
-    return SafeArea(
-      top: false,
-      minimum: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: canUpload ? _submitUpload : null,
-          borderRadius: BorderRadius.circular(20),
-          child: Ink(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: canUpload
-                    ? <Color>[
-                        widget.departmentColor,
-                        Color.lerp(widget.departmentColor, Colors.black, 0.18)!,
-                      ]
-                    : <Color>[disabledStart, disabledEnd],
-              ),
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: <BoxShadow>[
-                BoxShadow(
-                  color: (canUpload ? widget.departmentColor : Colors.black)
-                      .withValues(alpha: isDark ? 0.22 : 0.12),
-                  blurRadius: 20,
-                  offset: const Offset(0, 10),
-                ),
-              ],
-            ),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-              child: Row(
-                children: [
-                  Container(
-                    width: 46,
-                    height: 46,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.16),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: _isUploading
-                        ? const Padding(
-                            padding: EdgeInsets.all(12),
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Icon(Icons.cloud_upload_rounded,
-                            color: Colors.white),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          _isUploading ? 'Uploading...' : 'Upload syllabus',
-                          style: GoogleFonts.inter(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            color: Colors.white,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          _selectedSemester == null || _selectedSubject == null
-                              ? 'Select semester and subject'
-                              : 'Sem $_selectedSemester - $_selectedSubject',
-                          style: GoogleFonts.inter(
-                            fontSize: 12,
-                            color: Colors.white.withValues(alpha: 0.88),
-                            height: 1.3,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  const Icon(
-                    Icons.chevron_right_rounded,
-                    color: Colors.white,
-                    size: 26,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  // Bottom upload bar removed; it covered the form content.
 }

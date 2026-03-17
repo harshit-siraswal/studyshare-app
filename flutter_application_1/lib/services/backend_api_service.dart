@@ -481,6 +481,43 @@ class BackendApiService {
     return list.map((entry) => Map<String, dynamic>.from(entry as Map)).toList();
   }
 
+  Future<Map<String, dynamic>> updateRoomCodeVisibility({
+    required String roomId,
+    required bool showRoomCode,
+  }) async {
+    return _requestJson(
+      '/api/chat/rooms/${Uri.encodeComponent(roomId)}/code-visibility',
+      method: 'PATCH',
+      body: {'showRoomCode': showRoomCode},
+      requireAuthToken: true,
+    );
+  }
+
+  Future<Map<String, dynamic>> updateRoomMemberRole({
+    required String roomId,
+    required String targetEmail,
+    required String role,
+  }) async {
+    return _requestJson(
+      '/api/chat/rooms/${Uri.encodeComponent(roomId)}/members/role',
+      method: 'PATCH',
+      body: {'targetEmail': targetEmail, 'role': role},
+      requireAuthToken: true,
+    );
+  }
+
+  Future<Map<String, dynamic>> removeRoomMember({
+    required String roomId,
+    required String targetEmail,
+  }) async {
+    return _requestJson(
+      '/api/chat/rooms/${Uri.encodeComponent(roomId)}/members',
+      method: 'DELETE',
+      body: {'targetEmail': targetEmail},
+      requireAuthToken: true,
+    );
+  }
+
   Future<Map<String, dynamic>> deleteChatRoom(String roomId) async {
     return _requestJson(
       '/api/chat/rooms/${Uri.encodeComponent(roomId)}',
@@ -1480,6 +1517,47 @@ class BackendApiService {
     final data = await _requestJson(
       Uri(
         path: '/api/admin/resources',
+        queryParameters: queryParams,
+      ).toString(),
+      method: 'GET',
+      bearerOverride: bearerToken,
+      requireAuthToken: true,
+    );
+
+    final resourcesRaw = data['resources'];
+    if (resourcesRaw is! List) return const [];
+    return resourcesRaw
+        .whereType<Map>()
+        .map((row) => Map<String, dynamic>.from(row))
+        .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> listModerationResources({
+    String? bearerToken,
+    String? collegeId,
+    String? status,
+    String? semester,
+    String? branch,
+    String? subject,
+    int page = 1,
+    int pageSize = 100,
+  }) async {
+    final queryParams = <String, String>{
+      'page': page.toString(),
+      'limit': pageSize.toString(),
+      if (collegeId != null && collegeId.trim().isNotEmpty)
+        'college_id': collegeId.trim(),
+      if (status != null && status.trim().isNotEmpty) 'status': status.trim(),
+      if (semester != null && semester.trim().isNotEmpty)
+        'semester': semester.trim(),
+      if (branch != null && branch.trim().isNotEmpty) 'branch': branch.trim(),
+      if (subject != null && subject.trim().isNotEmpty)
+        'subject': subject.trim(),
+    };
+
+    final data = await _requestJson(
+      Uri(
+        path: '/api/resources/moderation',
         queryParameters: queryParams,
       ).toString(),
       method: 'GET',

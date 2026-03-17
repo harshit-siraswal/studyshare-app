@@ -6,6 +6,7 @@ import 'package:shimmer/shimmer.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import '../../config/theme.dart';
 import '../../services/auth_service.dart';
+import '../../services/backend_api_service.dart';
 import '../../services/supabase_service.dart';
 import 'department_account_screen.dart' as dept_screen;
 import '../../widgets/notice_card.dart';
@@ -34,6 +35,7 @@ class NoticesScreen extends StatefulWidget {
 class _NoticesScreenState extends State<NoticesScreen>
     with SingleTickerProviderStateMixin {
   final SupabaseService _supabaseService = SupabaseService();
+  final BackendApiService _backendApiService = BackendApiService();
   final AuthService _authService = AuthService();
 
   List<Map<String, dynamic>> _filteredNotices = [];
@@ -421,17 +423,17 @@ class _NoticesScreenState extends State<NoticesScreen>
     setState(() => _isLoading = true);
 
     try {
-      final notices = await _supabaseService.getNotices(
-        collegeId: widget.collegeId,
-        includeHidden: _canManageNotices,
-      );
+      final notices = await _backendApiService.getNotices(widget.collegeId);
+      final visibleNotices = _canManageNotices
+          ? notices
+          : notices.where((notice) => notice['is_active'] != false).toList();
       final activeNotices =
-          notices.where((notice) => notice['is_active'] != false).toList();
+          visibleNotices.where((notice) => notice['is_active'] != false).toList();
 
       // Filter by date range if set
-      List<Map<String, dynamic>> filtered = notices;
+      List<Map<String, dynamic>> filtered = visibleNotices;
       if (_startDate != null && _endDate != null) {
-        filtered = notices.where((notice) {
+        filtered = visibleNotices.where((notice) {
           final createdAt = notice['created_at'];
           if (createdAt == null) return false;
           final date = DateTime.tryParse(createdAt.toString());

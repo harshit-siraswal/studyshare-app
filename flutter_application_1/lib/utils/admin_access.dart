@@ -161,7 +161,8 @@ bool isTeacherOrAdminProfile(Map<String, dynamic> profile) {
 }
 
 bool canManageAdminResourcesProfile(Map<String, dynamic> profile) {
-  return hasAdminCapability(profile, 'upload_resource');
+  return hasAdminCapability(profile, 'upload_resource') ||
+      isTeacherOrAdminProfile(profile);
 }
 
 bool canBanUsersProfile(Map<String, dynamic> profile) {

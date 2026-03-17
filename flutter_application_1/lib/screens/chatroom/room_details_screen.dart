@@ -6,6 +6,7 @@ import '../../config/theme.dart';
 import '../../services/backend_api_service.dart';
 import '../../services/supabase_service.dart';
 import '../../utils/profile_photo_utils.dart';
+import '../profile/user_profile_screen.dart';
 import '../../widgets/user_avatar.dart';
 
 class RoomDetailsScreen extends StatefulWidget {
@@ -113,6 +114,27 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
         _isLoading = false;
         _loadError = 'Failed to load room details: $e';
       });
+    }
+  }
+
+  Future<void> _updateRoomCodeVisibility(bool value) async {
+    try {
+      final result = await _backendApiService.updateRoomCodeVisibility(
+        roomId: widget.roomId,
+        showRoomCode: value,
+      );
+      if (!mounted) return;
+      setState(() {
+        _roomInfo = {
+          ...?_roomInfo,
+          'show_room_code': result['show_room_code'] ?? value,
+        };
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to update visibility: $e')),
+      );
     }
   }
 
@@ -264,61 +286,176 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
         member['is_founder'] == true ||
         showFounderBadge ||
         _isSameUser(member, (_roomInfo?['created_by_email'] ?? '').toString());
+    final isSelf = _isSameUser(member, widget.userEmail);
     final photoUrl = _resolvePhotoUrl(member, const [
       'profile_photo_url',
       'photo_url',
       'avatar_url',
     ]);
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          UserAvatar(
-            radius: 18,
-            displayName: _memberDisplayName(member),
-            photoUrl: photoUrl.isNotEmpty ? photoUrl : null,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    Text(
-                      _memberDisplayName(member),
-                      style: GoogleFonts.inter(
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
-                    ),
-                    if (isFounder)
-                      _pill(
-                        label: 'Founder',
-                        isDark: isDark,
-                        background: const Color(0x268B5CF6),
-                        foreground: const Color(0xFF8B5CF6),
-                      ),
-                    if (!isFounder && role == 'admin')
-                      _pill(
-                        label: 'Admin',
-                        isDark: isDark,
-                        background: const Color(0x261EAEDB),
-                        foreground: const Color(0xFF1EAEDB),
-                      ),
-                  ],
-                ),
-              ],
+    return InkWell(
+      onTap: () => _openMemberProfile(member, photoUrl),
+      onLongPress: () {
+        if (!_isAdmin || isFounder || isSelf) return;
+        _showMemberActions(member, role, isDark);
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            UserAvatar(
+              radius: 18,
+              displayName: _memberDisplayName(member),
+              photoUrl: photoUrl.isNotEmpty ? photoUrl : null,
             ),
-          ),
-        ],
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text(
+                        _memberDisplayName(member),
+                        style: GoogleFonts.inter(
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white : Colors.black87,
+                        ),
+                      ),
+                      if (isFounder)
+                        _pill(
+                          label: 'Founder',
+                          isDark: isDark,
+                          background: const Color(0x268B5CF6),
+                          foreground: const Color(0xFF8B5CF6),
+                        ),
+                      if (!isFounder && role == 'admin')
+                        _pill(
+                          label: 'Admin',
+                          isDark: isDark,
+                          background: const Color(0x261EAEDB),
+                          foreground: const Color(0xFF1EAEDB),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
+  }
+
+  void _openMemberProfile(Map<String, dynamic> member, String photoUrl) {
+    final email = (member['user_email'] ?? '').toString().trim();
+    if (email.isEmpty) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => UserProfileScreen(
+          userEmail: email,
+          userName: _memberDisplayName(member),
+          userPhotoUrl: photoUrl.isNotEmpty ? photoUrl : null,
+        ),
+      ),
+    );
+  }
+
+  void _showMemberActions(Map<String, dynamic> member, String role, bool isDark) {
+    final email = (member['user_email'] ?? '').toString().trim();
+    if (email.isEmpty) return;
+    final isAdminRole = role == 'admin';
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white24 : Colors.black12,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(height: 12),
+              if (!isAdminRole)
+                ListTile(
+                  leading: const Icon(Icons.admin_panel_settings_outlined),
+                  title: const Text('Make Admin'),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await _updateMemberRole(email, 'admin');
+                  },
+                ),
+              if (isAdminRole)
+                ListTile(
+                  leading: const Icon(Icons.shield_outlined),
+                  title: const Text('Remove Admin'),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await _updateMemberRole(email, 'member');
+                  },
+                ),
+              if (!isAdminRole)
+                ListTile(
+                  leading: const Icon(Icons.person_remove_outlined),
+                  title: const Text('Remove from Room'),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    await _removeMember(email);
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _updateMemberRole(String email, String role) async {
+    try {
+      await _backendApiService.updateRoomMemberRole(
+        roomId: widget.roomId,
+        targetEmail: email,
+        role: role,
+      );
+      await _loadDetails();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to update role: $e')),
+      );
+    }
+  }
+
+  Future<void> _removeMember(String email) async {
+    try {
+      await _backendApiService.removeRoomMember(
+        roomId: widget.roomId,
+        targetEmail: email,
+      );
+      await _loadDetails();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to remove member: $e')),
+      );
+    }
   }
 
   Widget _sectionTitle(String text, bool isDark) {
@@ -383,6 +520,9 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
         .trim();
     final isPrivate = _roomInfo?['is_private'] == true ||
         _roomInfo?['is_private'] == 'true';
+    final showRoomCode = (_roomInfo?['show_room_code'] ?? true) == true;
+    final canShowRoomCode =
+        isPrivate && roomCode.isNotEmpty && (showRoomCode || _isAdmin);
     final dividerColor = isDark ? Colors.white12 : Colors.black12;
 
     return Scaffold(
@@ -480,7 +620,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
             ),
             const SizedBox(height: 10),
             Divider(color: dividerColor, height: 1),
-            if (_isAdmin && isPrivate && roomCode.isNotEmpty) ...[
+            if (canShowRoomCode) ...[
               const SizedBox(height: 8),
               Row(
                 children: [
@@ -503,6 +643,27 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                       );
                     },
                     icon: Icon(Icons.copy_rounded, color: AppTheme.primary),
+                  ),
+                ],
+              ),
+            ],
+            if (_isAdmin && isPrivate) ...[
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Show room code to members',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: isDark ? Colors.white54 : Colors.black54,
+                      ),
+                    ),
+                  ),
+                  Switch(
+                    value: showRoomCode,
+                    activeColor: AppTheme.primary,
+                    onChanged: (value) => _updateRoomCodeVisibility(value),
                   ),
                 ],
               ),

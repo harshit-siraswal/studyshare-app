@@ -96,6 +96,7 @@ class _StudyScreenState extends State<StudyScreen>
   bool _isResourceScopeToggleLoading = false;
   bool _canManageAdminResources = false;
   bool _canUploadSyllabus = false;
+  String _moderationStatusFilter = 'all';
   String _followingSearchQuery = '';
   List<Resource>? _cachedFilteredFollowingResources;
   String _lastFollowingFilterQuery = '';
@@ -122,10 +123,14 @@ class _StudyScreenState extends State<StudyScreen>
   int _unreadNotificationCount = 0;
 
   void _notifySyllabusContextChanged() {
-    widget.onSyllabusContextChanged?.call(
-      _tabController.index == 2,
-      _canUploadSyllabus,
-    );
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      widget.onSyllabusContextChanged?.call(
+        _tabController.index == 2,
+        _canUploadSyllabus,
+      );
+    });
   }
 
   bool get _isKietCollege {
@@ -520,8 +525,11 @@ class _StudyScreenState extends State<StudyScreen>
     String? branch,
     String? subject,
   }) async {
-    final resourcesPayload = await _apiService.listAdminResources(
+    final resourcesPayload = await _apiService.listModerationResources(
       collegeId: widget.collegeId,
+      status: _moderationStatusFilter == 'all'
+          ? null
+          : _moderationStatusFilter,
       semester: semester,
       branch: branch,
       subject: subject,
@@ -1008,6 +1016,15 @@ class _StudyScreenState extends State<StudyScreen>
 
   Widget _buildFollowingSearchBar() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final showModerationFilter = _canManageAdminResources;
+    final hasModerationFilter = _moderationStatusFilter != 'all';
+    final dividerColor = isDark ? Colors.white10 : Colors.black12;
+    final filterBackground = hasModerationFilter
+        ? AppTheme.primary.withValues(alpha: isDark ? 0.22 : 0.12)
+        : (isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.06));
+    final filterTextColor = hasModerationFilter
+        ? AppTheme.primary
+        : (isDark ? Colors.white70 : const Color(0xFF111827));
 
     return Container(
       height: 52,
@@ -1018,43 +1035,185 @@ class _StudyScreenState extends State<StudyScreen>
           color: isDark ? Colors.white12 : const Color(0xFFE2E8F0),
         ),
       ),
-      child: TextField(
-        controller: _followingSearchController,
-        onChanged: (value) {
-          setState(() => _followingSearchQuery = value);
-        },
-        style: GoogleFonts.inter(
-          fontSize: 14,
-          color: isDark ? Colors.white : const Color(0xFF0F172A),
-        ),
-        decoration: InputDecoration(
-          hintText: _canManageAdminResources
-              ? 'Search moderation queue...'
-              : 'Search following feed...',
-          hintStyle: GoogleFonts.inter(
-            fontSize: 14,
-            color: isDark ? Colors.white54 : const Color(0xFF64748B),
+      child: Row(
+        children: [
+          const SizedBox(width: 12),
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : const Color(0xFFE2E8F0),
+              borderRadius: BorderRadius.circular(17),
+            ),
+            child: const Icon(
+              Icons.search_rounded,
+              size: 18,
+              color: AppTheme.textMuted,
+            ),
           ),
-          prefixIcon: const Icon(
-            Icons.search_rounded,
-            color: AppTheme.textMuted,
-          ),
-          suffixIcon: _followingSearchQuery.trim().isEmpty
-              ? null
-              : IconButton(
-                  onPressed: () {
-                    _followingSearchController.clear();
-                    setState(() => _followingSearchQuery = '');
-                  },
-                  icon: const Icon(Icons.close_rounded, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: TextField(
+              controller: _followingSearchController,
+              onChanged: (value) {
+                setState(() => _followingSearchQuery = value);
+              },
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                color: isDark ? Colors.white : const Color(0xFF0F172A),
+              ),
+              decoration: InputDecoration(
+                hintText: _canManageAdminResources
+                    ? 'Search moderation queue...'
+                    : 'Search following feed...',
+                hintStyle: GoogleFonts.inter(
+                  fontSize: 14,
+                  color: isDark ? Colors.white54 : const Color(0xFF64748B),
                 ),
-          border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 14,
+                suffixIcon: _followingSearchQuery.trim().isEmpty
+                    ? null
+                    : IconButton(
+                        onPressed: () {
+                          _followingSearchController.clear();
+                          setState(() => _followingSearchQuery = '');
+                        },
+                        icon: const Icon(Icons.close_rounded, size: 18),
+                      ),
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(
+                  vertical: 14,
+                ),
+              ),
+            ),
           ),
-        ),
+          if (showModerationFilter) ...[
+            Container(width: 1, height: 28, color: dividerColor),
+            const SizedBox(width: 8),
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: _showModerationStatusFilterSheet,
+                borderRadius: BorderRadius.circular(18),
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: 34,
+                      height: 34,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: filterBackground,
+                        borderRadius: BorderRadius.circular(17),
+                        border: Border.all(
+                          color: hasModerationFilter
+                              ? AppTheme.primary.withValues(alpha: 0.4)
+                              : dividerColor,
+                        ),
+                      ),
+                      child: Icon(
+                        Icons.tune_rounded,
+                        color: filterTextColor,
+                        size: 18,
+                      ),
+                    ),
+                    if (hasModerationFilter)
+                      Positioned(
+                        right: -4,
+                        top: -4,
+                        child: Container(
+                          width: 16,
+                          height: 16,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: AppTheme.primary,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Text(
+                            '1',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 10),
+          ],
+        ],
       ),
+    );
+  }
+
+  void _showModerationStatusFilterSheet() {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final options = <String>[
+      'all',
+      'pending',
+      'approved',
+      'rejected',
+      'retracted',
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white24 : Colors.black12,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(height: 12),
+              for (final option in options)
+                ListTile(
+                  title: Text(
+                    option == 'all'
+                        ? 'All'
+                        : option[0].toUpperCase() + option.substring(1),
+                    style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                  trailing: _moderationStatusFilter == option
+                      ? Icon(Icons.check_rounded, color: AppTheme.primary)
+                      : null,
+                  onTap: () {
+                    Navigator.pop(context);
+                    if (_moderationStatusFilter == option) return;
+                    setState(() {
+                      _moderationStatusFilter = option;
+                      _followingResources = [];
+                      _moderationPage = 1;
+                      _hasMoreModeration = true;
+                    });
+                    _loadFollowingFeed();
+                  },
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
     );
   }
 

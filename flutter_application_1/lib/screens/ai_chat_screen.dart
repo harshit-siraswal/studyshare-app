@@ -26,7 +26,7 @@ import '../services/supabase_service.dart';
 import '../controllers/ai_chat_animation_controller.dart';
 import '../widgets/ai_chat_message_bubble.dart';
 import '../widgets/ai_formatted_text.dart';
-import '../widgets/ai_logo_mark.dart';
+import '../widgets/ai_logo.dart';
 import '../widgets/onboarding_overlay.dart';
 import '../widgets/paywall_dialog.dart';
 import '../utils/ai_token_budget_utils.dart';
@@ -2165,7 +2165,6 @@ class _AIChatScreenState extends State<AIChatScreen>
         allowWeb: false,
         useOcr: true,
         forceOcr: true,
-        ocrProvider: 'google',
         attachments: attachments,
         filters: contextFilters,
         languageHint: 'en',
@@ -2685,16 +2684,6 @@ Return STRICT JSON only (no markdown). Schema:
     return templateTokens.contains(token);
   }
 
-  String _labelForOcrProvider(String provider) {
-    switch (provider.toLowerCase()) {
-      case 'sarvam':
-        return 'Sarvam';
-      case 'google':
-      default:
-        return 'Google Vision';
-    }
-  }
-
   String _labelForOcrCode(String code) {
     switch (code.toLowerCase()) {
       case 'ocr_empty':
@@ -2971,9 +2960,6 @@ Return STRICT JSON only (no markdown). Schema:
             allowWeb: allowWeb,
             useOcr: hasImageAttachments || forceOcr,
             forceOcr: forceOcr,
-            ocrProvider: (hasImageAttachments || forceOcr)
-                ? 'google'
-                : null,
             attachments: mergedAttachments,
             history: history,
             filters: contextFilters,
@@ -3125,7 +3111,6 @@ Return STRICT JSON only (no markdown). Schema:
             allowWeb: allowWeb,
             useOcr: true,
             forceOcr: true,
-            ocrProvider: 'google',
             attachments: attachmentPayload,
             history: history,
             filters: contextFilters,
@@ -3402,7 +3387,6 @@ Return STRICT JSON only (no markdown). Schema:
             allowWeb: _allowWebMode,
             useOcr: shouldEnableOcr,
             forceOcr: hasImageAttachments,
-            ocrProvider: shouldEnableOcr ? 'google' : null,
             attachments: attachmentPayload,
             history: history,
             filters: contextFilters,
@@ -3856,7 +3840,7 @@ Return STRICT JSON only (no markdown). Schema:
         children: [
           for (final err in visible) ...[
             Text(
-              '- ${err.name} (${_labelForOcrProvider(err.provider)}: ${_labelForOcrCode(err.code)})',
+              '- ${err.name} (${_labelForOcrCode(err.code)})',
               style: GoogleFonts.inter(
                 fontSize: isCompact ? 10.5 : 11,
                 color: textColor,
@@ -3928,7 +3912,7 @@ Return STRICT JSON only (no markdown). Schema:
         if (!msg.isUser)
           Row(
             children: [
-              const AiLogoMark(size: 15, useSvg: true),
+              const AiLogo(size: 16, animate: true),
               const SizedBox(width: 6),
               Text(
                 _chatTitle,
@@ -4446,7 +4430,7 @@ Return STRICT JSON only (no markdown). Schema:
                                   ),
                                 ],
                               ),
-                              child: const AiLogoSpinner(size: 72),
+                              child: const AiLogo(size: 72, animate: true),
                             ),
                           ),
                           const SizedBox(height: 24),
@@ -4543,6 +4527,8 @@ Return STRICT JSON only (no markdown). Schema:
     final attachButtonSize = 44.0;
     final sendButtonSize = isSmallPhone ? 36.0 : (isCompact ? 38.0 : 42.0);
     final sendIconSize = isSmallPhone ? 16.0 : 17.0;
+    final hasComposerContent =
+        _hasText || _attachments.isNotEmpty || _stickyAttachments.isNotEmpty;
     final textFieldStyle = GoogleFonts.inter(
       color: isDark ? Colors.white : Colors.black87,
       fontSize: isSmallPhone ? 14 : 15,
@@ -4552,8 +4538,8 @@ Return STRICT JSON only (no markdown). Schema:
       fontSize: isSmallPhone ? 14 : 15,
     );
     final inputContentPadding = EdgeInsets.symmetric(
-      horizontal: 2,
-      vertical: isSmallPhone ? 8 : 10,
+      horizontal: 0,
+      vertical: isSmallPhone ? 10 : (isCompact ? 10 : 12),
     );
     final inputMaxHeight = isSmallPhone ? 126.0 : 152.0;
     final attachmentNameStyle = GoogleFonts.inter(
@@ -4679,7 +4665,7 @@ Return STRICT JSON only (no markdown). Schema:
                                         ),
                                       ],
                                     ),
-                                    child: const AiLogoSpinner(size: 60),
+                                    child: const AiLogo(size: 60, animate: true),
                                   ),
                                 ),
                               ),
@@ -4837,177 +4823,7 @@ Return STRICT JSON only (no markdown). Schema:
                             padding: const EdgeInsets.only(bottom: 8),
                             child: _buildAiTokenLowBanner(isDark),
                           ),
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 126,
-                                padding: const EdgeInsets.all(2),
-                                decoration: BoxDecoration(
-                                  color: isDark
-                                      ? Colors.white10
-                                      : Colors.black.withValues(alpha: 0.05),
-                                  borderRadius: BorderRadius.circular(999),
-                                  border: Border.all(
-                                    color: isDark ? Colors.white12 : Colors.black12,
-                                  ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Expanded(
-                                      child: InkWell(
-                                        onTap: () {
-                                          if (!mounted) return;
-                                          setState(() => _allowWebMode = false);
-                                        },
-                                        borderRadius: BorderRadius.circular(999),
-                                        child: AnimatedContainer(
-                                          duration:
-                                              const Duration(milliseconds: 150),
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 4,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: !_allowWebMode
-                                                ? (isDark
-                                                    ? Colors.white24
-                                                    : Colors.white)
-                                                : Colors.transparent,
-                                            borderRadius:
-                                                BorderRadius.circular(999),
-                                          ),
-                                          child: Center(
-                                            child: Text(
-                                              'Local',
-                                              style: GoogleFonts.inter(
-                                                fontSize: 10,
-                                                fontWeight: FontWeight.w600,
-                                                color: !_allowWebMode
-                                                    ? (isDark
-                                                        ? Colors.white
-                                                        : Colors.black87)
-                                                    : (isDark
-                                                        ? Colors.white70
-                                                        : Colors.black54),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: InkWell(
-                                        onTap: () {
-                                          if (!mounted) return;
-                                          setState(() => _allowWebMode = true);
-                                        },
-                                        borderRadius: BorderRadius.circular(999),
-                                        child: AnimatedContainer(
-                                          duration:
-                                              const Duration(milliseconds: 150),
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 4,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: _allowWebMode
-                                                ? (isDark
-                                                    ? Colors.white24
-                                                    : Colors.white)
-                                                : Colors.transparent,
-                                            borderRadius:
-                                                BorderRadius.circular(999),
-                                          ),
-                                          child: Center(
-                                            child: Text(
-                                              'Web',
-                                              style: GoogleFonts.inter(
-                                                fontSize: 10,
-                                                fontWeight: FontWeight.w600,
-                                                color: _allowWebMode
-                                                    ? (isDark
-                                                        ? Colors.white
-                                                        : Colors.black87)
-                                                    : (isDark
-                                                        ? Colors.white70
-                                                        : Colors.black54),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              if (widget.resourceContext != null) ...[
-                                const SizedBox(width: 8),
-                                InkWell(
-                                  borderRadius: BorderRadius.circular(999),
-                                  onTap: () {
-                                    if (!mounted) return;
-                                    setState(
-                                      () => _searchAllPdfs = !_searchAllPdfs,
-                                    );
-                                  },
-                                  child: AnimatedContainer(
-                                    duration: const Duration(milliseconds: 180),
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 12,
-                                      vertical: 7,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: _searchAllPdfs
-                                          ? AppTheme.primary.withValues(
-                                              alpha: isDark ? 0.22 : 0.14,
-                                            )
-                                          : (isDark
-                                              ? Colors.white10
-                                              : Colors.black.withValues(
-                                                  alpha: 0.04,
-                                                )),
-                                      borderRadius: BorderRadius.circular(999),
-                                      border: Border.all(
-                                        color: _searchAllPdfs
-                                            ? AppTheme.primary
-                                            : (isDark
-                                                ? Colors.white12
-                                                : Colors.black12),
-                                      ),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          Icons.layers_rounded,
-                                          size: 14,
-                                          color: _searchAllPdfs
-                                              ? AppTheme.primary
-                                              : (isDark
-                                                  ? Colors.white70
-                                                  : Colors.black54),
-                                        ),
-                                        const SizedBox(width: 6),
-                                        Text(
-                                          'Search all PDFs',
-                                          style: GoogleFonts.inter(
-                                            fontSize: 10.5,
-                                            fontWeight: FontWeight.w600,
-                                            color: _searchAllPdfs
-                                                ? AppTheme.primary
-                                                : (isDark
-                                                    ? Colors.white70
-                                                    : Colors.black54),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
+                        const SizedBox(height: 4),
                         if (_attachments.isNotEmpty)
                           Align(
                             alignment: Alignment.centerLeft,
@@ -5136,187 +4952,301 @@ Return STRICT JSON only (no markdown). Schema:
                             ),
                           ),
                         Padding(
-                          padding: const EdgeInsets.fromLTRB(12, 6, 12, 10),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
+                          padding: const EdgeInsets.fromLTRB(4, 6, 4, 10),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  Expanded(
-                                    child: ConstrainedBox(
-                                      constraints: BoxConstraints(
-                                        minHeight: composerMinHeight,
-                                        maxHeight: inputMaxHeight,
-                                      ),
-                                      child: TextField(
-                                        key: _coachInputKey,
-                                        controller: _controller,
-                                        minLines: 1,
-                                        maxLines: 6,
-                                        textInputAction: TextInputAction.send,
-                                        onSubmitted: (_) => _sendMessage(),
-                                        style: textFieldStyle,
-                                        decoration: InputDecoration(
-                                          hintText: 'Type your message here...',
-                                          hintStyle: hintStyle.copyWith(
-                                            color: isDark
-                                                ? Colors.white54
-                                                : Colors.black45,
-                                          ),
-                                          border: InputBorder.none,
-                                          isDense: true,
-                                          contentPadding: inputContentPadding,
-                                          prefix: GestureDetector(
-                                            onTap: _showSourcePicker,
-                                            child: Padding(
-                                              padding:
-                                                  const EdgeInsets.only(right: 6),
-                                              child: Chip(
-                                                label: Text(
-                                                  _allowWebMode
-                                                      ? 'Web'
-                                                      : 'Notes',
-                                                  style: TextStyle(
-                                                    fontSize: 11,
-                                                    color: _allowWebMode
-                                                        ? const Color(0xFF1EAEDB)
-                                                        : const Color(
-                                                            0xFF8B5CF6,
-                                                          ),
-                                                  ),
-                                                ),
-                                                backgroundColor: _allowWebMode
-                                                    ? const Color(0x261EAEDB)
-                                                    : const Color(0x268B5CF6),
-                                                side: BorderSide(
-                                                  color: _allowWebMode
-                                                      ? const Color(0xFF1EAEDB)
-                                                      : const Color(
-                                                          0xFF8B5CF6,
-                                                        ),
-                                                  width: 1,
-                                                ),
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                  horizontal: 4,
-                                                  vertical: 0,
-                                                ),
-                                                materialTapTargetSize:
-                                                    MaterialTapTargetSize
-                                                        .shrinkWrap,
-                                                visualDensity:
-                                                    VisualDensity.compact,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
+                              SizedBox(
+                                width: attachButtonSize,
+                                height: attachButtonSize,
+                                child: Container(
+                                  decoration: BoxDecoration(
+                                    color: isDark
+                                        ? const Color(0xFF22242A)
+                                        : const Color(0xFFF3F4F6),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: isDark
+                                          ? Colors.white12
+                                          : Colors.black12,
                                     ),
                                   ),
-                                  const SizedBox(width: 6),
-                                  AnimatedSwitcher(
-                                    duration:
-                                        const Duration(milliseconds: 180),
-                                    child: _hasText
-                                        ? SizedBox(
-                                            key: const ValueKey('send'),
-                                            width: sendButtonSize,
-                                            height: sendButtonSize,
-                                            child: Container(
-                                              decoration: BoxDecoration(
-                                                color: isDark
-                                                    ? Colors.white
-                                                    : AppTheme.primary,
-                                                shape: BoxShape.circle,
-                                              ),
-                                              child: IconButton(
-                                                onPressed: (_isLoading ||
-                                                        _isUploadingAttachment ||
-                                                        _isSendAttemptInProgress)
-                                                    ? null
-                                                    : _sendMessage,
-                                                padding: EdgeInsets.zero,
-                                                icon: Icon(
-                                                  Icons.arrow_upward_rounded,
-                                                  size: sendIconSize,
-                                                  color: isDark
-                                                      ? const Color(0xFF1F2023)
-                                                      : Colors.white,
-                                                ),
-                                              ),
+                                  child: IconButton(
+                                    key: _coachAttachKey,
+                                    tooltip: 'Attach image or PDF',
+                                    onPressed: (_isLoading ||
+                                            _isUploadingAttachment ||
+                                            _isSendAttemptInProgress)
+                                        ? null
+                                        : _pickAttachment,
+                                    padding: EdgeInsets.zero,
+                                    iconSize: 18,
+                                    icon: _isUploadingAttachment
+                                        ? const SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
                                             ),
                                           )
-                                        : SizedBox(
-                                            key: const ValueKey('mic'),
-                                            width: sendButtonSize,
-                                            height: sendButtonSize,
-                                            child: IconButton(
-                                              onPressed: null,
-                                              padding: EdgeInsets.zero,
-                                              icon: Icon(
-                                                Icons.mic_none_rounded,
-                                                size: sendIconSize,
+                                        : Icon(
+                                            Icons.attach_file_rounded,
+                                            color: isDark
+                                                ? Colors.white70
+                                                : Colors.black87,
+                                          ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Container(
+                                  constraints: BoxConstraints(
+                                    minHeight: composerMinHeight,
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: isDark
+                                        ? const Color(0xFF15171C)
+                                        : Colors.white,
+                                    borderRadius: BorderRadius.circular(18),
+                                    border: Border.all(
+                                      color: isDark
+                                          ? Colors.white12
+                                          : Colors.black12,
+                                    ),
+                                    boxShadow: [
+                                      if (!isDark)
+                                        BoxShadow(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.04,
+                                          ),
+                                          blurRadius: 10,
+                                          offset: const Offset(0, 6),
+                                        ),
+                                    ],
+                                  ),
+                                  child: Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.end,
+                                    children: [
+                                      Expanded(
+                                        child: ConstrainedBox(
+                                          constraints: BoxConstraints(
+                                            maxHeight: inputMaxHeight,
+                                          ),
+                                          child: TextField(
+                                            key: _coachInputKey,
+                                            controller: _controller,
+                                            minLines: 1,
+                                            maxLines: 6,
+                                            textInputAction:
+                                                TextInputAction.send,
+                                            onSubmitted: (_) => _sendMessage(),
+                                            style: textFieldStyle,
+                                            decoration: InputDecoration(
+                                              hintText:
+                                                  'Ask anything about your notes…',
+                                              hintStyle: hintStyle.copyWith(
                                                 color: isDark
-                                                    ? Colors.white38
-                                                    : Colors.black38,
+                                                    ? Colors.white54
+                                                    : Colors.black45,
+                                              ),
+                                              border: InputBorder.none,
+                                              isDense: true,
+                                              contentPadding:
+                                                  inputContentPadding,
+                                              prefix: GestureDetector(
+                                                onTap: _showSourcePicker,
+                                                child: Padding(
+                                                  padding:
+                                                      const EdgeInsets.only(
+                                                        right: 8,
+                                                      ),
+                                                  child: Container(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                      horizontal: 8,
+                                                      vertical: 4,
+                                                    ),
+                                                    decoration: BoxDecoration(
+                                                      color: _allowWebMode
+                                                          ? const Color(
+                                                              0x1A1EAEDB,
+                                                            )
+                                                          : const Color(
+                                                              0x1A8B5CF6,
+                                                            ),
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                        999,
+                                                      ),
+                                                      border: Border.all(
+                                                        color: _allowWebMode
+                                                            ? const Color(
+                                                                0xFF1EAEDB,
+                                                              )
+                                                            : const Color(
+                                                                0xFF8B5CF6,
+                                                              ),
+                                                      ),
+                                                    ),
+                                                    child: Text(
+                                                      _allowWebMode
+                                                          ? 'Web'
+                                                          : 'Notes',
+                                                      style: GoogleFonts.inter(
+                                                        fontSize: 11,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                        color: _allowWebMode
+                                                            ? const Color(
+                                                                0xFF1EAEDB,
+                                                              )
+                                                            : const Color(
+                                                                0xFF8B5CF6,
+                                                              ),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
                                               ),
                                             ),
                                           ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Row(
-                                children: [
-                                  SizedBox(
-                                    width: attachButtonSize,
-                                    height: attachButtonSize,
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        color: isDark
-                                            ? const Color(0xFF2E3033)
-                                            : const Color(0xFFF1F5F9),
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
-                                          color: isDark
-                                              ? const Color(0xFF3C4046)
-                                              : Colors.black12,
                                         ),
                                       ),
-                                      child: IconButton(
-                                        key: _coachAttachKey,
-                                        tooltip: 'Attach image or PDF',
-                                        onPressed: (_isLoading ||
-                                                _isUploadingAttachment ||
-                                                _isSendAttemptInProgress)
-                                            ? null
-                                            : _pickAttachment,
-                                        padding: EdgeInsets.zero,
-                                        iconSize: 18,
-                                        icon: _isUploadingAttachment
-                                            ? const SizedBox(
-                                                width: 16,
-                                                height: 16,
-                                                child:
-                                                    CircularProgressIndicator(
-                                                  strokeWidth: 2,
+                                      const SizedBox(width: 6),
+                                      AnimatedSwitcher(
+                                        duration: const Duration(
+                                          milliseconds: 180,
+                                        ),
+                                        child: hasComposerContent
+                                            ? SizedBox(
+                                                key: const ValueKey('send'),
+                                                width: sendButtonSize,
+                                                height: sendButtonSize,
+                                                child: Container(
+                                                  decoration: BoxDecoration(
+                                                    color: AppTheme.primary,
+                                                    shape: BoxShape.circle,
+                                                  ),
+                                                  child: IconButton(
+                                                    onPressed: (_isLoading ||
+                                                            _isUploadingAttachment ||
+                                                            _isSendAttemptInProgress)
+                                                        ? null
+                                                        : _sendMessage,
+                                                    padding: EdgeInsets.zero,
+                                                    icon: Icon(
+                                                      Icons
+                                                          .arrow_upward_rounded,
+                                                      size: sendIconSize,
+                                                      color: Colors.white,
+                                                    ),
+                                                  ),
                                                 ),
                                               )
-                                            : Icon(
-                                                Icons.attach_file_rounded,
-                                                color: isDark
-                                                    ? Colors.white70
-                                                    : Colors.black87,
+                                            : SizedBox(
+                                                key: const ValueKey('mic'),
+                                                width: sendButtonSize,
+                                                height: sendButtonSize,
+                                                child: IconButton(
+                                                  onPressed: null,
+                                                  padding: EdgeInsets.zero,
+                                                  icon: Icon(
+                                                    Icons.mic_none_rounded,
+                                                    size: sendIconSize,
+                                                    color: isDark
+                                                        ? Colors.white38
+                                                        : Colors.black38,
+                                                  ),
+                                                ),
                                               ),
                                       ),
-                                    ),
+                                    ],
                                   ),
-                                ],
+                                ),
                               ),
                             ],
                           ),
                         ),
+                        if (widget.resourceContext != null)
+                          Padding(
+                            padding: const EdgeInsets.only(
+                              left: 4,
+                              right: 4,
+                              bottom: 8,
+                            ),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(999),
+                                onTap: () {
+                                  if (!mounted) return;
+                                  setState(
+                                    () => _searchAllPdfs = !_searchAllPdfs,
+                                  );
+                                },
+                                child: AnimatedContainer(
+                                  duration:
+                                      const Duration(milliseconds: 180),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 7,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: _searchAllPdfs
+                                        ? AppTheme.primary.withValues(
+                                            alpha: isDark ? 0.22 : 0.14,
+                                          )
+                                        : (isDark
+                                            ? Colors.white10
+                                            : Colors.black.withValues(
+                                                alpha: 0.04,
+                                              )),
+                                    borderRadius: BorderRadius.circular(999),
+                                    border: Border.all(
+                                      color: _searchAllPdfs
+                                          ? AppTheme.primary
+                                          : (isDark
+                                              ? Colors.white12
+                                              : Colors.black12),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.layers_rounded,
+                                        size: 14,
+                                        color: _searchAllPdfs
+                                            ? AppTheme.primary
+                                            : (isDark
+                                                ? Colors.white70
+                                                : Colors.black54),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'Search all PDFs',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w600,
+                                          color: _searchAllPdfs
+                                              ? AppTheme.primary
+                                              : (isDark
+                                                  ? Colors.white70
+                                                  : Colors.black54),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                   ),
