@@ -88,6 +88,7 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
     final token = _playerLoadToken;
     final controller = WebViewController();
     await controller.setJavaScriptMode(JavaScriptMode.unrestricted);
+    await controller.setMediaPlaybackRequiresUserGesture(false);
     await controller.setBackgroundColor(Colors.black);
     await controller.addJavaScriptChannel(
       'StudySharePlayer',
@@ -245,6 +246,7 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
   String _buildPlayerHtml(ParsedYoutubeLink link) {
     final videoId = link.videoId;
     final start = link.startSeconds;
+    final origin = link.watchUri.origin;
     return '''
 <!DOCTYPE html>
 <html lang="en">
@@ -282,7 +284,7 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
       firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
       function onYouTubeIframeAPIReady() {
         window._ytPlayer = new YT.Player('player', {
-          host: 'https://www.youtube-nocookie.com',
+          host: '$origin',
           videoId: '$videoId',
           playerVars: {
             autoplay: 1,
@@ -291,7 +293,7 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
             rel: 0,
             modestbranding: 1,
             enablejsapi: 1,
-            origin: 'https://www.youtube-nocookie.com',
+            origin: '$origin',
           },
           events: {
             onReady: function(event) {
