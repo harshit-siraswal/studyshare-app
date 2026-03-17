@@ -255,14 +255,6 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
           ),
         ],
       ),
-      floatingActionButton: widget.canUploadSyllabus
-          ? FloatingActionButton.extended(
-              onPressed: _openUploadFlow,
-              icon: const Icon(Icons.upload_rounded),
-              label: const Text('Upload Syllabus'),
-              backgroundColor: AppTheme.primary,
-            )
-          : null,
     );
   }
 

@@ -4503,16 +4503,28 @@ Return STRICT JSON only (no markdown). Schema:
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(4, 6, 4, 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          SizedBox(
-            width: actionSize,
-            height: actionSize,
-            child: Material(
-              color:
-                  isDark ? const Color(0xFF22242A) : const Color(0xFFF3F4F6),
-              shape: const CircleBorder(),
+      child: Container(
+        constraints: const BoxConstraints(minHeight: 44),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: fieldBg,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: fieldBorder),
+          boxShadow: [
+            if (!isDark)
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.05),
+                blurRadius: 10,
+                offset: const Offset(0, 6),
+              ),
+          ],
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            SizedBox(
+              width: actionSize,
+              height: actionSize,
               child: IconButton(
                 key: _coachAttachKey,
                 tooltip: 'Attach image or PDF',
@@ -4535,117 +4547,91 @@ Return STRICT JSON only (no markdown). Schema:
                       ),
               ),
             ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Container(
-              constraints: const BoxConstraints(minHeight: 44),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: fieldBg,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: fieldBorder),
-                boxShadow: [
-                  if (!isDark)
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.05),
-                      blurRadius: 10,
-                      offset: const Offset(0, 6),
+            const SizedBox(width: 6),
+            Expanded(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: inputMaxHeight),
+                child: TextField(
+                  key: _coachInputKey,
+                  controller: _controller,
+                  minLines: 1,
+                  maxLines: 6,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => _sendMessage(),
+                  style: textFieldStyle,
+                  decoration: InputDecoration(
+                    hintText: 'Ask anything about your notes…',
+                    hintStyle: hintStyle.copyWith(
+                      color: mutedIconColor,
                     ),
-                ],
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Expanded(
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(maxHeight: inputMaxHeight),
-                      child: TextField(
-                        key: _coachInputKey,
-                        controller: _controller,
-                        minLines: 1,
-                        maxLines: 6,
-                        textInputAction: TextInputAction.send,
-                        onSubmitted: (_) => _sendMessage(),
-                        style: textFieldStyle,
-                        decoration: InputDecoration(
-                          hintText: 'Ask anything about your notes…',
-                          hintStyle: hintStyle.copyWith(
-                            color: mutedIconColor,
-                          ),
-                          border: InputBorder.none,
-                          isDense: true,
-                          contentPadding:
-                              const EdgeInsets.symmetric(vertical: 8),
-                        ),
-                      ),
-                    ),
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 8),
                   ),
-                  const SizedBox(width: 4),
-                  SizedBox(
-                    width: 36,
-                    height: 36,
-                    child: IconButton(
-                      tooltip: _allowWebMode ? 'Web on' : 'Web off',
-                      onPressed:
-                          (_isLoading || _isSendAttemptInProgress) ? null : () {
-                        if (!mounted) return;
-                        setState(() => _allowWebMode = !_allowWebMode);
-                      },
-                      icon: Icon(
-                        _allowWebMode
-                            ? Icons.public_rounded
-                            : Icons.public_off_rounded,
-                        size: 20,
-                        color:
-                            _allowWebMode ? AppTheme.primary : mutedIconColor,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 180),
-                    child: hasComposerContent
-                        ? SizedBox(
-                            key: const ValueKey('send'),
-                            width: sendButtonSize,
-                            height: sendButtonSize,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: AppTheme.primary,
-                                shape: BoxShape.circle,
-                              ),
-                              child: IconButton(
-                                onPressed: (_isLoading ||
-                                        _isUploadingAttachment ||
-                                        _isSendAttemptInProgress)
-                                    ? null
-                                    : _sendMessage,
-                                padding: EdgeInsets.zero,
-                                icon: const Icon(
-                                  Icons.arrow_upward_rounded,
-                                  size: 18,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                          )
-                        : SizedBox(
-                            key: const ValueKey('send-disabled'),
-                            width: sendButtonSize,
-                            height: sendButtonSize,
-                            child: Icon(
-                              Icons.arrow_upward_rounded,
-                              size: 18,
-                              color: mutedIconColor,
-                            ),
-                          ),
-                  ),
-                ],
+                ),
               ),
             ),
-          ),
-        ],
+            const SizedBox(width: 4),
+            SizedBox(
+              width: 36,
+              height: 36,
+              child: IconButton(
+                tooltip: _allowWebMode ? 'Web on' : 'Web off',
+                onPressed:
+                    (_isLoading || _isSendAttemptInProgress) ? null : () {
+                  if (!mounted) return;
+                  setState(() => _allowWebMode = !_allowWebMode);
+                },
+                icon: Icon(
+                  _allowWebMode
+                      ? Icons.public_rounded
+                      : Icons.public_off_rounded,
+                  size: 20,
+                  color: _allowWebMode ? AppTheme.primary : mutedIconColor,
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              child: hasComposerContent
+                  ? SizedBox(
+                      key: const ValueKey('send'),
+                      width: sendButtonSize,
+                      height: sendButtonSize,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary,
+                          shape: BoxShape.circle,
+                        ),
+                        child: IconButton(
+                          onPressed: (_isLoading ||
+                                  _isUploadingAttachment ||
+                                  _isSendAttemptInProgress)
+                              ? null
+                              : _sendMessage,
+                          padding: EdgeInsets.zero,
+                          icon: const Icon(
+                            Icons.arrow_upward_rounded,
+                            size: 18,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    )
+                  : SizedBox(
+                      key: const ValueKey('send-disabled'),
+                      width: sendButtonSize,
+                      height: sendButtonSize,
+                      child: Icon(
+                        Icons.arrow_upward_rounded,
+                        size: 18,
+                        color: mutedIconColor,
+                      ),
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
