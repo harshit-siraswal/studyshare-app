@@ -275,6 +275,31 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
               ],
             ),
           ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: FilledButton.icon(
+              onPressed:
+                  _canUpload && !_isUploading ? _submitUpload : null,
+              icon: Icon(
+                _isUploading
+                    ? Icons.cloud_upload_rounded
+                    : Icons.upload_rounded,
+              ),
+              label: Text(
+                _isUploading ? 'Uploading…' : 'Upload Syllabus',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+              ),
+              style: FilledButton.styleFrom(
+                backgroundColor: widget.departmentColor,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+          ),
           if (_isUploading) ...[
             const SizedBox(height: 16),
             const LinearProgressIndicator(),

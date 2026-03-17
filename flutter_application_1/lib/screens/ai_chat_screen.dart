@@ -4486,6 +4486,170 @@ Return STRICT JSON only (no markdown). Schema:
     );
   }
 
+  Widget _buildPromptComposer({
+    required bool isDark,
+    required bool hasComposerContent,
+    required double attachButtonSize,
+    required double sendButtonSize,
+    required double inputMaxHeight,
+    required TextStyle textFieldStyle,
+    required TextStyle hintStyle,
+  }) {
+    final iconColor = isDark ? Colors.white70 : Colors.black87;
+    final mutedIconColor = isDark ? Colors.white54 : Colors.black45;
+    final fieldBg = isDark ? const Color(0xFF15171C) : Colors.white;
+    final fieldBorder = isDark ? Colors.white12 : Colors.black12;
+    final actionSize = attachButtonSize < 44 ? 44.0 : attachButtonSize;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 6, 4, 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          SizedBox(
+            width: actionSize,
+            height: actionSize,
+            child: Material(
+              color:
+                  isDark ? const Color(0xFF22242A) : const Color(0xFFF3F4F6),
+              shape: const CircleBorder(),
+              child: IconButton(
+                key: _coachAttachKey,
+                tooltip: 'Attach image or PDF',
+                onPressed: (_isLoading ||
+                        _isUploadingAttachment ||
+                        _isSendAttemptInProgress)
+                    ? null
+                    : _pickAttachment,
+                padding: EdgeInsets.zero,
+                iconSize: 20,
+                icon: _isUploadingAttachment
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(
+                        Icons.attach_file_rounded,
+                        color: iconColor,
+                      ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Container(
+              constraints: const BoxConstraints(minHeight: 44),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: fieldBg,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: fieldBorder),
+                boxShadow: [
+                  if (!isDark)
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.05),
+                      blurRadius: 10,
+                      offset: const Offset(0, 6),
+                    ),
+                ],
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Expanded(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(maxHeight: inputMaxHeight),
+                      child: TextField(
+                        key: _coachInputKey,
+                        controller: _controller,
+                        minLines: 1,
+                        maxLines: 6,
+                        textInputAction: TextInputAction.send,
+                        onSubmitted: (_) => _sendMessage(),
+                        style: textFieldStyle,
+                        decoration: InputDecoration(
+                          hintText: 'Ask anything about your notes…',
+                          hintStyle: hintStyle.copyWith(
+                            color: mutedIconColor,
+                          ),
+                          border: InputBorder.none,
+                          isDense: true,
+                          contentPadding:
+                              const EdgeInsets.symmetric(vertical: 8),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  SizedBox(
+                    width: 36,
+                    height: 36,
+                    child: IconButton(
+                      tooltip: _allowWebMode ? 'Web on' : 'Web off',
+                      onPressed:
+                          (_isLoading || _isSendAttemptInProgress) ? null : () {
+                        if (!mounted) return;
+                        setState(() => _allowWebMode = !_allowWebMode);
+                      },
+                      icon: Icon(
+                        _allowWebMode
+                            ? Icons.public_rounded
+                            : Icons.public_off_rounded,
+                        size: 20,
+                        color:
+                            _allowWebMode ? AppTheme.primary : mutedIconColor,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 180),
+                    child: hasComposerContent
+                        ? SizedBox(
+                            key: const ValueKey('send'),
+                            width: sendButtonSize,
+                            height: sendButtonSize,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: AppTheme.primary,
+                                shape: BoxShape.circle,
+                              ),
+                              child: IconButton(
+                                onPressed: (_isLoading ||
+                                        _isUploadingAttachment ||
+                                        _isSendAttemptInProgress)
+                                    ? null
+                                    : _sendMessage,
+                                padding: EdgeInsets.zero,
+                                icon: const Icon(
+                                  Icons.arrow_upward_rounded,
+                                  size: 18,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          )
+                        : SizedBox(
+                            key: const ValueKey('send-disabled'),
+                            width: sendButtonSize,
+                            height: sendButtonSize,
+                            child: Icon(
+                              Icons.arrow_upward_rounded,
+                              size: 18,
+                              color: mutedIconColor,
+                            ),
+                          ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final mediaQuery = MediaQuery.of(context);
@@ -4506,8 +4670,6 @@ Return STRICT JSON only (no markdown). Schema:
         (screenWidth * (isSmallPhone ? 0.52 : (isCompact ? 0.48 : 0.38)))
             .clamp(116.0, 240.0)
             .toDouble();
-    final composerMinHeight = (isSmallPhone ? 40.0 : (isCompact ? 42.0 : 46.0))
-        .toDouble();
     final inputOuterPadding = EdgeInsets.fromLTRB(
       horizontalPagePadding,
       isSmallPhone ? 7 : (isCompact ? 8 : 10),
@@ -4526,7 +4688,6 @@ Return STRICT JSON only (no markdown). Schema:
     );
     final attachButtonSize = 44.0;
     final sendButtonSize = isSmallPhone ? 36.0 : (isCompact ? 38.0 : 42.0);
-    final sendIconSize = isSmallPhone ? 16.0 : 17.0;
     final hasComposerContent =
         _hasText || _attachments.isNotEmpty || _stickyAttachments.isNotEmpty;
     final textFieldStyle = GoogleFonts.inter(
@@ -4536,10 +4697,6 @@ Return STRICT JSON only (no markdown). Schema:
     final hintStyle = GoogleFonts.inter(
       color: isDark ? AppTheme.darkTextMuted : AppTheme.lightTextMuted,
       fontSize: isSmallPhone ? 14 : 15,
-    );
-    final inputContentPadding = EdgeInsets.symmetric(
-      horizontal: 0,
-      vertical: isSmallPhone ? 10 : (isCompact ? 10 : 12),
     );
     final inputMaxHeight = isSmallPhone ? 126.0 : 152.0;
     final attachmentNameStyle = GoogleFonts.inter(
@@ -4951,227 +5108,14 @@ Return STRICT JSON only (no markdown). Schema:
                               ),
                             ),
                           ),
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(4, 6, 4, 10),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              SizedBox(
-                                width: attachButtonSize,
-                                height: attachButtonSize,
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: isDark
-                                        ? const Color(0xFF22242A)
-                                        : const Color(0xFFF3F4F6),
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: isDark
-                                          ? Colors.white12
-                                          : Colors.black12,
-                                    ),
-                                  ),
-                                  child: IconButton(
-                                    key: _coachAttachKey,
-                                    tooltip: 'Attach image or PDF',
-                                    onPressed: (_isLoading ||
-                                            _isUploadingAttachment ||
-                                            _isSendAttemptInProgress)
-                                        ? null
-                                        : _pickAttachment,
-                                    padding: EdgeInsets.zero,
-                                    iconSize: 18,
-                                    icon: _isUploadingAttachment
-                                        ? const SizedBox(
-                                            width: 16,
-                                            height: 16,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 2,
-                                            ),
-                                          )
-                                        : Icon(
-                                            Icons.attach_file_rounded,
-                                            color: isDark
-                                                ? Colors.white70
-                                                : Colors.black87,
-                                          ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Container(
-                                  constraints: BoxConstraints(
-                                    minHeight: composerMinHeight,
-                                  ),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 6,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: isDark
-                                        ? const Color(0xFF15171C)
-                                        : Colors.white,
-                                    borderRadius: BorderRadius.circular(18),
-                                    border: Border.all(
-                                      color: isDark
-                                          ? Colors.white12
-                                          : Colors.black12,
-                                    ),
-                                    boxShadow: [
-                                      if (!isDark)
-                                        BoxShadow(
-                                          color: Colors.black.withValues(
-                                            alpha: 0.04,
-                                          ),
-                                          blurRadius: 10,
-                                          offset: const Offset(0, 6),
-                                        ),
-                                    ],
-                                  ),
-                                  child: Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.end,
-                                    children: [
-                                      Expanded(
-                                        child: ConstrainedBox(
-                                          constraints: BoxConstraints(
-                                            maxHeight: inputMaxHeight,
-                                          ),
-                                          child: TextField(
-                                            key: _coachInputKey,
-                                            controller: _controller,
-                                            minLines: 1,
-                                            maxLines: 6,
-                                            textInputAction:
-                                                TextInputAction.send,
-                                            onSubmitted: (_) => _sendMessage(),
-                                            style: textFieldStyle,
-                                            decoration: InputDecoration(
-                                              hintText:
-                                                  'Ask anything about your notes…',
-                                              hintStyle: hintStyle.copyWith(
-                                                color: isDark
-                                                    ? Colors.white54
-                                                    : Colors.black45,
-                                              ),
-                                              border: InputBorder.none,
-                                              isDense: true,
-                                              contentPadding:
-                                                  inputContentPadding,
-                                              prefix: GestureDetector(
-                                                onTap: _showSourcePicker,
-                                                child: Padding(
-                                                  padding:
-                                                      const EdgeInsets.only(
-                                                        right: 8,
-                                                      ),
-                                                  child: Container(
-                                                    padding:
-                                                        const EdgeInsets.symmetric(
-                                                      horizontal: 8,
-                                                      vertical: 4,
-                                                    ),
-                                                    decoration: BoxDecoration(
-                                                      color: _allowWebMode
-                                                          ? const Color(
-                                                              0x1A1EAEDB,
-                                                            )
-                                                          : const Color(
-                                                              0x1A8B5CF6,
-                                                            ),
-                                                      borderRadius:
-                                                          BorderRadius.circular(
-                                                        999,
-                                                      ),
-                                                      border: Border.all(
-                                                        color: _allowWebMode
-                                                            ? const Color(
-                                                                0xFF1EAEDB,
-                                                              )
-                                                            : const Color(
-                                                                0xFF8B5CF6,
-                                                              ),
-                                                      ),
-                                                    ),
-                                                    child: Text(
-                                                      _allowWebMode
-                                                          ? 'Web'
-                                                          : 'Notes',
-                                                      style: GoogleFonts.inter(
-                                                        fontSize: 11,
-                                                        fontWeight:
-                                                            FontWeight.w600,
-                                                        color: _allowWebMode
-                                                            ? const Color(
-                                                                0xFF1EAEDB,
-                                                              )
-                                                            : const Color(
-                                                                0xFF8B5CF6,
-                                                              ),
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      AnimatedSwitcher(
-                                        duration: const Duration(
-                                          milliseconds: 180,
-                                        ),
-                                        child: hasComposerContent
-                                            ? SizedBox(
-                                                key: const ValueKey('send'),
-                                                width: sendButtonSize,
-                                                height: sendButtonSize,
-                                                child: Container(
-                                                  decoration: BoxDecoration(
-                                                    color: AppTheme.primary,
-                                                    shape: BoxShape.circle,
-                                                  ),
-                                                  child: IconButton(
-                                                    onPressed: (_isLoading ||
-                                                            _isUploadingAttachment ||
-                                                            _isSendAttemptInProgress)
-                                                        ? null
-                                                        : _sendMessage,
-                                                    padding: EdgeInsets.zero,
-                                                    icon: Icon(
-                                                      Icons
-                                                          .arrow_upward_rounded,
-                                                      size: sendIconSize,
-                                                      color: Colors.white,
-                                                    ),
-                                                  ),
-                                                ),
-                                              )
-                                            : SizedBox(
-                                                key: const ValueKey('mic'),
-                                                width: sendButtonSize,
-                                                height: sendButtonSize,
-                                                child: IconButton(
-                                                  onPressed: null,
-                                                  padding: EdgeInsets.zero,
-                                                  icon: Icon(
-                                                    Icons.mic_none_rounded,
-                                                    size: sendIconSize,
-                                                    color: isDark
-                                                        ? Colors.white38
-                                                        : Colors.black38,
-                                                  ),
-                                                ),
-                                              ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+                        _buildPromptComposer(
+                          isDark: isDark,
+                          hasComposerContent: hasComposerContent,
+                          attachButtonSize: attachButtonSize,
+                          sendButtonSize: sendButtonSize,
+                          inputMaxHeight: inputMaxHeight,
+                          textFieldStyle: textFieldStyle,
+                          hintStyle: hintStyle,
                         ),
                         if (widget.resourceContext != null)
                           Padding(
