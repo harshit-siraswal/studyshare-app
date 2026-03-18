@@ -118,7 +118,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
   bool _useOcr = true;
   bool _forceOcr = false;
-  String _ocrProvider = 'google';
+  String _ocrProvider = 'gemini';
   bool _showAnswers = false;
   final Map<int, String> _selectedAnswers = {};
   final Set<int> _flippedCardIndexes = <int>{};
@@ -134,12 +134,10 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
   String _ocrProviderLabelFor(String provider) {
     switch (provider) {
-      case 'google':
-        return 'Google Vision';
-      case 'sarvam':
-        return 'Sarvam';
+      case 'gemini':
+        return 'Gemini';
       default:
-        return 'Google Vision';
+        return 'Gemini';
     }
   }
 
