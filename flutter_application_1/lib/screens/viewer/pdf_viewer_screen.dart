@@ -20,6 +20,7 @@ class PdfViewerScreen extends StatefulWidget {
   final String title;
   final String? resourceId;
   final String? collegeId;
+  final int initialPage;
 
   const PdfViewerScreen({
     super.key,
@@ -27,6 +28,7 @@ class PdfViewerScreen extends StatefulWidget {
     required this.title,
     this.resourceId,
     this.collegeId,
+    this.initialPage = 1,
   });
 
   @override
@@ -46,7 +48,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   bool _hasError = false;
   String _errorMessage = '';
 
-
   bool _showSearch = false;
   final TextEditingController _searchController = TextEditingController();
   Timer? _searchDebounce;
@@ -62,6 +63,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   String get _urlPath => Uri.tryParse(widget.pdfUrl)?.path.toLowerCase() ?? '';
 
   bool get _isNetwork => widget.pdfUrl.startsWith('http');
+
+  int get _initialPageNumber => widget.initialPage < 1 ? 1 : widget.initialPage;
 
   bool get _isPdf => _urlPath.endsWith('.pdf');
 
@@ -111,7 +114,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
 
   void _initWebView() {
     final encodedUrl = Uri.encodeComponent(widget.pdfUrl);
-    final googleDocsUrl = 'https://docs.google.com/gview?embedded=true&url=$encodedUrl';
+    final googleDocsUrl =
+        'https://docs.google.com/gview?embedded=true&url=$encodedUrl';
 
     _webViewController = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
@@ -122,9 +126,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
             if (_isAllowedOfficeViewerNavigation(request.url)) {
               return NavigationDecision.navigate;
             }
-            debugPrint(
-              'Blocked unexpected Office WebView URL: ${request.url}',
-            );
+            debugPrint('Blocked unexpected Office WebView URL: ${request.url}');
             return NavigationDecision.prevent;
           },
           onPageStarted: (_) {
@@ -195,21 +197,25 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       if (_pdfSearchListener != null) {
         _searchResult.removeListener(_pdfSearchListener!);
       }
-      
+
       final result = _pdfViewerController.searchText(trimmed);
       _searchResult = result;
-      
+
       _pdfSearchListener = () {
         if (mounted) {
           setState(() {});
-          if (!kIsWeb && result.isSearchCompleted && result.totalInstanceCount == 0 && requestId == _searchSequence && !_isOcrSearching) {
+          if (!kIsWeb &&
+              result.isSearchCompleted &&
+              result.totalInstanceCount == 0 &&
+              requestId == _searchSequence &&
+              !_isOcrSearching) {
             _runOcrFallbackSearch(trimmed, requestId);
           }
         }
       };
-      
+
       result.addListener(_pdfSearchListener!);
-      
+
       setState(() {
         _ocrMatches = [];
         _ocrSearchError = null;
@@ -219,7 +225,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   }
 
   Future<void> _runOcrFallbackSearch(String query, int requestId) async {
-    if (!_isPdf || widget.resourceId == null || widget.resourceId!.isEmpty) return;
+    if (!_isPdf || widget.resourceId == null || widget.resourceId!.isEmpty) {
+      return;
+    }
 
     setState(() {
       _isOcrSearching = true;
@@ -262,10 +270,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     if (_ocrMatches.isEmpty) return;
     showModalBottomSheet(
       context: context,
-      backgroundColor:
-          Theme.of(context).brightness == Brightness.dark
-              ? AppTheme.darkSurface
-              : Colors.white,
+      backgroundColor: Theme.of(context).brightness == Brightness.dark
+          ? AppTheme.darkSurface
+          : Colors.white,
       isScrollControlled: true,
       builder: (context) {
         return SafeArea(
@@ -300,7 +307,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                   child: ListView.separated(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                     itemCount: _ocrMatches.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    separatorBuilder: (_, index) => const SizedBox(height: 10),
                     itemBuilder: (context, index) {
                       final snippet =
                           _ocrMatches[index]['snippet']?.toString() ?? '';
@@ -314,8 +321,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                           border: Border.all(
                             color:
                                 Theme.of(context).brightness == Brightness.dark
-                                    ? AppTheme.darkBorder
-                                    : const Color(0xFFE2E8F0),
+                                ? AppTheme.darkBorder
+                                : const Color(0xFFE2E8F0),
                           ),
                         ),
                         child: Text(
@@ -325,8 +332,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                             height: 1.5,
                             color:
                                 Theme.of(context).brightness == Brightness.dark
-                                    ? Colors.white70
-                                    : const Color(0xFF334155),
+                                ? Colors.white70
+                                : const Color(0xFF334155),
                           ),
                         ),
                       );
@@ -367,15 +374,17 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to open link. Please try again.')),
+          const SnackBar(
+            content: Text('Unable to open link. Please try again.'),
+          ),
         );
       }
     } catch (e) {
       debugPrint('Failed to launch URL: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Unable to open link.')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Unable to open link.')));
       }
     }
   }
@@ -391,7 +400,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         builder: (context) => PaywallDialog(
           onSuccess: () {
             if (!mounted) return;
-            messenger.showSnackBar(const SnackBar(content: Text('Premium unlocked! Downloading...')));
+            messenger.showSnackBar(
+              const SnackBar(content: Text('Premium unlocked! Downloading...')),
+            );
             _performDownloadOrLaunch();
           },
         ),
@@ -405,7 +416,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   @override
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
-    final bgColor = isDarkMode ? const Color(0xFF121212) : AppTheme.lightBackground;
+    final bgColor = isDarkMode
+        ? const Color(0xFF121212)
+        : AppTheme.lightBackground;
     final textColor = isDarkMode ? Colors.white : Colors.black;
     final appBarColor = isDarkMode ? const Color(0xFF1E1E1E) : Colors.white;
 
@@ -427,7 +440,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         ),
         title: Text(
           widget.title,
-          style: GoogleFonts.inter(color: textColor, fontSize: 16, fontWeight: FontWeight.w600),
+          style: GoogleFonts.inter(
+            color: textColor,
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
@@ -439,12 +456,18 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     decoration: BoxDecoration(
-                      color: isDarkMode ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+                      color: isDarkMode
+                          ? Colors.white10
+                          : Colors.black.withValues(alpha: 0.05),
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.search_rounded, color: textColor.withValues(alpha: 0.75), size: 20),
+                        Icon(
+                          Icons.search_rounded,
+                          color: textColor.withValues(alpha: 0.75),
+                          size: 20,
+                        ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: TextField(
@@ -452,11 +475,17 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                             autofocus: true,
                             onChanged: _onSearchChanged,
                             onSubmitted: _performSearch,
-                            style: GoogleFonts.inter(color: textColor, fontSize: 15),
+                            style: GoogleFonts.inter(
+                              color: textColor,
+                              fontSize: 15,
+                            ),
                             cursorColor: textColor,
                             decoration: InputDecoration(
                               hintText: 'Find in PDF...',
-                              hintStyle: GoogleFonts.inter(color: textColor.withValues(alpha: 0.5), fontSize: 14),
+                              hintStyle: GoogleFonts.inter(
+                                color: textColor.withValues(alpha: 0.5),
+                                fontSize: 14,
+                              ),
                               border: InputBorder.none,
                             ),
                           ),
@@ -477,13 +506,19 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         actions: [
           if (_isPdf)
             IconButton(
-              icon: Icon(_showSearch ? Icons.close_rounded : Icons.search_rounded),
+              icon: Icon(
+                _showSearch ? Icons.close_rounded : Icons.search_rounded,
+              ),
               onPressed: _toggleSearch,
               tooltip: 'Find in document',
             ),
           if (_isPdf)
             IconButton(
-              icon: Icon(_isNightMode ? Icons.light_mode_rounded : Icons.dark_mode_rounded),
+              icon: Icon(
+                _isNightMode
+                    ? Icons.light_mode_rounded
+                    : Icons.dark_mode_rounded,
+              ),
               onPressed: () {
                 setState(() {
                   _isNightMode = !_isNightMode;
@@ -508,12 +543,16 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
             IconButton(
               icon: const Icon(Icons.keyboard_arrow_up_rounded),
               tooltip: 'Previous match',
-              onPressed: _searchResult.hasResult ? () => _searchResult.previousInstance() : null,
+              onPressed: _searchResult.hasResult
+                  ? () => _searchResult.previousInstance()
+                  : null,
             ),
             IconButton(
               icon: const Icon(Icons.keyboard_arrow_down_rounded),
               tooltip: 'Next match',
-              onPressed: _searchResult.hasResult ? () => _searchResult.nextInstance() : null,
+              onPressed: _searchResult.hasResult
+                  ? () => _searchResult.nextInstance()
+                  : null,
             ),
           ],
           if (widget.resourceId != null && widget.resourceId!.isNotEmpty)
@@ -528,7 +567,6 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               onPressed: _handleDownload,
               tooltip: 'Download',
             ),
-
         ],
       ),
       body: Stack(
@@ -544,7 +582,11 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.browser_not_supported_rounded, size: 64, color: Colors.grey),
+                  const Icon(
+                    Icons.browser_not_supported_rounded,
+                    size: 64,
+                    color: Colors.grey,
+                  ),
                   const SizedBox(height: 16),
                   Text(
                     'Office document viewing is not fully supported on Web natively.',
@@ -556,13 +598,16 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
                     onPressed: _handleDownload,
                     icon: const Icon(Icons.download_rounded),
                     label: const Text('Download to View'),
-                  )
+                  ),
                 ],
               ),
             )
           else
             _buildUnsupportedContent(),
-          if (_showSearch && (_isOcrSearching || _ocrMatches.isNotEmpty || _ocrSearchError != null))
+          if (_showSearch &&
+              (_isOcrSearching ||
+                  _ocrMatches.isNotEmpty ||
+                  _ocrSearchError != null))
             Positioned(
               top: 0,
               left: 12,
@@ -584,7 +629,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       decoration: BoxDecoration(
         color: isDarkMode ? AppTheme.darkCard : Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isDarkMode ? AppTheme.darkBorder : const Color(0xFFE2E8F0)),
+        border: Border.all(
+          color: isDarkMode ? AppTheme.darkBorder : const Color(0xFFE2E8F0),
+        ),
       ),
       child: Row(
         children: [
@@ -600,8 +647,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               _isOcrSearching
                   ? 'No embedded text match. Searching OCR text...'
                   : _ocrMatches.isNotEmpty
-                      ? 'Found ${_ocrMatches.length} OCR matches for this PDF.'
-                      : (_ocrSearchError ?? 'No OCR match found'),
+                  ? 'Found ${_ocrMatches.length} OCR matches for this PDF.'
+                  : (_ocrSearchError ?? 'No OCR match found'),
               style: GoogleFonts.inter(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
@@ -632,6 +679,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         });
       }
     }
+
     void onFailed(PdfDocumentLoadFailedDetails details) {
       if (mounted) {
         setState(() {
@@ -648,6 +696,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
           widget.pdfUrl,
           key: _pdfViewerKey,
           controller: _pdfViewerController,
+          initialPageNumber: _initialPageNumber,
           onDocumentLoaded: onLoaded,
           onDocumentLoadFailed: onFailed,
           enableDoubleTapZooming: true,
@@ -666,6 +715,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
               File(filePath),
               key: _pdfViewerKey,
               controller: _pdfViewerController,
+              initialPageNumber: _initialPageNumber,
               onDocumentLoaded: onLoaded,
               onDocumentLoadFailed: onFailed,
               enableDoubleTapZooming: true,
@@ -716,15 +766,24 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.error_outline_rounded, size: 64, color: AppTheme.error),
+            const Icon(
+              Icons.error_outline_rounded,
+              size: 64,
+              color: AppTheme.error,
+            ),
             const SizedBox(height: 16),
             Text(
               'Failed to load document',
-              style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w600),
+              style: GoogleFonts.inter(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
-              _errorMessage.isNotEmpty ? _errorMessage : 'An unknown error occurred',
+              _errorMessage.isNotEmpty
+                  ? _errorMessage
+                  : 'An unknown error occurred',
               textAlign: TextAlign.center,
               style: GoogleFonts.inter(fontSize: 14, color: AppTheme.textMuted),
             ),

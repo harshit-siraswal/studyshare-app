@@ -15,6 +15,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../config/app_config.dart';
 import '../config/theme.dart';
 import '../models/ai_question_paper.dart';
+import '../models/study_ai_plan.dart';
 import '../services/auth_service.dart';
 import '../services/ai_chat_notification_service.dart';
 import '../services/backend_api_service.dart';
@@ -29,6 +30,7 @@ import '../widgets/ai_formatted_text.dart';
 import '../widgets/ai_logo.dart';
 import '../widgets/onboarding_overlay.dart';
 import '../widgets/paywall_dialog.dart';
+import '../widgets/study_ai_plan_widget.dart';
 import '../utils/ai_token_budget_utils.dart';
 import '../utils/link_navigation_utils.dart';
 import 'ai_question_paper_quiz_screen.dart';
@@ -132,6 +134,10 @@ class AIChatMessage {
   bool ocrFailureAffectsRetrieval;
   List<OcrErrorInfo> ocrErrors;
   AiQuestionPaper? quizActionPaper;
+  AnswerOrigin? answerOrigin;
+  List<PlanStep> planSteps;
+  String? planTitle;
+  bool showPlanExport;
 
   AIChatMessage({
     required this.isUser,
@@ -146,6 +152,10 @@ class AIChatMessage {
     this.ocrFailureAffectsRetrieval = false,
     this.ocrErrors = const [],
     this.quizActionPaper,
+    this.answerOrigin,
+    this.planSteps = const [],
+    this.planTitle,
+    this.showPlanExport = false,
   });
 }
 
@@ -978,6 +988,12 @@ class _AIChatScreenState extends State<AIChatScreen>
           .toList(),
       cached: message.cached,
       noLocal: message.noLocal,
+      answerOrigin: message.answerOrigin?.wireValue,
+      planTitle: message.planTitle,
+      planSteps: message.planSteps
+          .map((step) => step.toCompactJson())
+          .toList(growable: false),
+      showPlanExport: message.showPlanExport,
       retrievalScore: message.retrievalScore,
       llmConfidenceScore: message.llmConfidenceScore,
       combinedConfidence: message.combinedConfidence,
@@ -1001,6 +1017,9 @@ class _AIChatScreenState extends State<AIChatScreen>
     final sources = message.sources
         .map((source) => RagSource.fromJson(source))
         .toList();
+    final planSteps = message.planSteps
+        .map((step) => PlanStep.fromJson(step))
+        .toList(growable: false);
     return AIChatMessage(
       isUser: message.isUser,
       content: message.content,
@@ -1008,6 +1027,10 @@ class _AIChatScreenState extends State<AIChatScreen>
       primarySource: sources.firstWhereOrNull((s) => s.isPrimary),
       cached: message.cached,
       noLocal: message.noLocal,
+      answerOrigin: AnswerOriginX.fromWireValue(message.answerOrigin),
+      planSteps: planSteps,
+      planTitle: message.planTitle,
+      showPlanExport: message.showPlanExport,
       retrievalScore: message.retrievalScore,
       llmConfidenceScore: message.llmConfidenceScore,
       combinedConfidence: message.combinedConfidence,
@@ -1017,6 +1040,367 @@ class _AIChatScreenState extends State<AIChatScreen>
           .toList(),
       quizActionPaper: quizActionPaper,
     );
+  }
+
+  String _buildPlanTitleFromPrompt(String prompt) {
+    final compact = _sanitizePromptFragment(prompt, maxLength: 56);
+    if (compact.isEmpty) return 'Preparing your answer';
+    return compact;
+  }
+
+  bool _shouldShowPlanCard(AIChatMessage message) {
+    if (message.isUser) return false;
+    return message.answerOrigin != null || message.planSteps.length >= 2;
+  }
+
+  SourceBadge _sourceBadgeFromRagSource(RagSource source) {
+    final normalized = source.sourceType.trim().toLowerCase();
+    if (normalized == 'web') return SourceBadge.web;
+    if (normalized == 'youtube' || normalized == 'video') {
+      return SourceBadge.video;
+    }
+    return SourceBadge.notes;
+  }
+
+  List<PlanSource> _planSourcesFromRagSources(
+    List<RagSource> sources, {
+    int limit = 3,
+  }) {
+    final seen = <String>{};
+    final planSources = <PlanSource>[];
+
+    for (final source in sources) {
+      final badge = _sourceBadgeFromRagSource(source);
+      final key = [
+        source.fileId.trim(),
+        source.title.trim(),
+        source.startPage?.toString() ?? '',
+        badge.wireValue,
+      ].join('|');
+      if (seen.contains(key)) continue;
+      seen.add(key);
+      planSources.add(
+        PlanSource(
+          title: source.title,
+          badge: badge,
+          page: source.startPage,
+          timestamp: source.timestamp,
+          url: badge == SourceBadge.notes
+              ? source.fileUrl
+              : (source.videoUrl ?? source.fileUrl),
+          fileId: source.fileId.trim().isEmpty ? null : source.fileId.trim(),
+        ),
+      );
+      if (planSources.length >= limit) break;
+    }
+
+    return planSources;
+  }
+
+  String _simplePlanStepTitle(AnswerOrigin? origin) {
+    switch (origin) {
+      case AnswerOrigin.webOnly:
+        return 'Searched the web';
+      case AnswerOrigin.notesPlusWeb:
+        return 'Gathered notes and web context';
+      case AnswerOrigin.insufficientNotes:
+        return 'Checked your notes';
+      case AnswerOrigin.notesOnly:
+      case null:
+        return 'Retrieved from your notes';
+    }
+  }
+
+  List<PlanStep> _buildSimplePlanSteps({
+    required AnswerOrigin? answerOrigin,
+    required List<RagSource> sources,
+    required bool noLocal,
+    required bool answerCompleted,
+  }) {
+    final planSources = _planSourcesFromRagSources(sources);
+    final StepStatus retrievalStatus;
+    switch (answerOrigin) {
+      case AnswerOrigin.insufficientNotes:
+        retrievalStatus = planSources.isNotEmpty
+            ? StepStatus.needHelp
+            : StepStatus.failed;
+        break;
+      case AnswerOrigin.webOnly:
+      case AnswerOrigin.notesPlusWeb:
+      case AnswerOrigin.notesOnly:
+        retrievalStatus = StepStatus.completed;
+        break;
+      case null:
+        if (planSources.isNotEmpty) {
+          retrievalStatus = StepStatus.completed;
+        } else if (noLocal) {
+          retrievalStatus = StepStatus.failed;
+        } else {
+          retrievalStatus = StepStatus.inProgress;
+        }
+        break;
+    }
+
+    final answerStatus = answerCompleted
+        ? StepStatus.completed
+        : StepStatus.inProgress;
+
+    return [
+      PlanStep(
+        id: 'retrieve',
+        title: _simplePlanStepTitle(answerOrigin),
+        status: retrievalStatus,
+        description: answerOrigin == AnswerOrigin.insufficientNotes
+            ? 'Only a partial match was found in your notes.'
+            : null,
+        sources: planSources,
+      ),
+      PlanStep(id: 'answer', title: 'Generated answer', status: answerStatus),
+    ];
+  }
+
+  List<PlanStep> _markSimplePlanAnswerStatus(
+    List<PlanStep> steps,
+    StepStatus status,
+  ) {
+    return steps
+        .map(
+          (step) => step.id == 'answer' ? step.copyWith(status: status) : step,
+        )
+        .toList(growable: false);
+  }
+
+  RagSource? _findSourceForPlanOpen(AIChatMessage message, String fileId) {
+    if (message.primarySource?.fileId == fileId) {
+      return message.primarySource;
+    }
+    return message.sources.firstWhereOrNull(
+      (source) => source.fileId == fileId,
+    );
+  }
+
+  Future<void> _openPlanPdfSource(
+    AIChatMessage message,
+    String fileId,
+    int? page,
+  ) async {
+    final source = _findSourceForPlanOpen(message, fileId);
+    final target = _normalizeExternalUrl(source?.fileUrl ?? '');
+    final uri = _buildExternalLaunchUri(target);
+    if (uri == null) {
+      _showSourceUrlErrorSnackBar(source?.title ?? 'PDF source');
+      return;
+    }
+
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PdfViewerScreen(
+          pdfUrl: uri.toString(),
+          title: source?.title ?? 'Source',
+          resourceId: fileId,
+          collegeId: widget.collegeId,
+          initialPage: page ?? 1,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openPlanWebSource(String url) async {
+    final uri = _buildExternalLaunchUri(_normalizeExternalUrl(url));
+    if (uri == null) {
+      _showSourceUrlErrorSnackBar('Web source');
+      return;
+    }
+    await _openExternalSourceLink(uri: uri, sourceTitle: 'Web source');
+  }
+
+  Future<void> _openPlanVideoSource(String url, String? timestamp) async {
+    final normalized = _normalizeExternalUrl(url);
+    if (normalized.isEmpty) {
+      _showSourceUrlErrorSnackBar('Video source');
+      return;
+    }
+    final uri = _buildExternalLaunchUri(normalized);
+    if (uri == null) {
+      _showSourceUrlErrorSnackBar('Video source');
+      return;
+    }
+
+    var opened = false;
+    if (mounted) {
+      try {
+        opened = await openStudyShareLink(
+          context,
+          rawUrl: normalized,
+          title: 'Video source',
+          collegeId: widget.collegeId,
+          subject: widget.resourceContext?.subject,
+          semester: widget.resourceContext?.semester,
+          branch: widget.resourceContext?.branch,
+          fallbackBaseUrl: AppConfig.apiUrl,
+        );
+      } catch (e) {
+        debugPrint('openStudyShareLink failed for plan source: $e');
+      }
+    }
+
+    if (!opened) {
+      await _openExternalSourceLink(uri: uri, sourceTitle: 'Video source');
+    }
+  }
+
+  List<PlanSource> _planSourcesFromAttachmentMaps(
+    List<Map<String, dynamic>> attachments, {
+    int limit = 3,
+  }) {
+    final seen = <String>{};
+    final planSources = <PlanSource>[];
+    for (final attachment in attachments) {
+      final title = attachment['name']?.toString().trim() ?? 'Study material';
+      final rawUrl = attachment['url']?.toString().trim() ?? '';
+      final normalizedType = attachment['type']?.toString().toLowerCase() ?? '';
+      final badge =
+          rawUrl.toLowerCase().contains('youtu') ||
+              normalizedType == 'youtube' ||
+              normalizedType == 'video'
+          ? SourceBadge.video
+          : (normalizedType == 'web' ? SourceBadge.web : SourceBadge.notes);
+      final key = '$title|${badge.wireValue}|$rawUrl';
+      if (seen.contains(key)) continue;
+      seen.add(key);
+      planSources.add(
+        PlanSource(
+          title: title,
+          badge: badge,
+          url: rawUrl.isEmpty ? null : rawUrl,
+        ),
+      );
+      if (planSources.length >= limit) break;
+    }
+    return planSources;
+  }
+
+  String _buildQuestionPaperPlanTitle({
+    required String inferredSubject,
+    required _QuestionPaperRequestConfig config,
+  }) {
+    final subject = inferredSubject.trim();
+    if (subject.isNotEmpty) {
+      return 'Preparing your $subject paper';
+    }
+    return 'Preparing Sem ${config.semester} ${config.branch.toUpperCase()} paper';
+  }
+
+  List<PlanStep> _buildQuestionPaperPlan({
+    required String notesDescription,
+    List<PlanSource> noteSources = const [],
+  }) {
+    return [
+      const PlanStep(
+        id: 'qp_context',
+        title: 'Resolved paper context',
+        status: StepStatus.pending,
+      ),
+      PlanStep(
+        id: 'qp_notes',
+        title: 'Loaded related notes',
+        status: StepStatus.pending,
+        description: notesDescription,
+        sources: noteSources,
+      ),
+      const PlanStep(
+        id: 'qp_generate',
+        title: 'Generated question paper',
+        status: StepStatus.pending,
+      ),
+      const PlanStep(
+        id: 'qp_validate',
+        title: 'Parsed and validated paper',
+        status: StepStatus.pending,
+      ),
+      const PlanStep(
+        id: 'qp_ready',
+        title: 'Ready to quiz or download',
+        status: StepStatus.pending,
+      ),
+    ];
+  }
+
+  List<PlanStep> _updatePlanStepList(
+    List<PlanStep> steps,
+    String stepId, {
+    StepStatus? status,
+    String? description,
+    List<PlanSource>? sources,
+  }) {
+    return steps
+        .map((step) {
+          if (step.id != stepId) return step;
+          return step.copyWith(
+            status: status ?? step.status,
+            description: description ?? step.description,
+            sources: sources ?? step.sources,
+          );
+        })
+        .toList(growable: false);
+  }
+
+  List<PlanStep> _upsertPlanSubstepList(
+    List<PlanStep> steps,
+    String stepId,
+    PlanSubstep substep,
+  ) {
+    return steps
+        .map((step) {
+          if (step.id != stepId) return step;
+          final updatedSubsteps = [...step.substeps];
+          final existingIndex = updatedSubsteps.indexWhere(
+            (item) => item.id == substep.id,
+          );
+          if (existingIndex >= 0) {
+            updatedSubsteps[existingIndex] = substep;
+          } else {
+            updatedSubsteps.add(substep);
+          }
+          return step.copyWith(substeps: updatedSubsteps);
+        })
+        .toList(growable: false);
+  }
+
+  Future<void> _exportQuestionPaperFromMessage(AIChatMessage message) async {
+    final paper = message.quizActionPaper;
+    if (paper == null) return;
+    try {
+      final file = await _summaryPdfService.saveQuestionPaperPdf(
+        paper: paper,
+        subtitle: 'AI Test Paper',
+        watermarkText: 'StudyShare Test',
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('PDF saved and ready to share: ${file.path}'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path)],
+          text: 'StudyShare test paper: ${paper.title}',
+        ),
+      );
+    } catch (e, stackTrace) {
+      debugPrint('Failed to export question paper PDF: $e\n$stackTrace');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Failed to download PDF. Please try again.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   double? _toNullableDouble(dynamic value) {
@@ -1552,44 +1936,6 @@ class _AIChatScreenState extends State<AIChatScreen>
           ),
         );
       },
-    );
-  }
-
-  void _showSourcePicker() {
-    showModalBottomSheet(
-      context: context,
-      builder: (_) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            leading: const Icon(
-              Icons.description_outlined,
-              color: Color(0xFF8B5CF6),
-            ),
-            title: const Text('My Notes'),
-            subtitle: const Text('Search uploaded PDFs and study material'),
-            selected: !_allowWebMode,
-            onTap: () {
-              setState(() => _allowWebMode = false);
-              Navigator.pop(context);
-            },
-          ),
-          ListTile(
-            leading: const Icon(
-              Icons.language,
-              color: Color(0xFF1EAEDB),
-            ),
-            title: const Text('Web Search'),
-            subtitle: const Text('Search the internet for answers'),
-            selected: _allowWebMode,
-            onTap: () {
-              setState(() => _allowWebMode = true);
-              Navigator.pop(context);
-            },
-          ),
-          const SizedBox(height: 16),
-        ],
-      ),
     );
   }
 
@@ -2885,11 +3231,23 @@ Return STRICT JSON only (no markdown). Schema:
   }) async {
     final tracker = _startLongResponseTracker('Question paper generation');
     final history = _buildStructuredHistory(pendingUserPrompt: userPrompt);
-    final aiMessage = AIChatMessage(isUser: false, content: '');
+    final aiMessage = AIChatMessage(
+      isUser: false,
+      content: '',
+      planTitle: 'Preparing your question paper',
+      planSteps: _buildQuestionPaperPlan(
+        notesDescription: 'Collecting the most relevant notes for this paper.',
+      ),
+    );
 
     setState(() {
       _messages.add(AIChatMessage(isUser: true, content: userVisible));
       _messages.add(aiMessage);
+      aiMessage.planSteps = _updatePlanStepList(
+        aiMessage.planSteps,
+        'qp_context',
+        status: StepStatus.inProgress,
+      );
       _isLoading = true;
       _controller.clear();
       _attachments.clear();
@@ -2906,9 +3264,7 @@ Return STRICT JSON only (no markdown). Schema:
       final languageHint = _shouldForceEnglish(userPrompt) ? 'en' : 'auto';
       final dialectIntensity = languageHint == 'en'
           ? null
-          : (_detectDialectIntensity(userPrompt) == 'strong'
-              ? 'strong'
-              : null);
+          : (_detectDialectIntensity(userPrompt) == 'strong' ? 'strong' : null);
       final excludeFileIds = (_lastPrimarySourceFileId ?? '').trim().isNotEmpty
           ? <String>[_lastPrimarySourceFileId!.trim()]
           : null;
@@ -2936,12 +3292,70 @@ Return STRICT JSON only (no markdown). Schema:
       final hasImageAttachments = mergedAttachments.any(
         (item) => item['type']?.toString().toLowerCase() == 'image',
       );
+      final noteSources = _planSourcesFromAttachmentMaps(mergedAttachments);
+      final notesDescription = totalAttachmentCount > 0
+          ? 'Using $totalAttachmentCount note source'
+                '${totalAttachmentCount == 1 ? '' : 's'} for grounding.'
+          : 'No related notes were found for this paper yet.';
+      if (mounted) {
+        setState(() {
+          aiMessage.planTitle = _buildQuestionPaperPlanTitle(
+            inferredSubject: inferredSubject,
+            config: config,
+          );
+          aiMessage.planSteps = _updatePlanStepList(
+            aiMessage.planSteps,
+            'qp_context',
+            status: StepStatus.completed,
+            description: inferredSubject.trim().isNotEmpty
+                ? 'Resolved subject: $inferredSubject'
+                : 'Using Sem ${config.semester} • ${config.branch.toUpperCase()} context.',
+          );
+          aiMessage.planSteps = _updatePlanStepList(
+            aiMessage.planSteps,
+            'qp_notes',
+            status: noteSources.isNotEmpty
+                ? StepStatus.completed
+                : StepStatus.needHelp,
+            description: notesDescription,
+            sources: noteSources,
+          );
+          aiMessage.planSteps = _updatePlanStepList(
+            aiMessage.planSteps,
+            'qp_generate',
+            status: StepStatus.inProgress,
+          );
+        });
+      }
       var lastAnswer = '';
       AiQuestionPaper? paper;
       var forceOcr = false;
       var aiInvoked = false;
+      var ocrRetryUsed = false;
       for (var attempt = 0; attempt < 3 && paper == null; attempt++) {
         final strictMode = attempt > 0;
+        final attemptId = attempt == 0
+            ? 'attempt_1'
+            : (!ocrRetryUsed && forceOcr ? 'attempt_ocr' : 'attempt_strict');
+        final attemptTitle = attempt == 0
+            ? 'Attempt 1'
+            : (!ocrRetryUsed && forceOcr ? 'OCR retry' : 'Strict retry');
+        if (attemptId == 'attempt_ocr') {
+          ocrRetryUsed = true;
+        }
+        if (mounted) {
+          setState(() {
+            aiMessage.planSteps = _upsertPlanSubstepList(
+              aiMessage.planSteps,
+              'qp_generate',
+              PlanSubstep(
+                id: attemptId,
+                title: attemptTitle,
+                status: StepStatus.inProgress,
+              ),
+            );
+          });
+        }
         final prompt = _buildQuestionPaperPrompt(
           userPrompt: userPrompt,
           semester: config.semester,
@@ -2957,14 +3371,14 @@ Return STRICT JSON only (no markdown). Schema:
           sessionId: _activeSessionId,
           fileId: searchAllForPrompt ? null : widget.resourceContext?.fileId,
           videoUrl: widget.resourceContext?.videoUrl,
-            allowWeb: allowWeb,
-            useOcr: hasImageAttachments || forceOcr,
-            forceOcr: forceOcr,
-            attachments: mergedAttachments,
-            history: history,
-            filters: contextFilters,
-            sourceSwitchForTurn: sourceSwitchForTurn,
-            excludeFileIds: excludeFileIds,
+          allowWeb: allowWeb,
+          useOcr: hasImageAttachments || forceOcr,
+          forceOcr: forceOcr,
+          attachments: mergedAttachments,
+          history: history,
+          filters: contextFilters,
+          sourceSwitchForTurn: sourceSwitchForTurn,
+          excludeFileIds: excludeFileIds,
           dialectIntensity: dialectIntensity,
           languageHint: languageHint,
         );
@@ -2975,15 +3389,45 @@ Return STRICT JSON only (no markdown). Schema:
         aiInvoked = true;
         final answer = _extractRagAnswer(response);
         lastAnswer = answer;
+        aiMessage.answerOrigin = AnswerOriginX.fromWireValue(
+          response['answer_origin']?.toString(),
+        );
         final noLocal =
             _responseIndicatesNoLocal(response) ||
             _looksLikeNoContextAnswer(answer);
+        final responseSourcesRaw = response['sources'] as List?;
+        final responseSources = responseSourcesRaw == null
+            ? const <RagSource>[]
+            : responseSourcesRaw
+                  .whereType<Map>()
+                  .map(
+                    (entry) =>
+                        RagSource.fromJson(Map<String, dynamic>.from(entry)),
+                  )
+                  .toList(growable: false);
+        final attemptSources = _planSourcesFromRagSources(responseSources);
         debugPrint(
           'QuizGen attempt=${attempt + 1} noLocal=$noLocal '
           'attachments=${mergedAttachments.length} '
           'answerLen=${answer.length}',
         );
         if (noLocal && hasPdfAttachments && !forceOcr) {
+          if (mounted) {
+            setState(() {
+              aiMessage.planSteps = _upsertPlanSubstepList(
+                aiMessage.planSteps,
+                'qp_generate',
+                PlanSubstep(
+                  id: attemptId,
+                  title: attemptTitle,
+                  status: StepStatus.needHelp,
+                  detail:
+                      'The first pass did not find enough grounded note context. Retrying with OCR enabled.',
+                  sources: attemptSources,
+                ),
+              );
+            });
+          }
           forceOcr = true;
           continue;
         }
@@ -2999,6 +3443,22 @@ Return STRICT JSON only (no markdown). Schema:
             'QuizGen parse failed attempt=${attempt + 1}. '
             'Preview=${answer.replaceAll('\n', ' ').substring(0, answer.length > 240 ? 240 : answer.length)}',
           );
+          if (mounted) {
+            setState(() {
+              aiMessage.planSteps = _upsertPlanSubstepList(
+                aiMessage.planSteps,
+                'qp_generate',
+                PlanSubstep(
+                  id: attemptId,
+                  title: attemptTitle,
+                  status: StepStatus.failed,
+                  detail:
+                      'The response could not be parsed into a usable question paper format.',
+                  sources: attemptSources,
+                ),
+              );
+            });
+          }
           continue;
         }
         if (_isLowQualityQuestionPaper(candidate)) {
@@ -3006,7 +3466,48 @@ Return STRICT JSON only (no markdown). Schema:
             'Discarded low-quality question paper response '
             '(attempt=${attempt + 1}).',
           );
+          if (mounted) {
+            setState(() {
+              aiMessage.planSteps = _upsertPlanSubstepList(
+                aiMessage.planSteps,
+                'qp_generate',
+                PlanSubstep(
+                  id: attemptId,
+                  title: attemptTitle,
+                  status: StepStatus.needHelp,
+                  detail:
+                      'The draft was incomplete, so StudyShare is trying a stricter generation pass.',
+                  sources: attemptSources,
+                ),
+              );
+            });
+          }
           continue;
+        }
+        if (mounted) {
+          setState(() {
+            aiMessage.planSteps = _upsertPlanSubstepList(
+              aiMessage.planSteps,
+              'qp_generate',
+              PlanSubstep(
+                id: attemptId,
+                title: attemptTitle,
+                status: StepStatus.completed,
+                detail: 'A valid question paper draft was generated.',
+                sources: attemptSources,
+              ),
+            );
+            aiMessage.planSteps = _updatePlanStepList(
+              aiMessage.planSteps,
+              'qp_generate',
+              status: StepStatus.completed,
+            );
+            aiMessage.planSteps = _updatePlanStepList(
+              aiMessage.planSteps,
+              'qp_validate',
+              status: StepStatus.inProgress,
+            );
+          });
         }
         paper = candidate;
       }
@@ -3023,9 +3524,31 @@ Return STRICT JSON only (no markdown). Schema:
           if (_looksLikeQuizJsonPayload(lastAnswer)) {
             aiMessage.content = fallback;
           } else {
-            aiMessage.content =
-                lastAnswer.trim().isEmpty ? fallback : lastAnswer;
+            aiMessage.content = lastAnswer.trim().isEmpty
+                ? fallback
+                : lastAnswer;
           }
+          aiMessage.showPlanExport = false;
+          aiMessage.planSteps = _updatePlanStepList(
+            aiMessage.planSteps,
+            'qp_generate',
+            status: StepStatus.failed,
+            description:
+                'StudyShare could not generate a valid paper from the current notes.',
+          );
+          aiMessage.planSteps = _updatePlanStepList(
+            aiMessage.planSteps,
+            'qp_validate',
+            status: StepStatus.failed,
+            description: 'The generated response was not valid enough to use.',
+          );
+          aiMessage.planSteps = _updatePlanStepList(
+            aiMessage.planSteps,
+            'qp_ready',
+            status: StepStatus.failed,
+            description:
+                'Download stays unavailable until a valid paper is ready.',
+          );
         });
         await _persistCurrentSession();
         return;
@@ -3035,6 +3558,20 @@ Return STRICT JSON only (no markdown). Schema:
       setState(() {
         aiMessage.content = _buildQuestionPaperSummary(generatedPaper);
         aiMessage.quizActionPaper = generatedPaper;
+        aiMessage.showPlanExport = true;
+        aiMessage.planSteps = _updatePlanStepList(
+          aiMessage.planSteps,
+          'qp_validate',
+          status: StepStatus.completed,
+          description:
+              'Questions, options, and explanations were validated successfully.',
+        );
+        aiMessage.planSteps = _updatePlanStepList(
+          aiMessage.planSteps,
+          'qp_ready',
+          status: StepStatus.completed,
+          description: 'You can start the quiz or download the PDF now.',
+        );
       });
       await _persistCurrentSession();
     } catch (e) {
@@ -3043,6 +3580,23 @@ Return STRICT JSON only (no markdown). Schema:
         aiMessage.content =
             'Question paper generation failed: '
             '${e.toString().replaceFirst('Exception: ', '')}';
+        aiMessage.showPlanExport = false;
+        aiMessage.planSteps = _updatePlanStepList(
+          aiMessage.planSteps,
+          'qp_generate',
+          status: StepStatus.failed,
+          description: 'The paper generation request failed before completion.',
+        );
+        aiMessage.planSteps = _updatePlanStepList(
+          aiMessage.planSteps,
+          'qp_validate',
+          status: StepStatus.failed,
+        );
+        aiMessage.planSteps = _updatePlanStepList(
+          aiMessage.planSteps,
+          'qp_ready',
+          status: StepStatus.failed,
+        );
       });
       await _persistCurrentSession();
     } finally {
@@ -3083,9 +3637,7 @@ Return STRICT JSON only (no markdown). Schema:
       final languageHint = _shouldForceEnglish(userPrompt) ? 'en' : 'auto';
       final dialectIntensity = languageHint == 'en'
           ? null
-          : (_detectDialectIntensity(userPrompt) == 'strong'
-              ? 'strong'
-              : null);
+          : (_detectDialectIntensity(userPrompt) == 'strong' ? 'strong' : null);
       final excludeFileIds = (_lastPrimarySourceFileId ?? '').trim().isNotEmpty
           ? <String>[_lastPrimarySourceFileId!.trim()]
           : null;
@@ -3130,7 +3682,9 @@ Return STRICT JSON only (no markdown). Schema:
               _responseIndicatesNoLocal(candidate) ||
               _looksLikeNoContextAnswer(candidateAnswer);
           final shouldRetryWithWeb =
-              _allowWebMode && !allowWeb && (candidateAnswer.isEmpty || noLocal);
+              _allowWebMode &&
+              !allowWeb &&
+              (candidateAnswer.isEmpty || noLocal);
 
           response = candidate;
           answer = candidateAnswer;
@@ -3150,7 +3704,7 @@ Return STRICT JSON only (no markdown). Schema:
       }
 
       if (response == null && lastError != null) {
-        throw lastError!;
+        throw lastError;
       }
       if (response != null) {
         _supabase.markAiTokenBalanceStale();
@@ -3292,9 +3846,10 @@ Return STRICT JSON only (no markdown). Schema:
         final dialectIntensity = languageHint == 'en'
             ? null
             : (_detectDialectIntensity(userPrompt) == 'strong'
-                ? 'strong'
-                : null);
-        final excludeFileIds = (_lastPrimarySourceFileId ?? '').trim().isNotEmpty
+                  ? 'strong'
+                  : null);
+        final excludeFileIds =
+            (_lastPrimarySourceFileId ?? '').trim().isNotEmpty
             ? <String>[_lastPrimarySourceFileId!.trim()]
             : null;
         final attachmentPayload = effectiveAttachments
@@ -3323,8 +3878,31 @@ Return STRICT JSON only (no markdown). Schema:
             attachmentPayload.isNotEmpty ||
             (widget.resourceContext != null &&
                 (widget.resourceContext?.videoUrl ?? '').isEmpty);
-        final minScore =
-            localContextRequired ? (isPdfOverviewPrompt ? 0.16 : 0.08) : null;
+        final effectiveAllowWeb = _allowWebMode;
+        final effectiveFileId = effectiveAllowWeb
+            ? null
+            : (searchAllForPrompt ? null : widget.resourceContext?.fileId);
+        final effectiveVideoUrl = effectiveAllowWeb
+            ? null
+            : widget.resourceContext?.videoUrl;
+        final effectiveAttachmentPayload = effectiveAllowWeb
+            ? const <Map<String, dynamic>>[]
+            : attachmentPayload;
+        final effectiveFilters = effectiveAllowWeb ? null : contextFilters;
+        final effectiveSourceSwitchForTurn = effectiveAllowWeb
+            ? false
+            : sourceSwitchForTurn;
+        final effectiveExcludeFileIds = effectiveAllowWeb
+            ? null
+            : excludeFileIds;
+        final effectiveUseOcr = effectiveAllowWeb ? false : shouldEnableOcr;
+        final effectiveForceOcr = effectiveAllowWeb
+            ? false
+            : hasImageAttachments;
+        final minScore = localContextRequired
+            ? (isPdfOverviewPrompt ? 0.16 : 0.08)
+            : null;
+        final effectiveMinScore = effectiveAllowWeb ? null : minScore;
         final userVisible = turnAttachments.isEmpty
             ? userPrompt
             : '$userPrompt\n\n${turnAttachments.length} attachments added.';
@@ -3359,7 +3937,11 @@ Return STRICT JSON only (no markdown). Schema:
         }
 
         final tracker = _startLongResponseTracker('AI response generation');
-        final aiMessage = AIChatMessage(isUser: false, content: '');
+        final aiMessage = AIChatMessage(
+          isUser: false,
+          content: '',
+          planTitle: _buildPlanTitleFromPrompt(userVisible),
+        );
         final AIChatMessage aiMessageForError = aiMessage;
         var malformedChunkCount = 0;
         var aiInvoked = false;
@@ -3381,17 +3963,17 @@ Return STRICT JSON only (no markdown). Schema:
             question: sendPrompt,
             collegeId: widget.collegeId,
             sessionId: _activeSessionId,
-            minScore: minScore,
-            fileId: searchAllForPrompt ? null : widget.resourceContext?.fileId,
-            videoUrl: widget.resourceContext?.videoUrl,
-            allowWeb: _allowWebMode,
-            useOcr: shouldEnableOcr,
-            forceOcr: hasImageAttachments,
-            attachments: attachmentPayload,
+            minScore: effectiveMinScore,
+            fileId: effectiveFileId,
+            videoUrl: effectiveVideoUrl,
+            allowWeb: effectiveAllowWeb,
+            useOcr: effectiveUseOcr,
+            forceOcr: effectiveForceOcr,
+            attachments: effectiveAttachmentPayload,
             history: history,
-            filters: contextFilters,
-            sourceSwitchForTurn: sourceSwitchForTurn,
-            excludeFileIds: excludeFileIds,
+            filters: effectiveFilters,
+            sourceSwitchForTurn: effectiveSourceSwitchForTurn,
+            excludeFileIds: effectiveExcludeFileIds,
             dialectIntensity: dialectIntensity,
             languageHint: languageHint,
           );
@@ -3417,8 +3999,9 @@ Return STRICT JSON only (no markdown). Schema:
                 final ocrErrors = ocrErrorsRaw
                     .whereType<Map>()
                     .map(
-                      (entry) =>
-                          OcrErrorInfo.fromJson(Map<String, dynamic>.from(entry)),
+                      (entry) => OcrErrorInfo.fromJson(
+                        Map<String, dynamic>.from(entry),
+                      ),
                     )
                     .toList();
                 final primarySource = _parsePrimarySource(
@@ -3428,17 +4011,30 @@ Return STRICT JSON only (no markdown). Schema:
                   primarySource,
                   sources,
                 );
-                final primarySourceFileIdRaw =
-                    data['primary_source_file_id']?.toString().trim();
-                final primarySourceFileId = primarySourceFileIdRaw != null &&
+                final primarySourceFileIdRaw = data['primary_source_file_id']
+                    ?.toString()
+                    .trim();
+                final primarySourceFileId =
+                    primarySourceFileIdRaw != null &&
                         primarySourceFileIdRaw.isNotEmpty
                     ? primarySourceFileIdRaw
                     : primarySource?.fileId;
+                final answerOrigin = AnswerOriginX.fromWireValue(
+                  data['answer_origin']?.toString(),
+                );
+                final simplePlan = _buildSimplePlanSteps(
+                  answerOrigin: answerOrigin,
+                  sources: orderedSources,
+                  noLocal: data['no_local'] == true,
+                  answerCompleted: false,
+                );
 
                 setState(() {
                   aiMessage.primarySource = primarySource;
                   aiMessage.sources = orderedSources;
                   aiMessage.noLocal = data['no_local'] == true;
+                  aiMessage.answerOrigin = answerOrigin;
+                  aiMessage.planSteps = simplePlan;
                   aiMessage.retrievalScore = _toNullableDouble(
                     data['retrieval_score'],
                   );
@@ -3465,7 +4061,14 @@ Return STRICT JSON only (no markdown). Schema:
               } else if (type == 'error') {
                 _enqueueTypedChunk(aiMessage, '\n\nError: ${chunk['message']}');
               } else if (type == 'done') {
-                // Done
+                if (aiMessage.planSteps.isNotEmpty) {
+                  setState(() {
+                    aiMessage.planSteps = _markSimplePlanAnswerStatus(
+                      aiMessage.planSteps,
+                      StepStatus.completed,
+                    );
+                  });
+                }
               } else {
                 final textChunk =
                     chunk['text']?.toString() ??
@@ -3491,9 +4094,11 @@ Return STRICT JSON only (no markdown). Schema:
                     primarySource,
                     sources,
                   );
-                  final primarySourceFileIdRaw =
-                      chunk['primary_source_file_id']?.toString().trim();
-                  final primarySourceFileId = primarySourceFileIdRaw != null &&
+                  final primarySourceFileIdRaw = chunk['primary_source_file_id']
+                      ?.toString()
+                      .trim();
+                  final primarySourceFileId =
+                      primarySourceFileIdRaw != null &&
                           primarySourceFileIdRaw.isNotEmpty
                       ? primarySourceFileIdRaw
                       : primarySource?.fileId;
@@ -3502,6 +4107,15 @@ Return STRICT JSON only (no markdown). Schema:
                       aiMessage.primarySource = primarySource;
                       aiMessage.sources = orderedSources;
                       aiMessage.noLocal = chunk['no_local'] == true;
+                      aiMessage.answerOrigin ??= AnswerOriginX.fromWireValue(
+                        chunk['answer_origin']?.toString(),
+                      );
+                      aiMessage.planSteps = _buildSimplePlanSteps(
+                        answerOrigin: aiMessage.answerOrigin,
+                        sources: orderedSources,
+                        noLocal: chunk['no_local'] == true,
+                        answerCompleted: false,
+                      );
                       aiMessage.retrievalScore = _toNullableDouble(
                         chunk['retrieval_score'],
                       );
@@ -3573,6 +4187,12 @@ Return STRICT JSON only (no markdown). Schema:
           await _waitForTypingDrain();
           if (mounted) {
             setState(() {
+              if (aiMessageForError.planSteps.isNotEmpty) {
+                aiMessageForError.planSteps = _markSimplePlanAnswerStatus(
+                  aiMessageForError.planSteps,
+                  StepStatus.failed,
+                );
+              }
               final separator = aiMessageForError.content.isEmpty ? '' : '\n\n';
               aiMessageForError.content += '$separator$errorMessage';
             });
@@ -3904,6 +4524,7 @@ Return STRICT JSON only (no markdown). Schema:
       color: textColor,
       letterSpacing: 0.05,
     );
+    final showPlanCard = _shouldShowPlanCard(msg);
     final skeletonLine1Width = (bubbleMaxWidth * 0.6).clamp(110.0, 260.0);
     final skeletonLine2Width = (bubbleMaxWidth * 0.45).clamp(88.0, 220.0);
     final messageBody = Column(
@@ -3989,7 +4610,28 @@ Return STRICT JSON only (no markdown). Schema:
             ],
           ),
         if (!msg.isUser) const SizedBox(height: 8),
-        if (isStreamingAssistantMessage)
+        if (showPlanCard) ...[
+          StudyAIPlanWidget(
+            title: msg.planTitle?.trim().isNotEmpty == true
+                ? msg.planTitle!.trim()
+                : _chatTitle,
+            answerOrigin: msg.answerOrigin,
+            steps: msg.planSteps,
+            isRunning: isStreamingAssistantMessage,
+            showExport: msg.showPlanExport,
+            onOpenPdf: (fileId, page) => _openPlanPdfSource(msg, fileId, page),
+            onOpenUrl: (url) => _openPlanWebSource(url),
+            onOpenVideo: (url, timestamp) =>
+                _openPlanVideoSource(url, timestamp),
+            onExport: msg.quizActionPaper == null
+                ? null
+                : () => _exportQuestionPaperFromMessage(msg),
+          ),
+          if (!(isStreamingAssistantMessage && msg.content.trim().isEmpty))
+            const SizedBox(height: 10),
+        ],
+        if (isStreamingAssistantMessage &&
+            !(showPlanCard && isStreamingPlaceholder))
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -4115,7 +4757,7 @@ Return STRICT JSON only (no markdown). Schema:
             ),
           ),
         ],
-        if (!msg.isUser && msg.sources.isNotEmpty) ...[
+        if (!msg.isUser && msg.sources.isNotEmpty && !showPlanCard) ...[
           const SizedBox(height: 12),
           Text(
             'Sources',
@@ -4491,146 +5133,176 @@ Return STRICT JSON only (no markdown). Schema:
     required bool hasComposerContent,
     required double attachButtonSize,
     required double sendButtonSize,
-    required double inputMaxHeight,
     required TextStyle textFieldStyle,
     required TextStyle hintStyle,
   }) {
     final iconColor = isDark ? Colors.white70 : Colors.black87;
     final mutedIconColor = isDark ? Colors.white54 : Colors.black45;
-    final fieldBg = isDark ? const Color(0xFF15171C) : Colors.white;
-    final fieldBorder = isDark ? Colors.white12 : Colors.black12;
-    final actionSize = attachButtonSize < 44 ? 44.0 : attachButtonSize;
+    final fieldBg = isDark ? const Color(0xFF14171D) : const Color(0xFFF8FAFC);
+    final fieldBorder = isDark ? Colors.white10 : const Color(0xFFE2E8F0);
+    final actionSize = 34.0;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 6, 4, 10),
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 44),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: fieldBg,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: fieldBorder),
-          boxShadow: [
-            if (!isDark)
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
-                blurRadius: 10,
-                offset: const Offset(0, 6),
-              ),
-          ],
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            SizedBox(
+    Widget composerAction({
+      required IconData icon,
+      required VoidCallback? onTap,
+      required String tooltip,
+      Key? key,
+      Color? color,
+      Widget? child,
+      bool active = false,
+    }) {
+      final resolvedColor = color ?? (active ? AppTheme.primary : iconColor);
+      return Tooltip(
+        message: tooltip,
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            key: key,
+            borderRadius: BorderRadius.circular(999),
+            onTap: onTap,
+            child: Container(
               width: actionSize,
               height: actionSize,
-              child: IconButton(
-                key: _coachAttachKey,
-                tooltip: 'Attach image or PDF',
-                onPressed: (_isLoading ||
-                        _isUploadingAttachment ||
-                        _isSendAttemptInProgress)
-                    ? null
-                    : _pickAttachment,
-                padding: EdgeInsets.zero,
-                iconSize: 20,
-                icon: _isUploadingAttachment
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Icon(
-                        Icons.attach_file_rounded,
-                        color: iconColor,
-                      ),
+              decoration: BoxDecoration(
+                color: active
+                    ? AppTheme.primary.withValues(alpha: isDark ? 0.18 : 0.12)
+                    : Colors.transparent,
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: child ?? Icon(icon, size: 19, color: resolvedColor),
               ),
             ),
-            const SizedBox(width: 6),
-            Expanded(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxHeight: inputMaxHeight),
-                child: TextField(
-                  key: _coachInputKey,
-                  controller: _controller,
-                  minLines: 1,
-                  maxLines: 6,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: (_) => _sendMessage(),
-                  style: textFieldStyle,
-                  decoration: InputDecoration(
-                    hintText: 'Ask anything about your notes…',
-                    hintStyle: hintStyle.copyWith(
-                      color: mutedIconColor,
-                    ),
-                    border: InputBorder.none,
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 8),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(0, 4, 0, 8),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 48),
+        child: TextField(
+          key: _coachInputKey,
+          controller: _controller,
+          minLines: 1,
+          maxLines: 6,
+          textInputAction: TextInputAction.send,
+          onSubmitted: (_) => _sendMessage(),
+          style: textFieldStyle,
+          decoration: InputDecoration(
+            hintText: 'Ask anything about your notes...',
+            hintStyle: hintStyle.copyWith(color: mutedIconColor),
+            filled: true,
+            fillColor: fieldBg,
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 10,
+            ),
+            prefix: Padding(
+              padding: const EdgeInsets.only(left: 10, right: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  composerAction(
+                    key: _coachAttachKey,
+                    icon: Icons.attach_file_rounded,
+                    tooltip: 'Attach image or PDF',
+                    onTap:
+                        (_isLoading ||
+                            _isUploadingAttachment ||
+                            _isSendAttemptInProgress)
+                        ? null
+                        : _pickAttachment,
+                    child: _isUploadingAttachment
+                        ? const SizedBox(
+                            width: 15,
+                            height: 15,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : null,
                   ),
-                ),
+                  const SizedBox(width: 2),
+                  composerAction(
+                    icon: _allowWebMode
+                        ? Icons.public_rounded
+                        : Icons.public_off_rounded,
+                    tooltip: _allowWebMode ? 'Web on' : 'Web off',
+                    onTap: (_isLoading || _isSendAttemptInProgress)
+                        ? null
+                        : () {
+                            if (!mounted) return;
+                            setState(() => _allowWebMode = !_allowWebMode);
+                          },
+                    color: _allowWebMode ? AppTheme.primary : mutedIconColor,
+                    active: _allowWebMode,
+                  ),
+                ],
               ),
             ),
-            const SizedBox(width: 4),
-            SizedBox(
-              width: 36,
-              height: 36,
-              child: IconButton(
-                tooltip: _allowWebMode ? 'Web on' : 'Web off',
-                onPressed:
-                    (_isLoading || _isSendAttemptInProgress) ? null : () {
-                  if (!mounted) return;
-                  setState(() => _allowWebMode = !_allowWebMode);
-                },
-                icon: Icon(
-                  _allowWebMode
-                      ? Icons.public_rounded
-                      : Icons.public_off_rounded,
-                  size: 20,
-                  color: _allowWebMode ? AppTheme.primary : mutedIconColor,
-                ),
-              ),
+            suffixIconConstraints: BoxConstraints(
+              minWidth: sendButtonSize + 12,
+              minHeight: sendButtonSize,
             ),
-            const SizedBox(width: 4),
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 180),
-              child: hasComposerContent
-                  ? SizedBox(
-                      key: const ValueKey('send'),
-                      width: sendButtonSize,
-                      height: sendButtonSize,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: AppTheme.primary,
-                          shape: BoxShape.circle,
-                        ),
-                        child: IconButton(
-                          onPressed: (_isLoading ||
-                                  _isUploadingAttachment ||
-                                  _isSendAttemptInProgress)
-                              ? null
-                              : _sendMessage,
-                          padding: EdgeInsets.zero,
-                          icon: const Icon(
-                            Icons.arrow_upward_rounded,
-                            size: 18,
-                            color: Colors.white,
+            suffixIcon: Padding(
+              padding: const EdgeInsets.only(right: 6),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                child: hasComposerContent
+                    ? SizedBox(
+                        key: const ValueKey('send'),
+                        width: sendButtonSize,
+                        height: sendButtonSize,
+                        child: DecoratedBox(
+                          decoration: const BoxDecoration(
+                            color: AppTheme.primary,
+                            shape: BoxShape.circle,
+                          ),
+                          child: IconButton(
+                            onPressed:
+                                (_isLoading ||
+                                    _isUploadingAttachment ||
+                                    _isSendAttemptInProgress)
+                                ? null
+                                : _sendMessage,
+                            padding: EdgeInsets.zero,
+                            icon: const Icon(
+                              Icons.arrow_upward_rounded,
+                              size: 18,
+                              color: Colors.white,
+                            ),
                           ),
                         ),
+                      )
+                    : SizedBox(
+                        key: const ValueKey('send-disabled'),
+                        width: sendButtonSize,
+                        height: sendButtonSize,
+                        child: Icon(
+                          Icons.arrow_upward_rounded,
+                          size: 18,
+                          color: mutedIconColor,
+                        ),
                       ),
-                    )
-                  : SizedBox(
-                      key: const ValueKey('send-disabled'),
-                      width: sendButtonSize,
-                      height: sendButtonSize,
-                      child: Icon(
-                        Icons.arrow_upward_rounded,
-                        size: 18,
-                        color: mutedIconColor,
-                      ),
-                    ),
+              ),
             ),
-          ],
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(30),
+              borderSide: BorderSide(color: fieldBorder),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(30),
+              borderSide: BorderSide(
+                color: AppTheme.primary.withValues(alpha: 0.65),
+                width: 1.1,
+              ),
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(30),
+              borderSide: BorderSide(color: fieldBorder),
+            ),
+          ),
         ),
       ),
     );
@@ -4643,8 +5315,9 @@ Return STRICT JSON only (no markdown). Schema:
     final isCompact = screenWidth < 380;
     final isSmallPhone = screenWidth < 350;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final appBarBodyTopPadding =
-        widget.embedded ? 0.0 : mediaQuery.padding.top + kToolbarHeight + 6;
+    final appBarBodyTopPadding = widget.embedded
+        ? 0.0
+        : mediaQuery.padding.top + kToolbarHeight + 6;
     final horizontalPagePadding = (screenWidth * 0.03)
         .clamp(8.0, 16.0)
         .toDouble();
@@ -4684,7 +5357,6 @@ Return STRICT JSON only (no markdown). Schema:
       color: isDark ? AppTheme.darkTextMuted : AppTheme.lightTextMuted,
       fontSize: isSmallPhone ? 14 : 15,
     );
-    final inputMaxHeight = isSmallPhone ? 126.0 : 152.0;
     final attachmentNameStyle = GoogleFonts.inter(
       fontSize: isSmallPhone ? 10 : (isCompact ? 10.5 : 11),
       color: isDark ? Colors.white70 : Colors.black87,
@@ -4712,68 +5384,70 @@ Return STRICT JSON only (no markdown). Schema:
           ? null
           : AppBar(
               backgroundColor: chatBackground.withValues(alpha: 0.78),
-        flexibleSpace: ClipRect(
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-            child: Container(color: Colors.transparent),
-          ),
-        ),
-        elevation: 0,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              _chatTitle,
-              style: GoogleFonts.inter(
-                fontWeight: FontWeight.w700,
-                fontSize: isCompact ? 16 : 17,
-                letterSpacing: -0.2,
+              flexibleSpace: ClipRect(
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+                  child: Container(color: Colors.transparent),
+                ),
               ),
-            ),
-            Text(
-              _isStudioChat ? effectiveCollegeName : 'Smart study assistant',
-              style: GoogleFonts.inter(
-                fontSize: isCompact ? 10 : 10.5,
-                letterSpacing: 0.1,
-                color: isDark
-                    ? AppTheme.darkTextMuted
-                    : AppTheme.lightTextMuted,
+              elevation: 0,
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _chatTitle,
+                    style: GoogleFonts.inter(
+                      fontWeight: FontWeight.w700,
+                      fontSize: isCompact ? 16 : 17,
+                      letterSpacing: -0.2,
+                    ),
+                  ),
+                  Text(
+                    _isStudioChat
+                        ? effectiveCollegeName
+                        : 'Smart study assistant',
+                    style: GoogleFonts.inter(
+                      fontSize: isCompact ? 10 : 10.5,
+                      letterSpacing: 0.1,
+                      color: isDark
+                          ? AppTheme.darkTextMuted
+                          : AppTheme.lightTextMuted,
+                    ),
+                  ),
+                ],
               ),
-            ),
-          ],
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'Show coach marks',
-            onPressed: _replayCoachMarks,
-            icon: const Icon(Icons.help_outline_rounded),
-          ),
-          IconButton(
-            tooltip: _notifyOnLongResponses
-                ? 'Disable long-response notifications'
-                : 'Enable long-response notifications',
-            onPressed: _toggleLongResponseNotifications,
-            icon: Icon(
-              _notifyOnLongResponses
-                  ? Icons.notifications_active_rounded
-                  : Icons.notifications_none_rounded,
-            ),
-          ),
-          IconButton(
-            key: _coachHistoryKey,
-            tooltip: 'Chat history',
-            onPressed: _isHistoryLoading ? null : _openHistorySheet,
-            icon: const Icon(Icons.history_rounded),
-          ),
-          IconButton(
-            key: _coachNewChatKey,
-            tooltip: 'New chat',
-            onPressed: (_messages.isEmpty && _attachments.isEmpty)
-                ? null
-                : _startNewChat,
-            icon: const Icon(Icons.add_comment_outlined),
-          ),
-        ],
+              actions: [
+                IconButton(
+                  tooltip: 'Show coach marks',
+                  onPressed: _replayCoachMarks,
+                  icon: const Icon(Icons.help_outline_rounded),
+                ),
+                IconButton(
+                  tooltip: _notifyOnLongResponses
+                      ? 'Disable long-response notifications'
+                      : 'Enable long-response notifications',
+                  onPressed: _toggleLongResponseNotifications,
+                  icon: Icon(
+                    _notifyOnLongResponses
+                        ? Icons.notifications_active_rounded
+                        : Icons.notifications_none_rounded,
+                  ),
+                ),
+                IconButton(
+                  key: _coachHistoryKey,
+                  tooltip: 'Chat history',
+                  onPressed: _isHistoryLoading ? null : _openHistorySheet,
+                  icon: const Icon(Icons.history_rounded),
+                ),
+                IconButton(
+                  key: _coachNewChatKey,
+                  tooltip: 'New chat',
+                  onPressed: (_messages.isEmpty && _attachments.isEmpty)
+                      ? null
+                      : _startNewChat,
+                  icon: const Icon(Icons.add_comment_outlined),
+                ),
+              ],
             ),
       body: Padding(
         padding: EdgeInsets.only(top: appBarBodyTopPadding),
@@ -4808,7 +5482,10 @@ Return STRICT JSON only (no markdown). Schema:
                                         ),
                                       ],
                                     ),
-                                    child: const AiLogo(size: 60, animate: true),
+                                    child: const AiLogo(
+                                      size: 60,
+                                      animate: true,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -4940,115 +5617,35 @@ Return STRICT JSON only (no markdown). Schema:
             // Input area
             SafeArea(
               top: false,
-              child: ClipRect(
-                child: BackdropFilter(
-                  filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-                  child: Container(
-                    padding: inputOuterPadding,
-                    decoration: BoxDecoration(
-                      color:
-                          (isDark
-                                  ? const Color(0xFF1C1C1E)
-                                  : const Color(0xFFF2F2F7))
-                              .withValues(alpha: 0.85),
-                      border: Border(
-                        top: BorderSide(
-                          color: isDark
-                              ? Colors.white10
-                              : Colors.black.withValues(alpha: 0.05),
-                        ),
+              child: Padding(
+                padding: inputOuterPadding,
+                child: Column(
+                  children: [
+                    if (_showAiTokenLowBanner && !_userDismissedTokenBanner)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: _buildAiTokenLowBanner(isDark),
                       ),
-                    ),
-                    child: Column(
-                      children: [
-                        if (_showAiTokenLowBanner && !_userDismissedTokenBanner)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: _buildAiTokenLowBanner(isDark),
-                          ),
-                        const SizedBox(height: 4),
-                        if (_attachments.isNotEmpty)
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: List.generate(_attachments.length, (
-                                  index,
-                                ) {
-                                  final attachment = _attachments[index];
-                                  return Container(
-                                    padding: attachmentChipPadding,
-                                    decoration: BoxDecoration(
-                                      color: isDark
-                                          ? Colors.white10
-                                          : Colors.black.withValues(
-                                              alpha: 0.05,
-                                            ),
-                                      borderRadius: BorderRadius.circular(12),
-                                      border: Border.all(
-                                        color: isDark
-                                            ? Colors.white12
-                                            : Colors.black12,
-                                      ),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          attachment.isPdf
-                                              ? Icons.picture_as_pdf_rounded
-                                              : Icons.image_rounded,
-                                          size: 14,
-                                          color: AppTheme.primary,
-                                        ),
-                                        const SizedBox(width: 6),
-                                        ConstrainedBox(
-                                          constraints: BoxConstraints(
-                                            maxWidth: attachmentMaxWidth,
-                                          ),
-                                          child: Text(
-                                            attachment.name,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: attachmentNameStyle,
-                                          ),
-                                        ),
-                                        const SizedBox(width: 4),
-                                        GestureDetector(
-                                          onTap: () => _removeAttachment(index),
-                                          child: Icon(
-                                            Icons.close_rounded,
-                                            size: 14,
-                                            color: isDark
-                                                ? Colors.white54
-                                                : Colors.black45,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  );
-                                }),
-                              ),
-                            ),
-                          ),
-                        if (_attachments.isEmpty &&
-                            _stickyAttachments.isNotEmpty)
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 6,
-                                ),
+                    const SizedBox(height: 4),
+                    if (_attachments.isNotEmpty)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: List.generate(_attachments.length, (
+                              index,
+                            ) {
+                              final attachment = _attachments[index];
+                              return Container(
+                                padding: attachmentChipPadding,
                                 decoration: BoxDecoration(
                                   color: isDark
                                       ? Colors.white10
-                                      : Colors.black.withValues(alpha: 0.04),
-                                  borderRadius: BorderRadius.circular(10),
+                                      : Colors.black.withValues(alpha: 0.05),
+                                  borderRadius: BorderRadius.circular(12),
                                   border: Border.all(
                                     color: isDark
                                         ? Colors.white12
@@ -5059,28 +5656,26 @@ Return STRICT JSON only (no markdown). Schema:
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     Icon(
-                                      Icons.description_outlined,
+                                      attachment.isPdf
+                                          ? Icons.picture_as_pdf_rounded
+                                          : Icons.image_rounded,
                                       size: 14,
                                       color: AppTheme.primary,
                                     ),
                                     const SizedBox(width: 6),
-                                    Text(
-                                      'Using ${_stickyAttachments.length} previous attachment${_stickyAttachments.length > 1 ? 's' : ''}',
-                                      style: GoogleFonts.inter(
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.w600,
-                                        color: isDark
-                                            ? Colors.white70
-                                            : Colors.black87,
+                                    ConstrainedBox(
+                                      constraints: BoxConstraints(
+                                        maxWidth: attachmentMaxWidth,
+                                      ),
+                                      child: Text(
+                                        attachment.name,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: attachmentNameStyle,
                                       ),
                                     ),
-                                    const SizedBox(width: 6),
+                                    const SizedBox(width: 4),
                                     GestureDetector(
-                                      onTap: () async {
-                                        if (!mounted) return;
-                                        setState(() => _clearStickyContext());
-                                        await _persistCurrentSession();
-                                      },
+                                      onTap: () => _removeAttachment(index),
                                       child: Icon(
                                         Icons.close_rounded,
                                         size: 14,
@@ -5091,95 +5686,149 @@ Return STRICT JSON only (no markdown). Schema:
                                     ),
                                   ],
                                 ),
+                              );
+                            }),
+                          ),
+                        ),
+                      ),
+                    if (_attachments.isEmpty && _stickyAttachments.isNotEmpty)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? Colors.white10
+                                  : Colors.black.withValues(alpha: 0.04),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: isDark ? Colors.white12 : Colors.black12,
                               ),
                             ),
-                          ),
-                        _buildPromptComposer(
-                          isDark: isDark,
-                          hasComposerContent: hasComposerContent,
-                          attachButtonSize: attachButtonSize,
-                          sendButtonSize: sendButtonSize,
-                          inputMaxHeight: inputMaxHeight,
-                          textFieldStyle: textFieldStyle,
-                          hintStyle: hintStyle,
-                        ),
-                        if (widget.resourceContext != null)
-                          Padding(
-                            padding: const EdgeInsets.only(
-                              left: 4,
-                              right: 4,
-                              bottom: 8,
-                            ),
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(999),
-                                onTap: () {
-                                  if (!mounted) return;
-                                  setState(
-                                    () => _searchAllPdfs = !_searchAllPdfs,
-                                  );
-                                },
-                                child: AnimatedContainer(
-                                  duration:
-                                      const Duration(milliseconds: 180),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 12,
-                                    vertical: 7,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.description_outlined,
+                                  size: 14,
+                                  color: AppTheme.primary,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Using ${_stickyAttachments.length} previous attachment${_stickyAttachments.length > 1 ? 's' : ''}',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    color: isDark
+                                        ? Colors.white70
+                                        : Colors.black87,
                                   ),
-                                  decoration: BoxDecoration(
+                                ),
+                                const SizedBox(width: 6),
+                                GestureDetector(
+                                  onTap: () async {
+                                    if (!mounted) return;
+                                    setState(() => _clearStickyContext());
+                                    await _persistCurrentSession();
+                                  },
+                                  child: Icon(
+                                    Icons.close_rounded,
+                                    size: 14,
+                                    color: isDark
+                                        ? Colors.white54
+                                        : Colors.black45,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    _buildPromptComposer(
+                      isDark: isDark,
+                      hasComposerContent: hasComposerContent,
+                      attachButtonSize: attachButtonSize,
+                      sendButtonSize: sendButtonSize,
+                      textFieldStyle: textFieldStyle,
+                      hintStyle: hintStyle,
+                    ),
+                    if (widget.resourceContext != null)
+                      Padding(
+                        padding: const EdgeInsets.only(
+                          left: 4,
+                          right: 4,
+                          bottom: 8,
+                        ),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(999),
+                            onTap: () {
+                              if (!mounted) return;
+                              setState(() => _searchAllPdfs = !_searchAllPdfs);
+                            },
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 7,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _searchAllPdfs
+                                    ? AppTheme.primary.withValues(
+                                        alpha: isDark ? 0.22 : 0.14,
+                                      )
+                                    : (isDark
+                                          ? Colors.white10
+                                          : Colors.black.withValues(
+                                              alpha: 0.04,
+                                            )),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: _searchAllPdfs
+                                      ? AppTheme.primary
+                                      : (isDark
+                                            ? Colors.white12
+                                            : Colors.black12),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.layers_rounded,
+                                    size: 14,
                                     color: _searchAllPdfs
-                                        ? AppTheme.primary.withValues(
-                                            alpha: isDark ? 0.22 : 0.14,
-                                          )
+                                        ? AppTheme.primary
                                         : (isDark
-                                            ? Colors.white10
-                                            : Colors.black.withValues(
-                                                alpha: 0.04,
-                                              )),
-                                    borderRadius: BorderRadius.circular(999),
-                                    border: Border.all(
+                                              ? Colors.white70
+                                              : Colors.black54),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Search all PDFs',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w600,
                                       color: _searchAllPdfs
                                           ? AppTheme.primary
                                           : (isDark
-                                              ? Colors.white12
-                                              : Colors.black12),
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.layers_rounded,
-                                        size: 14,
-                                        color: _searchAllPdfs
-                                            ? AppTheme.primary
-                                            : (isDark
                                                 ? Colors.white70
                                                 : Colors.black54),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        'Search all PDFs',
-                                        style: GoogleFonts.inter(
-                                          fontSize: 10.5,
-                                          fontWeight: FontWeight.w600,
-                                          color: _searchAllPdfs
-                                              ? AppTheme.primary
-                                              : (isDark
-                                                  ? Colors.white70
-                                                  : Colors.black54),
-                                        ),
-                                      ),
-                                    ],
+                                    ),
                                   ),
-                                ),
+                                ],
                               ),
                             ),
                           ),
-                      ],
-                    ),
-                  ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ),

@@ -8,6 +8,8 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../models/ai_question_paper.dart';
+
 class SummaryPdfService {
   Future<File> saveSummaryPdf({
     required String title,
@@ -30,6 +32,74 @@ class SummaryPdfService {
 
     await outputFile.writeAsBytes(bytes, flush: true);
     return outputFile;
+  }
+
+  Future<File> saveQuestionPaperPdf({
+    required AiQuestionPaper paper,
+    String subtitle = 'AI Test Paper',
+    String watermarkText = 'StudyShare Test',
+  }) async {
+    return saveSummaryPdf(
+      title: paper.title,
+      summary: buildQuestionPaperText(paper),
+      subtitle: subtitle,
+      watermarkText: watermarkText,
+    );
+  }
+
+  String buildQuestionPaperText(AiQuestionPaper paper) {
+    final buffer = StringBuffer();
+    buffer.writeln(paper.title);
+    buffer.writeln('Subject: ${paper.subject}');
+    buffer.writeln('Semester: ${paper.semester}');
+    buffer.writeln('Branch: ${paper.branch}');
+    buffer.writeln(
+      'Generated at: '
+      '${paper.generatedAt.toLocal().toIso8601String()}',
+    );
+    if (paper.instructions.isNotEmpty) {
+      buffer.writeln('');
+      buffer.writeln('Instructions:');
+      for (final line in paper.instructions) {
+        buffer.writeln('- $line');
+      }
+    }
+    buffer.writeln('');
+    buffer.writeln('Questions:');
+    for (var i = 0; i < paper.questions.length; i++) {
+      final question = paper.questions[i];
+      buffer.writeln('');
+      buffer.writeln('Q${i + 1}. ${question.question}');
+      for (var j = 0; j < question.options.length; j++) {
+        final letter = _indexToLetter(j);
+        buffer.writeln('$letter. ${question.options[j]}');
+      }
+      final hasValidCorrectIndex =
+          question.correctIndex >= 0 &&
+          question.correctIndex < question.options.length;
+      final correctLetter = hasValidCorrectIndex
+          ? _indexToLetter(question.correctIndex)
+          : '?';
+      buffer.writeln('Answer: $correctLetter');
+      if (question.explanation.trim().isNotEmpty) {
+        buffer.writeln('Explanation: ${question.explanation}');
+      }
+      final sourceParts = <String>[
+        question.source.title.trim(),
+        question.source.section.trim(),
+        question.source.pages.trim(),
+      ].where((part) => part.isNotEmpty).toList(growable: false);
+      if (sourceParts.isNotEmpty) {
+        buffer.writeln('Source: ${sourceParts.join(' | ')}');
+      }
+    }
+    return buffer.toString().trim();
+  }
+
+  String _indexToLetter(int index) {
+    if (index < 0) return '?';
+    if (index < 26) return String.fromCharCode(65 + index);
+    return (index + 1).toString();
   }
 
   Future<Directory> _resolveDirectory() async {
@@ -127,7 +197,9 @@ class SummaryPdfService {
       final contentId = contentObjectIds[i];
       final stream = _buildPageStream(
         pages[i],
-        watermarkText: watermarkText.trim().isEmpty ? (headerBrandName ?? 'StudyShare') : watermarkText.trim(),
+        watermarkText: watermarkText.trim().isEmpty
+            ? (headerBrandName ?? 'StudyShare')
+            : watermarkText.trim(),
       );
 
       objectMap[contentId] =
@@ -294,10 +366,7 @@ class SummaryPdfService {
     return wrapped;
   }
 
-  String _buildPageStream(
-    List<String> lines, {
-    required String watermarkText,
-  }) {
+  String _buildPageStream(List<String> lines, {required String watermarkText}) {
     final stream = StringBuffer();
     final watermark = _escapePdfText(
       watermarkText.trim().isEmpty ? 'StudyShare' : watermarkText.trim(),

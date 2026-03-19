@@ -8,6 +8,10 @@ class LocalAiChatMessage {
   final List<Map<String, dynamic>> sources;
   final bool cached;
   final bool noLocal;
+  final String? answerOrigin;
+  final String? planTitle;
+  final List<Map<String, dynamic>> planSteps;
+  final bool showPlanExport;
   final double? retrievalScore;
   final double? llmConfidenceScore;
   final double? combinedConfidence;
@@ -23,6 +27,10 @@ class LocalAiChatMessage {
     required this.sources,
     required this.cached,
     required this.noLocal,
+    this.answerOrigin,
+    this.planTitle,
+    this.planSteps = const [],
+    this.showPlanExport = false,
     this.retrievalScore,
     this.llmConfidenceScore,
     this.combinedConfidence,
@@ -36,6 +44,7 @@ class LocalAiChatMessage {
   factory LocalAiChatMessage.fromJson(Map<String, dynamic> json) {
     final rawSources = json['sources'];
     final rawOcrErrors = json['ocr_errors'];
+    final rawPlanSteps = json['plan_steps'];
     final rawActionType = json['action_type']?.toString();
     final rawActionPayload = json['action_payload'];
     Map<String, dynamic>? normalizedActionPayload;
@@ -72,6 +81,15 @@ class LocalAiChatMessage {
           : const [],
       cached: json['cached'] == true,
       noLocal: json['no_local'] == true,
+      answerOrigin: json['answer_origin']?.toString(),
+      planTitle: json['plan_title']?.toString(),
+      planSteps: rawPlanSteps is List
+          ? rawPlanSteps
+                .whereType<Map>()
+                .map((entry) => Map<String, dynamic>.from(entry))
+                .toList()
+          : const [],
+      showPlanExport: json['show_plan_export'] == true,
       retrievalScore: json['retrieval_score'] is num
           ? (json['retrieval_score'] as num).toDouble()
           : double.tryParse(json['retrieval_score']?.toString() ?? ''),
@@ -81,8 +99,7 @@ class LocalAiChatMessage {
       combinedConfidence: json['combined_confidence'] is num
           ? (json['combined_confidence'] as num).toDouble()
           : double.tryParse(json['combined_confidence']?.toString() ?? ''),
-      ocrFailureAffectsRetrieval:
-          json['ocr_failure_affects_retrieval'] == true,
+      ocrFailureAffectsRetrieval: json['ocr_failure_affects_retrieval'] == true,
       ocrErrors: rawOcrErrors is List
           ? rawOcrErrors
                 .whereType<Map>()
@@ -105,11 +122,15 @@ class LocalAiChatMessage {
       'sources': sources,
       'cached': cached,
       'no_local': noLocal,
+      if (answerOrigin != null && answerOrigin!.isNotEmpty)
+        'answer_origin': answerOrigin,
+      if (planTitle != null && planTitle!.isNotEmpty) 'plan_title': planTitle,
+      if (planSteps.isNotEmpty) 'plan_steps': planSteps,
+      if (showPlanExport) 'show_plan_export': true,
       if (retrievalScore != null) 'retrieval_score': retrievalScore,
       if (llmConfidenceScore != null)
         'llm_confidence_score': llmConfidenceScore,
-      if (combinedConfidence != null)
-        'combined_confidence': combinedConfidence,
+      if (combinedConfidence != null) 'combined_confidence': combinedConfidence,
       'ocr_failure_affects_retrieval': ocrFailureAffectsRetrieval,
       if (ocrErrors.isNotEmpty) 'ocr_errors': ocrErrors,
       if (actionType != null && actionType!.isNotEmpty)

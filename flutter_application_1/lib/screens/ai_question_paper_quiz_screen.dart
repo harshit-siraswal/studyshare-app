@@ -53,25 +53,24 @@ class _AiQuestionPaperQuizScreenState extends State<AiQuestionPaperQuizScreen> {
     if (_isDownloading) return;
     setState(() => _isDownloading = true);
     try {
-      final file = await _pdfService.saveSummaryPdf(
-        title: widget.paper.title,
-        summary: _buildPaperForPdf(),
+      final file = await _pdfService.saveQuestionPaperPdf(
+        paper: widget.paper,
         subtitle: 'AI Test Paper',
         watermarkText: 'StudyShare Test',
       );
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('PDF saved and ready to share: ${file.path}'),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-          await SharePlus.instance.share(
-            ShareParams(
-              files: [XFile(file.path)],
-              text: 'StudyShare test paper: ${widget.paper.title}',
-            ),
-          );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('PDF saved and ready to share: ${file.path}'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path)],
+          text: 'StudyShare test paper: ${widget.paper.title}',
+        ),
+      );
     } catch (e, stackTrace) {
       debugPrint('Failed to download question paper PDF: $e\n$stackTrace');
       if (!mounted) return;
@@ -86,54 +85,6 @@ class _AiQuestionPaperQuizScreenState extends State<AiQuestionPaperQuizScreen> {
         setState(() => _isDownloading = false);
       }
     }
-  }
-
-  String _buildPaperForPdf() {
-    final buffer = StringBuffer();
-    buffer.writeln(widget.paper.title);
-    buffer.writeln('Subject: ${widget.paper.subject}');
-    buffer.writeln('Semester: ${widget.paper.semester}');
-    buffer.writeln('Branch: ${widget.paper.branch}');
-    buffer.writeln(
-      'Generated at: ${widget.paper.generatedAt.toLocal().toIso8601String()}',
-    );
-    if (widget.paper.instructions.isNotEmpty) {
-      buffer.writeln('');
-      buffer.writeln('Instructions:');
-      for (final line in widget.paper.instructions) {
-        buffer.writeln('- $line');
-      }
-    }
-    buffer.writeln('');
-    buffer.writeln('Questions:');
-    for (var i = 0; i < widget.paper.questions.length; i++) {
-      final q = widget.paper.questions[i];
-      buffer.writeln('');
-      buffer.writeln('Q${i + 1}. ${q.question}');
-      for (var j = 0; j < q.options.length; j++) {
-        final letter = _indexToLetter(j);
-        buffer.writeln('$letter. ${q.options[j]}');
-      }
-      final hasValidCorrectIndex =
-          q.correctIndex >= 0 && q.correctIndex < q.options.length;
-      final correctLetter = hasValidCorrectIndex
-          ? _indexToLetter(q.correctIndex)
-          : '?';
-      buffer.writeln('Answer: $correctLetter');
-      if (q.explanation.trim().isNotEmpty) {
-        buffer.writeln('Explanation: ${q.explanation}');
-      }
-      final source = q.source;
-      final sourceParts = <String>[
-        source.title.trim(),
-        source.section.trim(),
-        source.pages.trim(),
-      ].where((part) => part.isNotEmpty).toList(growable: false);
-      if (sourceParts.isNotEmpty) {
-        buffer.writeln('Source: ${sourceParts.join(' | ')}');
-      }
-    }
-    return buffer.toString().trim();
   }
 
   void _showTheory(int questionIndex) {

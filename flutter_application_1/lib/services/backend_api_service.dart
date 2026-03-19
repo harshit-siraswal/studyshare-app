@@ -127,6 +127,7 @@ class BackendApiService {
         lowered.contains('http 525') ||
         lowered.contains('http 526');
   }
+
   static final Map<String, DateTime> _bookmarkCheckRateLimitUntil =
       <String, DateTime>{};
   DateTime? _notificationsRateLimitUntil;
@@ -317,9 +318,7 @@ class BackendApiService {
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
       if (path == '/api/users/profile' && normalizedMethod == 'PUT') {
-        debugPrint(
-          '[ProfileUpdate] HTTP ${res.statusCode} body: ${res.body}',
-        );
+        debugPrint('[ProfileUpdate] HTTP ${res.statusCode} body: ${res.body}');
       }
       final msg =
           data?['message']?.toString() ?? data?['error']?.toString() ?? '';
@@ -422,15 +421,15 @@ class BackendApiService {
 
     if (file.bytes != null) {
       request.files.add(
-        http.MultipartFile.fromBytes(
-          'image',
-          file.bytes!,
-          filename: file.name,
-        ),
+        http.MultipartFile.fromBytes('image', file.bytes!, filename: file.name),
       );
     } else if (file.path != null) {
       request.files.add(
-        await http.MultipartFile.fromPath('image', file.path!, filename: file.name),
+        await http.MultipartFile.fromPath(
+          'image',
+          file.path!,
+          filename: file.name,
+        ),
       );
     } else {
       throw BackendApiHttpException(
@@ -478,7 +477,9 @@ class BackendApiService {
       method: 'GET',
     );
     final list = (data['members'] as List?) ?? const [];
-    return list.map((entry) => Map<String, dynamic>.from(entry as Map)).toList();
+    return list
+        .map((entry) => Map<String, dynamic>.from(entry as Map))
+        .toList();
   }
 
   Future<Map<String, dynamic>> updateRoomCodeVisibility({
@@ -574,10 +575,7 @@ class BackendApiService {
     return _requestJson(
       '/api/chat/messages/${Uri.encodeComponent(messageId)}',
       method: 'PUT',
-      body: <String, dynamic>{
-        'content': content,
-        'imageUrl': ?imageUrl,
-      },
+      body: <String, dynamic>{'content': content, 'imageUrl': ?imageUrl},
     );
   }
 
@@ -692,10 +690,7 @@ class BackendApiService {
           return await _requestJson(
             '/api/attendance/kiet/sync',
             method: 'POST',
-            body: {
-              'collegeId': collegeId,
-              'cybervidyaToken': cybervidyaToken,
-            },
+            body: {'collegeId': collegeId, 'cybervidyaToken': cybervidyaToken},
             securityContext: includeRecaptcha ? context : null,
             includeRecaptchaToken: includeRecaptcha,
             recaptchaAction: 'attendance_sync',
@@ -961,10 +956,7 @@ class BackendApiService {
   }
 
   Future<void> deleteNotice({required String noticeId}) async {
-    await _requestJson(
-      _noticePath(noticeId),
-      method: 'DELETE',
-    );
+    await _requestJson(_noticePath(noticeId), method: 'DELETE');
   }
 
   // ----------------------------
@@ -1790,7 +1782,7 @@ class BackendApiService {
     String? dialectIntensity,
     String? languageHint,
   }) async {
-    return _requestJson(
+    final response = await _requestJson(
       '/api/rag/query',
       method: 'POST',
       timeout: _aiRequestTimeout,
@@ -1816,6 +1808,42 @@ class BackendApiService {
         'language_hint': ?languageHint,
       },
     );
+    return _normalizeRagResponse(response);
+  }
+
+  Map<String, dynamic> _normalizeRagResponse(Map<String, dynamic> response) {
+    final data = response['data'];
+    if (data is! Map) return response;
+
+    final normalized = Map<String, dynamic>.from(response);
+    final nested = Map<String, dynamic>.from(data);
+    const mirroredKeys = <String>[
+      'answer',
+      'response',
+      'sources',
+      'primary_source',
+      'primary_source_file_id',
+      'no_local',
+      'retrieval_score',
+      'llm_confidence_score',
+      'combined_confidence',
+      'source_switch_applied',
+      'retrieval_mode',
+      'dialect_intensity_used',
+      'tone_profile_used',
+      'ocr_failure_affects_retrieval',
+      'ocr_errors',
+      'answer_origin',
+      'strict_notes_mode',
+    ];
+
+    for (final key in mirroredKeys) {
+      if (normalized[key] == null && nested[key] != null) {
+        normalized[key] = nested[key];
+      }
+    }
+
+    return normalized;
   }
 
   Future<Map<String, dynamic>> uploadNotebookSource({
@@ -2001,7 +2029,8 @@ class BackendApiService {
     final ocrErrors =
         response['ocr_errors'] ?? (data is Map ? data['ocr_errors'] : null);
     final primarySource =
-        response['primary_source'] ?? (data is Map ? data['primary_source'] : null);
+        response['primary_source'] ??
+        (data is Map ? data['primary_source'] : null);
     final primarySourceFileId =
         response['primary_source_file_id'] ??
         (data is Map ? data['primary_source_file_id'] : null);
@@ -2009,15 +2038,22 @@ class BackendApiService {
         response['source_switch_applied'] ??
         (data is Map ? data['source_switch_applied'] : null);
     final retrievalMode =
-        response['retrieval_mode'] ?? (data is Map ? data['retrieval_mode'] : null);
+        response['retrieval_mode'] ??
+        (data is Map ? data['retrieval_mode'] : null);
     final dialectIntensityUsed =
         response['dialect_intensity_used'] ??
         (data is Map ? data['dialect_intensity_used'] : null);
     final toneProfileUsed =
         response['tone_profile_used'] ??
         (data is Map ? data['tone_profile_used'] : null);
+    final answerOrigin =
+        response['answer_origin'] ??
+        (data is Map ? data['answer_origin'] : null);
+    final strictNotesMode =
+        response['strict_notes_mode'] ??
+        (data is Map ? data['strict_notes_mode'] : null);
 
-    if (normalizedSources.isNotEmpty || noLocal) {
+    if (normalizedSources.isNotEmpty || noLocal || answerOrigin != null) {
       yield jsonEncode({
         'type': 'metadata',
         'data': <String, dynamic>{
@@ -2032,6 +2068,8 @@ class BackendApiService {
           'retrieval_mode': ?retrievalMode,
           'dialect_intensity_used': ?dialectIntensityUsed,
           'tone_profile_used': ?toneProfileUsed,
+          'answer_origin': ?answerOrigin,
+          'strict_notes_mode': ?strictNotesMode,
           'ocr_failure_affects_retrieval': ?ocrFailureAffectsRetrieval,
           'ocr_errors': ?ocrErrors,
         },
@@ -2118,7 +2156,7 @@ class BackendApiService {
         'session_id': ?sessionId,
         'top_k': ?topK,
         'min_score': ?minScore,
-        'allow_web': ?allowWeb,
+        'allow_web': allowWeb == true,
         // TODO: replace with searchMode enum after Section B UI
         'retrieval_mode': allowWeb == true ? 'web' : 'local',
         'file_id': ?fileId,
