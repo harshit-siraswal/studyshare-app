@@ -6,7 +6,6 @@ import 'package:shimmer/shimmer.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import '../../config/theme.dart';
 import '../../services/auth_service.dart';
-import '../../services/backend_api_service.dart';
 import '../../services/supabase_service.dart';
 import 'department_account_screen.dart' as dept_screen;
 import '../../widgets/notice_card.dart';
@@ -35,7 +34,6 @@ class NoticesScreen extends StatefulWidget {
 class _NoticesScreenState extends State<NoticesScreen>
     with SingleTickerProviderStateMixin {
   final SupabaseService _supabaseService = SupabaseService();
-  final BackendApiService _backendApiService = BackendApiService();
   final AuthService _authService = AuthService();
 
   List<Map<String, dynamic>> _filteredNotices = [];
@@ -248,7 +246,7 @@ class _NoticesScreenState extends State<NoticesScreen>
                                   collegeId: widget.collegeId,
                                   isDark: isDark,
                                   canManage: _canManageNotices,
-                                  onNoticeUpdated: _loadNotices,
+                                  onNoticeUpdated: _loadAccessContextAndNotices,
                                 ),
                               );
                             },
@@ -273,9 +271,11 @@ class _NoticesScreenState extends State<NoticesScreen>
   Future<void> _loadNoticeAccess() async {
     try {
       final profile = await _supabaseService.getCurrentUserProfile(
-        maxAttempts: 1,
+        maxAttempts: 2,
       );
-      final canManage = isTeacherOrAdminProfile(profile);
+      final canManage =
+          isTeacherOrAdminProfile(profile) ||
+          hasAdminCapability(profile, 'upload_notice');
       if (!mounted) return;
       setState(() => _canManageNotices = canManage);
     } catch (e) {
@@ -423,12 +423,16 @@ class _NoticesScreenState extends State<NoticesScreen>
     setState(() => _isLoading = true);
 
     try {
-      final notices = await _backendApiService.getNotices(widget.collegeId);
+      final notices = await _supabaseService.getNotices(
+        collegeId: widget.collegeId,
+        includeHidden: _canManageNotices,
+      );
       final visibleNotices = _canManageNotices
           ? notices
           : notices.where((notice) => notice['is_active'] != false).toList();
-      final activeNotices =
-          visibleNotices.where((notice) => notice['is_active'] != false).toList();
+      final activeNotices = visibleNotices
+          .where((notice) => notice['is_active'] != false)
+          .toList();
 
       // Filter by date range if set
       List<Map<String, dynamic>> filtered = visibleNotices;
@@ -640,7 +644,8 @@ class _NoticesScreenState extends State<NoticesScreen>
                                           collegeId: widget.collegeId,
                                           isDark: isDark,
                                           canManage: _canManageNotices,
-                                          onNoticeUpdated: _loadNotices,
+                                          onNoticeUpdated:
+                                              _loadAccessContextAndNotices,
                                         ),
                                       ),
                                     ),

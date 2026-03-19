@@ -167,8 +167,7 @@ class _StickerPickerState extends State<StickerPicker>
   void _handleGifScroll() {
     if (!_gifHasMore || _gifLoading || _gifLoadingMore) return;
     if (!_gifScrollController.hasClients) return;
-    final threshold =
-        _gifScrollController.position.maxScrollExtent - 300;
+    final threshold = _gifScrollController.position.maxScrollExtent - 300;
     if (_gifScrollController.position.pixels >= threshold) {
       _loadGiphyGifs(query: _gifQuery, append: true);
     }
@@ -177,8 +176,7 @@ class _StickerPickerState extends State<StickerPicker>
   void _handleTenorScroll() {
     if (_tenorLoadingMore || _tenorNextPos == null) return;
     if (!_tenorScrollController.hasClients) return;
-    final threshold =
-        _tenorScrollController.position.maxScrollExtent - 300;
+    final threshold = _tenorScrollController.position.maxScrollExtent - 300;
     if (_tenorScrollController.position.pixels >= threshold) {
       _loadMoreTenorGifs();
     }
@@ -191,24 +189,24 @@ class _StickerPickerState extends State<StickerPicker>
       _errorMessage = null;
     });
 
-      try {
-        await _stickerService.warmUpCapabilities();
-        await _stickerService.purgeLegacyPacks();
-        await _stickerService.ensureDefaultAnimatedPacksInstalled(packCount: 3);
-        final stickers = await _stickerService.getLocalStickers();
-        final installed = await _stickerService.getInstalledPackIds();
-        if (!mounted) return;
-        setState(() {
-          _stickers = stickers;
-          _installedPackIds = installed;
-          _isLoading = false;
-        });
-        unawaited(
-          _stickerService
-              .ensureDefaultTelegramPacksInstalled()
-              .then((_) => _refreshLocalStickers()),
-        );
-      } catch (_) {
+    try {
+      await _stickerService.warmUpCapabilities();
+      await _stickerService.purgeLegacyPacks();
+      await _stickerService.ensureDefaultAnimatedPacksInstalled(packCount: 3);
+      final stickers = await _stickerService.getLocalStickers();
+      final installed = await _stickerService.getInstalledPackIds();
+      if (!mounted) return;
+      setState(() {
+        _stickers = stickers;
+        _installedPackIds = installed;
+        _isLoading = false;
+      });
+      unawaited(
+        _stickerService.ensureDefaultTelegramPacksInstalled().then(
+          (_) => _refreshLocalStickers(),
+        ),
+      );
+    } catch (_) {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
@@ -345,25 +343,32 @@ class _StickerPickerState extends State<StickerPicker>
   List<GiphyGifItem> _parseGiphyGifItems(String body) {
     final decoded = jsonDecode(body) as Map<String, dynamic>;
     final data = (decoded['data'] as List?) ?? [];
-    return data.map((item) {
-      final images = item['images'] as Map<String, dynamic>? ?? {};
-      final fixed = images['fixed_width'] as Map<String, dynamic>? ?? {};
-      final original = images['original'] as Map<String, dynamic>? ?? {};
-      final fixedUrl = fixed['url']?.toString() ?? '';
-      final origUrl = original['url']?.toString() ?? '';
-      final width = double.tryParse(fixed['width']?.toString() ?? '') ?? 1;
-      final height = double.tryParse(fixed['height']?.toString() ?? '') ?? 1;
-      return GiphyGifItem(
-        id: item['id']?.toString() ?? '',
-        title: item['title']?.toString() ?? '',
-        fixedWidthUrl: fixedUrl,
-        originalUrl: origUrl.isEmpty ? fixedUrl : origUrl,
-        aspectRatio: width / (height == 0 ? 1 : height),
-      );
-    }).where((item) => item.fixedWidthUrl.isNotEmpty).toList();
+    return data
+        .map((item) {
+          final images = item['images'] as Map<String, dynamic>? ?? {};
+          final fixed = images['fixed_width'] as Map<String, dynamic>? ?? {};
+          final original = images['original'] as Map<String, dynamic>? ?? {};
+          final fixedUrl = fixed['url']?.toString() ?? '';
+          final origUrl = original['url']?.toString() ?? '';
+          final width = double.tryParse(fixed['width']?.toString() ?? '') ?? 1;
+          final height =
+              double.tryParse(fixed['height']?.toString() ?? '') ?? 1;
+          return GiphyGifItem(
+            id: item['id']?.toString() ?? '',
+            title: item['title']?.toString() ?? '',
+            fixedWidthUrl: fixedUrl,
+            originalUrl: origUrl.isEmpty ? fixedUrl : origUrl,
+            aspectRatio: width / (height == 0 ? 1 : height),
+          );
+        })
+        .where((item) => item.fixedWidthUrl.isNotEmpty)
+        .toList();
   }
 
-  Iterable<Uri> _backendUris(String endpoint, Map<String, String> params) sync* {
+  Iterable<Uri> _backendUris(
+    String endpoint,
+    Map<String, String> params,
+  ) sync* {
     final normalized = endpoint.startsWith('/') ? endpoint : '/$endpoint';
     for (final base in AppConfig.apiBaseUrls) {
       final uri = Uri.parse('$base$normalized');
@@ -380,8 +385,9 @@ class _StickerPickerState extends State<StickerPicker>
     String? query,
     int limit = 25,
   }) async {
-    final effectiveQuery =
-        (query == null || query.trim().isEmpty) ? 'trending' : query.trim();
+    final effectiveQuery = (query == null || query.trim().isEmpty)
+        ? 'trending'
+        : query.trim();
     try {
       final v2Uri = Uri.parse(
         'https://tenor.googleapis.com/v2/search?q=$effectiveQuery&key=${AppConfig.tenorApiKey}&limit=$limit&media_filter=gif',
@@ -400,8 +406,7 @@ class _StickerPickerState extends State<StickerPicker>
                 title: 'GIF',
                 fixedWidthUrl: item.url,
                 originalUrl: item.url,
-                aspectRatio:
-                    item.width / (item.height == 0 ? 1 : item.height),
+                aspectRatio: item.width / (item.height == 0 ? 1 : item.height),
               ),
             )
             .toList();
@@ -413,8 +418,9 @@ class _StickerPickerState extends State<StickerPicker>
       final legacyUri = Uri.parse(
         'https://g.tenor.com/v1/search?q=$effectiveQuery&key=LIVDSRZULELA&limit=$limit',
       );
-      final res =
-          await http.get(legacyUri).timeout(const Duration(seconds: 12));
+      final res = await http
+          .get(legacyUri)
+          .timeout(const Duration(seconds: 12));
       if (res.statusCode != 200) return [];
       final decoded = jsonDecode(res.body) as Map<String, dynamic>;
       final results = (decoded['results'] as List?) ?? [];
@@ -426,15 +432,12 @@ class _StickerPickerState extends State<StickerPicker>
         final media = mediaList.first as Map? ?? const {};
         final gif =
             (media['gif'] ?? media['mediumgif'] ?? media['tinygif']) as Map? ??
-                const {};
+            const {};
         final url = gif['url']?.toString() ?? '';
         final dims = (gif['dims'] as List?) ?? const [0, 0];
         if (url.isEmpty) continue;
-        final width =
-            dims.isNotEmpty ? int.tryParse('${dims.first}') ?? 1 : 1;
-        final height = dims.length > 1
-            ? int.tryParse('${dims[1]}') ?? 1
-            : 1;
+        final width = dims.isNotEmpty ? int.tryParse('${dims.first}') ?? 1 : 1;
+        final height = dims.length > 1 ? int.tryParse('${dims[1]}') ?? 1 : 1;
         items.add(
           GiphyGifItem(
             id: url,
@@ -463,8 +466,9 @@ class _StickerPickerState extends State<StickerPicker>
         'media_filter=gif',
         if (pos != null && pos.isNotEmpty) 'pos=$pos',
       ].join('&');
-      final v2Uri =
-          Uri.parse('https://tenor.googleapis.com/v2/search?$queryParams');
+      final v2Uri = Uri.parse(
+        'https://tenor.googleapis.com/v2/search?$queryParams',
+      );
       final res = await http.get(v2Uri).timeout(const Duration(seconds: 12));
       if (res.statusCode == 200) {
         final decoded = jsonDecode(res.body) as Map<String, dynamic>;
@@ -482,8 +486,9 @@ class _StickerPickerState extends State<StickerPicker>
       final legacyUri = Uri.parse(
         'https://g.tenor.com/v1/search?q=meme&key=LIVDSRZULELA&limit=$limit',
       );
-      final res =
-          await http.get(legacyUri).timeout(const Duration(seconds: 12));
+      final res = await http
+          .get(legacyUri)
+          .timeout(const Duration(seconds: 12));
       if (res.statusCode != 200) return (<TenorGifItem>[], null);
       final decoded = jsonDecode(res.body) as Map<String, dynamic>;
       final results = (decoded['results'] as List?) ?? [];
@@ -495,15 +500,12 @@ class _StickerPickerState extends State<StickerPicker>
         final media = mediaList.first as Map? ?? const {};
         final gif =
             (media['gif'] ?? media['mediumgif'] ?? media['tinygif']) as Map? ??
-                const {};
+            const {};
         final url = gif['url']?.toString() ?? '';
         final dims = (gif['dims'] as List?) ?? const [0, 0];
         if (url.isEmpty) continue;
-        final width =
-            dims.isNotEmpty ? int.tryParse('${dims.first}') ?? 1 : 1;
-        final height = dims.length > 1
-            ? int.tryParse('${dims[1]}') ?? 1
-            : 1;
+        final width = dims.isNotEmpty ? int.tryParse('${dims.first}') ?? 1 : 1;
+        final height = dims.length > 1 ? int.tryParse('${dims[1]}') ?? 1 : 1;
         items.add(TenorGifItem(url: url, width: width, height: height));
       }
       return (items, null);
@@ -522,11 +524,11 @@ class _StickerPickerState extends State<StickerPicker>
       final imgflipRes = await http
           .get(Uri.parse('https://api.imgflip.com/get_memes'))
           .timeout(const Duration(seconds: 15));
-      final imgflipDecoded = jsonDecode(imgflipRes.body) as Map<String, dynamic>;
-      final templates =
-          (imgflipDecoded['data']?['memes'] as List? ?? [])
-              .map((e) => ImgflipTemplate.fromJson(e as Map<String, dynamic>))
-              .toList();
+      final imgflipDecoded =
+          jsonDecode(imgflipRes.body) as Map<String, dynamic>;
+      final templates = (imgflipDecoded['data']?['memes'] as List? ?? [])
+          .map((e) => ImgflipTemplate.fromJson(e as Map<String, dynamic>))
+          .toList();
 
       final tenorPage = await _fetchTenorMemesPage(limit: 20);
 
@@ -550,10 +552,7 @@ class _StickerPickerState extends State<StickerPicker>
     if (_tenorLoadingMore || _tenorNextPos == null) return;
     setState(() => _tenorLoadingMore = true);
     try {
-      final page = await _fetchTenorMemesPage(
-        limit: 20,
-        pos: _tenorNextPos,
-      );
+      final page = await _fetchTenorMemesPage(limit: 20, pos: _tenorNextPos);
       if (!mounted) return;
       setState(() {
         _tenorGifs.addAll(page.$1);
@@ -571,12 +570,12 @@ class _StickerPickerState extends State<StickerPicker>
     final filtered = query.isEmpty
         ? _stickers
         : _stickers
-            .where(
-              (file) =>
-                  file.path.toLowerCase().contains(query) ||
-                  file.uri.pathSegments.last.toLowerCase().contains(query),
-            )
-            .toList();
+              .where(
+                (file) =>
+                    file.path.toLowerCase().contains(query) ||
+                    file.uri.pathSegments.last.toLowerCase().contains(query),
+              )
+              .toList();
     if (_activePackId == 'all') return filtered;
     return filtered
         .where((file) => _extractPackIdFromPath(file.path) == _activePackId)
@@ -716,8 +715,9 @@ class _StickerPickerState extends State<StickerPicker>
                       separatorBuilder: (_, __) => const SizedBox(height: 8),
                       itemBuilder: (context, index) {
                         final packName = packs[index];
-                        final isInstalled =
-                            _installedPackIds.contains(packName);
+                        final isInstalled = _installedPackIds.contains(
+                          packName,
+                        );
                         final isInstalling = installing.contains(packName);
 
                         return Container(
@@ -777,8 +777,9 @@ class _StickerPickerState extends State<StickerPicker>
                                     setSheetState(
                                       () => installing.add(packName),
                                     );
-                                    await _stickerService
-                                        .installTelegramPack(packName);
+                                    await _stickerService.installTelegramPack(
+                                      packName,
+                                    );
                                     await _refreshLocalStickers();
                                     setSheetState(
                                       () => installing.remove(packName),
@@ -819,10 +820,7 @@ class _StickerPickerState extends State<StickerPicker>
   }
 
   Future<void> _openMemeEditor(ImgflipTemplate template) async {
-    final file = await _downloadToTempFile(
-      template.url,
-      'imgflip_template',
-    );
+    final file = await _downloadToTempFile(template.url, 'imgflip_template');
     if (file == null) return;
     await _openStickerEditorFromFile(
       file,
@@ -889,35 +887,80 @@ class _StickerPickerState extends State<StickerPicker>
 
   Widget _buildSegmentedTabs(bool isDark) {
     final labels = ['Stickers', 'GIFs', 'Memes'];
-    return Row(
-      children: labels.asMap().entries.map((entry) {
-        final selected = _tabController.index == entry.key;
-        return Expanded(
-          child: GestureDetector(
-            onTap: () => setState(() => _tabController.animateTo(entry.key)),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              margin: const EdgeInsets.symmetric(horizontal: 3),
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              decoration: BoxDecoration(
-                color: selected ? AppTheme.primary : Colors.transparent,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                entry.value,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: selected
-                      ? Colors.white
-                      : (isDark ? Colors.white54 : Colors.black45),
-                ),
-              ),
+    final animation = _tabController.animation;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final segmentCount = labels.length;
+        final segmentWidth = (constraints.maxWidth - 6) / segmentCount;
+
+        Widget childForValue(double value) {
+          final clampedValue = value.clamp(0.0, (segmentCount - 1).toDouble());
+          return Container(
+            decoration: BoxDecoration(
+              color: isDark ? Colors.white10 : Colors.black12,
+              borderRadius: BorderRadius.circular(24),
             ),
-          ),
+            padding: const EdgeInsets.all(3),
+            child: Stack(
+              children: [
+                Positioned(
+                  left: segmentWidth * clampedValue,
+                  top: 0,
+                  bottom: 0,
+                  width: segmentWidth,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: AppTheme.primary,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                  ),
+                ),
+                Row(
+                  children: labels.asMap().entries.map((entry) {
+                    final selected = _tabController.index == entry.key;
+                    return Expanded(
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(20),
+                          onTap: () => _tabController.animateTo(entry.key),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            child: AnimatedDefaultTextStyle(
+                              duration: const Duration(milliseconds: 160),
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: selected
+                                    ? Colors.white
+                                    : (isDark
+                                          ? Colors.white54
+                                          : Colors.black45),
+                              ),
+                              child: Text(
+                                entry.value,
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+          );
+        }
+
+        if (animation == null) {
+          return childForValue(_tabController.index.toDouble());
+        }
+        return AnimatedBuilder(
+          animation: animation,
+          builder: (context, child) => childForValue(animation.value),
         );
-      }).toList(),
+      },
     );
   }
 
@@ -935,9 +978,7 @@ class _StickerPickerState extends State<StickerPicker>
       ),
       decoration: InputDecoration(
         hintText: hint,
-        hintStyle: TextStyle(
-          color: isDark ? Colors.white38 : Colors.black38,
-        ),
+        hintStyle: TextStyle(color: isDark ? Colors.white38 : Colors.black38),
         prefixIcon: Icon(
           Icons.search,
           size: 18,
@@ -971,7 +1012,7 @@ class _StickerPickerState extends State<StickerPicker>
         .toList();
 
     return SizedBox(
-      height: 80,
+      height: 68,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: items.length,
@@ -983,8 +1024,8 @@ class _StickerPickerState extends State<StickerPicker>
           return GestureDetector(
             onTap: () => setState(() => _activePackId = pack.id),
             child: Container(
-              width: 64,
-              padding: const EdgeInsets.all(6),
+              width: 58,
+              padding: const EdgeInsets.all(5),
               decoration: BoxDecoration(
                 color: isActive
                     ? AppTheme.primary.withValues(alpha: 0.18)
@@ -998,10 +1039,7 @@ class _StickerPickerState extends State<StickerPicker>
                   ? const Icon(Icons.sticky_note_2_outlined)
                   : ClipRRect(
                       borderRadius: BorderRadius.circular(10),
-                      child: Image.file(
-                        preview,
-                        fit: BoxFit.cover,
-                      ),
+                      child: Image.file(preview, fit: BoxFit.cover),
                     ),
             ),
           );
@@ -1103,30 +1141,29 @@ class _StickerPickerState extends State<StickerPicker>
         ),
       );
     }
-      return MasonryGridView.count(
-        controller: _gifScrollController,
-        padding: const EdgeInsets.only(top: 8),
-        crossAxisCount: 2,
-        mainAxisSpacing: 6,
-        crossAxisSpacing: 6,
-        itemCount:
-            _giphyGifResults.length + (_gifLoadingMore ? 1 : 0),
-        itemBuilder: (context, index) {
-          if (index >= _giphyGifResults.length) {
-            return Center(
-              child: SizedBox(
-                height: 18,
-                width: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: isDark ? Colors.white70 : Colors.black45,
-                ),
+    return MasonryGridView.count(
+      controller: _gifScrollController,
+      padding: const EdgeInsets.only(top: 8),
+      crossAxisCount: 2,
+      mainAxisSpacing: 6,
+      crossAxisSpacing: 6,
+      itemCount: _giphyGifResults.length + (_gifLoadingMore ? 1 : 0),
+      itemBuilder: (context, index) {
+        if (index >= _giphyGifResults.length) {
+          return Center(
+            child: SizedBox(
+              height: 18,
+              width: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: isDark ? Colors.white70 : Colors.black45,
               ),
-            );
-          }
-          final item = _giphyGifResults[index];
-          return GestureDetector(
-            onTap: () async {
+            ),
+          );
+        }
+        final item = _giphyGifResults[index];
+        return GestureDetector(
+          onTap: () async {
             final navigator = Navigator.of(context);
             await _sendRemoteMedia(item.originalUrl, prefix: 'giphy_gif');
             if (!mounted) return;
@@ -1216,8 +1253,9 @@ class _StickerPickerState extends State<StickerPicker>
                   width: double.infinity,
                   child: ElevatedButton(
                     onPressed: _memeSubmitting ? null : _submitMeme,
-                    child:
-                        Text(_memeSubmitting ? 'Creating...' : 'Create Meme'),
+                    child: Text(
+                      _memeSubmitting ? 'Creating...' : 'Create Meme',
+                    ),
                   ),
                 ),
               ),
@@ -1243,9 +1281,9 @@ class _StickerPickerState extends State<StickerPicker>
       );
     }
 
-      return ListView(
-        controller: _tenorScrollController,
-        children: [
+    return ListView(
+      controller: _tenorScrollController,
+      children: [
         const SizedBox(height: 10),
         if (_imgflipTemplates.isNotEmpty) ...[
           Padding(
@@ -1299,22 +1337,19 @@ class _StickerPickerState extends State<StickerPicker>
             ),
           ),
         if (_tenorGifs.isNotEmpty) const SizedBox(height: 8),
-          MasonryGridView.count(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: 2,
-            mainAxisSpacing: 6,
-            crossAxisSpacing: 6,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            itemCount: _tenorGifs.length,
-            itemBuilder: (context, index) {
+        MasonryGridView.count(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          crossAxisCount: 2,
+          mainAxisSpacing: 6,
+          crossAxisSpacing: 6,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          itemCount: _tenorGifs.length,
+          itemBuilder: (context, index) {
             final item = _tenorGifs[index];
             return GestureDetector(
               onTap: () async {
-                final file = await _downloadToTempFile(
-                  item.url,
-                  'tenor_meme',
-                );
+                final file = await _downloadToTempFile(item.url, 'tenor_meme');
                 if (!mounted || file == null) return;
                 await _openStickerEditorFromFile(
                   file,
@@ -1328,28 +1363,28 @@ class _StickerPickerState extends State<StickerPicker>
                   imageUrl: item.url,
                   fit: BoxFit.cover,
                 ),
-                ),
-              );
-            },
-          ),
-          if (_tenorLoadingMore)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Center(
-                child: SizedBox(
-                  height: 18,
-                  width: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: isDark ? Colors.white70 : Colors.black45,
-                  ),
+              ),
+            );
+          },
+        ),
+        if (_tenorLoadingMore)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            child: Center(
+              child: SizedBox(
+                height: 18,
+                width: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: isDark ? Colors.white70 : Colors.black45,
                 ),
               ),
             ),
-          const SizedBox(height: 20),
-        ],
-      );
-    }
+          ),
+        const SizedBox(height: 20),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1451,73 +1486,80 @@ class _StickerPickerState extends State<StickerPicker>
                           );
                         },
                       ),
-                        const SizedBox(height: 10),
-                        if (_stickerQuery.trim().isEmpty) ...[
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton.icon(
-                                  onPressed: _createStickerFromImage,
-                                  icon: const Icon(
-                                    Icons.add_photo_alternate_rounded,
+                      const SizedBox(height: 10),
+                      if (_stickerQuery.trim().isEmpty) ...[
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton.icon(
+                                onPressed: _createStickerFromImage,
+                                icon: const Icon(
+                                  Icons.add_photo_alternate_rounded,
+                                ),
+                                label: const Text('Create Sticker'),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: AppTheme.primary,
+                                  side: BorderSide(
+                                    color: AppTheme.primary.withValues(
+                                      alpha: 0.4,
+                                    ),
                                   ),
-                                  label: const Text('Create Sticker'),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: AppTheme.primary,
-                                    side: BorderSide(
-                                      color:
-                                          AppTheme.primary.withValues(alpha: 0.4),
-                                    ),
-                                    padding: const EdgeInsets.symmetric(
-                                      vertical: 12,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(999),
-                                    ),
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 12,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(999),
                                   ),
                                 ),
-                              ),
-                              const SizedBox(width: 8),
-                              SizedBox(
-                                width: 44,
-                                height: 44,
-                                child: IconButton(
-                                  tooltip: 'From device',
-                                  onPressed: _pickStickerFromDevice,
-                                  icon: Icon(
-                                    Icons.phone_android_rounded,
-                                    color: isDark
-                                        ? Colors.white70
-                                        : Colors.black54,
-                                  ),
-                                  style: IconButton.styleFrom(
-                                    backgroundColor: isDark
-                                        ? Colors.white10
-                                        : Colors.black12,
-                                    shape: const CircleBorder(),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                        ],
-                        if (_stickerQuery.trim().isEmpty) ...[
-                          _buildStickerPackStrip(isDark),
-                          const SizedBox(height: 6),
-                          Align(
-                            alignment: Alignment.centerLeft,
-                            child: TextButton.icon(
-                              onPressed: _showTelegramPackSheet,
-                              icon: const Icon(Icons.add_circle_outline_rounded),
-                              label: const Text('Get More Stickers'),
-                              style: TextButton.styleFrom(
-                                foregroundColor: AppTheme.primary,
                               ),
                             ),
+                            const SizedBox(width: 8),
+                            SizedBox(
+                              width: 44,
+                              height: 44,
+                              child: IconButton(
+                                tooltip: 'From device',
+                                onPressed: _pickStickerFromDevice,
+                                icon: Icon(
+                                  Icons.phone_android_rounded,
+                                  color: isDark
+                                      ? Colors.white70
+                                      : Colors.black54,
+                                ),
+                                style: IconButton.styleFrom(
+                                  backgroundColor: isDark
+                                      ? Colors.white10
+                                      : Colors.black12,
+                                  shape: const CircleBorder(),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                      ],
+                      if (_stickerQuery.trim().isEmpty) ...[
+                        _buildStickerPackStrip(isDark),
+                        const SizedBox(height: 2),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton.icon(
+                            onPressed: _showTelegramPackSheet,
+                            icon: const Icon(Icons.add_circle_outline_rounded),
+                            label: const Text('Get More Stickers'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: AppTheme.primary,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                                vertical: 2,
+                              ),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
                           ),
-                          const SizedBox(height: 10),
-                        ],
+                        ),
+                        const SizedBox(height: 4),
+                      ],
                       Expanded(child: _buildStickerGrid(isDark)),
                     ],
                   ),

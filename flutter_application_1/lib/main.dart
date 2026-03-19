@@ -390,10 +390,20 @@ class _AppRootState extends State<AppRoot> {
         return;
       }
 
-      // Initialize Heavy Services in parallel AFTER the splash screen has rendered
+      // Initialize heavy services after the splash screen has rendered.
+      // DownloadService opens Hive boxes, so Hive must complete first.
+      final hiveInit = () async {
+        try {
+          await Hive.initFlutter();
+        } catch (e) {
+          debugPrint('Hive initialization error: $e');
+          rethrow; // Hive is required for app functionality
+        }
+      }();
+
       await Future.wait([
         // 1. Supabase (required)
-        // required — app cannot function without this, errors are rethrown
+        // required ? app cannot function without this, errors are rethrown
         () async {
           try {
             await Supabase.initialize(
@@ -407,7 +417,7 @@ class _AppRootState extends State<AppRoot> {
           }
         }(),
         // 2. Firebase
-        // optional — degrade gracefully, errors logged only
+        // optional ? degrade gracefully, errors logged only
         () async {
           try {
             await Firebase.initializeApp(
@@ -423,25 +433,8 @@ class _AppRootState extends State<AppRoot> {
           }
         }(),
         // 3. Hive
-        // required — app cannot function without this, errors are rethrown
-        () async {
-          try {
-            await Hive.initFlutter();
-          } catch (e) {
-            debugPrint('Hive initialization error: $e');
-            rethrow; // Hive is required for app functionality
-          }
-        }(),
-        // 4. DownloadService
-        // optional — degrade gracefully, errors logged only
-        () async {
-          try {
-            await DownloadService().init();
-          } catch (e) {
-            debugPrint('DownloadService initialization error: $e');
-          }
-        }(),
-        // 5. HomeWidgetService
+        hiveInit,
+        // 4. HomeWidgetService
         () async {
           try {
             await HomeWidgetService.instance.initialize();
@@ -450,6 +443,13 @@ class _AppRootState extends State<AppRoot> {
           }
         }(),
       ]);
+
+      try {
+        await hiveInit;
+        await DownloadService().init();
+      } catch (e) {
+        debugPrint('DownloadService initialization error: $e');
+      }
 
       if (!_firebaseInitialized) {
         _initializationErrorMessage ??=

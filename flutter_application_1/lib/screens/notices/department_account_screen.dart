@@ -26,19 +26,25 @@ class DepartmentAccountScreen extends StatefulWidget {
 class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
   final SupabaseService _supabaseService = SupabaseService();
   final AuthService _authService = AuthService();
+  final TextEditingController _searchController = TextEditingController();
   List<Map<String, dynamic>> _notices = [];
   bool _isLoading = true;
   bool _isFollowing = false;
   int _followerCount = 0;
   bool _isFollowLoading = true;
   bool _canManageNotices = false;
+  bool _showSearchBar = false;
+  String _searchQuery = '';
+  DateTimeRange? _selectedDateRange;
 
   Future<void> _loadNoticeAccess() async {
     try {
       final profile = await _supabaseService.getCurrentUserProfile(
-        maxAttempts: 1,
+        maxAttempts: 2,
       );
-      final canManage = isTeacherOrAdminProfile(profile);
+      final canManage =
+          isTeacherOrAdminProfile(profile) ||
+          hasAdminCapability(profile, 'upload_notice');
       if (!mounted) return;
       setState(() => _canManageNotices = canManage);
     } catch (e) {
@@ -89,7 +95,8 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
       if (mounted) {
         setState(() => _isFollowLoading = false);
       }
-    }  }
+    }
+  }
 
   Future<void> _toggleFollow() async {
     final email = _authService.userEmail;
@@ -157,6 +164,128 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
     }
   }
 
+  List<Map<String, dynamic>> _filteredDepartmentNotices() {
+    Iterable<Map<String, dynamic>> filtered = _notices;
+
+    final query = _searchQuery.trim().toLowerCase();
+    if (query.isNotEmpty) {
+      filtered = filtered.where((notice) {
+        final title = (notice['title'] ?? '').toString().toLowerCase();
+        final content = (notice['content'] ?? '').toString().toLowerCase();
+        final creator = (notice['created_by'] ?? '').toString().toLowerCase();
+        return title.contains(query) ||
+            content.contains(query) ||
+            creator.contains(query);
+      });
+    }
+
+    if (_selectedDateRange != null) {
+      filtered = filtered.where((notice) {
+        final createdAt = DateTime.tryParse(
+          notice['created_at']?.toString() ?? '',
+        );
+        if (createdAt == null) return false;
+        final start = DateTime(
+          _selectedDateRange!.start.year,
+          _selectedDateRange!.start.month,
+          _selectedDateRange!.start.day,
+        );
+        final end = DateTime(
+          _selectedDateRange!.end.year,
+          _selectedDateRange!.end.month,
+          _selectedDateRange!.end.day,
+          23,
+          59,
+          59,
+        );
+        return !createdAt.isBefore(start) && !createdAt.isAfter(end);
+      });
+    }
+
+    return filtered.toList();
+  }
+
+  Future<void> _pickNoticeDateRange(bool isDark) async {
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
+      initialDateRange: _selectedDateRange,
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: AppTheme.primary,
+              brightness: isDark ? Brightness.dark : Brightness.light,
+              surface: isDark ? AppTheme.darkSurface : Colors.white,
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (!mounted || picked == null) return;
+    setState(() => _selectedDateRange = picked);
+  }
+
+  Widget _buildDepartmentSearchBar(bool isDark, Color secondaryColor) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: TextField(
+        controller: _searchController,
+        onChanged: (value) => setState(() => _searchQuery = value),
+        style: GoogleFonts.inter(
+          fontSize: 14,
+          color: isDark ? Colors.white : Colors.black87,
+        ),
+        decoration: InputDecoration(
+          hintText: 'Search notices in ${widget.account.name}',
+          hintStyle: GoogleFonts.inter(fontSize: 14, color: secondaryColor),
+          filled: true,
+          fillColor: isDark
+              ? Colors.white10
+              : Colors.black.withValues(alpha: 0.04),
+          prefixIcon: Icon(
+            Icons.search_rounded,
+            color: secondaryColor,
+            size: 20,
+          ),
+          suffixIcon: _searchQuery.isEmpty
+              ? null
+              : IconButton(
+                  tooltip: 'Clear search',
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() => _searchQuery = '');
+                  },
+                  icon: Icon(Icons.close_rounded, color: secondaryColor),
+                ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(999),
+            borderSide: BorderSide.none,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(999),
+            borderSide: BorderSide.none,
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(999),
+            borderSide: BorderSide(
+              color: AppTheme.primary.withValues(alpha: 0.35),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -173,6 +302,7 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
     final followTextColor = _isFollowing
         ? (isDark ? Colors.white : Colors.black)
         : (isDark ? Colors.black : Colors.white);
+    final visibleNotices = _filteredDepartmentNotices();
 
     return Scaffold(
       backgroundColor: bgColor,
@@ -183,6 +313,42 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
           icon: Icon(Icons.arrow_back, color: textColor),
           onPressed: () => Navigator.pop(context),
         ),
+        actions: [
+          IconButton(
+            tooltip: _showSearchBar ? 'Hide search' : 'Search notices',
+            icon: Icon(
+              _showSearchBar ? Icons.close_rounded : Icons.search_rounded,
+              color: textColor,
+            ),
+            onPressed: () {
+              setState(() {
+                _showSearchBar = !_showSearchBar;
+                if (!_showSearchBar) {
+                  _searchController.clear();
+                  _searchQuery = '';
+                }
+              });
+            },
+          ),
+          IconButton(
+            tooltip: _selectedDateRange != null
+                ? 'Clear date filter'
+                : 'Filter by date',
+            icon: Icon(
+              _selectedDateRange != null
+                  ? Icons.event_busy_rounded
+                  : Icons.calendar_month_rounded,
+              color: _selectedDateRange != null ? AppTheme.primary : textColor,
+            ),
+            onPressed: () async {
+              if (_selectedDateRange != null) {
+                setState(() => _selectedDateRange = null);
+                return;
+              }
+              await _pickNoticeDateRange(isDark);
+            },
+          ),
+        ],
       ),
       body: CustomScrollView(
         slivers: [
@@ -312,6 +478,12 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
                   ),
                   const SizedBox(height: 16),
                   const Divider(height: 1),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 180),
+                    child: _showSearchBar
+                        ? _buildDepartmentSearchBar(isDark, secondaryColor)
+                        : const SizedBox.shrink(),
+                  ),
                 ],
               ),
             ),
@@ -320,7 +492,7 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
           // Notices List
           if (_isLoading)
             SliverToBoxAdapter(child: _buildLoadingSkeleton(isDark))
-          else if (_notices.isEmpty)
+          else if (visibleNotices.isEmpty)
             SliverToBoxAdapter(
               child: _buildEmptyState(isDark, textColor, secondaryColor),
             )
@@ -328,14 +500,14 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
             SliverList(
               delegate: SliverChildBuilderDelegate(
                 (context, index) => NoticeCard(
-                  notice: _notices[index],
+                  notice: visibleNotices[index],
                   account: widget.account,
                   collegeId: widget.collegeId,
                   isDark: isDark,
                   canManage: _canManageNotices,
-                  onNoticeUpdated: _loadDepartmentNotices,
+                  onNoticeUpdated: _loadAccessContextAndNotices,
                 ),
-                childCount: _notices.length,
+                childCount: visibleNotices.length,
               ),
             ),
 

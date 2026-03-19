@@ -580,10 +580,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         width: 120,
         height: 120,
         fit: BoxFit.contain,
-        errorBuilder: (context, error, stackTrace) => Text(
-          url,
-          style: GoogleFonts.inter(color: textColor),
-        ),
+        errorBuilder: (context, error, stackTrace) =>
+            Text(url, style: GoogleFonts.inter(color: textColor)),
       );
     }
     return CachedNetworkImage(
@@ -594,12 +592,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       placeholder: (_, __) => SizedBox(
         width: 120,
         height: 120,
-        child: Container(
-          color: isDark ? Colors.white10 : Colors.grey.shade200,
-        ),
+        child: Container(color: isDark ? Colors.white10 : Colors.grey.shade200),
       ),
-      errorWidget: (_, __, ___) =>
-          const Icon(Icons.broken_image_outlined),
+      errorWidget: (_, __, ___) => const Icon(Icons.broken_image_outlined),
     );
   }
 
@@ -677,9 +672,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               }
                               setModalState(() => isSaving = true);
                               final updatedContent = title.isNotEmpty
-                                  ? (body.isNotEmpty
-                                        ? '$title\n$body'
-                                        : title)
+                                  ? (body.isNotEmpty ? '$title\n$body' : title)
                                   : body;
                               try {
                                 await _supabaseService.updatePost(
@@ -701,9 +694,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                 }
                                 if (!mounted) return;
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Post updated'),
-                                  ),
+                                  const SnackBar(content: Text('Post updated')),
                                 );
                               } catch (e) {
                                 if (sheetCtx.mounted) {
@@ -807,10 +798,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(
-              'Delete',
-              style: TextStyle(color: Colors.red),
-            ),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -821,15 +809,15 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     try {
       await _supabaseService.deletePost(postId);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Post deleted')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Post deleted')));
       Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to delete: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
     }
   }
 
@@ -844,8 +832,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final post = _post;
-    final authorEmail =
-        (post['author_email'] ?? post['user_email'] ?? '').toString();
+    final authorEmail = (post['author_email'] ?? post['user_email'] ?? '')
+        .toString();
     final isAuthor =
         authorEmail.isNotEmpty &&
         authorEmail.toLowerCase() == widget.userEmail.toLowerCase();
@@ -936,9 +924,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                           const SizedBox(width: 10),
                           Text(
                             'Delete Post',
-                            style: GoogleFonts.inter(
-                              color: Colors.redAccent,
-                            ),
+                            style: GoogleFonts.inter(color: Colors.redAccent),
                           ),
                         ],
                       ),
@@ -1014,8 +1000,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       }
     }
 
-    final authorEmail =
-        (post['author_email'] ?? post['user_email'] ?? '').toString();
+    final authorEmail = (post['author_email'] ?? post['user_email'] ?? '')
+        .toString();
     final authorName =
         post['author_name'] ?? authorEmail.split('@').first ?? 'User';
     final normalizedEmail = _normalizeEmail(authorEmail);
@@ -1026,10 +1012,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       'photo_url',
       'avatar_url',
     ]);
-    final resolvedPhoto =
-        (cachedPhoto != null && cachedPhoto.isNotEmpty)
-            ? cachedPhoto
-            : fallbackPhoto;
+    final resolvedPhoto = (cachedPhoto != null && cachedPhoto.isNotEmpty)
+        ? cachedPhoto
+        : fallbackPhoto;
     if (resolvedPhoto.isEmpty && normalizedEmail.isNotEmpty) {
       _ensureProfilePhotoCached(normalizedEmail);
     }
@@ -1088,10 +1073,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               ),
                             ),
                             const SizedBox(width: 4),
-                            UserBadge(
-                              email: authorEmail,
-                              size: 14,
-                            ),
+                            UserBadge(email: authorEmail, size: 14),
                           ],
                         ),
                         Text(
@@ -1137,87 +1119,92 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           // Image (Added Fix)
           if ((post['image_url']?.toString() ?? '').isNotEmpty) ...[
             const SizedBox(height: 12),
-            Builder(builder: (context) {
-              final imageUrl = post['image_url']!.toString();
-              return GestureDetector(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => FullScreenImageViewer(
-                        imageUrl: imageUrl,
-                        heroTag: 'post_image_${widget.post['id']}',
-                      ),
-                    ),
-                  );
-                },
-                child: Hero(
-                  tag: 'post_image_${widget.post['id']}',
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.network(
-                      imageUrl,
-                    width: double.infinity,
-                    fit: BoxFit.cover,
-                    loadingBuilder: (context, child, loadingProgress) {
-                      if (loadingProgress == null) return child;
-                      final expectedBytes = loadingProgress.expectedTotalBytes;
-                      final progress = expectedBytes != null
-                          ? loadingProgress.cumulativeBytesLoaded /
-                                expectedBytes
-                          : null;
-                      return Container(
-                        height: 200,
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? Colors.white.withValues(alpha: 0.05)
-                              : const Color(0xFFF1F5F9),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Center(
-                          child: CircularProgressIndicator(
-                            value: progress,
-                            strokeWidth: 2,
-                            color: AppTheme.primary,
-                          ),
-                        ),
-                      );
-                    },
-                    errorBuilder: (context, error, stackTrace) => Container(
-                      height: 150,
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? Colors.white.withValues(alpha: 0.05)
-                            : const Color(0xFFF1F5F9),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: isDark ? Colors.white10 : Colors.grey.shade200,
+            Builder(
+              builder: (context) {
+                final imageUrl = post['image_url']!.toString();
+                return GestureDetector(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => FullScreenImageViewer(
+                          imageUrl: imageUrl,
+                          heroTag: 'post_image_${widget.post['id']}',
                         ),
                       ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.image_not_supported_outlined,
-                            size: 32,
-                            color: AppTheme.textMuted,
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            'Image unavailable',
-                            style: GoogleFonts.inter(
-                              fontSize: 12,
-                              color: AppTheme.textMuted,
+                    );
+                  },
+                  child: Hero(
+                    tag: 'post_image_${widget.post['id']}',
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(12),
+                      child: Image.network(
+                        imageUrl,
+                        width: double.infinity,
+                        fit: BoxFit.cover,
+                        loadingBuilder: (context, child, loadingProgress) {
+                          if (loadingProgress == null) return child;
+                          final expectedBytes =
+                              loadingProgress.expectedTotalBytes;
+                          final progress = expectedBytes != null
+                              ? loadingProgress.cumulativeBytesLoaded /
+                                    expectedBytes
+                              : null;
+                          return Container(
+                            height: 200,
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? Colors.white.withValues(alpha: 0.05)
+                                  : const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Center(
+                              child: CircularProgressIndicator(
+                                value: progress,
+                                strokeWidth: 2,
+                                color: AppTheme.primary,
+                              ),
+                            ),
+                          );
+                        },
+                        errorBuilder: (context, error, stackTrace) => Container(
+                          height: 150,
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.05)
+                                : const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: isDark
+                                  ? Colors.white10
+                                  : Colors.grey.shade200,
                             ),
                           ),
-                        ],
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.image_not_supported_outlined,
+                                size: 32,
+                                color: AppTheme.textMuted,
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Image unavailable',
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  color: AppTheme.textMuted,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ),
-            );
-            }),
+                );
+              },
+            ),
           ],
           const SizedBox(height: 12),
 
@@ -1351,10 +1338,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       'avatar_url',
       'user_photo_url',
     ]);
-    final resolvedPhoto =
-        (cachedPhoto != null && cachedPhoto.isNotEmpty)
-            ? cachedPhoto
-            : fallbackPhoto;
+    final resolvedPhoto = (cachedPhoto != null && cachedPhoto.isNotEmpty)
+        ? cachedPhoto
+        : fallbackPhoto;
     if (resolvedPhoto.isEmpty && normalizedEmail.isNotEmpty) {
       _ensureProfilePhotoCached(normalizedEmail);
     }
@@ -1431,9 +1417,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                           builder: (context) => UserProfileScreen(
                             userEmail: authorEmail,
                             userName: authorName,
-                            userPhotoUrl: hasAuthorPhoto
-                                ? resolvedPhoto
-                                : null,
+                            userPhotoUrl: hasAuthorPhoto ? resolvedPhoto : null,
                           ),
                         ),
                       );
@@ -1571,48 +1555,67 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
                         // Threaded Replies Toggle
                         if (hasReplies) ...[
-                          const SizedBox(height: 10),
-                          GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                if (isExpanded) {
-                                  _expandedCommentIds.remove(commentId);
-                                } else {
-                                  _expandedCommentIds.add(commentId);
-                                }
-                              });
-                            },
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 30,
-                                  height: 1, // Line
-                                  color: AppTheme.textMuted.withValues(
-                                    alpha: 0.5,
+                          Padding(
+                            padding: EdgeInsets.only(
+                              top: 6,
+                              bottom: isExpanded ? 6 : 10,
+                            ),
+                            child: Align(
+                              alignment: Alignment.centerLeft,
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () {
+                                  setState(() {
+                                    if (isExpanded) {
+                                      _expandedCommentIds.remove(commentId);
+                                    } else {
+                                      _expandedCommentIds.add(commentId);
+                                    }
+                                  });
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 6,
                                   ),
-                                  margin: const EdgeInsets.only(right: 8),
-                                ),
-                                Text(
-                                  isExpanded
-                                      ? 'Hide replies'
-                                      : 'View ${replies.length} replies',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: AppTheme.textMuted,
+                                  decoration: BoxDecoration(
+                                    color: isDark
+                                        ? Colors.white.withValues(alpha: 0.06)
+                                        : Colors.black.withValues(alpha: 0.03),
+                                    borderRadius: BorderRadius.circular(999),
+                                    border: Border.all(
+                                      color: isDark
+                                          ? Colors.white12
+                                          : Colors.black12,
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        isExpanded
+                                            ? Icons.keyboard_arrow_up_rounded
+                                            : Icons.keyboard_arrow_down_rounded,
+                                        size: 16,
+                                        color: AppTheme.textMuted,
+                                      ),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        isExpanded
+                                            ? 'Hide replies'
+                                            : 'View ${replies.length} replies',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppTheme.textMuted,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                                Icon(
-                                  isExpanded
-                                      ? Icons.keyboard_arrow_up_rounded
-                                      : Icons.keyboard_arrow_down_rounded,
-                                  size: 16,
-                                  color: AppTheme.textMuted,
-                                ),
-                              ],
+                              ),
                             ),
                           ),
-                          const SizedBox(height: 4),
                         ],
                       ],
                     ),
@@ -1640,7 +1643,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                           itemCount: replies.length,
                           separatorBuilder: (_, index) =>
                               const SizedBox(height: 12),
-                        itemBuilder: (context, index) => _buildCommentCard(
+                          itemBuilder: (context, index) => _buildCommentCard(
                             replies[index],
                             isDark,
                             depth: depth + 1,
@@ -1698,8 +1701,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
   void _primePhotoCacheFromComments(List<Map<String, dynamic>> comments) {
     for (final comment in comments) {
-      final email =
-          _normalizeEmail(comment['author_email']?.toString() ?? '');
+      final email = _normalizeEmail(comment['author_email']?.toString() ?? '');
       if (email.isNotEmpty && !_profilePhotoCache.containsKey(email)) {
         final resolved = _resolvePhotoUrl(comment, const [
           'author_photo_url',

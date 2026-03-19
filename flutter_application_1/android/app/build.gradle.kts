@@ -8,9 +8,10 @@ plugins {
 
 configurations.all {
     resolutionStrategy {
-        // IMPORTANT: Need 1.15.0+ for setStylusHandwritingEnabled method required by Flutter
-        force("androidx.core:core-ktx:1.15.0")
-        force("androidx.core:core:1.15.0")
+        // Keep core libraries new enough for Flutter stylus handwriting and
+        // UCrop's EdgeToEdge dependencies used during profile-photo editing.
+        force("androidx.core:core-ktx:1.17.0")
+        force("androidx.core:core:1.17.0")
     }
 }
 
@@ -100,7 +101,7 @@ flutter {
 
 dependencies {
     // IMPORTANT: 1.15.0 required for setStylusHandwritingEnabled method (Flutter TextInput on API 36)
-    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.core:core-ktx:1.17.0")
     implementation("androidx.multidex:multidex:2.0.1")
     implementation(platform("com.google.firebase:firebase-bom:32.7.4"))
     implementation("com.google.firebase:firebase-auth")

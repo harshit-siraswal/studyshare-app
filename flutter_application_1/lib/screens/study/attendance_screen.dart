@@ -8,6 +8,7 @@ import '../../config/theme.dart';
 import '../../models/attendance_models.dart';
 import '../../services/attendance_service.dart';
 import 'attendance_web_login_screen.dart';
+
 class AttendanceScreen extends StatefulWidget {
   final String collegeId;
   final String collegeName;
@@ -116,11 +117,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final message = error is AttendanceSyncException
         ? error.message
         : error.toString().replaceFirst('Exception: ', '');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-      ),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Future<void> _syncWithSavedToken({bool promptIfMissingToken = true}) async {
@@ -161,9 +160,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       _snapshot = null;
       _autoSyncAttempted = false;
     });
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('KIET session cleared.')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('KIET session cleared.')));
   }
 
   Future<void> _syncWithToken(
@@ -184,6 +183,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           context: context,
         );
       }
+
       final results = await Future.wait([
         doSync(),
         Future.delayed(const Duration(milliseconds: 800)),
@@ -329,21 +329,26 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   ) {
     final today = DateTime.now();
     final startOfToday = DateTime(today.year, today.month, today.day);
-    final entries = List<AttendanceScheduleEntry>.from(snapshot.schedule.entries)
-      ..sort((a, b) {
-        final aDate = _attendanceService.tryParseDate(a.lectureDate) ??
-            DateTime.fromMillisecondsSinceEpoch(0);
-        final bDate = _attendanceService.tryParseDate(b.lectureDate) ??
-            DateTime.fromMillisecondsSinceEpoch(0);
-        final dateCmp = aDate.compareTo(bDate);
-        if (dateCmp != 0) return dateCmp;
-        return a.start.compareTo(b.start);
-      });
+    final entries =
+        List<AttendanceScheduleEntry>.from(snapshot.schedule.entries)
+          ..sort((a, b) {
+            final aDate =
+                _attendanceService.tryParseDate(a.lectureDate) ??
+                DateTime.fromMillisecondsSinceEpoch(0);
+            final bDate =
+                _attendanceService.tryParseDate(b.lectureDate) ??
+                DateTime.fromMillisecondsSinceEpoch(0);
+            final dateCmp = aDate.compareTo(bDate);
+            if (dateCmp != 0) return dateCmp;
+            return a.start.compareTo(b.start);
+          });
 
-    final weekStart =
-        _attendanceService.tryParseDate(snapshot.schedule.weekStartDate);
-    final weekEnd =
-        _attendanceService.tryParseDate(snapshot.schedule.weekEndDate);
+    final weekStart = _attendanceService.tryParseDate(
+      snapshot.schedule.weekStartDate,
+    );
+    final weekEnd = _attendanceService.tryParseDate(
+      snapshot.schedule.weekEndDate,
+    );
 
     final upcoming = entries.where((entry) {
       final parsed = _attendanceService.tryParseDate(entry.lectureDate);
@@ -360,20 +365,25 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   List<AttendanceScheduleEntry> _weeklyScheduleEntries(
     AttendanceSnapshot snapshot,
   ) {
-    final entries = List<AttendanceScheduleEntry>.from(snapshot.schedule.entries)
-      ..sort((a, b) {
-        final aDate = _attendanceService.tryParseDate(a.lectureDate) ??
-            DateTime.fromMillisecondsSinceEpoch(0);
-        final bDate = _attendanceService.tryParseDate(b.lectureDate) ??
-            DateTime.fromMillisecondsSinceEpoch(0);
-        final dateCmp = aDate.compareTo(bDate);
-        if (dateCmp != 0) return dateCmp;
-        return a.start.compareTo(b.start);
-      });
-    final weekStart =
-        _attendanceService.tryParseDate(snapshot.schedule.weekStartDate);
-    final weekEnd =
-        _attendanceService.tryParseDate(snapshot.schedule.weekEndDate);
+    final entries =
+        List<AttendanceScheduleEntry>.from(snapshot.schedule.entries)
+          ..sort((a, b) {
+            final aDate =
+                _attendanceService.tryParseDate(a.lectureDate) ??
+                DateTime.fromMillisecondsSinceEpoch(0);
+            final bDate =
+                _attendanceService.tryParseDate(b.lectureDate) ??
+                DateTime.fromMillisecondsSinceEpoch(0);
+            final dateCmp = aDate.compareTo(bDate);
+            if (dateCmp != 0) return dateCmp;
+            return a.start.compareTo(b.start);
+          });
+    final weekStart = _attendanceService.tryParseDate(
+      snapshot.schedule.weekStartDate,
+    );
+    final weekEnd = _attendanceService.tryParseDate(
+      snapshot.schedule.weekEndDate,
+    );
     if (weekStart == null && weekEnd == null) return entries;
 
     return entries.where((entry) {
@@ -387,22 +397,28 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   }
 
   DateTime _parseEntryDateTime(String dateRaw, String timeRaw) {
-    final baseDate =
-        _attendanceService.tryParseDate(dateRaw) ?? DateTime.now();
+    final baseDate = _attendanceService.tryParseDate(dateRaw) ?? DateTime.now();
     final trimmed = timeRaw.trim();
     if (trimmed.isEmpty) {
       return DateTime(baseDate.year, baseDate.month, baseDate.day, 9);
     }
 
-    final amPmMatch = RegExp(r'(\d{1,2}):(\d{2})\s*([AaPp][Mm])')
-        .firstMatch(trimmed);
+    final amPmMatch = RegExp(
+      r'(\d{1,2}):(\d{2})\s*([AaPp][Mm])',
+    ).firstMatch(trimmed);
     if (amPmMatch != null) {
       final hourRaw = int.tryParse(amPmMatch.group(1) ?? '') ?? 9;
       final minute = int.tryParse(amPmMatch.group(2) ?? '') ?? 0;
       final meridiem = amPmMatch.group(3)!.toLowerCase();
       var hour = hourRaw % 12;
       if (meridiem == 'pm') hour += 12;
-      return DateTime(baseDate.year, baseDate.month, baseDate.day, hour, minute);
+      return DateTime(
+        baseDate.year,
+        baseDate.month,
+        baseDate.day,
+        hour,
+        minute,
+      );
     }
 
     final parts = trimmed.split(':');
@@ -416,13 +432,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     for (final entry in entries) {
       final start = _parseEntryDateTime(entry.lectureDate, entry.start);
       final end = _parseEntryDateTime(entry.lectureDate, entry.end);
-      final safeEnd =
-          end.isAfter(start) ? end : start.add(const Duration(hours: 1));
+      final safeEnd = end.isAfter(start)
+          ? end
+          : start.add(const Duration(hours: 1));
       final title = entry.courseName.isEmpty
           ? (entry.title.isEmpty ? 'Class' : entry.title)
           : entry.courseName;
-      final description =
-          '${entry.courseComponentName} • ${entry.facultyName}'.trim();
+      final description = '${entry.courseComponentName} • ${entry.facultyName}'
+          .trim();
       final event = Event(
         title: title,
         description: description,
@@ -492,11 +509,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                           )
                         : ListView.separated(
                             itemCount: entries.length,
-                            separatorBuilder: (_, __) => const Divider(height: 1),
+                            separatorBuilder: (_, __) =>
+                                const Divider(height: 1),
                             itemBuilder: (context, index) {
                               final entry = entries[index];
                               final title = entry.courseName.isEmpty
-                                  ? (entry.title.isEmpty ? 'Class' : entry.title)
+                                  ? (entry.title.isEmpty
+                                        ? 'Class'
+                                        : entry.title)
                                   : entry.courseName;
                               final location = entry.classRoom.isEmpty
                                   ? 'Classroom TBA'
@@ -544,7 +564,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             ? [
                 IconButton(
                   tooltip: 'Weekly schedule',
-                  onPressed: _snapshot == null ? null : _openWeeklyScheduleSheet,
+                  onPressed: _snapshot == null
+                      ? null
+                      : _openWeeklyScheduleSheet,
                   icon: const Icon(Icons.calendar_month_rounded),
                 ),
                 IconButton(
@@ -560,8 +582,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 ),
                 IconButton(
                   tooltip: 'Log out',
-                  onPressed:
-                      _isManualSyncing || _snapshot == null ? null : _logoutKietSession,
+                  onPressed: _isManualSyncing || _snapshot == null
+                      ? null
+                      : _logoutKietSession,
                   icon: const Icon(Icons.logout_rounded),
                 ),
               ]
@@ -630,6 +653,17 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             'StudyShare opens the official KIET ERP page, waits for the authenticated home state after login and reCAPTCHA, then reads the session token the same way the upstream bridge does.',
             style: GoogleFonts.inter(
               fontSize: 14,
+              height: 1.4,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Attendance sync can take 1-2 minutes after login.',
+            style: GoogleFonts.inter(
+              fontSize: 13,
               height: 1.4,
               color: isDark
                   ? AppTheme.darkTextSecondary
@@ -774,6 +808,16 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           const SizedBox(height: 12),
           Text(
             'Last synced ${_formatSyncTime(snapshot.syncedAt)}',
+            style: GoogleFonts.inter(
+              fontSize: 12,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Attendance sync can take 1-2 minutes to finish.',
             style: GoogleFonts.inter(
               fontSize: 12,
               color: isDark
@@ -935,6 +979,3 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     return '${difference.inDays} day ago';
   }
 }
-
-
-

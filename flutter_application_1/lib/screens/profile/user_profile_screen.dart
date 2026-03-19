@@ -37,6 +37,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   final AuthService _authService = AuthService();
   final BackendApiService _backendApiService = BackendApiService();
   final DownloadService _downloadService = DownloadService();
+  final TextEditingController _contributionSearchController =
+      TextEditingController();
 
   bool _isLoading = true;
   String? _errorMessage;
@@ -58,6 +60,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   bool _banLoading = false;
   bool _isBanned = false;
   bool _viewerCanBanUsers = false;
+  bool _showContributionSearch = false;
+  String _contributionSearchQuery = '';
 
   @override
   void initState() {
@@ -169,6 +173,75 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     }
   }
 
+  List<Resource> get _filteredUserResources {
+    final query = _contributionSearchQuery.trim().toLowerCase();
+    if (query.isEmpty) return _userResources;
+    return _userResources.where((resource) {
+      final title = resource.title.toLowerCase();
+      final subject = (resource.subject ?? '').toLowerCase();
+      final branch = (resource.branch ?? '').toLowerCase();
+      final semester = (resource.semester ?? '').toLowerCase();
+      return title.contains(query) ||
+          subject.contains(query) ||
+          branch.contains(query) ||
+          semester.contains(query);
+    }).toList();
+  }
+
+  Widget _buildContributionSearchBar(bool isDark) {
+    final secondaryColor = isDark
+        ? AppTheme.darkTextSecondary
+        : AppTheme.lightTextSecondary;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: TextField(
+        controller: _contributionSearchController,
+        onChanged: (value) => setState(() => _contributionSearchQuery = value),
+        style: GoogleFonts.inter(
+          fontSize: 14,
+          color: isDark ? Colors.white : Colors.black87,
+        ),
+        decoration: InputDecoration(
+          hintText: 'Search contributions',
+          hintStyle: GoogleFonts.inter(fontSize: 14, color: secondaryColor),
+          filled: true,
+          fillColor: isDark
+              ? Colors.white10
+              : Colors.black.withValues(alpha: 0.04),
+          prefixIcon: Icon(
+            Icons.search_rounded,
+            size: 20,
+            color: secondaryColor,
+          ),
+          suffixIcon: _contributionSearchQuery.isEmpty
+              ? null
+              : IconButton(
+                  tooltip: 'Clear search',
+                  onPressed: () {
+                    _contributionSearchController.clear();
+                    setState(() => _contributionSearchQuery = '');
+                  },
+                  icon: Icon(Icons.close_rounded, color: secondaryColor),
+                ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(999),
+            borderSide: BorderSide.none,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(999),
+            borderSide: BorderSide.none,
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(999),
+            borderSide: BorderSide(
+              color: AppTheme.primary.withValues(alpha: 0.35),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   String get _displayName =>
       _fetchedDisplayName ?? widget.userName ?? widget.userEmail.split('@')[0];
   String get _avatarLetter =>
@@ -192,6 +265,12 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       !_isBanned &&
       _isTeacherOrAdminViewer &&
       _viewerCanBanUsers;
+
+  @override
+  void dispose() {
+    _contributionSearchController.dispose();
+    super.dispose();
+  }
 
   Future<void> _deleteContribution(Resource resource) async {
     if (!_isSelfProfile) return;
@@ -247,9 +326,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       try {
         await _loadUserProfile();
       } catch (reloadError) {
-        debugPrint(
-          'Profile reload after deletion failed: $reloadError',
-        );
+        debugPrint('Profile reload after deletion failed: $reloadError');
       }
     } catch (e, stackTrace) {
       debugPrint('Failed to delete contribution: $e\n$stackTrace');
@@ -384,6 +461,28 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           icon: Icon(Icons.arrow_back, color: textColor),
           onPressed: () => Navigator.pop(context),
         ),
+        actions: [
+          IconButton(
+            tooltip: _showContributionSearch
+                ? 'Hide contribution search'
+                : 'Search contributions',
+            icon: Icon(
+              _showContributionSearch
+                  ? Icons.close_rounded
+                  : Icons.search_rounded,
+              color: textColor,
+            ),
+            onPressed: () {
+              setState(() {
+                _showContributionSearch = !_showContributionSearch;
+                if (!_showContributionSearch) {
+                  _contributionSearchController.clear();
+                  _contributionSearchQuery = '';
+                }
+              });
+            },
+          ),
+        ],
       ),
       body: _isLoading
           ? Center(child: CircularProgressIndicator(color: AppTheme.primary))
@@ -597,6 +696,13 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                 color: textColor,
                               ),
                             ),
+                            const SizedBox(height: 12),
+                            AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 180),
+                              child: _showContributionSearch
+                                  ? _buildContributionSearchBar(isDark)
+                                  : const SizedBox.shrink(),
+                            ),
                             const SizedBox(height: 16),
                           ],
                         ),
@@ -604,7 +710,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                     ),
 
                     // Content Grid
-                    _userResources.isEmpty
+                    _filteredUserResources.isEmpty
                         ? SliverToBoxAdapter(
                             child: Padding(
                               padding: const EdgeInsets.symmetric(vertical: 40),
@@ -624,7 +730,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                   context,
                                   index,
                                 ) {
-                                  final resource = _userResources[index];
+                                  final resource =
+                                      _filteredUserResources[index];
                                   return AnimationConfiguration.staggeredList(
                                     position: index,
                                     duration: const Duration(milliseconds: 375),
@@ -662,7 +769,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                       ),
                                     ),
                                   );
-                                }, childCount: _userResources.length),
+                                }, childCount: _filteredUserResources.length),
                               ),
                             ),
                           ),

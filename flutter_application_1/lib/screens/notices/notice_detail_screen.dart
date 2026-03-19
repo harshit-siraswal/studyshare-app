@@ -881,8 +881,9 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     final replies =
         (comment['replies'] as List?)?.cast<Map<String, dynamic>>() ?? [];
     final commentId = comment['id']?.toString() ?? '';
-    final threadId =
-        commentId.isNotEmpty ? commentId : 'thread_${comment.hashCode}';
+    final threadId = commentId.isNotEmpty
+        ? commentId
+        : 'thread_${comment.hashCode}';
     final hasReplies = replies.isNotEmpty;
     final isExpanded = _expandedThreadIds.contains(threadId);
 
@@ -891,38 +892,64 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
       children: [
         _buildCommentItem(comment, isDark, textColor, secondaryColor),
         if (hasReplies) ...[
-          const SizedBox(height: 6),
-          GestureDetector(
-            onTap: () {
-              setState(() {
-                if (isExpanded) {
-                  _expandedThreadIds.remove(threadId);
-                } else {
-                  _expandedThreadIds.add(threadId);
-                }
-              });
-            },
-            child: Row(
-              children: [
-                Icon(
-                  isExpanded
-                      ? Icons.keyboard_arrow_up_rounded
-                      : Icons.keyboard_arrow_down_rounded,
-                  size: 18,
-                  color: secondaryColor,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  isExpanded
-                      ? 'Hide replies'
-                      : 'View replies (${replies.length})',
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: secondaryColor,
+          Padding(
+            padding: EdgeInsets.only(
+              left: 44,
+              top: 2,
+              bottom: isExpanded ? 6 : 10,
+            ),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () {
+                  setState(() {
+                    if (isExpanded) {
+                      _expandedThreadIds.remove(threadId);
+                    } else {
+                      _expandedThreadIds.add(threadId);
+                    }
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.06)
+                        : Colors.black.withValues(alpha: 0.03),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: isDark ? Colors.white12 : Colors.black12,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isExpanded
+                            ? Icons.keyboard_arrow_up_rounded
+                            : Icons.keyboard_arrow_down_rounded,
+                        size: 16,
+                        color: secondaryColor,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        isExpanded
+                            ? 'Hide replies'
+                            : 'View replies (${replies.length})',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: secondaryColor,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ],
+              ),
             ),
           ),
           if (isExpanded)
