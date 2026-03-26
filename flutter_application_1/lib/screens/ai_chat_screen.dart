@@ -5222,171 +5222,205 @@ Return STRICT JSON only (no markdown). Schema:
   }) {
     final iconColor = isDark ? Colors.white70 : Colors.black87;
     final mutedIconColor = isDark ? Colors.white54 : Colors.black45;
-    final fieldBg = isDark ? const Color(0xFF14171D) : const Color(0xFFF8FAFC);
-    final fieldBorder = isDark ? Colors.white10 : const Color(0xFFE2E8F0);
-    final actionSize = 34.0;
-
-    Widget composerAction({
-      required IconData icon,
-      required VoidCallback? onTap,
-      required String tooltip,
-      Key? key,
-      Color? color,
-      Widget? child,
-      bool active = false,
-    }) {
-      final resolvedColor = color ?? (active ? AppTheme.primary : iconColor);
-      return Tooltip(
-        message: tooltip,
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            key: key,
-            borderRadius: BorderRadius.circular(999),
-            onTap: onTap,
-            child: Container(
-              width: actionSize,
-              height: actionSize,
-              decoration: BoxDecoration(
-                color: active
-                    ? AppTheme.primary.withValues(alpha: isDark ? 0.18 : 0.12)
-                    : Colors.transparent,
-                shape: BoxShape.circle,
-              ),
-              child: Center(
-                child: child ?? Icon(icon, size: 19, color: resolvedColor),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
+    final fieldBg = isDark ? const Color(0xFF12151C) : Colors.white;
+    final fieldBorder = isDark
+        ? Colors.white.withValues(alpha: 0.12)
+        : const Color(0xFFD8E0EF);
+    final composerBusy =
+        _isLoading || _isUploadingAttachment || _isSendAttemptInProgress;
+    final canSend = hasComposerContent && !composerBusy;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(0, 4, 0, 8),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 48),
-        child: TextField(
-          key: _coachInputKey,
-          controller: _controller,
-          minLines: 1,
-          maxLines: 6,
-          textInputAction: TextInputAction.send,
-          onSubmitted: (_) => _sendMessage(),
-          style: textFieldStyle,
-          decoration: InputDecoration(
-            hintText: 'Ask anything about your notes...',
-            hintStyle: hintStyle.copyWith(color: mutedIconColor),
-            filled: true,
-            fillColor: fieldBg,
-            isDense: true,
-            contentPadding: const EdgeInsets.symmetric(
-              horizontal: 16,
-              vertical: 10,
+      child: Container(
+        decoration: BoxDecoration(
+          color: fieldBg,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: fieldBorder),
+          boxShadow: [
+            BoxShadow(
+              color: isDark
+                  ? Colors.black.withValues(alpha: 0.32)
+                  : const Color(0xFF0F172A).withValues(alpha: 0.05),
+              blurRadius: 14,
+              offset: const Offset(0, 5),
             ),
-            prefix: Padding(
-              padding: const EdgeInsets.only(left: 10, right: 4),
+          ],
+        ),
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 2),
               child: Row(
-                mainAxisSize: MainAxisSize.min,
                 children: [
-                  composerAction(
-                    key: _coachAttachKey,
-                    icon: Icons.attach_file_rounded,
-                    tooltip: 'Attach image or PDF',
-                    onTap:
-                        (_isLoading ||
-                            _isUploadingAttachment ||
-                            _isSendAttemptInProgress)
-                        ? null
-                        : _pickAttachment,
-                    child: _isUploadingAttachment
-                        ? const SizedBox(
-                            width: 15,
-                            height: 15,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : null,
-                  ),
-                  const SizedBox(width: 2),
-                  composerAction(
-                    icon: _allowWebMode
-                        ? Icons.public_rounded
-                        : Icons.public_off_rounded,
-                    tooltip: _allowWebMode ? 'Web on' : 'Web off',
-                    onTap: (_isLoading || _isSendAttemptInProgress)
-                        ? null
-                        : () {
-                            if (!mounted) return;
-                            setState(() => _allowWebMode = !_allowWebMode);
-                          },
+                  Icon(
+                    _allowWebMode ? Icons.travel_explore_rounded : Icons.menu_book_rounded,
+                    size: 14,
                     color: _allowWebMode ? AppTheme.primary : mutedIconColor,
-                    active: _allowWebMode,
+                  ),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      _allowWebMode
+                          ? 'Web research mode on'
+                          : 'Notes-first mode',
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: _allowWebMode
+                            ? AppTheme.primary
+                            : (isDark ? Colors.white60 : Colors.black54),
+                      ),
+                    ),
                   ),
                 ],
               ),
             ),
-            suffixIconConstraints: BoxConstraints(
-              minWidth: sendButtonSize + 12,
-              minHeight: sendButtonSize,
+            TextField(
+              key: _coachInputKey,
+              controller: _controller,
+              minLines: 1,
+              maxLines: 6,
+              textInputAction: TextInputAction.send,
+              onSubmitted: (_) => _sendMessage(),
+              style: textFieldStyle,
+              decoration: InputDecoration(
+                hintText: 'Ask anything about your notes...',
+                hintStyle: hintStyle.copyWith(color: mutedIconColor),
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+                isDense: true,
+              ),
             ),
-            suffixIcon: Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 180),
-                child: hasComposerContent
-                    ? SizedBox(
-                        key: const ValueKey('send'),
-                        width: sendButtonSize,
-                        height: sendButtonSize,
-                        child: DecoratedBox(
-                          decoration: const BoxDecoration(
-                            color: AppTheme.primary,
-                            shape: BoxShape.circle,
-                          ),
-                          child: IconButton(
-                            onPressed:
-                                (_isLoading ||
-                                    _isUploadingAttachment ||
-                                    _isSendAttemptInProgress)
-                                ? null
-                                : _sendMessage,
-                            padding: EdgeInsets.zero,
-                            icon: const Icon(
-                              Icons.arrow_upward_rounded,
-                              size: 18,
-                              color: Colors.white,
-                            ),
-                          ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
+              child: Row(
+                children: [
+                  Tooltip(
+                    message: 'Attach image or PDF',
+                    child: InkWell(
+                      key: _coachAttachKey,
+                      borderRadius: BorderRadius.circular(999),
+                      onTap: composerBusy ? null : _pickAttachment,
+                      child: Container(
+                        width: attachButtonSize,
+                        height: attachButtonSize,
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.08)
+                              : const Color(0xFFF1F5F9),
+                          shape: BoxShape.circle,
                         ),
-                      )
-                    : SizedBox(
-                        key: const ValueKey('send-disabled'),
-                        width: sendButtonSize,
-                        height: sendButtonSize,
-                        child: Icon(
-                          Icons.arrow_upward_rounded,
-                          size: 18,
-                          color: mutedIconColor,
+                        child: Center(
+                          child: _isUploadingAttachment
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : Icon(
+                                  Icons.attach_file_rounded,
+                                  size: 20,
+                                  color: composerBusy
+                                      ? mutedIconColor
+                                      : iconColor,
+                                ),
                         ),
                       ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Tooltip(
+                      message: _allowWebMode ? 'Web mode on' : 'Web mode off',
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(999),
+                        onTap: (_isLoading || _isSendAttemptInProgress)
+                            ? null
+                            : () {
+                                if (!mounted) return;
+                                setState(() => _allowWebMode = !_allowWebMode);
+                              },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 9,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _allowWebMode
+                                ? AppTheme.primary.withValues(alpha: isDark ? 0.2 : 0.12)
+                                : (isDark
+                                      ? Colors.white.withValues(alpha: 0.08)
+                                      : const Color(0xFFF4F6FB)),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: _allowWebMode
+                                  ? AppTheme.primary.withValues(alpha: 0.45)
+                                  : (isDark ? Colors.white24 : const Color(0xFFDCE3F0)),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                _allowWebMode
+                                    ? Icons.public_rounded
+                                    : Icons.public_off_rounded,
+                                size: 16,
+                                color: _allowWebMode
+                                    ? AppTheme.primary
+                                    : mutedIconColor,
+                              ),
+                              const SizedBox(width: 7),
+                              Text(
+                                _allowWebMode ? 'Web Research ON' : 'Web Research OFF',
+                                style: GoogleFonts.inter(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: _allowWebMode
+                                      ? AppTheme.primary
+                                      : (isDark ? Colors.white70 : Colors.black54),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  SizedBox(
+                    width: sendButtonSize,
+                    height: sendButtonSize,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 180),
+                      decoration: BoxDecoration(
+                        color: canSend
+                            ? AppTheme.primary
+                            : (isDark
+                                  ? Colors.white.withValues(alpha: 0.08)
+                                  : const Color(0xFFE9EEF7)),
+                        shape: BoxShape.circle,
+                      ),
+                      child: IconButton(
+                        onPressed: canSend ? _sendMessage : null,
+                        padding: EdgeInsets.zero,
+                        icon: Icon(
+                          Icons.arrow_upward_rounded,
+                          size: 18,
+                          color: canSend
+                              ? Colors.white
+                              : mutedIconColor,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(30),
-              borderSide: BorderSide(color: fieldBorder),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(30),
-              borderSide: BorderSide(
-                color: AppTheme.primary.withValues(alpha: 0.65),
-                width: 1.1,
-              ),
-            ),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(30),
-              borderSide: BorderSide(color: fieldBorder),
-            ),
-          ),
+          ],
         ),
       ),
     );
