@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:shimmer/shimmer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -1051,6 +1050,145 @@ class _AIChatScreenState extends State<AIChatScreen>
   bool _shouldShowPlanCard(AIChatMessage message) {
     if (message.isUser) return false;
     return message.answerOrigin != null || message.planSteps.length >= 2;
+  }
+
+  List<PlanStep> _buildInitialLivePlanSteps() {
+    return const [
+      PlanStep(
+        id: 'retrieve',
+        title: 'Scanning your notes',
+        status: StepStatus.inProgress,
+      ),
+      PlanStep(
+        id: 'answer',
+        title: 'Drafting response',
+        status: StepStatus.pending,
+      ),
+    ];
+  }
+
+  Widget _buildLiveActivityPanel({
+    required AIChatMessage message,
+    required bool isDark,
+    required bool isCompact,
+    required double maxWidth,
+  }) {
+    final steps = message.planSteps.isNotEmpty
+        ? message.planSteps.take(3).toList(growable: false)
+        : _buildInitialLivePlanSteps();
+
+    IconData iconFor(StepStatus status) {
+      switch (status) {
+        case StepStatus.completed:
+          return Icons.check_circle_rounded;
+        case StepStatus.failed:
+          return Icons.error_rounded;
+        case StepStatus.needHelp:
+          return Icons.help_rounded;
+        case StepStatus.inProgress:
+          return Icons.autorenew_rounded;
+        case StepStatus.pending:
+          return Icons.radio_button_unchecked_rounded;
+      }
+    }
+
+    Color colorFor(StepStatus status) {
+      switch (status) {
+        case StepStatus.completed:
+          return Colors.green;
+        case StepStatus.failed:
+          return AppTheme.error;
+        case StepStatus.needHelp:
+          return AppTheme.warning;
+        case StepStatus.inProgress:
+          return AppTheme.primary;
+        case StepStatus.pending:
+          return isDark ? Colors.white54 : Colors.black45;
+      }
+    }
+
+    final activityTitle =
+        message.planTitle?.trim().isNotEmpty == true
+        ? message.planTitle!.trim()
+        : 'Working on your answer';
+
+    return Container(
+      width: maxWidth,
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDark
+            ? const Color(0xFF111827).withValues(alpha: 0.88)
+            : const Color(0xFFF8FAFF),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.12)
+              : AppTheme.primary.withValues(alpha: 0.16),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
+                  backgroundColor: isDark
+                      ? Colors.white12
+                      : Colors.black.withValues(alpha: 0.08),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Live: $activityTitle',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    fontSize: isCompact ? 11 : 11.5,
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          ...steps.map((step) {
+            final color = colorFor(step.status);
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 5),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(iconFor(step.status), size: 14, color: color),
+                  const SizedBox(width: 7),
+                  Expanded(
+                    child: Text(
+                      step.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: isCompact ? 10.5 : 11,
+                        fontWeight: step.status == StepStatus.inProgress
+                            ? FontWeight.w700
+                            : FontWeight.w600,
+                        color: isDark ? Colors.white70 : Colors.black87,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
   }
 
   SourceBadge _sourceBadgeFromRagSource(RagSource source) {
@@ -3941,6 +4079,7 @@ Return STRICT JSON only (no markdown). Schema:
           isUser: false,
           content: '',
           planTitle: _buildPlanTitleFromPrompt(userVisible),
+          planSteps: _buildInitialLivePlanSteps(),
         );
         final AIChatMessage aiMessageForError = aiMessage;
         var malformedChunkCount = 0;
@@ -4524,9 +4663,8 @@ Return STRICT JSON only (no markdown). Schema:
       color: textColor,
       letterSpacing: 0.05,
     );
-    final showPlanCard = _shouldShowPlanCard(msg);
-    final skeletonLine1Width = (bubbleMaxWidth * 0.6).clamp(110.0, 260.0);
-    final skeletonLine2Width = (bubbleMaxWidth * 0.45).clamp(88.0, 220.0);
+    final showPlanCard =
+      _shouldShowPlanCard(msg) && !isStreamingAssistantMessage;
     final messageBody = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -4630,61 +4768,7 @@ Return STRICT JSON only (no markdown). Schema:
           if (!(isStreamingAssistantMessage && msg.content.trim().isEmpty))
             const SizedBox(height: 10),
         ],
-        if (isStreamingAssistantMessage &&
-            !(showPlanCard && isStreamingPlaceholder))
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Shimmer.fromColors(
-                baseColor: isDark ? Colors.white54 : Colors.black54,
-                highlightColor: isDark ? Colors.white : Colors.black87,
-                child: Text(
-                  isStreamingPlaceholder
-                      ? 'Thinking through your notes...'
-                      : msg.content,
-                  style: messageTextStyle,
-                ),
-              ),
-              if (isStreamingPlaceholder) ...[
-                const SizedBox(height: 8),
-                Shimmer.fromColors(
-                  baseColor: isDark
-                      ? Colors.white.withValues(alpha: 0.12)
-                      : Colors.black.withValues(alpha: 0.08),
-                  highlightColor: isDark
-                      ? Colors.white.withValues(alpha: 0.24)
-                      : Colors.black.withValues(alpha: 0.16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        height: 8,
-                        width: skeletonLine1Width,
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? Colors.white24
-                              : Colors.black.withValues(alpha: 0.16),
-                          borderRadius: BorderRadius.circular(99),
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      Container(
-                        height: 8,
-                        width: skeletonLine2Width,
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? Colors.white24
-                              : Colors.black.withValues(alpha: 0.16),
-                          borderRadius: BorderRadius.circular(99),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ],
-          )
-        else
+        if (!(isStreamingAssistantMessage && isStreamingPlaceholder))
           AiFormattedText(
             text: msg.content,
             baseStyle: messageTextStyle,
@@ -5594,6 +5678,11 @@ Return STRICT JSON only (no markdown). Schema:
                       itemCount: _messages.length,
                       itemBuilder: (context, index) {
                         final m = _messages[index];
+                        final isStreamingAssistantMessage =
+                            !m.isUser &&
+                            _isLoading &&
+                            index == _messages.length - 1;
+
                         return Align(
                           alignment: m.isUser
                               ? Alignment.centerRight
@@ -5602,12 +5691,24 @@ Return STRICT JSON only (no markdown). Schema:
                             constraints: BoxConstraints(
                               maxWidth: bubbleMaxWidth,
                             ),
-                            child: _buildMessageBubble(
-                              m,
-                              isDark,
-                              index,
-                              screenWidth,
-                              bubbleMaxWidth,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (isStreamingAssistantMessage)
+                                  _buildLiveActivityPanel(
+                                    message: m,
+                                    isDark: isDark,
+                                    isCompact: isCompact,
+                                    maxWidth: bubbleMaxWidth,
+                                  ),
+                                _buildMessageBubble(
+                                  m,
+                                  isDark,
+                                  index,
+                                  screenWidth,
+                                  bubbleMaxWidth,
+                                ),
+                              ],
                             ),
                           ),
                         );
