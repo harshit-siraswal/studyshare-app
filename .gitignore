@@ -16,3 +16,28 @@ flutter_application_1/out.txt
 flutter_application_1/analysis.txt
 flutter_application_1/analysis_utf8.txt
 flutter_application_1/lib/config/app_config.dart
+
+# Flutter/Dart build outputs
+**/build/
+**/.dart_tool/
+**/pubspec.lock
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/coverage/
+**/*.iml
+**/.gradle/
+
+# Android build artifacts
+flutter_application_1/android/app/build/
+flutter_application_1/android/app/.gradle/
+flutter_application_1/android/.gradle/
+flutter_application_1/android/.idea/
+**/intermediates/
+**/.cxx/
+**/outputs/
+
+# Generated/derived build metadata
+**/flutter_build.d
+flutter_application_1/android/app/build/intermediates/**
+**/android/**/build/intermediates/**
