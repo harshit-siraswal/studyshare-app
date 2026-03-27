@@ -13,6 +13,7 @@ import '../../models/resource.dart';
 import '../../services/supabase_service.dart';
 import '../../services/download_service.dart';
 import '../../services/subscription_service.dart';
+import '../../services/resource_state_repository.dart';
 import '../../widgets/resource_card.dart';
 import '../notifications/notification_screen.dart';
 import '../profile/bookmarks_screen.dart';
@@ -53,6 +54,8 @@ class StudyScreen extends StatefulWidget {
 class _StudyScreenState extends State<StudyScreen>
     with SingleTickerProviderStateMixin {
   final SupabaseService _supabaseService = SupabaseService();
+  final ResourceStateRepository _resourceStateRepository =
+      ResourceStateRepository();
   final BackendApiService _apiService = BackendApiService();
   final SubscriptionService _subscriptionService = SubscriptionService();
   final DownloadService _downloadService = DownloadService();
@@ -96,6 +99,7 @@ class _StudyScreenState extends State<StudyScreen>
   bool _isResourceScopeToggleLoading = false;
   bool _canManageAdminResources = false;
   bool _canUploadSyllabus = false;
+  bool _hasAttendanceFeature = false;
   String _moderationStatusFilter = 'all';
   String _followingSearchQuery = '';
   List<Resource>? _cachedFilteredFollowingResources;
@@ -133,16 +137,27 @@ class _StudyScreenState extends State<StudyScreen>
     });
   }
 
-  bool get _isKietCollege {
-    final collegeName = widget.collegeName.trim().toLowerCase();
-    final collegeDomain = widget.collegeDomain.trim().toLowerCase();
-    return collegeName.contains('kiet') || collegeDomain.contains('kiet');
-  }
-
   String get _effectiveUserEmail {
     final fromWidget = widget.userEmail.trim();
     if (fromWidget.isNotEmpty) return fromWidget;
     return (_supabaseService.currentUserEmail ?? '').trim();
+  }
+
+  void _prefetchResourceStatesInBackground(
+    String userEmail,
+    Iterable<Resource> resources,
+  ) {
+    if (userEmail.isEmpty || resources.isEmpty) return;
+    unawaited(
+      _resourceStateRepository
+          .prefetchResourceStateForResources(
+            userEmail: userEmail,
+            resources: resources,
+          )
+          .catchError((Object e, StackTrace st) {
+            debugPrint('Resource-state prefetch failed: $e\n$st');
+          }),
+    );
   }
 
   Future<void> _loadUnreadNotificationCount() async {
@@ -228,6 +243,14 @@ class _StudyScreenState extends State<StudyScreen>
           canUploadSyllabusProfile(profile) ||
           isTeacherOrAdminProfile(profile) ||
           resolveEffectiveProfileRole(profile) == appRoleModerator;
+      final attendanceFlag = profile['has_attendance_feature'];
+      final featureFlags = profile['feature_flags'];
+      final features = profile['features'];
+      final hasExplicitAttendanceDisable =
+          attendanceFlag == false ||
+          (featureFlags is Map && featureFlags['attendance'] == false) ||
+          (features is Map && features['attendance'] == false);
+      final hasAttendanceFeature = !hasExplicitAttendanceDisable;
       if (mounted) {
         setState(() {
           _profileSemesterFilter = semester;
@@ -239,6 +262,7 @@ class _StudyScreenState extends State<StudyScreen>
               : normalizedBranchCode;
           _canManageAdminResources = canManageAdminResources;
           _canUploadSyllabus = canUploadSyllabus;
+          _hasAttendanceFeature = hasAttendanceFeature;
         });
         _notifySyllabusContextChanged();
       }
@@ -307,7 +331,7 @@ class _StudyScreenState extends State<StudyScreen>
     }
 
     try {
-      await _loadUserProfile(forceRefresh: true);
+      await _loadUserProfile();
 
       if (_canManageAdminResources) {
         const requestPage = 1;
@@ -327,6 +351,11 @@ class _StudyScreenState extends State<StudyScreen>
           if (scopedResources.isNotEmpty || !_moderationRelevantOnly) {
             break;
           }
+        }
+
+        final activeEmail = _effectiveUserEmail;
+        if (activeEmail.isNotEmpty && resources.isNotEmpty) {
+          _prefetchResourceStatesInBackground(activeEmail, resources);
         }
 
         if (!mounted) return;
@@ -359,6 +388,9 @@ class _StudyScreenState extends State<StudyScreen>
           userEmail: activeEmail,
           collegeId: widget.collegeId,
         );
+        if (resources.isNotEmpty) {
+          _prefetchResourceStatesInBackground(activeEmail, resources);
+        }
         if (!mounted) return;
         setState(() {
           _followingResources = resources;
@@ -398,6 +430,10 @@ class _StudyScreenState extends State<StudyScreen>
         branch: _resolvedModerationBranchFilter(),
         subject: _resolvedModerationSubjectFilter(),
       );
+      final activeEmail = _effectiveUserEmail;
+      if (activeEmail.isNotEmpty && resources.isNotEmpty) {
+        _prefetchResourceStatesInBackground(activeEmail, resources);
+      }
 
       if (!mounted) return;
       setState(() {
@@ -527,9 +563,7 @@ class _StudyScreenState extends State<StudyScreen>
   }) async {
     final resourcesPayload = await _apiService.listModerationResources(
       collegeId: widget.collegeId,
-      status: _moderationStatusFilter == 'all'
-          ? null
-          : _moderationStatusFilter,
+      status: _moderationStatusFilter == 'all' ? null : _moderationStatusFilter,
       semester: semester,
       branch: branch,
       subject: subject,
@@ -609,6 +643,10 @@ class _StudyScreenState extends State<StudyScreen>
 
     try {
       final resources = await _fetchResourcesWithRelevantFallback(offset: 0);
+      final activeEmail = _effectiveUserEmail;
+      if (activeEmail.isNotEmpty && resources.isNotEmpty) {
+        _prefetchResourceStatesInBackground(activeEmail, resources);
+      }
 
       if (!mounted) return;
 
@@ -703,6 +741,10 @@ class _StudyScreenState extends State<StudyScreen>
       final moreResources = await _fetchResourcesWithRelevantFallback(
         offset: _resources.length,
       );
+      final activeEmail = _effectiveUserEmail;
+      if (activeEmail.isNotEmpty && moreResources.isNotEmpty) {
+        _prefetchResourceStatesInBackground(activeEmail, moreResources);
+      }
 
       if (!mounted) return;
 
@@ -1083,9 +1125,7 @@ class _StudyScreenState extends State<StudyScreen>
                       ),
                 border: InputBorder.none,
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(
-                  vertical: 14,
-                ),
+                contentPadding: const EdgeInsets.symmetric(vertical: 14),
               ),
             ),
           ),
@@ -1205,6 +1245,7 @@ class _StudyScreenState extends State<StudyScreen>
                       _followingResources = [];
                       _moderationPage = 1;
                       _hasMoreModeration = true;
+                      _isLoadingFollowing = true;
                     });
                     _loadFollowingFeed();
                   },
@@ -1462,6 +1503,7 @@ class _StudyScreenState extends State<StudyScreen>
           child: ResourceCard(
             resource: resource,
             userEmail: _effectiveUserEmail,
+            deferRemoteStateHydration: true,
             showModerationControls: isTeacher,
             onApprove: onApprove,
             onRetract: onRetract,
@@ -1781,7 +1823,7 @@ class _StudyScreenState extends State<StudyScreen>
             ),
           ),
 
-          if (_isKietCollege)
+          if (_hasAttendanceFeature)
             IconButton(
               onPressed: () {
                 Navigator.push(
@@ -2508,6 +2550,7 @@ class _StudyScreenState extends State<StudyScreen>
                   child: ResourceCard(
                     resource: resource,
                     userEmail: _effectiveUserEmail,
+                    deferRemoteStateHydration: true,
                     onVoteChanged: _handleResourceVoteChanged,
                   ),
                 ),

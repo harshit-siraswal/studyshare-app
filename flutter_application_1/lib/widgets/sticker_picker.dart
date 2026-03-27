@@ -8,7 +8,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
-import 'package:image_picker/image_picker.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
@@ -108,8 +107,8 @@ class _StickerPickerState extends State<StickerPicker>
   bool _isLoading = true;
   String? _errorMessage;
 
-  String _activePackId = 'all';
   String _stickerQuery = '';
+  String _selectedPackId = 'all';
 
   List<GiphyStickerItem> _giphyStickerResults = [];
   bool _giphyLoading = false;
@@ -130,9 +129,6 @@ class _StickerPickerState extends State<StickerPicker>
   String? _tenorNextPos;
   bool _tenorLoadingMore = false;
   final ScrollController _tenorScrollController = ScrollController();
-  ImgflipTemplate? _activeTemplate;
-  List<TextEditingController> _memeTextControllers = [];
-  bool _memeSubmitting = false;
 
   Timer? _stickerSearchDebounce;
   Timer? _gifSearchDebounce;
@@ -156,9 +152,6 @@ class _StickerPickerState extends State<StickerPicker>
     _gifSearchController.dispose();
     _gifScrollController.dispose();
     _tenorScrollController.dispose();
-    for (final controller in _memeTextControllers) {
-      controller.dispose();
-    }
     _stickerSearchDebounce?.cancel();
     _gifSearchDebounce?.cancel();
     super.dispose();
@@ -201,11 +194,6 @@ class _StickerPickerState extends State<StickerPicker>
         _installedPackIds = installed;
         _isLoading = false;
       });
-      unawaited(
-        _stickerService.ensureDefaultTelegramPacksInstalled().then(
-          (_) => _refreshLocalStickers(),
-        ),
-      );
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -222,6 +210,10 @@ class _StickerPickerState extends State<StickerPicker>
     setState(() {
       _stickers = stickers;
       _installedPackIds = installed;
+      if (_selectedPackId != 'all' &&
+          !_installedPackIds.contains(_selectedPackId)) {
+        _selectedPackId = 'all';
+      }
     });
   }
 
@@ -381,79 +373,6 @@ class _StickerPickerState extends State<StickerPicker>
     return user?.getIdToken();
   }
 
-  Future<List<GiphyGifItem>> _fetchTenorGifs({
-    String? query,
-    int limit = 25,
-  }) async {
-    final effectiveQuery = (query == null || query.trim().isEmpty)
-        ? 'trending'
-        : query.trim();
-    try {
-      final v2Uri = Uri.parse(
-        'https://tenor.googleapis.com/v2/search?q=$effectiveQuery&key=${AppConfig.tenorApiKey}&limit=$limit&media_filter=gif',
-      );
-      final res = await http.get(v2Uri).timeout(const Duration(seconds: 12));
-      if (res.statusCode == 200) {
-        final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-        final results = (decoded['results'] as List? ?? [])
-            .map((e) => TenorGifItem.fromJson(e as Map<String, dynamic>))
-            .where((e) => e.url.isNotEmpty)
-            .toList();
-        return results
-            .map(
-              (item) => GiphyGifItem(
-                id: item.url,
-                title: 'GIF',
-                fixedWidthUrl: item.url,
-                originalUrl: item.url,
-                aspectRatio: item.width / (item.height == 0 ? 1 : item.height),
-              ),
-            )
-            .toList();
-      }
-    } catch (_) {
-      // Fall through to legacy Tenor endpoint.
-    }
-    try {
-      final legacyUri = Uri.parse(
-        'https://g.tenor.com/v1/search?q=$effectiveQuery&key=LIVDSRZULELA&limit=$limit',
-      );
-      final res = await http
-          .get(legacyUri)
-          .timeout(const Duration(seconds: 12));
-      if (res.statusCode != 200) return [];
-      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-      final results = (decoded['results'] as List?) ?? [];
-      final items = <GiphyGifItem>[];
-      for (final raw in results) {
-        if (raw is! Map) continue;
-        final mediaList = (raw['media'] as List?) ?? const [];
-        if (mediaList.isEmpty) continue;
-        final media = mediaList.first as Map? ?? const {};
-        final gif =
-            (media['gif'] ?? media['mediumgif'] ?? media['tinygif']) as Map? ??
-            const {};
-        final url = gif['url']?.toString() ?? '';
-        final dims = (gif['dims'] as List?) ?? const [0, 0];
-        if (url.isEmpty) continue;
-        final width = dims.isNotEmpty ? int.tryParse('${dims.first}') ?? 1 : 1;
-        final height = dims.length > 1 ? int.tryParse('${dims[1]}') ?? 1 : 1;
-        items.add(
-          GiphyGifItem(
-            id: url,
-            title: 'GIF',
-            fixedWidthUrl: url,
-            originalUrl: url,
-            aspectRatio: width / (height == 0 ? 1 : height),
-          ),
-        );
-      }
-      return items;
-    } catch (_) {
-      return [];
-    }
-  }
-
   Future<(List<TenorGifItem>, String?)> _fetchTenorMemesPage({
     int limit = 20,
     String? pos,
@@ -567,39 +486,22 @@ class _StickerPickerState extends State<StickerPicker>
 
   List<File> get _filteredLocalStickers {
     final query = _stickerQuery.trim().toLowerCase();
-    final filtered = query.isEmpty
+    final selectedPackId = _selectedPackId.trim();
+    final filteredByPack = selectedPackId.isEmpty || selectedPackId == 'all'
         ? _stickers
         : _stickers
+              .where((file) => _packIdForFile(file) == selectedPackId)
+              .toList();
+
+    return query.isEmpty
+        ? filteredByPack
+        : filteredByPack
               .where(
                 (file) =>
                     file.path.toLowerCase().contains(query) ||
                     file.uri.pathSegments.last.toLowerCase().contains(query),
               )
               .toList();
-    if (_activePackId == 'all') return filtered;
-    return filtered
-        .where((file) => _extractPackIdFromPath(file.path) == _activePackId)
-        .toList();
-  }
-
-  String _extractPackIdFromPath(String rawPath) {
-    final normalized = rawPath.replaceAll('\\', '/');
-    final segments = normalized.split('/');
-    final packSegment = segments.firstWhere(
-      (segment) => segment.startsWith('pack_'),
-      orElse: () => '',
-    );
-    if (packSegment.isEmpty) return 'custom';
-    return packSegment.replaceFirst('pack_', '');
-  }
-
-  Map<String, File> _buildPackPreviewMap() {
-    final previews = <String, File>{};
-    for (final sticker in _stickers) {
-      final packId = _extractPackIdFromPath(sticker.path);
-      previews.putIfAbsent(packId, () => sticker);
-    }
-    return previews;
   }
 
   Future<File?> _downloadToTempFile(String url, String prefix) async {
@@ -649,20 +551,73 @@ class _StickerPickerState extends State<StickerPicker>
     }
   }
 
-  Future<void> _pickStickerFromDevice() async {
-    final picker = ImagePicker();
-    final picked = await picker.pickImage(source: ImageSource.gallery);
-    if (!mounted || picked == null) return;
-    widget.onStickerSelected(File(picked.path));
-    Navigator.pop(context);
+  List<StickerPack> get _featuredStickerPacks => StickerService.availablePacks
+      .where((pack) => pack.stickerUrls.isNotEmpty)
+      .toList(growable: false);
+
+  List<StickerPack> get _installedStickerPacks => _featuredStickerPacks
+      .where((pack) => _installedPackIds.contains(pack.id))
+      .toList(growable: false);
+
+  String _assetPathFromStickerUrl(String url) =>
+      url.replaceFirst('asset://', '');
+
+  String? _packIdForFile(File file) {
+    final segments = file.uri.pathSegments;
+    for (final segment in segments) {
+      if (!segment.startsWith('pack_')) continue;
+      final packId = segment.substring(5).trim();
+      if (packId.isNotEmpty) return packId;
+    }
+    return null;
   }
 
-  Future<void> _showTelegramPackSheet() async {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final packs = StickerService.defaultTelegramPacks;
-    final installing = <String>{};
+  String _packDescription(StickerPack pack) {
+    switch (pack.id) {
+      case 'animated_reaction_loop':
+        return 'Clean emoji-style reactions for everyday replies.';
+      case 'animated_study_loop':
+        return 'Books, targets, and focus stickers for study mode.';
+      case 'animated_celebration_loop':
+        return 'Confetti, trophies, and full-on victory energy.';
+      case 'animated_moods_loop':
+        return 'Expressive moods for late-night student life moments.';
+      default:
+        return '${pack.stickerUrls.length} animated stickers';
+    }
+  }
 
-    await showModalBottomSheet(
+  Widget _buildPackPreviewRow(StickerPack pack) {
+    final previewUrls = pack.stickerUrls.take(4).toList(growable: false);
+    return SizedBox(
+      height: 52,
+      child: Row(
+        children: previewUrls.asMap().entries.map((entry) {
+          final isLast = entry.key == previewUrls.length - 1;
+          return Padding(
+            padding: EdgeInsets.only(right: isLast ? 0 : 6),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.asset(
+                _assetPathFromStickerUrl(entry.value),
+                width: 52,
+                height: 52,
+                fit: BoxFit.cover,
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Future<void> _showStickerPackSheet() async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final packs = _featuredStickerPacks;
+    final installing = <String>{};
+    final sheetInstalledPackIds = Set<String>.from(_installedPackIds);
+
+    await showModalBottomSheet<void>(
       context: context,
       backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
       shape: const RoundedRectangleBorder(
@@ -689,7 +644,7 @@ class _StickerPickerState extends State<StickerPicker>
                     child: Row(
                       children: [
                         Text(
-                          'Telegram Sticker Packs',
+                          'Sticker Packs',
                           style: GoogleFonts.inter(
                             fontWeight: FontWeight.w600,
                             fontSize: 16,
@@ -712,92 +667,171 @@ class _StickerPickerState extends State<StickerPicker>
                       shrinkWrap: true,
                       padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
                       itemCount: packs.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      separatorBuilder: (_, _) => const SizedBox(height: 10),
                       itemBuilder: (context, index) {
-                        final packName = packs[index];
-                        final isInstalled = _installedPackIds.contains(
-                          packName,
+                        final pack = packs[index];
+                        final packId = pack.id;
+                        final isInstalled = sheetInstalledPackIds.contains(
+                          packId,
                         );
-                        final isInstalling = installing.contains(packName);
+                        final isInstalling = installing.contains(packId);
 
                         return Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 8,
-                          ),
+                          padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(
                             color: isDark ? Colors.white10 : Colors.black12,
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(18),
                           ),
-                          child: Row(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      packName,
-                                      style: GoogleFonts.inter(
-                                        fontWeight: FontWeight.w600,
-                                        color: isDark
-                                            ? Colors.white
-                                            : Colors.black87,
-                                      ),
+                              _buildPackPreviewRow(pack),
+                              const SizedBox(height: 12),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          pack.name,
+                                          style: GoogleFonts.inter(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 15,
+                                            color: isDark
+                                                ? Colors.white
+                                                : Colors.black87,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          _packDescription(pack),
+                                          style: GoogleFonts.inter(
+                                            fontSize: 12,
+                                            height: 1.35,
+                                            color: isDark
+                                                ? Colors.white60
+                                                : Colors.black54,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          '${pack.stickerUrls.length} animated stickers',
+                                          style: GoogleFonts.inter(
+                                            fontSize: 11.5,
+                                            fontWeight: FontWeight.w600,
+                                            color: AppTheme.primary,
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      'Download from Telegram',
-                                      style: GoogleFonts.inter(
-                                        fontSize: 12,
-                                        color: isDark
-                                            ? Colors.white54
-                                            : Colors.black45,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  if (isInstalled)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 8,
                                       ),
+                                      decoration: BoxDecoration(
+                                        color: Colors.green.withValues(
+                                          alpha: 0.14,
+                                        ),
+                                        borderRadius: BorderRadius.circular(
+                                          999,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.check_circle_rounded,
+                                            size: 16,
+                                            color: Colors.green.shade400,
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            'Added',
+                                            style: GoogleFonts.inter(
+                                              fontWeight: FontWeight.w700,
+                                              color: Colors.green.shade400,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  else if (isInstalling)
+                                    SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: AppTheme.primary,
+                                      ),
+                                    )
+                                  else
+                                    ElevatedButton(
+                                      onPressed: () async {
+                                        setSheetState(
+                                          () => installing.add(packId),
+                                        );
+                                        final installedCount =
+                                            await _stickerService.installPack(
+                                              pack,
+                                            );
+                                        await _refreshLocalStickers();
+                                        if (!mounted) return;
+                                        setSheetState(() {
+                                          installing.remove(packId);
+                                          if (installedCount > 0) {
+                                            sheetInstalledPackIds.add(packId);
+                                          }
+                                        });
+                                        if (installedCount > 0) {
+                                          setState(
+                                            () => _selectedPackId = packId,
+                                          );
+                                          if (!context.mounted) return;
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                '${pack.name} added with $installedCount stickers.',
+                                              ),
+                                            ),
+                                          );
+                                        } else if (context.mounted) {
+                                          ScaffoldMessenger.of(
+                                            context,
+                                          ).showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                'Could not add ${pack.name}. Please try again.',
+                                              ),
+                                            ),
+                                          );
+                                        }
+                                      },
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: AppTheme.primary,
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 16,
+                                          vertical: 10,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            999,
+                                          ),
+                                        ),
+                                      ),
+                                      child: const Text('Add Pack'),
                                     ),
-                                  ],
-                                ),
+                                ],
                               ),
-                              if (isInstalled)
-                                Icon(
-                                  Icons.check_circle,
-                                  color: Colors.green.shade400,
-                                )
-                              else if (isInstalling)
-                                SizedBox(
-                                  height: 20,
-                                  width: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: AppTheme.primary,
-                                  ),
-                                )
-                              else
-                                ElevatedButton(
-                                  onPressed: () async {
-                                    setSheetState(
-                                      () => installing.add(packName),
-                                    );
-                                    await _stickerService.installTelegramPack(
-                                      packName,
-                                    );
-                                    await _refreshLocalStickers();
-                                    setSheetState(
-                                      () => installing.remove(packName),
-                                    );
-                                  },
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: AppTheme.primary,
-                                    foregroundColor: Colors.white,
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 8,
-                                    ),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(999),
-                                    ),
-                                  ),
-                                  child: const Text('Install'),
-                                ),
                             ],
                           ),
                         );
@@ -827,62 +861,6 @@ class _StickerPickerState extends State<StickerPicker>
       startWithMemeLayout: true,
       sourceLabel: template.name,
     );
-  }
-
-  Future<void> _submitMeme() async {
-    final template = _activeTemplate;
-    if (template == null || _memeSubmitting) return;
-
-    final navigator = Navigator.of(context);
-    setState(() => _memeSubmitting = true);
-
-    try {
-      final text0 = _memeTextControllers.isNotEmpty
-          ? _memeTextControllers[0].text.trim()
-          : '';
-      final text1 = _memeTextControllers.length > 1
-          ? _memeTextControllers[1].text.trim()
-          : '';
-
-      final payload = {
-        'template_id': template.id,
-        'username': AppConfig.imgflipUsername,
-        'password': AppConfig.imgflipPassword,
-        'text0': text0,
-        'text1': text1,
-      };
-
-      final res = await http.post(
-        Uri.parse('https://api.imgflip.com/caption_image'),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: payload,
-      );
-
-      final decoded = jsonDecode(res.body) as Map<String, dynamic>;
-      if (decoded['success'] == true) {
-        final url = decoded['data']?['url']?.toString() ?? '';
-        if (url.isNotEmpty) {
-          await _sendRemoteMedia(url, prefix: 'imgflip');
-          if (!mounted) return;
-          navigator.pop();
-        }
-        return;
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Meme creation failed, try again')),
-        );
-      }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Meme creation failed, try again')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _memeSubmitting = false);
-    }
   }
 
   Widget _buildSegmentedTabs(bool isDark) {
@@ -1005,49 +983,6 @@ class _StickerPickerState extends State<StickerPicker>
     );
   }
 
-  Widget _buildStickerPackStrip(bool isDark) {
-    final previews = _buildPackPreviewMap();
-    final items = StickerService.availablePacks
-        .where((pack) => previews.containsKey(pack.id))
-        .toList();
-
-    return SizedBox(
-      height: 68,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: items.length,
-        separatorBuilder: (context, index) => const SizedBox(width: 10),
-        itemBuilder: (context, index) {
-          final pack = items[index];
-          final isActive = _activePackId == pack.id;
-          final preview = previews[pack.id];
-          return GestureDetector(
-            onTap: () => setState(() => _activePackId = pack.id),
-            child: Container(
-              width: 58,
-              padding: const EdgeInsets.all(5),
-              decoration: BoxDecoration(
-                color: isActive
-                    ? AppTheme.primary.withValues(alpha: 0.18)
-                    : (isDark ? Colors.white10 : const Color(0xFFF1F5F9)),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: isActive ? AppTheme.primary : Colors.transparent,
-                ),
-              ),
-              child: preview == null
-                  ? const Icon(Icons.sticky_note_2_outlined)
-                  : ClipRRect(
-                      borderRadius: BorderRadius.circular(10),
-                      child: Image.file(preview, fit: BoxFit.cover),
-                    ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
   Widget _buildStickerGrid(bool isDark) {
     final items = _stickerQuery.trim().isNotEmpty
         ? _giphyStickerResults
@@ -1117,6 +1052,73 @@ class _StickerPickerState extends State<StickerPicker>
     );
   }
 
+  Widget _buildInstalledPackChips(bool isDark) {
+    final packs = _installedStickerPacks;
+    if (packs.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final selectedColor = AppTheme.primary;
+    final idleColor = isDark
+        ? Colors.white10
+        : Colors.black.withValues(alpha: 0.05);
+
+    Widget chip({
+      required String id,
+      required String label,
+      required bool selected,
+    }) {
+      return ChoiceChip(
+        label: Text(label),
+        selected: selected,
+        onSelected: (_) {
+          setState(() => _selectedPackId = id);
+        },
+        selectedColor: selectedColor.withValues(alpha: isDark ? 0.22 : 0.12),
+        backgroundColor: idleColor,
+        side: BorderSide(
+          color: selected
+              ? selectedColor.withValues(alpha: 0.38)
+              : (isDark ? Colors.white12 : Colors.black12),
+        ),
+        labelStyle: GoogleFonts.inter(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w600,
+          color: selected
+              ? selectedColor
+              : (isDark ? Colors.white70 : Colors.black87),
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+        visualDensity: VisualDensity.compact,
+      );
+    }
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            chip(
+              id: 'all',
+              label: 'All Packs',
+              selected: _selectedPackId == 'all',
+            ),
+            ...packs.map(
+              (pack) => chip(
+                id: pack.id,
+                label: pack.name,
+                selected: _selectedPackId == pack.id,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildGifGrid(bool isDark) {
     if (_gifLoading) {
       return const Center(child: CircularProgressIndicator());
@@ -1178,91 +1180,6 @@ class _StickerPickerState extends State<StickerPicker>
           ),
         );
       },
-    );
-  }
-
-  Widget _buildMemeEditor(bool isDark) {
-    final template = _activeTemplate;
-    if (template == null) return const SizedBox.shrink();
-
-    return Positioned.fill(
-      child: Container(
-        color: Colors.black.withValues(alpha: 0.65),
-        child: SafeArea(
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  IconButton(
-                    onPressed: () => setState(() => _activeTemplate = null),
-                    icon: const Icon(Icons.arrow_back, color: Colors.white),
-                  ),
-                  Text(
-                    'Create Meme',
-                    style: GoogleFonts.inter(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 16,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: CachedNetworkImage(
-                  imageUrl: template.url,
-                  height: 200,
-                  fit: BoxFit.cover,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Expanded(
-                child: ListView.separated(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: _memeTextControllers.length,
-                  separatorBuilder: (context, index) =>
-                      const SizedBox(height: 8),
-                  itemBuilder: (context, index) {
-                    return TextField(
-                      controller: _memeTextControllers[index],
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                      ),
-                      decoration: InputDecoration(
-                        hintText: index == 0 ? 'Top text' : 'Bottom text',
-                        hintStyle: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.6),
-                          fontWeight: FontWeight.w700,
-                        ),
-                        filled: true,
-                        fillColor: Colors.white10,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                child: SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _memeSubmitting ? null : _submitMeme,
-                    child: Text(
-                      _memeSubmitting ? 'Creating...' : 'Create Meme',
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 
@@ -1514,51 +1431,31 @@ class _StickerPickerState extends State<StickerPicker>
                               ),
                             ),
                             const SizedBox(width: 8),
-                            SizedBox(
-                              width: 44,
-                              height: 44,
-                              child: IconButton(
-                                tooltip: 'From device',
-                                onPressed: _pickStickerFromDevice,
-                                icon: Icon(
-                                  Icons.phone_android_rounded,
-                                  color: isDark
-                                      ? Colors.white70
-                                      : Colors.black54,
+                            Expanded(
+                              child: FilledButton.icon(
+                                onPressed: _showStickerPackSheet,
+                                icon: const Icon(
+                                  Icons.collections_bookmark_rounded,
                                 ),
-                                style: IconButton.styleFrom(
-                                  backgroundColor: isDark
-                                      ? Colors.white10
-                                      : Colors.black12,
-                                  shape: const CircleBorder(),
+                                label: const Text('Get More Stickers'),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: AppTheme.primary,
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 12,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
                                 ),
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 6),
-                      ],
-                      if (_stickerQuery.trim().isEmpty) ...[
-                        _buildStickerPackStrip(isDark),
-                        const SizedBox(height: 2),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton.icon(
-                            onPressed: _showTelegramPackSheet,
-                            icon: const Icon(Icons.add_circle_outline_rounded),
-                            label: const Text('Get More Stickers'),
-                            style: TextButton.styleFrom(
-                              foregroundColor: AppTheme.primary,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 4,
-                                vertical: 2,
-                              ),
-                              minimumSize: Size.zero,
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
+                        const SizedBox(height: 10),
+                        _buildInstalledPackChips(isDark),
+                        if (_installedStickerPacks.isNotEmpty)
+                          const SizedBox(height: 10),
                       ],
                       Expanded(child: _buildStickerGrid(isDark)),
                     ],

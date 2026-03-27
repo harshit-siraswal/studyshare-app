@@ -106,9 +106,8 @@ class StickerPackImportResult {
 class StickerService {
   static const String _stickerDirName = 'stickers';
   static const String _installedPacksKey = 'installed_sticker_packs_v1';
-  static const String _telegramPacksKey = 'telegram_packs_v1_downloaded';
   static const String _autoInstallVersionKey = 'sticker_auto_install_version';
-  static const int _autoInstallVersion = 3;
+  static const int _autoInstallVersion = 4;
   static const Set<String> _supportedStickerExtensions = {
     '.png',
     '.jpg',
@@ -128,18 +127,12 @@ class StickerService {
   static bool _lastCapabilityAttemptHadToken = false;
   static const Duration _capabilityRetryBackoff = Duration(seconds: 30);
 
-  static const List<String> defaultTelegramPacks = [
-    'HotCherry',
-    'EasterAnimals',
-    'UtyaStickers',
-  ];
-
   static const List<StickerPack> availablePacks = [
     StickerPack(
       id: 'animated_reaction_loop',
-      name: 'Animated Reactions',
+      name: 'Campus Reacts',
       author: 'StudyShare',
-      source: 'generated from github.com/googlefonts/noto-emoji',
+      source: 'StudyShare animated pack',
       stickerUrls: [
         'asset://assets/stickers/animated_reactions/01_like.gif',
         'asset://assets/stickers/animated_reactions/02_clap.gif',
@@ -157,9 +150,9 @@ class StickerService {
     ),
     StickerPack(
       id: 'animated_study_loop',
-      name: 'Animated Study Vibes',
+      name: 'Study Vibes',
       author: 'StudyShare',
-      source: 'generated from github.com/googlefonts/noto-emoji',
+      source: 'StudyShare animated pack',
       stickerUrls: [
         'asset://assets/stickers/animated_study/01_book.gif',
         'asset://assets/stickers/animated_study/02_notes.gif',
@@ -177,9 +170,9 @@ class StickerService {
     ),
     StickerPack(
       id: 'animated_celebration_loop',
-      name: 'Animated Celebration',
+      name: 'Victory Mode',
       author: 'StudyShare',
-      source: 'generated from github.com/googlefonts/noto-emoji',
+      source: 'StudyShare animated pack',
       stickerUrls: [
         'asset://assets/stickers/animated_celebration/01_party.gif',
         'asset://assets/stickers/animated_celebration/02_confetti.gif',
@@ -195,48 +188,27 @@ class StickerService {
         'asset://assets/stickers/animated_celebration/12_rocket.gif',
       ],
     ),
-      StickerPack(
-        id: 'animated_moods_loop',
-        name: 'Animated Moods',
-        author: 'StudyShare',
-        source: 'generated from github.com/googlefonts/noto-emoji',
-        stickerUrls: [
-          'asset://assets/stickers/animated_moods/01_thinking.gif',
-          'asset://assets/stickers/animated_moods/02_shocked.gif',
-          'asset://assets/stickers/animated_moods/03_sleepy.gif',
-          'asset://assets/stickers/animated_moods/04_angry.gif',
-          'asset://assets/stickers/animated_moods/05_cry.gif',
-          'asset://assets/stickers/animated_moods/06_mindblown.gif',
-          'asset://assets/stickers/animated_moods/07_nerd.gif',
-          'asset://assets/stickers/animated_moods/08_wink.gif',
-          'asset://assets/stickers/animated_moods/09_grin.gif',
-          'asset://assets/stickers/animated_moods/10_smirk.gif',
-          'asset://assets/stickers/animated_moods/11_pleading.gif',
-          'asset://assets/stickers/animated_moods/12_melting.gif',
-        ],
-      ),
-      StickerPack(
-        id: 'HotCherry',
-        name: 'Hot Cherry',
-        author: 'Telegram',
-        source: 'Telegram',
-        stickerUrls: const [],
-      ),
-      StickerPack(
-        id: 'EasterAnimals',
-        name: 'Easter Animals',
-        author: 'Telegram',
-        source: 'Telegram',
-        stickerUrls: const [],
-      ),
-      StickerPack(
-        id: 'UtyaStickers',
-        name: 'Utya Stickers',
-        author: 'Telegram',
-        source: 'Telegram',
-        stickerUrls: const [],
-      ),
-    ];
+    StickerPack(
+      id: 'animated_moods_loop',
+      name: 'Late Night Moods',
+      author: 'StudyShare',
+      source: 'StudyShare animated pack',
+      stickerUrls: [
+        'asset://assets/stickers/animated_moods/01_thinking.gif',
+        'asset://assets/stickers/animated_moods/02_shocked.gif',
+        'asset://assets/stickers/animated_moods/03_sleepy.gif',
+        'asset://assets/stickers/animated_moods/04_angry.gif',
+        'asset://assets/stickers/animated_moods/05_cry.gif',
+        'asset://assets/stickers/animated_moods/06_mindblown.gif',
+        'asset://assets/stickers/animated_moods/07_nerd.gif',
+        'asset://assets/stickers/animated_moods/08_wink.gif',
+        'asset://assets/stickers/animated_moods/09_grin.gif',
+        'asset://assets/stickers/animated_moods/10_smirk.gif',
+        'asset://assets/stickers/animated_moods/11_pleading.gif',
+        'asset://assets/stickers/animated_moods/12_melting.gif',
+      ],
+    ),
+  ];
 
   // ─── Giphy Sticker API ────────────────────────────────────────────────────
 
@@ -582,14 +554,13 @@ class StickerService {
   }) async {
     try {
       final parsed = Uri.tryParse(url);
-      if (parsed == null || parsed.scheme != 'https' ||
+      if (parsed == null ||
+          parsed.scheme != 'https' ||
           !_allowedDownloadHosts.contains(parsed.host)) {
         debugPrint('[Giphy] Rejected URL (not in allowlist): $url');
         return null;
       }
-      final res = await http
-          .get(parsed)
-          .timeout(const Duration(seconds: 30));
+      final res = await http.get(parsed).timeout(const Duration(seconds: 30));
       if (res.statusCode != 200 || res.bodyBytes.isEmpty) return null;
       final rawExt = path.extension(parsed.path).toLowerCase();
       final contentType = res.headers['content-type']?.toLowerCase() ?? '';
@@ -635,6 +606,9 @@ class StickerService {
       'wa_gurl_vibes',
       'wa_snowden_moods',
       'wa_agent_reacts',
+      'HotCherry',
+      'EasterAnimals',
+      'UtyaStickers',
     };
     try {
       final dir = await getStickerDirectory();
@@ -701,95 +675,6 @@ class StickerService {
     }
 
     return installedNow;
-  }
-
-  /// Downloads default Telegram packs once per device.
-  Future<void> ensureDefaultTelegramPacksInstalled() async {
-    final prefs = await SharedPreferences.getInstance();
-    final alreadyDone = prefs.getBool(_telegramPacksKey) ?? false;
-    if (alreadyDone) return;
-
-    for (final packName in defaultTelegramPacks) {
-      await installTelegramPack(packName);
-    }
-
-    await prefs.setBool(_telegramPacksKey, true);
-  }
-
-  /// Installs a Telegram sticker pack into the local sticker directory.
-  Future<int> installTelegramPack(String packName) async {
-    final files = await fetchTelegramStickerPack(packName);
-    if (files.isEmpty) return 0;
-    final prefs = await SharedPreferences.getInstance();
-    final current =
-        prefs.getStringList(_installedPacksKey)?.toSet() ?? <String>{};
-    current.add(packName);
-    await prefs.setStringList(_installedPacksKey, current.toList());
-    return files.length;
-  }
-
-  /// Fetches a Telegram sticker pack and saves it locally (static webp only).
-  Future<List<File>> fetchTelegramStickerPack(String packName) async {
-    final token = AppConfig.telegramBotToken.trim();
-    if (token.isEmpty) return [];
-
-    final setUri = Uri.parse(
-      'https://api.telegram.org/bot$token/getStickerSet?name=$packName',
-    );
-    final setRes = await http.get(setUri).timeout(const Duration(seconds: 20));
-    if (setRes.statusCode != 200) return [];
-    final decoded = jsonDecode(setRes.body) as Map<String, dynamic>;
-    if (decoded['ok'] != true) return [];
-
-    final stickers = (decoded['result']?['stickers'] as List? ?? [])
-        .whereType<Map<String, dynamic>>()
-        .where((sticker) {
-      final isAnimated = sticker['is_animated'] == true;
-      final isVideo = sticker['is_video'] == true;
-      return !isAnimated && !isVideo;
-    }).toList();
-
-    if (stickers.isEmpty) return [];
-
-    final dir = await getStickerDirectory();
-    final packDir = Directory(path.join(dir.path, 'pack_$packName'));
-    if (!await packDir.exists()) {
-      await packDir.create(recursive: true);
-    }
-
-    final files = <File>[];
-    for (final sticker in stickers.take(30)) {
-      final fileId = sticker['file_id']?.toString() ?? '';
-      if (fileId.isEmpty) continue;
-
-      final fileInfoUri = Uri.parse(
-        'https://api.telegram.org/bot$token/getFile?file_id=$fileId',
-      );
-      final fileInfoRes =
-          await http.get(fileInfoUri).timeout(const Duration(seconds: 20));
-      if (fileInfoRes.statusCode != 200) continue;
-      final fileInfo = jsonDecode(fileInfoRes.body) as Map<String, dynamic>;
-      final filePath = fileInfo['result']?['file_path']?.toString() ?? '';
-      if (filePath.isEmpty) continue;
-      if (filePath.endsWith('.webm') || filePath.endsWith('.tgs')) continue;
-
-      final downloadUri = Uri.parse(
-        'https://api.telegram.org/file/bot$token/$filePath',
-      );
-      final downloadRes =
-          await http.get(downloadUri).timeout(const Duration(seconds: 20));
-      if (downloadRes.statusCode != 200) continue;
-
-      final ext = path.extension(filePath).toLowerCase();
-      final safeExt = ext.isEmpty ? '.webp' : ext;
-      final localFile = File(
-        path.join(packDir.path, 'tg_${packName}_${fileId.hashCode}$safeExt'),
-      );
-      await localFile.writeAsBytes(downloadRes.bodyBytes, flush: true);
-      files.add(localFile);
-    }
-
-    return files;
   }
 
   Future<List<File>> getLocalStickers() async {
@@ -1048,8 +933,44 @@ class StickerService {
 
   Future<Set<String>> getInstalledPackIds() async {
     final prefs = await SharedPreferences.getInstance();
-    final list = prefs.getStringList(_installedPacksKey) ?? const [];
-    return list.toSet();
+    final stored =
+        prefs.getStringList(_installedPacksKey)?.toSet() ?? <String>{};
+    final inferred = <String>{};
+
+    try {
+      final dir = await getStickerDirectory();
+      if (await dir.exists()) {
+        await for (final entity in dir.list()) {
+          if (entity is! Directory) continue;
+          final folderName = path.basename(entity.path);
+          if (!folderName.startsWith('pack_')) continue;
+          final packId = folderName.substring(5).trim();
+          if (packId.isEmpty) continue;
+
+          final files = await entity
+              .list()
+              .where((item) => item is File)
+              .cast<File>()
+              .toList();
+          final hasStickerFiles = files.any(
+            (file) => _supportedStickerExtensions.contains(
+              path.extension(file.path).toLowerCase(),
+            ),
+          );
+          if (hasStickerFiles) {
+            inferred.add(packId);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error inferring installed sticker packs: $e');
+    }
+
+    final merged = <String>{...stored, ...inferred};
+    if (merged.length != stored.length || !merged.containsAll(stored)) {
+      await prefs.setStringList(_installedPacksKey, merged.toList());
+    }
+    return merged;
   }
 
   Future<int> installPack(StickerPack pack) async {

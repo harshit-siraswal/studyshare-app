@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -6,6 +8,7 @@ import '../../config/theme.dart';
 import '../../models/resource.dart';
 import '../../services/supabase_service.dart';
 import '../../services/download_service.dart';
+import '../../services/resource_state_repository.dart';
 import '../../services/subscription_service.dart';
 import '../../widgets/resource_card.dart';
 
@@ -25,6 +28,8 @@ class ResourceSearchScreen extends StatefulWidget {
 
 class _ResourceSearchScreenState extends State<ResourceSearchScreen> {
   final SupabaseService _supabaseService = SupabaseService();
+  final ResourceStateRepository _resourceStateRepository =
+      ResourceStateRepository();
   final DownloadService _downloadService = DownloadService();
   final SubscriptionService _subscriptionService = SubscriptionService();
   final TextEditingController _searchController = TextEditingController();
@@ -207,6 +212,19 @@ class _ResourceSearchScreenState extends State<ResourceSearchScreen> {
         _searchResults = results;
         _isLoading = false;
       });
+
+      if (widget.userEmail.trim().isNotEmpty && results.isNotEmpty) {
+        unawaited(() async {
+          try {
+            await _resourceStateRepository.prefetchResourceStateForResources(
+              userEmail: widget.userEmail,
+              resources: results,
+            );
+          } catch (e, stackTrace) {
+            debugPrint('Search prefetch failed: $e\n$stackTrace');
+          }
+        }());
+      }
 
       if (_searchController.text.isNotEmpty) {
         _addRecentSearch(_searchController.text);
@@ -935,6 +953,7 @@ class _ResourceSearchScreenState extends State<ResourceSearchScreen> {
                   child: ResourceCard(
                     resource: _searchResults[index],
                     userEmail: widget.userEmail,
+                    deferRemoteStateHydration: true,
                   ),
                 ),
               ),

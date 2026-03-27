@@ -18,6 +18,10 @@ class RoomLimitException implements Exception {
 enum FollowStatus { notFollowing, pending, following }
 
 class SupabaseService {
+  factory SupabaseService() => _instance;
+  SupabaseService._internal();
+  static final SupabaseService _instance = SupabaseService._internal();
+
   static const int kUnlimitedDuration = -1;
   static const int kDefaultExpiryDays = 7;
   static const Duration _profileCacheTtl = Duration(seconds: 45);
@@ -68,9 +72,9 @@ class SupabaseService {
   static DateTime? _savedPostsSchemaCachedAt;
   static const Duration _savedPostsSchemaCacheTtl = Duration(minutes: 15);
 
-  /// A BuildContext is required to run reCAPTCHA (invisible WebView) before privileged writes.
-  /// Set this once from a top-level screen (e.g. HomeScreen) via [attachContext].
-  static BuildContext? _ctx;
+  /// A BuildContext is required to run reCAPTCHA (invisible WebView) before
+  /// privileged writes.
+  BuildContext? _ctx;
 
   void attachContext(BuildContext context) {
     _ctx = context;
@@ -89,6 +93,19 @@ class SupabaseService {
   }
 
   String _normalizeEmail(String? email) => email?.trim().toLowerCase() ?? '';
+
+  void _pruneExpiredRateLimits() {
+    final now = DateTime.now();
+    _bookmarkRateLimitUntil.removeWhere((_, until) => !until.isAfter(now));
+    _voteRateLimitUntil.removeWhere((_, until) => !until.isAfter(now));
+  }
+
+  String _escapeLikePattern(String value) {
+    return value
+        .replaceAll('\\', '\\\\')
+        .replaceAll('%', r'\%')
+        .replaceAll('_', r'\_');
+  }
 
   String _resourceStateKey(String resourceId, {String? userEmail}) {
     final normalizedInputEmail = _normalizeEmail(userEmail);
@@ -341,9 +358,12 @@ class SupabaseService {
   }
 
   Future<({int? userVote, int upvotes, int downvotes})> getResourceVoteStatus(
-    String resourceId,
+    String resourceId, {
+    String? userEmail,
+  }
   ) async {
-    final key = _resourceStateKey(resourceId);
+    _pruneExpiredRateLimits();
+    final key = _resourceStateKey(resourceId, userEmail: userEmail);
     final cached = _voteStateCache[key];
     if (cached != null) {
       return cached;
@@ -402,6 +422,114 @@ class SupabaseService {
 
     _voteStateInFlight[key] = future;
     return future;
+  }
+
+  ({int? userVote, int upvotes, int downvotes})? getCachedVoteState(
+    String resourceId, {
+    String? userEmail,
+  }) {
+    final cacheKey = _resourceStateKey(resourceId, userEmail: userEmail);
+    return _voteStateCache[cacheKey];
+  }
+
+  Future<void> prefetchVotesForResources({
+    required String userEmail,
+    required Iterable<String> resourceIds,
+    int maxConcurrent = 8,
+  }) async {
+    final normalizedEmail = _normalizeEmail(userEmail);
+    if (normalizedEmail.isEmpty) return;
+
+    final ids = resourceIds
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+    if (ids.isEmpty) return;
+
+    final safeMaxConcurrent =
+        maxConcurrent < 1 ? 1 : (maxConcurrent > 20 ? 20 : maxConcurrent);
+
+    for (var i = 0; i < ids.length; i += safeMaxConcurrent) {
+      final end = (i + safeMaxConcurrent) > ids.length
+          ? ids.length
+          : (i + safeMaxConcurrent);
+      final batch = ids.sublist(i, end);
+      await Future.wait(
+        batch.map((id) async {
+          await getResourceVoteStatus(id, userEmail: normalizedEmail);
+        }),
+      );
+    }
+  }
+
+  Future<void> prefetchResourceStatesFromBulkEndpoint({
+    required String userEmail,
+    required Iterable<String> resourceIds,
+  }) async {
+    final normalizedEmail = _normalizeEmail(userEmail);
+    if (normalizedEmail.isEmpty) return;
+
+    final ids = resourceIds
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+    if (ids.isEmpty) return;
+
+    final response = await _api.getBulkResourceStates(resourceIds: ids);
+    final rawStates =
+        (response['states'] ?? response['items'] ?? response['resourceStates'])
+            as List? ??
+        const [];
+
+    for (final item in rawStates) {
+      if (item is! Map) continue;
+      final row = Map<String, dynamic>.from(item);
+
+      final resourceId =
+          (row['resourceId'] ?? row['resource_id'] ?? row['id'] ?? row['itemId'])
+              ?.toString()
+              .trim() ??
+          '';
+      if (resourceId.isEmpty) continue;
+      final cacheKey = _resourceStateKey(resourceId, userEmail: normalizedEmail);
+
+      final rawBookmarked =
+          row['isBookmarked'] ?? row['bookmarked'] ?? row['is_bookmarked'];
+      if (rawBookmarked is bool) {
+        _bookmarkStateCache[cacheKey] = rawBookmarked;
+      }
+
+      final rawVote = row['userVote'] ?? row['user_vote'];
+      int? userVote;
+      if (rawVote is String) {
+        if (rawVote == 'upvote') {
+          userVote = 1;
+        } else if (rawVote == 'downvote') {
+          userVote = -1;
+        }
+      } else if (rawVote is num) {
+        userVote = rawVote.toInt();
+      }
+
+      final upvotesRaw = row['upvotes'] ?? row['up_votes'] ?? 0;
+      final downvotesRaw = row['downvotes'] ?? row['down_votes'] ?? 0;
+      _voteStateCache[cacheKey] = (
+        userVote: userVote,
+        upvotes: upvotesRaw is num ? upvotesRaw.toInt() : 0,
+        downvotes: downvotesRaw is num ? downvotesRaw.toInt() : 0,
+      );
+    }
+
+    for (final id in ids) {
+      final cacheKey = _resourceStateKey(id, userEmail: normalizedEmail);
+      _bookmarkStateCache.putIfAbsent(cacheKey, () => false);
+      _voteStateCache.putIfAbsent(
+        cacheKey,
+        () => (userVote: null, upvotes: 0, downvotes: 0),
+      );
+    }
   }
 
   Map<String, dynamic> _normalizeSocialUser(Map<String, dynamic> raw) {
@@ -650,11 +778,12 @@ class SupabaseService {
   /// Search colleges by name
   Future<List<College>> searchColleges(String query) async {
     try {
+      final escapedQuery = _escapeLikePattern(query.trim());
       final response = await _client
           .from('colleges')
           .select()
           .eq('is_active', true)
-          .ilike('name', '%$query%')
+          .ilike('name', '%$escapedQuery%')
           .order('name')
           .limit(10);
 
@@ -684,6 +813,16 @@ class SupabaseService {
     final normalizedSubject = subject?.trim();
     final normalizedType = type?.trim();
     final normalizedSearch = searchQuery?.trim() ?? '';
+    final escapedBranch = normalizedBranch == null
+      ? null
+      : _escapeLikePattern(normalizedBranch);
+    final escapedSubject = normalizedSubject == null
+      ? null
+      : _escapeLikePattern(normalizedSubject);
+    final escapedType = normalizedType == null
+      ? null
+      : _escapeLikePattern(normalizedType);
+    final escapedSearch = _escapeLikePattern(normalizedSearch);
     final cacheKey = _resourceListCacheKey(
       collegeId: collegeId,
       semester: normalizedSemester,
@@ -725,17 +864,17 @@ class SupabaseService {
         if (normalizedSemester != null && normalizedSemester.isNotEmpty) {
           query = query.eq('semester', normalizedSemester);
         }
-        if (normalizedBranch != null && normalizedBranch.isNotEmpty) {
-          query = query.ilike('branch', '%$normalizedBranch%');
+        if (escapedBranch != null && escapedBranch.isNotEmpty) {
+          query = query.ilike('branch', '%$escapedBranch%');
         }
-        if (normalizedSubject != null && normalizedSubject.isNotEmpty) {
-          query = query.ilike('subject', '%$normalizedSubject%');
+        if (escapedSubject != null && escapedSubject.isNotEmpty) {
+          query = query.ilike('subject', '%$escapedSubject%');
         }
-        if (normalizedType != null && normalizedType.isNotEmpty) {
-          query = query.ilike('type', normalizedType);
+        if (escapedType != null && escapedType.isNotEmpty) {
+          query = query.ilike('type', escapedType);
         }
         if (normalizedSearch.isNotEmpty) {
-          query = query.ilike('title', '%$normalizedSearch%');
+          query = query.ilike('title', '%$escapedSearch%');
         }
 
         final orderedQuery = sortBy == 'upvotes'
@@ -1019,7 +1158,12 @@ class SupabaseService {
         throw Exception('No pending follow request to cancel');
       }
 
-      await _api.cancelFollowRequest(int.parse(requestId), context: ctx);
+      final parsedRequestId = int.tryParse(requestId);
+      if (parsedRequestId == null) {
+        throw Exception('Invalid follow request id');
+      }
+
+      await _api.cancelFollowRequest(parsedRequestId, context: ctx);
     } catch (e) {
       debugPrint('Error cancelling follow request: $e');
       rethrow;
@@ -1133,7 +1277,7 @@ class SupabaseService {
       );
 
       if (response != null && response['success'] == false) {
-        throw response['error'] ?? 'Unknown error';
+        throw Exception(response['error']?.toString() ?? 'Unknown error');
       }
     } catch (e) {
       debugPrint('Error deleting room: $e');
@@ -1638,10 +1782,16 @@ class SupabaseService {
           .ilike('email', '%@$safeDomain');
 
       if (searchQuery != null && searchQuery.isNotEmpty) {
-        final safeQuery = searchQuery.replaceAll(RegExp(r'[%*,.]'), '');
-        dbQuery = dbQuery.or(
-          'display_name.ilike.%$safeQuery%,username.ilike.%$safeQuery%',
-        );
+        final normalizedQuery = searchQuery
+            .replaceAll(RegExp(r'[^a-zA-Z0-9\s]'), ' ')
+            .trim()
+            .replaceAll(RegExp(r'\s+'), ' ');
+        if (normalizedQuery.isNotEmpty) {
+          final safeQuery = _escapeLikePattern(normalizedQuery);
+          dbQuery = dbQuery.or(
+            'display_name.ilike.%$safeQuery%,username.ilike.%$safeQuery%',
+          );
+        }
       }
 
       final response = await dbQuery.limit(50);
@@ -2789,6 +2939,14 @@ class SupabaseService {
     }
   }
 
+  String? _extractMissingColumnName(Object error) {
+    final match = RegExp(
+      r'column\s+"([^"]+)"\s+does\s+not\s+exist',
+      caseSensitive: false,
+    ).firstMatch(error.toString());
+    return match?.group(1);
+  }
+
   Future<
     ({
       bool hasUserEmail,
@@ -2808,22 +2966,48 @@ class SupabaseService {
       return cached;
     }
 
-    final checks = await Future.wait<bool>([
-      _savedPostsColumnExists('user_email'),
-      _savedPostsColumnExists('user_id'),
-      _savedPostsColumnExists('message_id'),
-      _savedPostsColumnExists('post_id'),
-      _savedPostsColumnExists('room_id'),
-      _savedPostsColumnExists('created_at'),
-    ]);
+    const columns = <String>[
+      'user_email',
+      'user_id',
+      'message_id',
+      'post_id',
+      'room_id',
+      'created_at',
+    ];
+    final checksByColumn = <String, bool>{
+      for (final column in columns) column: true,
+    };
+
+    var shouldFallbackToPerColumnChecks = false;
+    try {
+      await _client.from('saved_posts').select(columns.join(',')).limit(1);
+    } catch (error) {
+      final missingColumn = _extractMissingColumnName(error);
+      if (missingColumn != null && checksByColumn.containsKey(missingColumn)) {
+        checksByColumn[missingColumn] = false;
+      } else {
+        shouldFallbackToPerColumnChecks = true;
+      }
+    }
+
+    if (shouldFallbackToPerColumnChecks) {
+      for (final column in columns) {
+        checksByColumn[column] = await _savedPostsColumnExists(column);
+      }
+    } else {
+      for (final column in columns) {
+        if (checksByColumn[column] == false) continue;
+        checksByColumn[column] = await _savedPostsColumnExists(column);
+      }
+    }
 
     final schema = (
-      hasUserEmail: checks[0],
-      hasUserId: checks[1],
-      hasMessageId: checks[2],
-      hasPostId: checks[3],
-      hasRoomId: checks[4],
-      hasCreatedAt: checks[5],
+      hasUserEmail: checksByColumn['user_email'] ?? false,
+      hasUserId: checksByColumn['user_id'] ?? false,
+      hasMessageId: checksByColumn['message_id'] ?? false,
+      hasPostId: checksByColumn['post_id'] ?? false,
+      hasRoomId: checksByColumn['room_id'] ?? false,
+      hasCreatedAt: checksByColumn['created_at'] ?? false,
     );
     _savedPostsSchemaCache = schema;
     _savedPostsSchemaCachedAt = DateTime.now();
@@ -3886,8 +4070,12 @@ class SupabaseService {
       }
     } catch (error) {
       if (_isNoRowsMutationResult(error)) {
+        debugPrint(
+          'No-rows mutation result while updating resource status: '
+          '${backendError.toString()}',
+        );
         throw Exception(
-          'failed: ${backendError.toString()}',
+          'Operation failed; please try again.',
         );
       }
       rethrow;
@@ -4009,52 +4197,48 @@ class SupabaseService {
     }
 
     final userId = currentUserId;
-    final payloads = <Map<String, dynamic>>[
-      if (userId != null && userId.isNotEmpty)
-        {
-          'department_id': departmentId,
-          'college_id': collegeId,
-          'user_id': userId,
-          'follower_email': normalizedEmail,
-        },
-      if (userId != null && userId.isNotEmpty)
-        {
-          'department_id': departmentId,
-          'college_id': collegeId,
-          'follower_id': userId,
-          'follower_email': normalizedEmail,
-        },
-      if (userId != null && userId.isNotEmpty)
-        {
-          'department_id': departmentId,
-          'college_id': collegeId,
-          'user_id': userId,
-          'user_email': normalizedEmail,
-        },
-      if (userId != null && userId.isNotEmpty)
-        {
-          'department_id': departmentId,
-          'college_id': collegeId,
-          'follower_id': userId,
-          'user_email': normalizedEmail,
-        },
-      {
+    final basePayload = <String, dynamic>{
+      'department_id': departmentId,
+      'college_id': collegeId,
+    };
+    final userIdentifiers = <String, String>{
+      if (userId != null && userId.isNotEmpty) 'user_id': userId,
+      if (userId != null && userId.isNotEmpty) 'follower_id': userId,
+      if (normalizedEmail.isNotEmpty) 'user_email': normalizedEmail,
+      if (normalizedEmail.isNotEmpty) 'follower_email': normalizedEmail,
+    };
+    final payloads = <Map<String, dynamic>>[];
+
+    for (final entry in userIdentifiers.entries) {
+      payloads.add(<String, dynamic>{...basePayload, entry.key: entry.value});
+      payloads.add(<String, dynamic>{
         'department_id': departmentId,
-        'college_id': collegeId,
-        'follower_email': normalizedEmail,
-      },
-      {'department_id': departmentId, 'follower_email': normalizedEmail},
-      {
-        'department_id': departmentId,
-        'college_id': collegeId,
-        'user_email': normalizedEmail,
-      },
-      {'department_id': departmentId, 'user_email': normalizedEmail},
-      if (userId != null && userId.isNotEmpty)
-        {'department_id': departmentId, 'user_id': userId},
-      if (userId != null && userId.isNotEmpty)
-        {'department_id': departmentId, 'follower_id': userId},
+        entry.key: entry.value,
+      });
+    }
+
+    final idPairs = <MapEntry<String, String>>[
+      if (userIdentifiers.containsKey('user_id'))
+        MapEntry('user_id', userIdentifiers['user_id']!),
+      if (userIdentifiers.containsKey('follower_id'))
+        MapEntry('follower_id', userIdentifiers['follower_id']!),
     ];
+    final emailPairs = <MapEntry<String, String>>[
+      if (userIdentifiers.containsKey('user_email'))
+        MapEntry('user_email', userIdentifiers['user_email']!),
+      if (userIdentifiers.containsKey('follower_email'))
+        MapEntry('follower_email', userIdentifiers['follower_email']!),
+    ];
+
+    for (final idEntry in idPairs) {
+      for (final emailEntry in emailPairs) {
+        payloads.add(<String, dynamic>{
+          ...basePayload,
+          idEntry.key: idEntry.value,
+          emailEntry.key: emailEntry.value,
+        });
+      }
+    }
 
     Object? lastError;
     for (final payload in payloads) {
@@ -4531,13 +4715,19 @@ class SupabaseService {
   Future<List<Map<String, dynamic>>> getNotices({
     required String collegeId,
     bool includeHidden = false,
+    int limit = 80,
+    int offset = 0,
   }) async {
     try {
+      final safeLimit = limit < 1 ? 1 : (limit > 500 ? 500 : limit);
+      final safeOffset = offset < 0 ? 0 : offset;
       var query = _client.from('notices').select().eq('college_id', collegeId);
       if (!includeHidden) {
         query = query.eq('is_active', true);
       }
-      final response = await query.order('created_at', ascending: false);
+      final response = await query
+          .order('created_at', ascending: false)
+          .range(safeOffset, safeOffset + safeLimit - 1);
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
       debugPrint('Error getting notices: $e');
@@ -4643,6 +4833,7 @@ class SupabaseService {
   /// Toggle bookmark for a resource - returns new bookmark state
   Future<bool> toggleBookmark(String userEmail, String resourceId) async {
     try {
+      _pruneExpiredRateLimits();
       final ctx = _ctx;
       if (ctx == null) throw Exception('Security context not initialized');
 
@@ -4670,6 +4861,7 @@ class SupabaseService {
 
   /// Check if a resource is bookmarked by the user
   Future<bool> isBookmarked(String userEmail, String resourceId) async {
+    _pruneExpiredRateLimits();
     final cacheKey = _resourceStateKey(resourceId, userEmail: userEmail);
     final cached = _bookmarkStateCache[cacheKey];
     if (cached != null) return cached;
@@ -4703,6 +4895,60 @@ class SupabaseService {
 
     _bookmarkStateInFlight[cacheKey] = future;
     return future;
+  }
+
+  bool? getCachedBookmarkState(String userEmail, String resourceId) {
+    final cacheKey = _resourceStateKey(resourceId, userEmail: userEmail);
+    return _bookmarkStateCache[cacheKey];
+  }
+
+  Future<void> prefetchBookmarksForResources({
+    required String userEmail,
+    required Iterable<String> resourceIds,
+  }) async {
+    final normalizedEmail = _normalizeEmail(userEmail);
+    if (normalizedEmail.isEmpty) return;
+
+    final ids = resourceIds
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+    if (ids.isEmpty) return;
+
+    try {
+      final response = await _api.getBookmarks();
+      final raw = (response['bookmarks'] ?? response['items']) as List? ?? const [];
+      final bookmarkedIds = <String>{};
+
+      for (final item in raw) {
+        if (item is! Map) continue;
+        final row = Map<String, dynamic>.from(item);
+        final rawId =
+            row['itemId'] ??
+            row['item_id'] ??
+            row['resourceId'] ??
+            row['resource_id'] ??
+            row['id'];
+        final itemType = (row['type'] ?? row['itemType'] ?? row['item_type'])
+            ?.toString()
+            .trim()
+            .toLowerCase();
+        if (itemType != null && itemType.isNotEmpty && itemType != 'resource') {
+          continue;
+        }
+        final id = rawId?.toString().trim() ?? '';
+        if (id.isEmpty) continue;
+        bookmarkedIds.add(id);
+      }
+
+      for (final id in ids) {
+        final cacheKey = _resourceStateKey(id, userEmail: normalizedEmail);
+        _bookmarkStateCache[cacheKey] = bookmarkedIds.contains(id);
+      }
+    } catch (e) {
+      debugPrint('Error prefetching resource bookmark states: $e');
+    }
   }
 
   // ============ NOTICES ============

@@ -30,7 +30,10 @@ void main() {
       ),
     );
 
-    final service = BackendApiService(httpClient: client);
+    final service = BackendApiService(
+      httpClient: client,
+      startMaintenanceTimer: false,
+    );
 
     await service.updateResourceStatus(
       resourceId: '95aeade0-2eb7-4b5c-b776-39352479ef1f',
@@ -66,7 +69,10 @@ void main() {
       return http.Response('{"success":true}', 200);
     });
 
-    final service = BackendApiService(httpClient: client);
+    final service = BackendApiService(
+      httpClient: client,
+      startMaintenanceTimer: false,
+    );
 
     await service.deleteResourceAsAdmin(
       resourceId: '95aeade0-2eb7-4b5c-b776-39352479ef1f',
@@ -89,5 +95,115 @@ void main() {
     expect(decoded['action'], 'delete_resource');
     expect(decoded['resourceId'], '95aeade0-2eb7-4b5c-b776-39352479ef1f');
     expect(decoded['keyHash'], 'test-token');
+  });
+
+  test(
+    'queryRag sends explicit local retrieval flags when web is off',
+    () async {
+      http.BaseRequest? capturedRequest;
+
+      final client = MockClient((request) async {
+        capturedRequest = request;
+        return http.Response('{"answer":"ok"}', 200);
+      });
+
+      final service = BackendApiService(
+        httpClient: client,
+        startMaintenanceTimer: false,
+      );
+
+      final response = await service.queryRag(
+        question: 'Explain this topic from my notes',
+        allowWeb: false,
+        fileId: 'file-123',
+      );
+
+      expect(response['answer'], 'ok');
+      expect(capturedRequest, isA<http.Request>());
+
+      final body =
+          jsonDecode((capturedRequest as http.Request).body)
+              as Map<String, dynamic>;
+      expect(body['allow_web'], isFalse);
+      expect(body['retrieval_mode'], 'local');
+      expect(body['strict_notes_mode'], isTrue);
+      expect(body['file_id'], 'file-123');
+    },
+  );
+
+  test('queryRag sends explicit web retrieval flags when web is on', () async {
+    http.BaseRequest? capturedRequest;
+
+    final client = MockClient((request) async {
+      capturedRequest = request;
+      return http.Response('{"answer":"ok"}', 200);
+    });
+
+    final service = BackendApiService(
+      httpClient: client,
+      startMaintenanceTimer: false,
+    );
+
+    await service.queryRag(
+      question: 'Search the web for this topic',
+      allowWeb: true,
+    );
+
+    expect(capturedRequest, isA<http.Request>());
+
+    final body =
+        jsonDecode((capturedRequest as http.Request).body)
+            as Map<String, dynamic>;
+    expect(body['allow_web'], isTrue);
+    expect(body['retrieval_mode'], 'web');
+    expect(body['strict_notes_mode'], isFalse);
+  });
+
+  test('queryRag retries once after a transient connection reset', () async {
+    var requestCount = 0;
+
+    final client = MockClient((request) async {
+      requestCount++;
+      if (requestCount == 1) {
+        throw http.ClientException('Connection reset by peer');
+      }
+      return http.Response('{"answer":"retry ok"}', 200);
+    });
+
+    final service = BackendApiService(
+      httpClient: client,
+      startMaintenanceTimer: false,
+    );
+
+    final response = await service.queryRag(
+      question: 'Explain this topic from my notes',
+      allowWeb: false,
+    );
+
+    expect(response['answer'], 'retry ok');
+    expect(requestCount, 2);
+  });
+
+  test('checkFollowStatus uses the singular follow status endpoint', () async {
+    http.BaseRequest? capturedRequest;
+
+    final client = MockClient((request) async {
+      capturedRequest = request;
+      return http.Response('{"status":"following"}', 200);
+    });
+
+    final service = BackendApiService(
+      httpClient: client,
+      startMaintenanceTimer: false,
+    );
+
+    final response = await service.checkFollowStatus('test.user@example.com');
+
+    expect(response['status'], 'following');
+    expect(capturedRequest, isA<http.Request>());
+    expect(
+      capturedRequest!.url.path,
+      '/api/follow/status/test.user%40example.com',
+    );
   });
 }

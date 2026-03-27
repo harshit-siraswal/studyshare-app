@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shimmer/shimmer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -31,6 +32,7 @@ import '../widgets/onboarding_overlay.dart';
 import '../widgets/paywall_dialog.dart';
 import '../widgets/study_ai_plan_widget.dart';
 import '../utils/ai_token_budget_utils.dart';
+import '../utils/ai_question_paper_parser.dart';
 import '../utils/link_navigation_utils.dart';
 import 'ai_question_paper_quiz_screen.dart';
 import 'viewer/pdf_viewer_screen.dart';
@@ -187,7 +189,7 @@ class _LongResponseTracker {
 
 /// Context for pinning a RAG chat to a specific resource/PDF.
 class ResourceContext {
-  final String fileId;
+  final String? fileId;
   final String title;
   final String? subject;
   final String? semester;
@@ -195,7 +197,7 @@ class ResourceContext {
   final String? videoUrl;
 
   const ResourceContext({
-    required this.fileId,
+    this.fileId,
     required this.title,
     this.subject,
     this.semester,
@@ -456,7 +458,7 @@ class _AIChatScreenState extends State<AIChatScreen>
       OnboardingStep(
         title: 'Send Request',
         description:
-            'Tap send to start AI generation. Responses stream live as they are produced.',
+            'Tap send to let StudyShare think through your notes before answering.',
         icon: Icons.arrow_upward_rounded,
         targetKey: _coachSendKey,
       ),
@@ -560,6 +562,9 @@ class _AIChatScreenState extends State<AIChatScreen>
     bool searchAllPdfs = false,
   }) {
     final cleaned = userPrompt.trim();
+    final hasVideoTranscriptContext = (widget.resourceContext?.videoUrl ?? '')
+        .trim()
+        .isNotEmpty;
     if (cleaned.isNotEmpty && preferLocalOnly) {
       if (searchAllPdfs) {
         return '$cleaned\n\n'
@@ -568,12 +573,27 @@ class _AIChatScreenState extends State<AIChatScreen>
             'file. Do not add outside web/general info. If nothing relevant '
             'is found, say that clearly and ask what to upload.';
       }
+      if (hasVideoTranscriptContext) {
+        return '$cleaned\n\n'
+            'Important: Use only the currently open video transcript and any '
+            'attached study material context. Do not add outside web/general '
+            'info. If the transcript does not contain the answer, say that '
+            'clearly.';
+      }
       return '$cleaned\n\n'
           'Important: Use only the uploaded/pinned study material context. '
           'Do not add outside web/general info. If the notes do not contain '
           'the answer, say that clearly and ask what to upload.';
     }
+    if (cleaned.isNotEmpty && hasVideoTranscriptContext) {
+      return '$cleaned\n\n'
+          'Primary context: the transcript of the video currently open in '
+          'StudyShare.';
+    }
     if (cleaned.isNotEmpty) return cleaned;
+    if (hasVideoTranscriptContext) {
+      return 'Please answer using the transcript of the currently open video.';
+    }
     if (hasAttachments) {
       return 'Please analyze the attached files and help me study.';
     }
@@ -1041,155 +1061,7 @@ class _AIChatScreenState extends State<AIChatScreen>
     );
   }
 
-  String _buildPlanTitleFromPrompt(String prompt) {
-    final compact = _sanitizePromptFragment(prompt, maxLength: 56);
-    if (compact.isEmpty) return 'Preparing your answer';
-    return compact;
-  }
-
-  bool _shouldShowPlanCard(AIChatMessage message) {
-    if (message.isUser) return false;
-    return message.answerOrigin != null || message.planSteps.length >= 2;
-  }
-
-  List<PlanStep> _buildInitialLivePlanSteps() {
-    return const [
-      PlanStep(
-        id: 'retrieve',
-        title: 'Scanning your notes',
-        status: StepStatus.inProgress,
-      ),
-      PlanStep(
-        id: 'answer',
-        title: 'Drafting response',
-        status: StepStatus.pending,
-      ),
-    ];
-  }
-
-  Widget _buildLiveActivityPanel({
-    required AIChatMessage message,
-    required bool isDark,
-    required bool isCompact,
-    required double maxWidth,
-  }) {
-    final steps = message.planSteps.isNotEmpty
-        ? message.planSteps.take(3).toList(growable: false)
-        : _buildInitialLivePlanSteps();
-
-    IconData iconFor(StepStatus status) {
-      switch (status) {
-        case StepStatus.completed:
-          return Icons.check_circle_rounded;
-        case StepStatus.failed:
-          return Icons.error_rounded;
-        case StepStatus.needHelp:
-          return Icons.help_rounded;
-        case StepStatus.inProgress:
-          return Icons.autorenew_rounded;
-        case StepStatus.pending:
-          return Icons.radio_button_unchecked_rounded;
-      }
-    }
-
-    Color colorFor(StepStatus status) {
-      switch (status) {
-        case StepStatus.completed:
-          return Colors.green;
-        case StepStatus.failed:
-          return AppTheme.error;
-        case StepStatus.needHelp:
-          return AppTheme.warning;
-        case StepStatus.inProgress:
-          return AppTheme.primary;
-        case StepStatus.pending:
-          return isDark ? Colors.white54 : Colors.black45;
-      }
-    }
-
-    final activityTitle =
-        message.planTitle?.trim().isNotEmpty == true
-        ? message.planTitle!.trim()
-        : 'Working on your answer';
-
-    return Container(
-      width: maxWidth,
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: isDark
-            ? const Color(0xFF111827).withValues(alpha: 0.88)
-            : const Color(0xFFF8FAFF),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isDark
-              ? Colors.white.withValues(alpha: 0.12)
-              : AppTheme.primary.withValues(alpha: 0.16),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              SizedBox(
-                width: 14,
-                height: 14,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
-                  backgroundColor: isDark
-                      ? Colors.white12
-                      : Colors.black.withValues(alpha: 0.08),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Live: $activityTitle',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.inter(
-                    fontSize: isCompact ? 11 : 11.5,
-                    fontWeight: FontWeight.w700,
-                    color: isDark ? Colors.white : const Color(0xFF0F172A),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ...steps.map((step) {
-            final color = colorFor(step.status);
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 5),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(iconFor(step.status), size: 14, color: color),
-                  const SizedBox(width: 7),
-                  Expanded(
-                    child: Text(
-                      step.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
-                        fontSize: isCompact ? 10.5 : 11,
-                        fontWeight: step.status == StepStatus.inProgress
-                            ? FontWeight.w700
-                            : FontWeight.w600,
-                        color: isDark ? Colors.white70 : Colors.black87,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }),
-        ],
-      ),
-    );
-  }
+  bool _shouldShowPlanCard(AIChatMessage _) => false;
 
   SourceBadge _sourceBadgeFromRagSource(RagSource source) {
     final normalized = source.sourceType.trim().toLowerCase();
@@ -2279,6 +2151,26 @@ class _AIChatScreenState extends State<AIChatScreen>
     return false;
   }
 
+  bool _responseUsesWebContent(Map<String, dynamic> response) {
+    final retrievalMode = response['retrieval_mode']?.toString().toLowerCase();
+    if (retrievalMode == 'web') return true;
+
+    final answerOrigin = response['answer_origin']?.toString().toLowerCase();
+    return answerOrigin == 'web_only' || answerOrigin == 'notes_plus_web';
+  }
+
+  void _guardUnexpectedWebResponse({
+    required bool allowWeb,
+    required Map<String, dynamic> response,
+  }) {
+    if (allowWeb || !_responseUsesWebContent(response)) return;
+
+    throw StateError(
+      'Web research is off, so this answer was blocked because it came from '
+      'the web instead of your notes.',
+    );
+  }
+
   bool _looksLikeNoContextAnswer(String answer) {
     final normalized = answer.trim().toLowerCase();
     if (normalized.isEmpty) return true;
@@ -2286,348 +2178,7 @@ class _AIChatScreenState extends State<AIChatScreen>
   }
 
   Map<String, dynamic>? _decodeJsonMapFromText(String raw) {
-    if (raw.trim().isEmpty) return null;
-    final fenceMatch = RegExp(
-      r'```(?:json)?\s*([\s\S]*?)```',
-      caseSensitive: false,
-    ).firstMatch(raw);
-    final cleaned = (fenceMatch?.group(1) ?? raw).trim();
-
-    final full = _tryDecodeJson(cleaned);
-    if (full is Map<String, dynamic>) return full;
-    if (full is Map) return Map<String, dynamic>.from(full);
-    if (full is List) {
-      final questions = full
-          .whereType<Map>()
-          .map(Map<String, dynamic>.from)
-          .toList();
-      if (questions.isNotEmpty) {
-        return <String, dynamic>{'questions': questions};
-      }
-    }
-
-    final firstObjectStart = cleaned.indexOf('{');
-    if (firstObjectStart != -1) {
-      final firstObjectEnd = _findBalancedObjectEnd(cleaned, firstObjectStart);
-      if (firstObjectEnd != -1) {
-        final sliced = cleaned.substring(firstObjectStart, firstObjectEnd + 1);
-        final parsed = _tryDecodeJson(sliced);
-        if (parsed is Map<String, dynamic>) return parsed;
-        if (parsed is Map) return Map<String, dynamic>.from(parsed);
-      }
-    }
-
-    return _recoverQuestionPaperJson(cleaned);
-  }
-
-  dynamic _tryDecodeJson(String source) {
-    try {
-      return jsonDecode(source);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  int _findBalancedObjectEnd(String source, int startIndex) {
-    if (startIndex < 0 ||
-        startIndex >= source.length ||
-        source[startIndex] != '{') {
-      return -1;
-    }
-
-    var depth = 0;
-    var inString = false;
-    var escaped = false;
-
-    for (var i = startIndex; i < source.length; i++) {
-      final char = source[i];
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-          continue;
-        }
-        if (char == r'\') {
-          escaped = true;
-          continue;
-        }
-        if (char == '"') {
-          inString = false;
-        }
-        continue;
-      }
-
-      if (char == '"') {
-        inString = true;
-        continue;
-      }
-      if (char == '{') {
-        depth++;
-        continue;
-      }
-      if (char == '}') {
-        depth--;
-        if (depth == 0) return i;
-      }
-    }
-    return -1;
-  }
-
-  String _decodeJsonEscapedString(String value) {
-    final decoded = _tryDecodeJson('"$value"');
-    if (decoded is String) return decoded;
-    return value;
-  }
-
-  String? _extractJsonStringField(String source, String field) {
-    final pattern = RegExp(
-      '"${RegExp.escape(field)}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)"',
-      caseSensitive: false,
-    );
-    final match = pattern.firstMatch(source);
-    if (match == null) return null;
-    final raw = match.group(1);
-    if (raw == null) return null;
-    final decoded = _decodeJsonEscapedString(raw).trim();
-    return decoded.isEmpty ? null : decoded;
-  }
-
-  List<String> _extractJsonStringArrayField(String source, String field) {
-    final fieldMatch = RegExp(
-      '"${RegExp.escape(field)}"\\s*:\\s*\\[',
-      caseSensitive: false,
-    ).firstMatch(source);
-    if (fieldMatch == null) return const [];
-
-    final values = <String>[];
-    var inString = false;
-    var escaped = false;
-    final buffer = StringBuffer();
-
-    for (var i = fieldMatch.end; i < source.length; i++) {
-      final char = source[i];
-      if (inString) {
-        if (escaped) {
-          buffer.write(char);
-          escaped = false;
-          continue;
-        }
-        if (char == r'\') {
-          escaped = true;
-          continue;
-        }
-        if (char == '"') {
-          final value = _decodeJsonEscapedString(buffer.toString()).trim();
-          if (value.isNotEmpty) values.add(value);
-          buffer.clear();
-          inString = false;
-          continue;
-        }
-        buffer.write(char);
-        continue;
-      }
-
-      if (char == '"') {
-        inString = true;
-        continue;
-      }
-      if (char == ']') {
-        break;
-      }
-    }
-    return values;
-  }
-
-  List<Map<String, dynamic>> _extractQuestionObjectsFromPartialJson(
-    String source,
-  ) {
-    final questionsMatch = RegExp(
-      '"questions"\\s*:\\s*\\[',
-      caseSensitive: false,
-    ).firstMatch(source);
-    if (questionsMatch == null) return const [];
-
-    final parsed = <Map<String, dynamic>>[];
-    var cursor = questionsMatch.end;
-    while (cursor < source.length) {
-      final char = source[cursor];
-      if (char == ']') break;
-      if (char != '{') {
-        cursor++;
-        continue;
-      }
-
-      final end = _findBalancedObjectEnd(source, cursor);
-      if (end == -1) break;
-
-      final objectSlice = source.substring(cursor, end + 1);
-      final decoded = _tryDecodeJson(objectSlice);
-      if (decoded is Map<String, dynamic>) {
-        parsed.add(decoded);
-      } else if (decoded is Map) {
-        parsed.add(Map<String, dynamic>.from(decoded));
-      }
-      cursor = end + 1;
-    }
-    return parsed;
-  }
-
-  Map<String, dynamic>? _recoverQuestionPaperJson(String source) {
-    final questions = _extractQuestionObjectsFromPartialJson(source);
-    if (questions.isEmpty) return null;
-
-    final recovered = <String, dynamic>{'questions': questions};
-    final title = _extractJsonStringField(source, 'title');
-    final subject = _extractJsonStringField(source, 'subject');
-    final instructions = _extractJsonStringArrayField(source, 'instructions');
-    if (title != null) recovered['title'] = title;
-    if (subject != null) recovered['subject'] = subject;
-    if (instructions.isNotEmpty) recovered['instructions'] = instructions;
-    return recovered;
-  }
-
-  int _resolveAnswerIndex({
-    required dynamic answer,
-    required List<String> options,
-  }) {
-    if (options.isEmpty) return 0;
-    final answerText = answer?.toString().trim() ?? '';
-    if (answerText.isEmpty) return 0;
-
-    final letterMatch = RegExp(r'^[A-Za-z]$').firstMatch(answerText);
-    if (letterMatch != null) {
-      final idx = answerText.toUpperCase().codeUnitAt(0) - 65;
-      if (idx >= 0 && idx < options.length) return idx;
-    }
-
-    final letterInText = RegExp(
-      r'\b(?:option\s*)?([A-Da-d])\b',
-    ).firstMatch(answerText);
-    if (letterInText != null) {
-      final letter = letterInText.group(1)?.toUpperCase() ?? '';
-      if (letter.isNotEmpty) {
-        final idx = letter.codeUnitAt(0) - 65;
-        if (idx >= 0 && idx < options.length) return idx;
-      }
-    }
-
-    final numeric = int.tryParse(answerText);
-    if (numeric != null && numeric > 0 && numeric <= options.length) {
-      return numeric - 1;
-    }
-    if (numeric != null && numeric >= 0 && numeric < options.length) {
-      return numeric;
-    }
-
-    final normalizedAnswer = answerText.toLowerCase();
-    for (var i = 0; i < options.length; i++) {
-      if (options[i].trim().toLowerCase() == normalizedAnswer) {
-        return i;
-      }
-    }
-    return 0;
-  }
-
-  List<String> _parseOptionsFromRawQuestion(Map<String, dynamic> raw) {
-    final rawOptions = raw['options'];
-    if (rawOptions is List) {
-      return rawOptions
-          .map((item) => item.toString().trim())
-          .where((item) => item.isNotEmpty)
-          .toList();
-    }
-
-    if (rawOptions is Map) {
-      final mapped = Map<String, dynamic>.from(rawOptions);
-      final letterKeys = <String>['A', 'B', 'C', 'D'];
-      final fromLetters = <String>[];
-      for (final key in letterKeys) {
-        final value = mapped[key] ?? mapped[key.toLowerCase()];
-        final option = value?.toString().trim() ?? '';
-        if (option.isNotEmpty) {
-          fromLetters.add(option);
-        }
-      }
-      if (fromLetters.length >= 2) return fromLetters;
-
-      final generic = mapped.values
-          .map((value) => value?.toString().trim() ?? '')
-          .where((value) => value.isNotEmpty)
-          .toList();
-      if (generic.length >= 2) return generic;
-    }
-
-    final fallbackKeys = ['option_a', 'option_b', 'option_c', 'option_d'];
-    final fallback = <String>[];
-    for (final key in fallbackKeys) {
-      final option = raw[key]?.toString().trim() ?? '';
-      if (option.isNotEmpty) fallback.add(option);
-    }
-    return fallback;
-  }
-
-  List<AiQuestionPaperQuestion> _parsePlainTextMcqs(String raw) {
-    final lines = raw.split('\n');
-    final questions = <AiQuestionPaperQuestion>[];
-
-    String currentQuestion = '';
-    final currentOptions = <String>[];
-    int currentAnswer = 0;
-
-    void flush() {
-      if (currentQuestion.trim().isEmpty || currentOptions.length < 2) return;
-      questions.add(
-        AiQuestionPaperQuestion(
-          question: currentQuestion.trim(),
-          options: List<String>.from(currentOptions),
-          correctIndex: currentAnswer.clamp(0, currentOptions.length - 1),
-        ),
-      );
-      currentQuestion = '';
-      currentOptions.clear();
-      currentAnswer = 0;
-    }
-
-    for (final rawLine in lines) {
-      final line = rawLine.trim();
-      if (line.isEmpty) continue;
-
-      final qMatch = RegExp(r'^\d+[\).]\s*(.+)$').firstMatch(line);
-      if (qMatch != null) {
-        flush();
-        currentQuestion = qMatch.group(1)?.trim() ?? '';
-        continue;
-      }
-
-      final optionMatch = RegExp(
-        r'^(?:[A-Da-d]|[1-4])[\).:\-]\s*(.+)$',
-      ).firstMatch(line);
-      if (optionMatch != null) {
-        currentOptions.add(optionMatch.group(1)?.trim() ?? '');
-        continue;
-      }
-
-      final answerMatch = RegExp(
-        r'^(?:answer|correct)\s*[:\-]\s*([A-Da-d1-4])$',
-        caseSensitive: false,
-      ).firstMatch(line);
-      if (answerMatch != null) {
-        final token = answerMatch.group(1)?.trim() ?? 'A';
-        final numeric = int.tryParse(token);
-        if (numeric != null && numeric >= 1 && numeric <= 4) {
-          currentAnswer = numeric - 1;
-        } else {
-          final char = token.toUpperCase();
-          currentAnswer = char.codeUnitAt(0) - 65;
-        }
-        continue;
-      }
-
-      if (currentQuestion.isNotEmpty && currentOptions.isEmpty) {
-        currentQuestion = '$currentQuestion $line';
-      }
-    }
-    flush();
-    return questions;
+    return decodeStructuredJsonMap(raw);
   }
 
   Future<String> _inferSubjectFromAttachments({
@@ -2881,6 +2432,15 @@ class _AIChatScreenState extends State<AIChatScreen>
   String _cleanUserVisibleErrorMessage(Object error) {
     final raw = error.toString().replaceFirst('Exception: ', '').trim();
     final lowered = raw.toLowerCase();
+    if (lowered.contains('connection reset') ||
+        lowered.contains('reset by peer') ||
+        lowered.contains('socketexception') ||
+        lowered.contains('connection abort')) {
+      return 'The AI server connection was interrupted. Please try again.';
+    }
+    if (lowered.contains('timed out') || lowered.contains('timeout')) {
+      return 'The AI request took too long. Please try again in a moment.';
+    }
     final hasHtmlPayload =
         lowered.contains('<!doctype html') ||
         lowered.contains('<html') ||
@@ -3225,91 +2785,26 @@ Return STRICT JSON only (no markdown). Schema:
     required String fallbackSubject,
     required int contextResourceCount,
   }) {
-    final decoded = _decodeJsonMapFromText(rawResponse);
-    final questions = <AiQuestionPaperQuestion>[];
-    var subject = fallbackSubject.trim();
-    var title = 'Generated Question Paper';
-    var instructions = <String>[];
-
-    if (decoded != null) {
-      final parsedSubject = decoded['subject']?.toString().trim() ?? '';
-      if (parsedSubject.isNotEmpty) subject = parsedSubject;
-      final parsedTitle = decoded['title']?.toString().trim() ?? '';
-      if (parsedTitle.isNotEmpty) title = parsedTitle;
-      instructions = ((decoded['instructions'] as List?) ?? const [])
-          .map((line) => line.toString().trim())
-          .where((line) => line.isNotEmpty)
-          .toList();
-
-      final rawQuestions = ((decoded['questions'] as List?) ?? const [])
-          .whereType<Map>()
-          .map((item) => Map<String, dynamic>.from(item))
-          .toList();
-
-      for (final raw in rawQuestions) {
-        final questionText =
-            raw['question']?.toString().trim() ??
-            raw['question_text']?.toString().trim() ??
-            raw['text']?.toString().trim() ??
-            raw['prompt']?.toString().trim() ??
-            '';
-        final options = _parseOptionsFromRawQuestion(raw);
-        if (questionText.isEmpty || options.length < 2) continue;
-        if (_isPlaceholderQuestion(question: questionText, options: options)) {
-          continue;
-        }
-
-        final sourceRaw = raw['source'];
-        final source = sourceRaw is Map
-            ? AiQuestionPaperSource(
-                title: sourceRaw['title']?.toString() ?? '',
-                section: sourceRaw['section']?.toString() ?? '',
-                pages: sourceRaw['pages']?.toString() ?? '',
-                note: sourceRaw['note']?.toString() ?? '',
-              )
-            : AiQuestionPaperSource(note: sourceRaw?.toString() ?? '');
-
-        final answerCandidate =
-            raw['answer'] ??
-            raw['correct_answer'] ??
-            raw['correctOption'] ??
-            raw['correct_option'] ??
-            raw['correctIndex'] ??
-            raw['correct_index'];
-
-        questions.add(
-          AiQuestionPaperQuestion(
-            question: questionText,
-            options: options,
-            correctIndex: _resolveAnswerIndex(
-              answer: answerCandidate,
-              options: options,
-            ),
-            explanation: raw['explanation']?.toString() ?? '',
-            source: source,
-          ),
-        );
-      }
-    }
-
-    if (questions.isEmpty) {
-      questions.addAll(_parsePlainTextMcqs(rawResponse));
-    }
-    questions.removeWhere(
-      (q) => _isPlaceholderQuestion(question: q.question, options: q.options),
-    );
-    if (questions.isEmpty) return null;
-    if (subject.isEmpty) subject = 'General';
-
-    return AiQuestionPaper(
-      title: title,
-      subject: subject,
+    final parsed = parseAiQuestionPaper(
+      rawResponse: rawResponse,
       semester: semester,
       branch: branch,
-      instructions: instructions,
-      questions: questions,
-      generatedAt: DateTime.now(),
-      pyqCount: contextResourceCount,
+      fallbackSubject: fallbackSubject,
+      contextResourceCount: contextResourceCount,
+    );
+    if (parsed == null) return null;
+
+    final filteredQuestions = parsed.questions
+        .where(
+          (q) =>
+              !_isPlaceholderQuestion(question: q.question, options: q.options),
+        )
+        .toList(growable: false);
+    if (filteredQuestions.isEmpty) return null;
+
+    return parsed.copyWith(
+      subject: parsed.subject.trim().isEmpty ? 'General' : parsed.subject,
+      questions: filteredQuestions,
     );
   }
 
@@ -4075,12 +3570,7 @@ Return STRICT JSON only (no markdown). Schema:
         }
 
         final tracker = _startLongResponseTracker('AI response generation');
-        final aiMessage = AIChatMessage(
-          isUser: false,
-          content: '',
-          planTitle: _buildPlanTitleFromPrompt(userVisible),
-          planSteps: _buildInitialLivePlanSteps(),
-        );
+        final aiMessage = AIChatMessage(isUser: false, content: '');
         final AIChatMessage aiMessageForError = aiMessage;
         var malformedChunkCount = 0;
         var aiInvoked = false;
@@ -4118,7 +3608,6 @@ Return STRICT JSON only (no markdown). Schema:
           );
           aiInvoked = true;
 
-          var receivedContent = false;
           await for (final chunkStr in stream) {
             if (!mounted) break;
             try {
@@ -4127,6 +3616,10 @@ Return STRICT JSON only (no markdown). Schema:
 
               if (type == 'metadata') {
                 final data = chunk['data'] as Map<String, dynamic>? ?? {};
+                _guardUnexpectedWebResponse(
+                  allowWeb: effectiveAllowWeb,
+                  response: data,
+                );
                 final sourcesRaw = (data['sources'] as List?) ?? const [];
                 final ocrErrorsRaw = (data['ocr_errors'] as List?) ?? const [];
                 final sources = sourcesRaw
@@ -4193,9 +3686,6 @@ Return STRICT JSON only (no markdown). Schema:
                 });
               } else if (type == 'chunk') {
                 final textChunk = chunk['text']?.toString() ?? '';
-                if (textChunk.trim().isNotEmpty) {
-                  receivedContent = true;
-                }
                 _enqueueTypedChunk(aiMessage, textChunk);
               } else if (type == 'error') {
                 _enqueueTypedChunk(aiMessage, '\n\nError: ${chunk['message']}');
@@ -4209,13 +3699,16 @@ Return STRICT JSON only (no markdown). Schema:
                   });
                 }
               } else {
+                _guardUnexpectedWebResponse(
+                  allowWeb: effectiveAllowWeb,
+                  response: Map<String, dynamic>.from(chunk),
+                );
                 final textChunk =
                     chunk['text']?.toString() ??
                     chunk['answer']?.toString() ??
                     chunk['response']?.toString() ??
                     '';
                 if (textChunk.trim().isNotEmpty) {
-                  receivedContent = true;
                   _enqueueTypedChunk(aiMessage, textChunk);
                 }
                 final sourcesRaw = (chunk['sources'] as List?) ?? const [];
@@ -4277,7 +3770,6 @@ Return STRICT JSON only (no markdown). Schema:
             } catch (e, st) {
               final fallbackText = chunkStr.trim();
               if (fallbackText.isNotEmpty) {
-                receivedContent = true;
                 _enqueueTypedChunk(aiMessage, fallbackText);
               } else {
                 debugPrint('Chunk parse error: $e\nStack: $st');
@@ -4294,7 +3786,8 @@ Return STRICT JSON only (no markdown). Schema:
           _streamTypingDone = true;
           _completeTypingDrainIfDrained();
           await _waitForTypingDrain();
-          if (receivedContent) {
+          final hasAssistantText = aiMessage.content.trim().isNotEmpty;
+          if (hasAssistantText) {
             final sanitized = _sanitizeAssistantAnswerText(aiMessage.content);
             final promotedQuiz = await _maybePromoteQuizFromAssistantResponse(
               rawResponse: sanitized,
@@ -4310,6 +3803,12 @@ Return STRICT JSON only (no markdown). Schema:
               } else {
                 aiMessage.content = sanitized;
               }
+            });
+          } else if (mounted) {
+            setState(() {
+              aiMessage.content = effectiveAllowWeb
+                  ? 'The AI connection was interrupted before a full answer arrived. Please try again.'
+                  : 'I could not complete a notes-based answer this time. Please try again.';
             });
           }
 
@@ -4664,7 +4163,10 @@ Return STRICT JSON only (no markdown). Schema:
       letterSpacing: 0.05,
     );
     final showPlanCard =
-      _shouldShowPlanCard(msg) && !isStreamingAssistantMessage;
+        _shouldShowPlanCard(msg) && !isStreamingAssistantMessage;
+    final streamingHint = _allowWebMode
+        ? 'Thinking through your sources and the web...'
+        : 'Thinking through your notes...';
     final messageBody = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -4768,7 +4270,22 @@ Return STRICT JSON only (no markdown). Schema:
           if (!(isStreamingAssistantMessage && msg.content.trim().isEmpty))
             const SizedBox(height: 10),
         ],
-        if (!(isStreamingAssistantMessage && isStreamingPlaceholder))
+        if (isStreamingPlaceholder)
+          Padding(
+            padding: const EdgeInsets.only(top: 2, bottom: 2),
+            child: Shimmer.fromColors(
+              baseColor: isDark ? Colors.white54 : Colors.black45,
+              highlightColor: isDark ? Colors.white : Colors.black87,
+              child: Text(
+                streamingHint,
+                style: messageTextStyle.copyWith(
+                  color: isDark ? Colors.white70 : Colors.black54,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          )
+        else
           AiFormattedText(
             text: msg.content,
             baseStyle: messageTextStyle,
@@ -4841,7 +4358,7 @@ Return STRICT JSON only (no markdown). Schema:
             ),
           ),
         ],
-        if (!msg.isUser && msg.sources.isNotEmpty && !showPlanCard) ...[
+        if (!msg.isUser && msg.sources.isNotEmpty) ...[
           const SizedBox(height: 12),
           Text(
             'Sources',
@@ -5229,6 +4746,13 @@ Return STRICT JSON only (no markdown). Schema:
     final composerBusy =
         _isLoading || _isUploadingAttachment || _isSendAttemptInProgress;
     final canSend = hasComposerContent && !composerBusy;
+    final textFieldMinHeight = math.max(
+      48.0,
+      math.max(attachButtonSize, sendButtonSize),
+    );
+    final toggleBackground = _allowWebMode
+        ? AppTheme.primary.withValues(alpha: isDark ? 0.18 : 0.12)
+        : Colors.transparent;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(0, 4, 0, 8),
@@ -5247,97 +4771,72 @@ Return STRICT JSON only (no markdown). Schema:
             ),
           ],
         ),
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 2),
-              child: Row(
-                children: [
-                  Icon(
-                    _allowWebMode ? Icons.travel_explore_rounded : Icons.menu_book_rounded,
-                    size: 14,
-                    color: _allowWebMode ? AppTheme.primary : mutedIconColor,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(4, 4, 6, 4),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Tooltip(
+                message: 'Attach image or PDF',
+                child: SizedBox(
+                  width: attachButtonSize,
+                  height: attachButtonSize,
+                  child: Center(
+                    child: _isUploadingAttachment
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : IconButton(
+                            key: _coachAttachKey,
+                            onPressed: composerBusy ? null : _pickAttachment,
+                            visualDensity: VisualDensity.compact,
+                            splashRadius: 18,
+                            icon: Icon(
+                              Icons.attach_file_rounded,
+                              size: 20,
+                              color: composerBusy ? mutedIconColor : iconColor,
+                            ),
+                          ),
                   ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      _allowWebMode
-                          ? 'Web research mode on'
-                          : 'Notes-first mode',
-                      style: GoogleFonts.inter(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: _allowWebMode
-                            ? AppTheme.primary
-                            : (isDark ? Colors.white60 : Colors.black54),
-                      ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              Expanded(
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: textFieldMinHeight),
+                  child: TextField(
+                    key: _coachInputKey,
+                    controller: _controller,
+                    minLines: 1,
+                    maxLines: 6,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => _sendMessage(),
+                    style: textFieldStyle,
+                    decoration: InputDecoration(
+                      hintText: 'Ask anything about your notes...',
+                      hintStyle: hintStyle.copyWith(color: mutedIconColor),
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.fromLTRB(0, 14, 0, 14),
+                      isDense: true,
                     ),
                   ),
-                ],
+                ),
               ),
-            ),
-            TextField(
-              key: _coachInputKey,
-              controller: _controller,
-              minLines: 1,
-              maxLines: 6,
-              textInputAction: TextInputAction.send,
-              onSubmitted: (_) => _sendMessage(),
-              style: textFieldStyle,
-              decoration: InputDecoration(
-                hintText: 'Ask anything about your notes...',
-                hintStyle: hintStyle.copyWith(color: mutedIconColor),
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
-                isDense: true,
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
-              child: Row(
-                children: [
-                  Tooltip(
-                    message: 'Attach image or PDF',
-                    child: InkWell(
-                      key: _coachAttachKey,
-                      borderRadius: BorderRadius.circular(999),
-                      onTap: composerBusy ? null : _pickAttachment,
-                      child: Container(
-                        width: attachButtonSize,
-                        height: attachButtonSize,
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? Colors.white.withValues(alpha: 0.08)
-                              : const Color(0xFFF1F5F9),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Center(
-                          child: _isUploadingAttachment
-                              ? const SizedBox(
-                                  width: 16,
-                                  height: 16,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : Icon(
-                                  Icons.attach_file_rounded,
-                                  size: 20,
-                                  color: composerBusy
-                                      ? mutedIconColor
-                                      : iconColor,
-                                ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Tooltip(
-                      message: _allowWebMode ? 'Web mode on' : 'Web mode off',
+              const SizedBox(width: 2),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 2),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Tooltip(
+                      message: _allowWebMode
+                          ? 'Web research on'
+                          : 'Web research off',
                       child: InkWell(
-                        borderRadius: BorderRadius.circular(999),
-                        onTap: (_isLoading || _isSendAttemptInProgress)
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: composerBusy
                             ? null
                             : () {
                                 if (!mounted) return;
@@ -5345,82 +4844,44 @@ Return STRICT JSON only (no markdown). Schema:
                               },
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 180),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 9,
-                          ),
+                          padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: _allowWebMode
-                                ? AppTheme.primary.withValues(alpha: isDark ? 0.2 : 0.12)
-                                : (isDark
-                                      ? Colors.white.withValues(alpha: 0.08)
-                                      : const Color(0xFFF4F6FB)),
-                            borderRadius: BorderRadius.circular(999),
-                            border: Border.all(
-                              color: _allowWebMode
-                                  ? AppTheme.primary.withValues(alpha: 0.45)
-                                  : (isDark ? Colors.white24 : const Color(0xFFDCE3F0)),
-                            ),
+                            color: toggleBackground,
+                            borderRadius: BorderRadius.circular(12),
                           ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                _allowWebMode
-                                    ? Icons.public_rounded
-                                    : Icons.public_off_rounded,
-                                size: 16,
-                                color: _allowWebMode
-                                    ? AppTheme.primary
-                                    : mutedIconColor,
-                              ),
-                              const SizedBox(width: 7),
-                              Text(
-                                _allowWebMode ? 'Web Research ON' : 'Web Research OFF',
-                                style: GoogleFonts.inter(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w700,
-                                  color: _allowWebMode
-                                      ? AppTheme.primary
-                                      : (isDark ? Colors.white70 : Colors.black54),
-                                ),
-                              ),
-                            ],
+                          child: Icon(
+                            _allowWebMode
+                                ? Icons.public_rounded
+                                : Icons.menu_book_rounded,
+                            size: 18,
+                            color: _allowWebMode
+                                ? AppTheme.primary
+                                : mutedIconColor,
                           ),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  SizedBox(
-                    width: sendButtonSize,
-                    height: sendButtonSize,
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      decoration: BoxDecoration(
-                        color: canSend
-                            ? AppTheme.primary
-                            : (isDark
-                                  ? Colors.white.withValues(alpha: 0.08)
-                                  : const Color(0xFFE9EEF7)),
-                        shape: BoxShape.circle,
-                      ),
+                    SizedBox(
+                      key: _coachSendKey,
+                      width: sendButtonSize,
+                      height: sendButtonSize,
                       child: IconButton(
                         onPressed: canSend ? _sendMessage : null,
-                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
+                        splashRadius: 18,
+                        tooltip: 'Send',
                         icon: Icon(
                           Icons.arrow_upward_rounded,
-                          size: 18,
-                          color: canSend
-                              ? Colors.white
-                              : mutedIconColor,
+                          size: 20,
+                          color: canSend ? AppTheme.primary : mutedIconColor,
                         ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -5712,10 +5173,6 @@ Return STRICT JSON only (no markdown). Schema:
                       itemCount: _messages.length,
                       itemBuilder: (context, index) {
                         final m = _messages[index];
-                        final isStreamingAssistantMessage =
-                            !m.isUser &&
-                            _isLoading &&
-                            index == _messages.length - 1;
 
                         return Align(
                           alignment: m.isUser
@@ -5728,13 +5185,6 @@ Return STRICT JSON only (no markdown). Schema:
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                if (isStreamingAssistantMessage)
-                                  _buildLiveActivityPanel(
-                                    message: m,
-                                    isDark: isDark,
-                                    isCompact: isCompact,
-                                    maxWidth: bubbleMaxWidth,
-                                  ),
                                 _buildMessageBubble(
                                   m,
                                   isDark,

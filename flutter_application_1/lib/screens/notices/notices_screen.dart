@@ -39,6 +39,11 @@ class _NoticesScreenState extends State<NoticesScreen>
   List<Map<String, dynamic>> _filteredNotices = [];
   bool _isLoading = true;
   bool _canManageNotices = false;
+  bool _isLoadingMoreNotices = false;
+  bool _hasMoreNotices = true;
+  int _noticesOffset = 0;
+  int _noticesRequestId = 0;
+  static const int _noticesPageSize = 80;
 
   late TabController _tabController;
 
@@ -128,7 +133,7 @@ class _NoticesScreenState extends State<NoticesScreen>
         _endDate = picked.end;
         _isLoading = true;
       });
-      _loadNotices();
+      _loadNotices(reset: true);
     }
   }
 
@@ -246,7 +251,8 @@ class _NoticesScreenState extends State<NoticesScreen>
                                   collegeId: widget.collegeId,
                                   isDark: isDark,
                                   canManage: _canManageNotices,
-                                  onNoticeUpdated: _loadAccessContextAndNotices,
+                                  onNoticeUpdated: () =>
+                                      _loadNotices(reset: true),
                                 ),
                               );
                             },
@@ -285,7 +291,7 @@ class _NoticesScreenState extends State<NoticesScreen>
 
   Future<void> _loadAccessContextAndNotices() async {
     await _loadNoticeAccess();
-    await _loadNotices();
+    await _loadNotices(reset: true);
   }
 
   @override
@@ -418,15 +424,35 @@ class _NoticesScreenState extends State<NoticesScreen>
     }
   }
 
-  Future<void> _loadNotices() async {
+  Future<void> _loadNotices({bool reset = false}) async {
     if (!mounted) return;
-    setState(() => _isLoading = true);
+    final hasDateFilter = _startDate != null && _endDate != null;
+    final fetchLimit = hasDateFilter ? 500 : _noticesPageSize;
+    final requestOffset = reset ? 0 : _noticesOffset;
+    final requestId = reset ? ++_noticesRequestId : _noticesRequestId;
+
+    if (reset) {
+      setState(() {
+        _isLoading = true;
+        _isLoadingMoreNotices = false;
+      });
+    } else {
+      if (_isLoading || _isLoadingMoreNotices || !_hasMoreNotices) return;
+      setState(() => _isLoadingMoreNotices = true);
+    }
 
     try {
       final notices = await _supabaseService.getNotices(
         collegeId: widget.collegeId,
         includeHidden: _canManageNotices,
+        limit: fetchLimit,
+        offset: requestOffset,
       );
+      if (requestId != _noticesRequestId) return;
+      // visibleNotices applies role visibility: managers (_canManageNotices)
+      // can see all notices, while other users only see active items.
+      // activeNotices is intentionally separate so HomeWidget sync always
+      // receives active entries only, even when managers view inactive notices.
       final visibleNotices = _canManageNotices
           ? notices
           : notices.where((notice) => notice['is_active'] != false).toList();
@@ -449,8 +475,15 @@ class _NoticesScreenState extends State<NoticesScreen>
 
       if (mounted) {
         setState(() {
-          _filteredNotices = filtered;
+          if (reset) {
+            _filteredNotices = filtered;
+          } else {
+            _filteredNotices = [..._filteredNotices, ...filtered];
+          }
+          _noticesOffset = requestOffset + notices.length;
+          _hasMoreNotices = !hasDateFilter && notices.length >= fetchLimit;
           _isLoading = false;
+          _isLoadingMoreNotices = false;
         });
       }
 
@@ -478,8 +511,19 @@ class _NoticesScreenState extends State<NoticesScreen>
       );
     } catch (e) {
       debugPrint('Error loading notices: $e');
-      if (mounted) setState(() => _isLoading = false);
+      if (requestId != _noticesRequestId) return;
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _isLoadingMoreNotices = false;
+        });
+      }
     }
+  }
+
+  Future<void> _loadMoreNotices() async {
+    if (_startDate != null && _endDate != null) return;
+    await _loadNotices(reset: false);
   }
 
   @override
@@ -602,7 +646,7 @@ class _NoticesScreenState extends State<NoticesScreen>
                 children: [
                   // Tab 1: Notices List
                   RefreshIndicator(
-                    onRefresh: _loadNotices,
+                    onRefresh: () => _loadNotices(reset: true),
                     child: _isLoading
                         ? _buildLoadingSkeleton(isDark)
                         : _filteredNotices.isEmpty
@@ -615,8 +659,44 @@ class _NoticesScreenState extends State<NoticesScreen>
                                 16,
                                 120,
                               ),
-                              itemCount: _filteredNotices.length,
+                              itemCount:
+                                  _filteredNotices.length +
+                                  ((_hasMoreNotices &&
+                                          _startDate == null &&
+                                          _endDate == null)
+                                      ? 1
+                                      : 0),
                               itemBuilder: (context, index) {
+                                if (_hasMoreNotices &&
+                                    _startDate == null &&
+                                    _endDate == null &&
+                                    index == _filteredNotices.length) {
+                                  return Padding(
+                                    padding: const EdgeInsets.only(
+                                      top: 6,
+                                      bottom: 14,
+                                    ),
+                                    child: Center(
+                                      child: _isLoadingMoreNotices
+                                          ? const SizedBox(
+                                              width: 22,
+                                              height: 22,
+                                              child:
+                                                  CircularProgressIndicator(
+                                                    strokeWidth: 2,
+                                                  ),
+                                            )
+                                          : OutlinedButton.icon(
+                                              onPressed: _loadMoreNotices,
+                                              icon: const Icon(
+                                                Icons.expand_more_rounded,
+                                              ),
+                                              label: const Text('Load more'),
+                                            ),
+                                    ),
+                                  );
+                                }
+
                                 final notice = _filteredNotices[index];
                                 // Attempt to map to department, fallback to General
                                 // Depending on notice schema, it might have 'department' key
@@ -644,8 +724,8 @@ class _NoticesScreenState extends State<NoticesScreen>
                                           collegeId: widget.collegeId,
                                           isDark: isDark,
                                           canManage: _canManageNotices,
-                                          onNoticeUpdated:
-                                              _loadAccessContextAndNotices,
+                                          onNoticeUpdated: () =>
+                                              _loadNotices(reset: true),
                                         ),
                                       ),
                                     ),
@@ -901,7 +981,7 @@ class _NoticesScreenState extends State<NoticesScreen>
       _startDate = null;
       _endDate = null;
     });
-    _loadNotices();
+    _loadNotices(reset: true);
   }
 
   Widget _buildDateFilterHeader(bool isDark) {

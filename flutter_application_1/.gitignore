@@ -49,16 +49,7 @@ app.*.map.json
 /android/.idea/
 
 # Android build intermediates and generated files
-**/intermediates/
-**/.cxx/
-**/outputs/
-**/android/**/build/intermediates/**
-**/android/**/.gradle/
 
-# Android specific build artifacts
-android/app/build/intermediates/**
-android/app/build/outputs/**
-**/flutter_build.d
 
 # Analysis logs
 analysis_log*.txt

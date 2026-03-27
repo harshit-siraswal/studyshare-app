@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -8,7 +9,6 @@ import '../data/academic_subjects_data.dart';
 import '../models/resource.dart';
 import '../screens/profile/user_profile_screen.dart';
 import '../screens/viewer/pdf_viewer_screen.dart';
-import '../screens/viewer/video_player_screen.dart';
 import '../services/download_service.dart';
 import '../services/subscription_service.dart';
 import '../services/supabase_service.dart';
@@ -28,6 +28,10 @@ class ResourceCard extends StatefulWidget {
   final VoidCallback? onDelete;
   final VoidCallback? onVoteChanged;
 
+  /// When true, callers should either pre-populate cache or call
+  /// [ResourceCardState.hydrateRemoteState] to avoid stale vote/bookmark UI.
+  final bool deferRemoteStateHydration;
+
   const ResourceCard({
     super.key,
     required this.resource,
@@ -39,13 +43,14 @@ class ResourceCard extends StatefulWidget {
     this.onReject,
     this.onDelete,
     this.onVoteChanged,
+    this.deferRemoteStateHydration = false,
   });
 
   @override
-  State<ResourceCard> createState() => _ResourceCardState();
+  State<ResourceCard> createState() => ResourceCardState();
 }
 
-class _ResourceCardState extends State<ResourceCard> {
+class ResourceCardState extends State<ResourceCard> {
   final SupabaseService _supabaseService = SupabaseService();
   final DownloadService _downloadService = DownloadService();
 
@@ -55,15 +60,19 @@ class _ResourceCardState extends State<ResourceCard> {
   bool _isBookmarked = false;
   bool _isVoting = false;
   bool _isDownloaded = false;
+  OverlayEntry? _peekOverlayEntry;
 
   @override
   void initState() {
     super.initState();
-    _upvotes = widget.resource.upvotes;
-    _downvotes = widget.resource.downvotes;
-    _checkBookmark();
-    _refreshVoteState();
+    _hydrateFromCacheAndMaybeRefresh();
     _refreshDownloadState();
+  }
+
+  @override
+  void dispose() {
+    _hidePeekPreview();
+    super.dispose();
   }
 
   @override
@@ -71,10 +80,42 @@ class _ResourceCardState extends State<ResourceCard> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.resource.id != widget.resource.id ||
         oldWidget.userEmail != widget.userEmail) {
+      _hydrateFromCacheAndMaybeRefresh();
       _refreshDownloadState();
-      _checkBookmark();
-      _refreshVoteState();
     }
+  }
+
+  void _hydrateFromCacheAndMaybeRefresh() {
+    _userVote = null;
+    _upvotes = widget.resource.upvotes;
+    _downvotes = widget.resource.downvotes;
+    _isBookmarked = false;
+
+    final cachedVote = _supabaseService.getCachedVoteState(
+      widget.resource.id,
+      userEmail: widget.userEmail,
+    );
+    if (cachedVote != null) {
+      _userVote = cachedVote.userVote;
+      _upvotes = cachedVote.upvotes;
+      _downvotes = cachedVote.downvotes;
+    }
+
+    final cachedBookmark = _supabaseService.getCachedBookmarkState(
+      widget.userEmail,
+      widget.resource.id,
+    );
+    if (cachedBookmark != null) {
+      _isBookmarked = cachedBookmark;
+    }
+
+    if (!widget.deferRemoteStateHydration) {
+      hydrateRemoteState();
+    }
+  }
+
+  Future<void> hydrateRemoteState() async {
+    await Future.wait<void>([_checkBookmark(), _refreshVoteState()]);
   }
 
   Future<void> _checkBookmark() async {
@@ -91,6 +132,7 @@ class _ResourceCardState extends State<ResourceCard> {
     try {
       final voteStatus = await _supabaseService.getResourceVoteStatus(
         widget.resource.id,
+        userEmail: widget.userEmail,
       );
       if (!mounted) return;
       setState(() {
@@ -193,7 +235,7 @@ class _ResourceCardState extends State<ResourceCard> {
         widget.resource.id,
         widget.userEmail,
       );
-      if (path != null) {
+      if (path != null && context.mounted) {
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -211,6 +253,7 @@ class _ResourceCardState extends State<ResourceCard> {
 
     final subService = SubscriptionService();
     final isPremium = await subService.isPremium();
+    if (!context.mounted) return;
     if (!isPremium) {
       showDialog(
         context: context,
@@ -242,19 +285,17 @@ class _ResourceCardState extends State<ResourceCard> {
         ownerEmail: widget.userEmail,
       );
       await _refreshDownloadState();
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Download Complete!')));
-      }
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Download Complete!')));
     } on DownloadCancelledException {
       return;
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
-      }
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Download failed: $e')));
     }
   }
 
@@ -411,6 +452,7 @@ class _ResourceCardState extends State<ResourceCard> {
     }
 
     final url = hasLocalFile ? localPath! : widget.resource.fileUrl;
+    if (!mounted) return;
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -426,50 +468,28 @@ class _ResourceCardState extends State<ResourceCard> {
 
   Future<void> _openVideo() async {
     final rawUrl = widget.resource.fileUrl;
-    final youtubeLink = parseYoutubeLink(rawUrl);
-    if (youtubeLink != null) {
-      try {
-        final opened = await openStudyShareLink(
-          context,
-          rawUrl: rawUrl,
-          title: widget.resource.title,
-          resourceId: widget.resource.id,
-          collegeId: widget.resource.collegeId,
-          subject: widget.resource.subject,
-          semester: widget.resource.semester,
-          branch: widget.resource.branch,
-        );
-        if (opened || !mounted) return;
-      } catch (e) {
-        debugPrint('openStudyShareLink error: $e');
-      }
-    } else {
-      final resolvedUri = buildStudyShareExternalUri(rawUrl);
-      final resolvedUrl = resolvedUri?.toString() ?? rawUrl;
-      if (!mounted) return;
-      await Navigator.push(
+    try {
+      final opened = await openStudyShareLink(
         context,
-        MaterialPageRoute(
-          builder: (_) => VideoPlayerScreen(
-            videoUrl: resolvedUrl,
-            title: widget.resource.title,
-            resourceId: widget.resource.id,
-            collegeId: widget.resource.collegeId,
-            subject: widget.resource.subject,
-            semester: widget.resource.semester,
-            branch: widget.resource.branch,
-          ),
-        ),
+        rawUrl: rawUrl,
+        title: widget.resource.title,
+        resourceId: widget.resource.id,
+        collegeId: widget.resource.collegeId,
+        subject: widget.resource.subject,
+        semester: widget.resource.semester,
+        branch: widget.resource.branch,
       );
-      return;
+      if (opened || !mounted) return;
+    } catch (e) {
+      debugPrint('openStudyShareLink error: $e');
     }
 
     final uri = _buildExternalVideoUri(widget.resource.fileUrl);
     if (uri == null) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid video URL')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Invalid video URL')));
       return;
     }
 
@@ -479,13 +499,231 @@ class _ResourceCardState extends State<ResourceCard> {
     final fallbackLaunched = await launchUrl(uri);
     if (fallbackLaunched || !mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Could not open video link')),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(const SnackBar(content: Text('Could not open video link')));
   }
 
   Uri? _buildExternalVideoUri(String rawUrl) {
     return buildExternalUri(rawUrl);
+  }
+
+  bool _looksLikeImageUrl(String url) {
+    final path = Uri.tryParse(url)?.path.toLowerCase() ?? url.toLowerCase();
+    return path.endsWith('.png') ||
+        path.endsWith('.jpg') ||
+        path.endsWith('.jpeg') ||
+        path.endsWith('.webp') ||
+        path.endsWith('.gif');
+  }
+
+  String? get _peekPreviewImageUrl {
+    final thumbnail = widget.resource.thumbnailUrl?.trim() ?? '';
+    if (thumbnail.isNotEmpty) return thumbnail;
+
+    final fileUrl = widget.resource.fileUrl.trim();
+    if (_looksLikeImageUrl(fileUrl)) return fileUrl;
+    return null;
+  }
+
+  Widget _buildPeekPreviewVisual(bool isDark) {
+    final previewUrl = _peekPreviewImageUrl;
+    if (previewUrl != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: AspectRatio(
+          aspectRatio: 16 / 10,
+          child: ColoredBox(
+            color: isDark ? Colors.black : Colors.white,
+            child: Image.network(
+              previewUrl,
+              fit: BoxFit.cover,
+              errorBuilder: (_, error, stackTrace) =>
+                  _buildPeekPreviewFallback(isDark),
+              loadingBuilder: (context, child, progress) {
+                if (progress == null) return child;
+                return const Center(child: CircularProgressIndicator());
+              },
+            ),
+          ),
+        ),
+      );
+    }
+
+    return _buildPeekPreviewFallback(isDark);
+  }
+
+  Widget _buildPeekPreviewFallback(bool isDark) {
+    return Container(
+      height: 180,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            _getTypeColor().withValues(alpha: 0.2),
+            (isDark ? AppTheme.darkCard : Colors.white),
+          ],
+        ),
+      ),
+      child: Center(
+        child: Container(
+          width: 72,
+          height: 72,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: _getTypeColor().withValues(alpha: 0.16),
+          ),
+          child: Icon(_getTypeIcon(), color: _getTypeColor(), size: 34),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPeekPreviewCard(BuildContext overlayContext) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final description = widget.resource.description?.trim() ?? '';
+    final maxWidth = MediaQuery.of(overlayContext).size.width > 460
+        ? 420.0
+        : MediaQuery.of(overlayContext).size.width - 28;
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 28),
+          child: TweenAnimationBuilder<double>(
+            tween: Tween<double>(begin: 0.94, end: 1),
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOutCubic,
+            builder: (context, scale, child) =>
+                Transform.scale(scale: scale, child: child),
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? const Color(0xFF12151D).withValues(alpha: 0.96)
+                      : Colors.white.withValues(alpha: 0.96),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(
+                    color: isDark ? Colors.white12 : Colors.black12,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.28),
+                      blurRadius: 28,
+                      offset: const Offset(0, 16),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildPeekPreviewVisual(isDark),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: _getTypeColor().withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            widget.resource.type.toUpperCase(),
+                            style: GoogleFonts.inter(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: _getTypeColor(),
+                            ),
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          'Release to close',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                            color: isDark ? Colors.white60 : Colors.black54,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      widget.resource.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: isDark
+                            ? AppTheme.textOnDark
+                            : AppTheme.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      _resourceMetaText(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white70 : Colors.black54,
+                      ),
+                    ),
+                    if (description.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        description,
+                        maxLines: 4,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          height: 1.45,
+                          color: isDark ? Colors.white70 : Colors.black87,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showPeekPreview() {
+    if (_peekOverlayEntry != null || !mounted) return;
+    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlay == null) return;
+
+    HapticFeedback.selectionClick();
+    _peekOverlayEntry = OverlayEntry(
+      builder: (overlayContext) => IgnorePointer(
+        ignoring: true,
+        child: Material(
+          color: Colors.black.withValues(alpha: 0.32),
+          child: _buildPeekPreviewCard(overlayContext),
+        ),
+      ),
+    );
+    overlay.insert(_peekOverlayEntry!);
+  }
+
+  void _hidePeekPreview() {
+    _peekOverlayEntry?.remove();
+    _peekOverlayEntry = null;
   }
 
   int get _netVotes => _upvotes - _downvotes;
@@ -515,221 +753,228 @@ class _ResourceCardState extends State<ResourceCard> {
     final moderationMetaRow = _buildModerationMetaRow();
     final moderationButtons = _buildModerationActionButtons();
 
-    return Material(
-      color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: _openResource,
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onLongPressStart: (_) => _showPeekPreview(),
+      onLongPressEnd: (_) => _hidePeekPreview(),
+      child: Material(
+        color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
         borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: EdgeInsets.all(isCompactCard ? 8 : 12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+        child: InkWell(
+          onTap: _openResource,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: EdgeInsets.all(isCompactCard ? 8 : 12),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? 0.18 : 0.05),
+                  blurRadius: 12,
+                  offset: const Offset(0, 6),
+                ),
+              ],
             ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.18 : 0.05),
-                blurRadius: 12,
-                offset: const Offset(0, 6),
-              ),
-            ],
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: isCompactCard ? 36 : 48,
-                height: isCompactCard ? 36 : 48,
-                decoration: BoxDecoration(
-                  color: _getTypeColor().withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(isCompactCard ? 8 : 10),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: isCompactCard ? 36 : 48,
+                  height: isCompactCard ? 36 : 48,
+                  decoration: BoxDecoration(
+                    color: _getTypeColor().withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(isCompactCard ? 8 : 10),
+                  ),
+                  child: Icon(
+                    _getTypeIcon(),
+                    color: _getTypeColor(),
+                    size: isCompactCard ? 18 : 24,
+                  ),
                 ),
-                child: Icon(
-                  _getTypeIcon(),
-                  color: _getTypeColor(),
-                  size: isCompactCard ? 18 : 24,
-                ),
-              ),
-              SizedBox(width: isCompactCard ? 8 : 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Wrap(
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      spacing: isCompactCard ? 6 : 8,
-                      runSpacing: isCompactCard ? 3 : 4,
-                      children: [
-                        Text(
-                          widget.resource.title,
-                          style: GoogleFonts.inter(
-                            fontSize: isCompactCard ? 13 : 14,
-                            fontWeight: FontWeight.w600,
-                            color: isDark
-                                ? AppTheme.textOnDark
-                                : AppTheme.textPrimary,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        Container(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: isCompactCard ? 5 : 6,
-                            vertical: isCompactCard ? 1.5 : 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: _getTypeColor().withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            widget.resource.type.toUpperCase(),
-                            style: GoogleFonts.inter(
-                              fontSize: isCompactCard ? 9 : 10,
-                              fontWeight: FontWeight.w600,
-                              color: _getTypeColor(),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    SizedBox(height: isCompactCard ? 2 : 4),
-                    _buildAuthorWidget(compact: isCompactCard),
-                    SizedBox(height: isCompactCard ? 2 : 4),
-                    Text(
-                      _resourceMetaText(),
-                      style: GoogleFonts.inter(
-                        fontSize: isCompactCard ? 10 : 11,
-                        color: AppTheme.textMuted,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    SizedBox(height: isCompactCard ? 6 : 8),
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
+                SizedBox(width: isCompactCard ? 8 : 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: isCompactCard ? 6 : 8,
+                        runSpacing: isCompactCard ? 3 : 4,
                         children: [
+                          Text(
+                            widget.resource.title,
+                            style: GoogleFonts.inter(
+                              fontSize: isCompactCard ? 13 : 14,
+                              fontWeight: FontWeight.w600,
+                              color: isDark
+                                  ? AppTheme.textOnDark
+                                  : AppTheme.textPrimary,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                           Container(
                             padding: EdgeInsets.symmetric(
-                              horizontal: isCompactCard ? 3 : 4,
-                              vertical: isCompactCard ? 1 : 2,
+                              horizontal: isCompactCard ? 5 : 6,
+                              vertical: isCompactCard ? 1.5 : 2,
                             ),
                             decoration: BoxDecoration(
-                              color: isDark
-                                  ? Colors.white.withValues(alpha: 0.05)
-                                  : Colors.black.withValues(alpha: 0.03),
-                              borderRadius: BorderRadius.circular(8),
+                              color: _getTypeColor().withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(6),
                             ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                _buildVoteButton(
-                                  icon: Icons.thumb_up_outlined,
-                                  isActive: _userVote == 1,
-                                  color: AppTheme.success,
-                                  onTap: () => _vote(1),
-                                ),
-                                Padding(
-                                  padding: EdgeInsets.symmetric(
-                                    horizontal: isCompactCard ? 4 : 6,
-                                  ),
-                                  child: Text(
-                                    _netVotes > 0
-                                        ? '+$_netVotes'
-                                        : '$_netVotes',
-                                    style: GoogleFonts.inter(
-                                      fontSize: isCompactCard ? 11 : 12,
-                                      fontWeight: FontWeight.w600,
-                                      color: _netVotes > 0
-                                          ? AppTheme.success
-                                          : _netVotes < 0
-                                          ? AppTheme.error
-                                          : AppTheme.textMuted,
-                                    ),
-                                  ),
-                                ),
-                                _buildVoteButton(
-                                  icon: Icons.thumb_down_outlined,
-                                  isActive: _userVote == -1,
-                                  color: AppTheme.error,
-                                  onTap: () => _vote(-1),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Material(
-                            color: Colors.transparent,
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(20),
-                              onTap: _toggleBookmark,
-                              child: Padding(
-                                padding: EdgeInsets.all(isCompactCard ? 6 : 8),
-                                child: Icon(
-                                  _isBookmarked
-                                      ? Icons.bookmark
-                                      : Icons.bookmark_border,
-                                  size: isCompactCard ? 18 : 20,
-                                  color: _isBookmarked
-                                      ? AppTheme.warning
-                                      : AppTheme.textMuted,
-                                ),
+                            child: Text(
+                              widget.resource.type.toUpperCase(),
+                              style: GoogleFonts.inter(
+                                fontSize: isCompactCard ? 9 : 10,
+                                fontWeight: FontWeight.w600,
+                                color: _getTypeColor(),
                               ),
-                            ),
-                          ),
-                          SizedBox(width: isCompactCard ? 12 : 16),
-                          if (widget.resource.type == 'notes' ||
-                              widget.resource.type == 'pyq') ...[
-                            Material(
-                              color: Colors.transparent,
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(20),
-                                onTap: () => _handleDownload(context),
-                                child: Padding(
-                                  padding: EdgeInsets.all(
-                                    isCompactCard ? 6 : 8,
-                                  ),
-                                  child: _isDownloaded
-                                      ? Icon(
-                                          Icons.offline_pin,
-                                          size: isCompactCard ? 18 : 20,
-                                          color: AppTheme.success,
-                                        )
-                                      : Icon(
-                                          Icons.download_rounded,
-                                          size: isCompactCard ? 18 : 20,
-                                          color: AppTheme.textMuted,
-                                        ),
-                                ),
-                              ),
-                            ),
-                            SizedBox(width: isCompactCard ? 8 : 12),
-                          ],
-                          Text(
-                            widget.resource.formattedDate,
-                            style: GoogleFonts.inter(
-                              fontSize: isCompactCard ? 9 : 10,
-                              color: AppTheme.textMuted,
                             ),
                           ),
                         ],
                       ),
-                    ),
-                    if (hasActionControls) ...[
-                      const SizedBox(height: 10),
-                      if (moderationMetaRow != null) ...[
-                        moderationMetaRow,
-                        if (moderationButtons.isNotEmpty)
-                          const SizedBox(height: 8),
+                      SizedBox(height: isCompactCard ? 2 : 4),
+                      _buildAuthorWidget(compact: isCompactCard),
+                      SizedBox(height: isCompactCard ? 2 : 4),
+                      Text(
+                        _resourceMetaText(),
+                        style: GoogleFonts.inter(
+                          fontSize: isCompactCard ? 10 : 11,
+                          color: AppTheme.textMuted,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      SizedBox(height: isCompactCard ? 6 : 8),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: isCompactCard ? 3 : 4,
+                                vertical: isCompactCard ? 1 : 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isDark
+                                    ? Colors.white.withValues(alpha: 0.05)
+                                    : Colors.black.withValues(alpha: 0.03),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  _buildVoteButton(
+                                    icon: Icons.thumb_up_outlined,
+                                    isActive: _userVote == 1,
+                                    color: AppTheme.success,
+                                    onTap: () => _vote(1),
+                                  ),
+                                  Padding(
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: isCompactCard ? 4 : 6,
+                                    ),
+                                    child: Text(
+                                      _netVotes > 0
+                                          ? '+$_netVotes'
+                                          : '$_netVotes',
+                                      style: GoogleFonts.inter(
+                                        fontSize: isCompactCard ? 11 : 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: _netVotes > 0
+                                            ? AppTheme.success
+                                            : _netVotes < 0
+                                            ? AppTheme.error
+                                            : AppTheme.textMuted,
+                                      ),
+                                    ),
+                                  ),
+                                  _buildVoteButton(
+                                    icon: Icons.thumb_down_outlined,
+                                    isActive: _userVote == -1,
+                                    color: AppTheme.error,
+                                    onTap: () => _vote(-1),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(20),
+                                onTap: _toggleBookmark,
+                                child: Padding(
+                                  padding: EdgeInsets.all(
+                                    isCompactCard ? 6 : 8,
+                                  ),
+                                  child: Icon(
+                                    _isBookmarked
+                                        ? Icons.bookmark
+                                        : Icons.bookmark_border,
+                                    size: isCompactCard ? 18 : 20,
+                                    color: _isBookmarked
+                                        ? AppTheme.warning
+                                        : AppTheme.textMuted,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            SizedBox(width: isCompactCard ? 12 : 16),
+                            if (widget.resource.type == 'notes' ||
+                                widget.resource.type == 'pyq') ...[
+                              Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(20),
+                                  onTap: () => _handleDownload(context),
+                                  child: Padding(
+                                    padding: EdgeInsets.all(
+                                      isCompactCard ? 6 : 8,
+                                    ),
+                                    child: _isDownloaded
+                                        ? Icon(
+                                            Icons.offline_pin,
+                                            size: isCompactCard ? 18 : 20,
+                                            color: AppTheme.success,
+                                          )
+                                        : Icon(
+                                            Icons.download_rounded,
+                                            size: isCompactCard ? 18 : 20,
+                                            color: AppTheme.textMuted,
+                                          ),
+                                  ),
+                                ),
+                              ),
+                              SizedBox(width: isCompactCard ? 8 : 12),
+                            ],
+                            Text(
+                              widget.resource.formattedDate,
+                              style: GoogleFonts.inter(
+                                fontSize: isCompactCard ? 9 : 10,
+                                color: AppTheme.textMuted,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (hasActionControls) ...[
+                        const SizedBox(height: 10),
+                        if (moderationMetaRow != null) ...[
+                          moderationMetaRow,
+                          if (moderationButtons.isNotEmpty)
+                            const SizedBox(height: 8),
+                        ],
+                        ...moderationButtons,
                       ],
-                      ...moderationButtons,
                     ],
-                  ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -847,11 +1092,7 @@ class _ResourceCardState extends State<ResourceCard> {
       spacing: 8,
       runSpacing: 8,
       crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        ?statusBadge,
-        ?teacherProfile,
-        ?deleteButton,
-      ],
+      children: [?statusBadge, ?teacherProfile, ?deleteButton],
     );
   }
 

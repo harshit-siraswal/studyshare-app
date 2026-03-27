@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 import '../../config/theme.dart';
 import '../../utils/youtube_link_utils.dart';
@@ -38,15 +37,31 @@ class YoutubePlayerScreen extends StatefulWidget {
 }
 
 class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
+  static const String _genericLoadErrorMessage =
+      'Unable to load this YouTube video right now.';
+
   WebViewController? _webViewController;
-  bool _isPlayerLoading = true;
-  bool _isPlayerReady = false;
   int _currentStartSeconds = 0;
+  bool _isPlayerLoading = true;
   String? _playerErrorMessage;
-  int _playerLoadToken = 0;
 
   ParsedYoutubeLink get _activeLink =>
       widget.youtubeLink.copyWith(startSeconds: _currentStartSeconds);
+
+  Uri get _inAppWatchUri {
+    final query = <String, String>{
+      ..._activeLink.watchUri.queryParameters,
+      'app': 'm',
+      'autoplay': '1',
+      'playsinline': '1',
+    };
+    return Uri.https('m.youtube.com', '/watch', query);
+  }
+
+  bool get _canUseAiStudio => widget.resourceId?.trim().isNotEmpty ?? false;
+  bool get _hasVideoTranscriptContext =>
+      (widget.resourceId?.trim().isNotEmpty ?? false) ||
+      _activeLink.watchUri.toString().trim().isNotEmpty;
 
   @override
   void initState() {
@@ -67,139 +82,72 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
 
   @override
   void dispose() {
-    _playerLoadToken++;
-    _webViewController = null;
     super.dispose();
   }
 
-  void _setupPlayer({int? startSeconds}) {
-    final nextStartSeconds = startSeconds ?? _currentStartSeconds;
-    _playerLoadToken++;
-    _webViewController = null;
+  void _setupPlayer() {
+    late final WebViewController controller;
+    controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(Colors.black)
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageStarted: (_) {
+            if (!mounted || _webViewController != controller) return;
+            setState(() {
+              _isPlayerLoading = true;
+              _playerErrorMessage = null;
+            });
+          },
+          onPageFinished: (_) {
+            if (!mounted || _webViewController != controller) return;
+            setState(() {
+              _isPlayerLoading = false;
+              _playerErrorMessage = null;
+            });
+          },
+          onWebResourceError: (error) {
+            if (!mounted || _webViewController != controller) return;
+            final description = error.description.trim();
+            setState(() {
+              _isPlayerLoading = false;
+              _playerErrorMessage = description.isNotEmpty
+                  ? description
+                  : _genericLoadErrorMessage;
+            });
+          },
+        ),
+      );
+
     setState(() {
-      _currentStartSeconds = nextStartSeconds;
+      _webViewController = controller;
       _isPlayerLoading = true;
-      _isPlayerReady = false;
       _playerErrorMessage = null;
     });
-    unawaited(_loadPlayerForLink(_activeLink));
-  }
 
-  Future<void> _loadPlayerForLink(ParsedYoutubeLink link) async {
-    final token = _playerLoadToken;
-    final controller = WebViewController();
-    await controller.setJavaScriptMode(JavaScriptMode.unrestricted);
-    final platform = controller.platform;
-    if (platform is AndroidWebViewController) {
-      await platform.setMediaPlaybackRequiresUserGesture(false);
-    }
-    await controller.setBackgroundColor(Colors.black);
-    await controller.addJavaScriptChannel(
-      'StudySharePlayer',
-      onMessageReceived: (message) {
-        if (!mounted || _playerLoadToken != token) return;
-        if (message.message == 'player_ready') {
-          setState(() {
-            _isPlayerLoading = false;
-            _isPlayerReady = true;
-            _playerErrorMessage = null;
-          });
-          return;
-        }
-        if (message.message.startsWith('error:')) {
-          setState(() {
-            _isPlayerLoading = false;
-            _playerErrorMessage = message.message
-                .substring('error:'.length)
-                .trim();
-          });
-        }
-      },
-    );
-    await controller.setNavigationDelegate(
-      NavigationDelegate(
-        onWebResourceError: (error) {
-          if (!mounted || _playerLoadToken != token) return;
-          setState(() {
-            _isPlayerLoading = false;
-            _playerErrorMessage = error.description.trim().isNotEmpty
-                ? error.description.trim()
-                : 'Unable to load this YouTube video right now.';
-          });
-        },
-      ),
-    );
-
-    if (!mounted || _playerLoadToken != token) return;
-    setState(() => _webViewController = controller);
-
-    try {
-      await controller.loadHtmlString(
-        _buildPlayerHtml(link),
-        baseUrl: link.watchUri.toString(),
-      );
-    } catch (error) {
-      if (!mounted || _playerLoadToken != token) return;
-      setState(() {
-        _isPlayerLoading = false;
-        _playerErrorMessage = 'Unable to load this YouTube video right now.';
-      });
-      debugPrint('YoutubePlayerScreen load error: $error');
-    }
-  }
-
-  Future<void> _openInYoutube({bool showFailureSnackBar = true}) async {
-    final opened = await openYoutubeExternally(_activeLink);
-    if (opened || !showFailureSnackBar || !mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Could not open YouTube right now.')),
+    unawaited(
+      controller.loadRequest(_inAppWatchUri).catchError((error) {
+        if (!mounted || _webViewController != controller) return;
+        final description = error?.toString().trim() ?? '';
+        setState(() {
+          _isPlayerLoading = false;
+          _playerErrorMessage = description.isNotEmpty
+              ? description
+              : _genericLoadErrorMessage;
+        });
+      }),
     );
   }
 
-  Future<void> _openInBrowser() async {
-    final opened = await launchExternalUri(_activeLink.watchUri);
+  Future<void> _openInYoutubeApp() async {
+    final opened = await openYoutubeInAppOnly(_activeLink);
     if (opened || !mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Could not open the video link.')),
+      const SnackBar(
+        content: Text('Could not open the YouTube app right now.'),
+      ),
     );
-  }
-
-  Future<void> _jumpToSecond(int seconds) async {
-    final bounded = seconds.clamp(0, 24 * 3600);
-    if (_isPlayerReady && _webViewController != null) {
-      try {
-        await _webViewController!.runJavaScript(
-          'if(window._ytPlayer&&window._ytPlayer.seekTo){window._ytPlayer.seekTo($bounded,true);}',
-        );
-        setState(() => _currentStartSeconds = bounded);
-        return;
-      } catch (e) {
-        debugPrint('JS seekTo failed, falling back to full reload: $e');
-      }
-    }
-    _setupPlayer(startSeconds: bounded);
-  }
-
-  List<int> _chapterJumpSeconds() {
-    final markers = <int>{0, 300, 600, 900, 1200};
-    if (widget.youtubeLink.startSeconds > 0) {
-      markers.add(widget.youtubeLink.startSeconds);
-    }
-    final sorted = markers.toList()..sort();
-    return sorted.where((seconds) => seconds <= 3600).toList();
-  }
-
-  String _formatTimestamp(int seconds) {
-    final safe = seconds < 0 ? 0 : seconds;
-    final hours = safe ~/ 3600;
-    final minutes = (safe % 3600) ~/ 60;
-    final secs = safe % 60;
-    if (hours > 0) {
-      return '$hours:${minutes.toString().padLeft(2, '0')}:${secs.toString().padLeft(2, '0')}';
-    }
-    return '$minutes:${secs.toString().padLeft(2, '0')}';
   }
 
   void _openAiStudioSheet({int initialTabIndex = 0, String? autoGenerateType}) {
@@ -234,112 +182,21 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
     );
   }
 
-  /// Error codes 101 and 150 mean the video owner has disabled embedding.
-  /// Error 2 = invalid video ID; error 5 = HTML5 player error.
-  /// We treat 101, 150, and 152 as "embedding disabled" for messaging.
-  static const _embeddingDisabledCodes = {101, 150, 152};
-
-  bool get _isEmbeddingError {
-    final msg = _playerErrorMessage ?? '';
-    final codeMatch = RegExp(r'error code (\d+)').firstMatch(msg);
-    if (codeMatch == null) return false;
-    final code = int.tryParse(codeMatch.group(1)!) ?? -1;
-    return _embeddingDisabledCodes.contains(code);
-  }
-
-  String _buildPlayerHtml(ParsedYoutubeLink link) {
-    final videoId = link.videoId;
-    final start = link.startSeconds;
-    final origin = link.watchUri.origin;
-    return '''
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
-    >
-    <style>
-      html, body {
-        margin: 0;
-        padding: 0;
-        width: 100%;
-        height: 100%;
-        background: #000;
-        overflow: hidden;
-      }
-      #player {
-        position: fixed;
-        inset: 0;
-        width: 100%;
-        height: 100%;
-      }
-    </style>
-    <script>
-      function studyShareNotify(message) {
-        if (window.StudySharePlayer) {
-          StudySharePlayer.postMessage(message);
-        }
-      }
-      var tag = document.createElement('script');
-      tag.src = 'https://www.youtube.com/iframe_api';
-      var firstScriptTag = document.getElementsByTagName('script')[0];
-      firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-      function onYouTubeIframeAPIReady() {
-        window._ytPlayer = new YT.Player('player', {
-          host: '$origin',
-          videoId: '$videoId',
-          playerVars: {
-            autoplay: 1,
-            start: $start,
-            playsinline: 1,
-            rel: 0,
-            modestbranding: 1,
-            enablejsapi: 1,
-            origin: '$origin',
-          },
-          events: {
-            onReady: function(event) {
-              studyShareNotify('player_ready');
-            },
-            onError: function(event) {
-              studyShareNotify('error:YouTube player error code ' + event.data);
-            },
-          },
-        });
-      }
-    </script>
-  </head>
-  <body>
-    <div id="player"></div>
-  </body>
-</html>
-''';
-  }
-
-
-
   Widget _buildPlayerError() {
-    final isEmbedError = _isEmbeddingError;
-    final message = isEmbedError
-        ? 'This video cannot be played in-app.\nPlease open it in YouTube.'
-        : (_playerErrorMessage == null || _playerErrorMessage!.isEmpty)
-            ? 'Unable to load video.'
-            : _playerErrorMessage!;
+    final message = (_playerErrorMessage ?? '').trim().isEmpty
+        ? _genericLoadErrorMessage
+        : _playerErrorMessage!;
 
     return ColoredBox(
       color: Colors.black,
       child: Center(
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(18),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
-                isEmbedError
-                    ? Icons.videocam_off_rounded
-                    : Icons.error_outline_rounded,
+                Icons.error_outline_rounded,
                 color: Colors.white70,
                 size: 28,
               ),
@@ -354,39 +211,18 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
                 ),
               ),
               const SizedBox(height: 14),
-              // Primary action: Open in YouTube (especially for embed errors)
-              FilledButton.icon(
-                onPressed: _openInYoutube,
-                icon: const Icon(Icons.play_circle_fill_rounded, size: 18),
-                label: const Text('Open in YouTube'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFFE11D48),
-                  foregroundColor: Colors.white,
-                  minimumSize: const Size(200, 40),
-                  textStyle: GoogleFonts.inter(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                  ),
+              OutlinedButton.icon(
+                onPressed: _setupPlayer,
+                icon: const Icon(Icons.refresh_rounded, size: 16),
+                label: const Text('Retry'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white70,
+                  side: const BorderSide(color: Colors.white24),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
                 ),
               ),
-              if (!isEmbedError) ...[
-                const SizedBox(height: 8),
-                OutlinedButton.icon(
-                  onPressed: _setupPlayer,
-                  icon: const Icon(Icons.refresh_rounded, size: 16),
-                  label: const Text('Retry'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white70,
-                    side: const BorderSide(color: Colors.white24),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                  ),
-                ),
-              ],
             ],
           ),
         ),
@@ -397,17 +233,16 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
   Widget _buildPlayerSurface() {
     final controller = _webViewController;
     if (controller == null) {
-      if (_playerErrorMessage != null) {
-        return AspectRatio(aspectRatio: 16 / 9, child: _buildPlayerError());
-      }
       return AspectRatio(
         aspectRatio: 16 / 9,
-        child: Container(
-          color: Colors.black,
-          child: const Center(
-            child: CircularProgressIndicator(color: Colors.white),
-          ),
-        ),
+        child: _playerErrorMessage == null
+            ? const ColoredBox(
+                color: Colors.black,
+                child: Center(
+                  child: CircularProgressIndicator(color: Colors.white),
+                ),
+              )
+            : _buildPlayerError(),
       );
     }
 
@@ -440,128 +275,6 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
     );
   }
 
-  Widget _buildExternalActions() {
-    return Row(
-      children: [
-        Expanded(
-          child: ElevatedButton.icon(
-            onPressed: _openInYoutube,
-            icon: const Icon(Icons.play_circle_fill_rounded),
-            label: const Text('Open in YouTube'),
-            style: ElevatedButton.styleFrom(
-              minimumSize: const Size.fromHeight(46),
-              backgroundColor: const Color(0xFFE11D48),
-              foregroundColor: Colors.white,
-              textStyle: GoogleFonts.inter(
-                fontWeight: FontWeight.w700,
-                fontSize: 13,
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: _openInBrowser,
-            icon: const Icon(Icons.language_rounded),
-            label: const Text('Open in browser'),
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size.fromHeight(46),
-              textStyle: GoogleFonts.inter(
-                fontWeight: FontWeight.w700,
-                fontSize: 13,
-              ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildAiActionCard({
-    required BuildContext context,
-    required String title,
-    required String subtitle,
-    required IconData icon,
-    required List<Color> gradientColors,
-    required VoidCallback onTap,
-  }) {
-    return Container(
-      width: 160,
-      margin: const EdgeInsets.only(right: 12),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: gradientColors,
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: gradientColors.last.withValues(alpha: 0.3),
-            blurRadius: 8,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(20),
-          highlightColor: Colors.white.withValues(alpha: 0.1),
-          splashColor: Colors.white.withValues(alpha: 0.2),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.25),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(icon, color: Colors.white, size: 22),
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: GoogleFonts.inter(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                        height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      style: GoogleFonts.inter(
-                        color: Colors.white.withValues(alpha: 0.85),
-                        fontWeight: FontWeight.w500,
-                        fontSize: 11,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildScreen({required bool isDark}) {
     return Scaffold(
       backgroundColor: isDark
@@ -575,10 +288,16 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
+          if (_canUseAiStudio)
+            IconButton(
+              tooltip: 'AI Studio',
+              onPressed: _openAiStudioSheet,
+              icon: const Icon(Icons.auto_awesome_rounded),
+            ),
           IconButton(
-            tooltip: 'Open in YouTube',
-            onPressed: _openInYoutube,
-            icon: const Icon(Icons.open_in_new_rounded),
+            tooltip: 'Open in YouTube app',
+            onPressed: _openInYoutubeApp,
+            icon: const Icon(Icons.ondemand_video_rounded),
           ),
         ],
       ),
@@ -589,36 +308,16 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
               child: _buildPlayerSurface(),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
-              child: _buildExternalActions(),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _openAiStudioSheet,
-                  icon: const Icon(Icons.auto_awesome_rounded, size: 18),
-                  label: const Text('Open AI Studio'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primaryColor,
-                    foregroundColor: Colors.white,
-                    textStyle: GoogleFonts.inter(fontWeight: FontWeight.w700),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                ),
-              ),
-            ),
+            const SizedBox(height: 8),
             Expanded(
               child: AIChatScreen(
                 collegeId: widget.collegeId ?? '',
                 collegeName: widget.collegeName ?? '',
-                resourceContext: (widget.resourceId?.trim().isNotEmpty ?? false)
+                resourceContext: _hasVideoTranscriptContext
                     ? ResourceContext(
-                        fileId: widget.resourceId!,
+                        fileId: widget.resourceId?.trim().isEmpty == true
+                            ? null
+                            : widget.resourceId?.trim(),
                         title: widget.title,
                         subject: widget.subject,
                         semester: widget.semester,

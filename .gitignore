@@ -29,15 +29,9 @@ flutter_application_1/lib/config/app_config.dart
 **/.gradle/
 
 # Android build artifacts
-flutter_application_1/android/app/build/
-flutter_application_1/android/app/.gradle/
-flutter_application_1/android/.gradle/
-flutter_application_1/android/.idea/
 **/intermediates/
 **/.cxx/
 **/outputs/
 
 # Generated/derived build metadata
 **/flutter_build.d
-flutter_application_1/android/app/build/intermediates/**
-**/android/**/build/intermediates/**

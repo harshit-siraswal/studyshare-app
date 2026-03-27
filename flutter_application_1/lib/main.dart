@@ -445,7 +445,6 @@ class _AppRootState extends State<AppRoot> {
       ]);
 
       try {
-        await hiveInit;
         await DownloadService().init();
       } catch (e) {
         debugPrint('DownloadService initialization error: $e');
@@ -475,107 +474,105 @@ class _AppRootState extends State<AppRoot> {
       _bindAuthAwareFcmSync();
     }
 
-    // Initialize Push Notifications (after Firebase is ready)
-    if (!kIsWeb && _firebaseInitialized) {
-      try {
-        // Set up background message handler
-        FirebaseMessaging.onBackgroundMessage(
-          firebaseMessagingBackgroundHandler,
-        );
-
-        await _pushService.initialize(
-          onTokenRefresh: (token) async {
-            await _ensureFcmTokenOwnership(token);
-          },
-          onTokenInvalidated: (token) async {
-            _lastRegisteredFcmToken = null;
-            await _unregisterFcmToken(
-              token,
-              reason: 'notifications_disabled',
-            );
-            try {
-              final prefs = await SharedPreferences.getInstance();
-              await prefs.remove(_fcmOwnerEmailKey);
-            } catch (e, st) {
-              debugPrint(
-                'Failed to remove FCM owner email from prefs: $e\n$st',
-              );
-            }
-          },
-          onMessageReceived: (message) {
-            debugPrint('Foreground message: ${message.notification?.title}');
-          },
-          onNotificationTap: (message) async {
-            // Handle navigation based on message data
-            debugPrint('Notification tapped: ${message.data}');
-
-            try {
-              // Safe extraction
-              final dynamic actionUrlRaw = message.data['actionUrl'];
-              final String? actionUrl = actionUrlRaw?.toString();
-
-              if (actionUrl != null && actionUrl.isNotEmpty) {
-                if (actionUrl.startsWith('/')) {
-                  // Internal navigation using global navigator key
-                  debugPrint('Internal navigation to $actionUrl requested');
-                  final navigatorState = appNavigatorKey.currentState;
-                  if (navigatorState == null) {
-                    debugPrint(
-                      'Navigator not mounted. Skipping deep link now: '
-                      '$actionUrl',
-                    );
-                    queueDeepLink(actionUrl);
-                  } else {
-                    await navigatorState.pushNamed(actionUrl);
-                  }
-                } else {
-                  // External navigation
-                  final uri = Uri.parse(actionUrl);
-                  if (!_isTrustedNotificationUri(uri)) {
-                    debugPrint(
-                      'Blocked untrusted notification URL: ${uri.toString()}',
-                    );
-                    // Show user feedback for blocked URL
-                    final currentContext = appNavigatorKey.currentContext;
-                    if (currentContext != null) {
-                      final l10n = AppLocalizations.of(currentContext);
-                      ScaffoldMessenger.of(currentContext).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            l10n?.blockedUntrustedUrl ?? 'Blocked untrusted URL',
-                          ),
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
-                    }
-                    return;
-                  }
-                  if (await canLaunchUrl(uri)) {
-                    await launchUrl(uri, mode: LaunchMode.externalApplication);
-                  } else {
-                    debugPrint('Could not launch deep link: $actionUrl');
-                  }
-                }
-              }
-            } catch (e) {
-              debugPrint('Error handling notification tap: $e');
-            }
-          },
-        );
-        await _syncStoredFcmToken();
-        debugPrint('Push notifications initialized');
-      } catch (e) {
-        debugPrint('Push notification initialization error: $e');
-        // Don't fail startup for push notification errors
-      }
-    }
-
     if (mounted) {
       assert(
         _themeProvider != null,
         'ThemeProvider should be set by _bootstrapTheme',
       );
       setState(() => _appState = AppState.ready);
+    }
+
+    // Initialize Push Notifications in background (after Firebase is ready)
+    // so startup can reach interactive state without waiting on network-dependent
+    // FCM registration/token sync.
+    if (!kIsWeb && _firebaseInitialized) {
+      unawaited(_initializePushNotificationsInBackground());
+    }
+  }
+
+  Future<void> _initializePushNotificationsInBackground() async {
+    try {
+      // Set up background message handler
+      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+
+      await _pushService.initialize(
+        onTokenRefresh: (token) async {
+          await _ensureFcmTokenOwnership(token);
+        },
+        onTokenInvalidated: (token) async {
+          _lastRegisteredFcmToken = null;
+          await _unregisterFcmToken(token, reason: 'notifications_disabled');
+          try {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.remove(_fcmOwnerEmailKey);
+          } catch (e, st) {
+            debugPrint('Failed to remove FCM owner email from prefs: $e\n$st');
+          }
+        },
+        onMessageReceived: (message) {
+          debugPrint('Foreground message: ${message.notification?.title}');
+        },
+        onNotificationTap: (message) async {
+          // Handle navigation based on message data
+          debugPrint('Notification tapped: ${message.data}');
+
+          try {
+            // Safe extraction
+            final dynamic actionUrlRaw = message.data['actionUrl'];
+            final String? actionUrl = actionUrlRaw?.toString();
+
+            if (actionUrl != null && actionUrl.isNotEmpty) {
+              if (actionUrl.startsWith('/')) {
+                // Internal navigation using global navigator key
+                debugPrint('Internal navigation to $actionUrl requested');
+                final navigatorState = appNavigatorKey.currentState;
+                if (navigatorState == null) {
+                  debugPrint(
+                    'Navigator not mounted. Skipping deep link now: $actionUrl',
+                  );
+                  queueDeepLink(actionUrl);
+                } else {
+                  await navigatorState.pushNamed(actionUrl);
+                }
+              } else {
+                // External navigation
+                final uri = Uri.parse(actionUrl);
+                if (!_isTrustedNotificationUri(uri)) {
+                  debugPrint(
+                    'Blocked untrusted notification URL: ${uri.toString()}',
+                  );
+                  // Show user feedback for blocked URL
+                  final currentContext = appNavigatorKey.currentContext;
+                  if (currentContext != null) {
+                    final l10n = AppLocalizations.of(currentContext);
+                    ScaffoldMessenger.of(currentContext).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          l10n?.blockedUntrustedUrl ?? 'Blocked untrusted URL',
+                        ),
+                        duration: const Duration(seconds: 2),
+                      ),
+                    );
+                  }
+                  return;
+                }
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                } else {
+                  debugPrint('Could not launch deep link: $actionUrl');
+                }
+              }
+            }
+          } catch (e) {
+            debugPrint('Error handling notification tap: $e');
+          }
+        },
+      );
+      await _syncStoredFcmToken();
+      debugPrint('Push notifications initialized');
+    } catch (e) {
+      debugPrint('Push notification initialization error: $e');
+      // Don't fail startup for push notification errors
     }
   }
 

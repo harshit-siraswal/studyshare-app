@@ -3,7 +3,6 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:ui';
-import 'package:animations/animations.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -69,6 +68,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   bool _isHandlingIncomingShare = false;
   bool _isStudySyllabusTab = false;
   bool _canUploadSyllabusFromStudy = false;
+  List<Widget> _screens = <Widget>[];
+  String _screensUserEmail = '';
+  int _screensNoticesToken = -1;
 
   String get _effectiveUserEmail {
     final authEmail = (_authService.userEmail ?? '').trim();
@@ -87,6 +89,18 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _checkHelpOverlay();
     _loadComposerAccess();
     _initializeIncomingShareHandling();
+  }
+
+  @override
+  void didUpdateWidget(covariant HomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.collegeId != widget.collegeId ||
+        oldWidget.collegeDomain != widget.collegeDomain ||
+        oldWidget.collegeName != widget.collegeName) {
+      _screens = <Widget>[];
+      _screensUserEmail = '';
+      _screensNoticesToken = -1;
+    }
   }
 
   @override
@@ -268,16 +282,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             const SizedBox(height: 14),
             Flexible(
               child: ListView.separated(
-                shrinkWrap: true,
                 itemCount: sortedDepartments.length,
-                separatorBuilder: (context, index) =>
-                    const SizedBox(height: 8),
+                separatorBuilder: (context, index) => const SizedBox(height: 8),
                 itemBuilder: (context, i) {
                   final dept = sortedDepartments[i];
-                  final isRecommended = recommendedDepartmentName != null &&
+                  final isRecommended =
+                      recommendedDepartmentName != null &&
                       dept.name == recommendedDepartmentName;
                   return ListTile(
-                    tileColor: isDark ? AppTheme.darkBackground : Colors.grey[50],
+                    tileColor: isDark
+                        ? AppTheme.darkBackground
+                        : Colors.grey[50],
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
                     ),
@@ -320,16 +335,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _openSyllabusUploadFlowFromFab() async {
-    if (!_canUploadSyllabusFromStudy) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Only admins/teachers can upload syllabus.'),
-        ),
-      );
-      return;
-    }
-
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final departments = await DepartmentsProvider.getDepartments();
     if (!mounted) return;
@@ -503,52 +508,52 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return _subscriptionService.isPremium();
   }
 
-  Widget _getScreen(int index) {
-    switch (index) {
-      case 0:
-        return StudyScreen(
-          collegeId: widget.collegeId,
-          collegeDomain: widget.collegeDomain,
-          collegeName: widget.collegeName,
-          userEmail: _effectiveUserEmail,
-          onChangeCollege: widget.onChangeCollege,
-          onSyllabusContextChanged: _onStudySyllabusContextChanged,
-        );
-      case 1:
-        return ChatroomListScreen(
-          collegeId: widget.collegeId,
-          collegeDomain: widget.collegeDomain,
-          userEmail: _effectiveUserEmail,
-        );
-      case 2:
-        return NoticesScreen(
-          collegeId: widget.collegeId,
-          refreshToken: _noticesRefreshToken,
-        );
-      case 3:
-        return ProfileScreen(
-          collegeName: widget.collegeName,
-          collegeDomain: widget.collegeDomain,
-          onLogout: _handleLogout,
-          onChangeCollege: widget.onChangeCollege,
-          themeProvider: widget.themeProvider,
-        );
-      default:
-        return StudyScreen(
-          collegeId: widget.collegeId,
-          collegeDomain: widget.collegeDomain,
-          collegeName: widget.collegeName,
-          userEmail: _effectiveUserEmail,
-          onChangeCollege: widget.onChangeCollege,
-          onSyllabusContextChanged: _onStudySyllabusContextChanged,
-        );
+  void _ensureScreensUpToDate() {
+    final email = _effectiveUserEmail;
+    if (_screens.isNotEmpty &&
+        _screensUserEmail == email &&
+        _screensNoticesToken == _noticesRefreshToken) {
+      return;
     }
+    _screensUserEmail = email;
+    _screensNoticesToken = _noticesRefreshToken;
+    _screens = <Widget>[
+      StudyScreen(
+        key: ValueKey<String>('study:$email'),
+        collegeId: widget.collegeId,
+        collegeDomain: widget.collegeDomain,
+        collegeName: widget.collegeName,
+        userEmail: email,
+        onChangeCollege: widget.onChangeCollege,
+        onSyllabusContextChanged: _onStudySyllabusContextChanged,
+      ),
+      ChatroomListScreen(
+        key: ValueKey<String>('chat:$email'),
+        collegeId: widget.collegeId,
+        collegeDomain: widget.collegeDomain,
+        userEmail: email,
+      ),
+      NoticesScreen(
+        key: ValueKey<int>(_noticesRefreshToken),
+        collegeId: widget.collegeId,
+        refreshToken: _noticesRefreshToken,
+      ),
+      ProfileScreen(
+        key: const ValueKey<String>('profile'),
+        collegeName: widget.collegeName,
+        collegeDomain: widget.collegeDomain,
+        onLogout: _handleLogout,
+        onChangeCollege: widget.onChangeCollege,
+        themeProvider: widget.themeProvider,
+      ),
+    ];
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bottomPadding = MediaQuery.of(context).padding.bottom;
+    _ensureScreensUpToDate();
     // FAB Logic removed as per new requirements
 
     return Scaffold(
@@ -590,21 +595,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           // Main content - padding adjusted to match floating nav height (72) + spacing (16) + system padding
           SafeArea(
             bottom: false,
-            child: PageTransitionSwitcher(
-              duration: const Duration(milliseconds: 300),
-              transitionBuilder: (child, primaryAnimation, secondaryAnimation) {
-                return SharedAxisTransition(
-                  animation: primaryAnimation,
-                  secondaryAnimation: secondaryAnimation,
-                  transitionType: SharedAxisTransitionType.vertical,
-                  fillColor: Colors.transparent,
-                  child: child,
-                );
-              },
-              child: KeyedSubtree(
-                key: ValueKey<int>(_currentIndex),
-                child: _getScreen(_currentIndex),
-              ),
+            child: IndexedStack(
+              index: _currentIndex,
+              children: [_screens[0], _screens[1], _screens[2], _screens[3]],
             ),
           ),
 
@@ -804,9 +797,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Future<void> _handleFabTap() async {
     if (_roleLoading) return;
     if (_currentIndex == 0 && _isStudySyllabusTab) {
-      if (_canUploadSyllabusFromStudy) {
-        await _openSyllabusUploadFlowFromFab();
+      if (!_canUploadSyllabusFromStudy) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Only admins/teachers can upload syllabus.'),
+          ),
+        );
+        return;
       }
+      await _openSyllabusUploadFlowFromFab();
       return;
     }
     if (_currentIndex == 2) {
@@ -862,14 +862,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ]
         : <Color>[AppTheme.primary, AppTheme.primaryDark];
 
-    final shadowColor = (isSyllabusUploadDisabled
-            ? Colors.black
-            : AppTheme.primary)
-        .withValues(alpha: 0.35);
+    final shadowColor =
+        (isSyllabusUploadDisabled ? Colors.black : AppTheme.primary).withValues(
+          alpha: 0.35,
+        );
 
     final screenWidth = MediaQuery.of(context).size.width;
     final left = (screenWidth - fabWidth) / 2;
     final bottom = bottomPadding + 26.0;
+    final fabIcon = _getFabIcon();
 
     return Positioned(
       left: left,
@@ -880,36 +881,61 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           opacity: (_roleLoading || isSyllabusUploadDisabled) ? 0.6 : 1.0,
           child: Hero(
             tag: 'fab_main',
+            createRectTween: (begin, end) =>
+                MaterialRectCenterArcTween(begin: begin, end: end),
             child: GestureDetector(
               onTap: () async {
                 HapticFeedback.mediumImpact();
                 await _handleFabTap();
               },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 260),
-                curve: Curves.easeOutCubic,
-                width: fabWidth,
-                height: fabHeight,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: gradientColors,
-                  ),
-                  boxShadow: <BoxShadow>[
-                    BoxShadow(
-                      color: shadowColor,
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
+              child: Material(
+                color: Colors.transparent,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 260),
+                  curve: Curves.easeOutCubic,
+                  width: fabWidth,
+                  height: fabHeight,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: gradientColors,
                     ),
-                  ],
-                ),
-                child: Icon(
-                  _getFabIcon(),
-                  key: ValueKey<IconData>(_getFabIcon()),
-                  color: Colors.white,
-                  size: 28,
+                    boxShadow: <BoxShadow>[
+                      BoxShadow(
+                        color: shadowColor,
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 350),
+                      switchInCurve: Curves.easeOutBack,
+                      switchOutCurve: Curves.easeInBack,
+                      transitionBuilder: (child, animation) {
+                        final turns = Tween<double>(
+                          begin: 0.0,
+                          end: 0.18,
+                        ).animate(animation);
+                        return RotationTransition(
+                          turns: turns,
+                          child: ScaleTransition(
+                            scale: animation,
+                            child: child,
+                          ),
+                        );
+                      },
+                      child: Icon(
+                        fabIcon,
+                        key: ValueKey<IconData>(fabIcon),
+                        color: Colors.white,
+                        size: 28,
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),

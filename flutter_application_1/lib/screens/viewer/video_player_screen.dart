@@ -56,10 +56,19 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   }
 
   Future<void> _initController() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+    final previousController = _controller;
+    _controlsTimer?.cancel();
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+        _showControls = true;
+        _controller = null;
+      });
+    }
+    if (previousController != null) {
+      await previousController.dispose();
+    }
 
     try {
       final uri = Uri.parse(widget.videoUrl);
@@ -68,14 +77,19 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           : VideoPlayerController.file(File(widget.videoUrl));
       await controller.initialize();
       controller.setLooping(false);
+      if (!mounted) {
+        await controller.dispose();
+        return;
+      }
       setState(() {
         _controller = controller;
         _isLoading = false;
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Unable to play this video in-app.';
+        _errorMessage = 'Unable to play this video in-app. Please try again.';
       });
     }
   }
@@ -139,7 +153,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     );
   }
 
-  Widget _buildPlayerSurface(bool isDark) {
+  Widget _buildPlayerSurface() {
     if (_isLoading) {
       return const AspectRatio(
         aspectRatio: 16 / 9,
@@ -152,24 +166,44 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
         aspectRatio: 16 / 9,
         child: Container(
           color: Colors.black,
-          alignment: Alignment.center,
           padding: const EdgeInsets.all(16),
-          child: Text(
-            _errorMessage!,
-            textAlign: TextAlign.center,
-            style: GoogleFonts.inter(color: Colors.white70),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                _errorMessage!,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(color: Colors.white70),
+              ),
+              const SizedBox(height: 14),
+              OutlinedButton.icon(
+                onPressed: _initController,
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('Retry'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Colors.white24),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       );
     }
 
     final controller = _controller!;
+    final aspectRatio = controller.value.aspectRatio > 0
+        ? controller.value.aspectRatio
+        : (16 / 9);
     return GestureDetector(
       onTap: _toggleControlsVisibility,
       child: ClipRRect(
         borderRadius: BorderRadius.circular(18),
         child: AspectRatio(
-          aspectRatio: controller.value.aspectRatio,
+          aspectRatio: aspectRatio,
           child: Stack(
             children: [
               Positioned.fill(child: VideoPlayer(controller)),
@@ -215,9 +249,13 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final canUseAi = (widget.resourceId?.trim().isNotEmpty ?? false);
+    final canUseAiStudio = (widget.resourceId?.trim().isNotEmpty ?? false);
+    final hasVideoTranscriptContext =
+        canUseAiStudio || widget.videoUrl.trim().isNotEmpty;
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
+      backgroundColor: isDark
+          ? AppTheme.darkBackground
+          : AppTheme.lightBackground,
       appBar: AppBar(
         title: Text(
           widget.title,
@@ -225,41 +263,32 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
           overflow: TextOverflow.ellipsis,
           style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 15),
         ),
+        actions: [
+          if (canUseAiStudio)
+            IconButton(
+              onPressed: _openAiStudioSheet,
+              tooltip: 'AI Studio',
+              icon: const Icon(Icons.auto_awesome_rounded),
+            ),
+        ],
       ),
       body: SafeArea(
         child: Column(
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
-              child: _buildPlayerSurface(isDark),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
-              child: SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: canUseAi ? _openAiStudioSheet : null,
-                  icon: const Icon(Icons.auto_awesome_rounded, size: 18),
-                  label: const Text('Open AI Studio'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    foregroundColor: Colors.white,
-                    textStyle: GoogleFonts.inter(fontWeight: FontWeight.w700),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                  ),
-                ),
-              ),
+              child: _buildPlayerSurface(),
             ),
             const SizedBox(height: 8),
             Expanded(
               child: AIChatScreen(
                 collegeId: widget.collegeId ?? '',
                 collegeName: widget.collegeName ?? '',
-                resourceContext: canUseAi
+                resourceContext: hasVideoTranscriptContext
                     ? ResourceContext(
-                        fileId: widget.resourceId!,
+                        fileId: canUseAiStudio
+                            ? widget.resourceId?.trim()
+                            : null,
                         title: widget.title,
                         subject: widget.subject,
                         semester: widget.semester,

@@ -47,9 +47,21 @@ bool isBackendCompatibilityFallbackError(Object error) {
 /// Use this for ALL privileged writes (create room, post, comment, upload, profile update).
 /// This avoids client-side Supabase inserts that fail under RLS with anon key.
 class BackendApiService {
-  BackendApiService({FirebaseAuth? firebaseAuth, http.Client? httpClient})
-    : _injectedAuth = firebaseAuth,
-      _httpClient = httpClient ?? http.Client();
+  BackendApiService({
+    FirebaseAuth? firebaseAuth,
+    http.Client? httpClient,
+    bool startMaintenanceTimer = true,
+  }) : _injectedAuth = firebaseAuth,
+       _httpClient = httpClient ?? _sharedHttpClient {
+    if (startMaintenanceTimer) {
+      _bookmarkRateLimitCleanupTimer ??= Timer.periodic(
+        const Duration(minutes: 10),
+        (_) => _cleanupExpiredBookmarkCheckRateLimits(),
+      );
+    }
+  }
+
+  static final http.Client _sharedHttpClient = http.Client();
 
   final FirebaseAuth? _injectedAuth;
   final http.Client _httpClient;
@@ -128,10 +140,68 @@ class BackendApiService {
         lowered.contains('http 526');
   }
 
+  bool _isAiOrRagPath(String path) {
+    return path.startsWith('/api/rag/') || path.startsWith('/api/ai/');
+  }
+
+  bool _shouldPreferFreshConnection(String path) {
+    return _isAiOrRagPath(path);
+  }
+
+  bool _shouldRetryTransientConnectionFailure({
+    required String path,
+    required String method,
+  }) {
+    final normalizedMethod = method.toUpperCase();
+    if (_isAiOrRagPath(path)) {
+      return true;
+    }
+    return normalizedMethod == 'GET';
+  }
+
+  bool _isTransientConnectionFailure(Object error) {
+    if (error is TimeoutException || error is SocketException) {
+      return true;
+    }
+    if (error is http.ClientException) {
+      final lowered = error.message.toLowerCase();
+      return lowered.contains('connection reset') ||
+          lowered.contains('reset by peer') ||
+          lowered.contains('broken pipe') ||
+          lowered.contains('connection closed') ||
+          lowered.contains('connection abort') ||
+          lowered.contains('software caused connection abort') ||
+          lowered.contains('stream terminated') ||
+          lowered.contains('timed out');
+    }
+
+    final lowered = error.toString().toLowerCase();
+    return lowered.contains('connection reset') ||
+        lowered.contains('reset by peer') ||
+        lowered.contains('broken pipe') ||
+        lowered.contains('connection abort') ||
+        lowered.contains('socketexception') ||
+        lowered.contains('timed out');
+  }
+
   static final Map<String, DateTime> _bookmarkCheckRateLimitUntil =
       <String, DateTime>{};
+  static Timer? _bookmarkRateLimitCleanupTimer;
   DateTime? _notificationsRateLimitUntil;
   int? _lastUnreadNotificationCount;
+  List<Map<String, dynamic>> _lastNotificationsCache =
+      const <Map<String, dynamic>>[];
+
+  static void _cleanupExpiredBookmarkCheckRateLimits() {
+    final now = DateTime.now();
+    _bookmarkCheckRateLimitUntil.removeWhere((_, until) => !until.isAfter(now));
+  }
+
+  static void disposeTimersForTesting() {
+    _bookmarkRateLimitCleanupTimer?.cancel();
+    _bookmarkRateLimitCleanupTimer = null;
+    _bookmarkCheckRateLimitUntil.clear();
+  }
 
   FirebaseAuth? get _auth {
     if (_injectedAuth != null) return _injectedAuth;
@@ -273,8 +343,53 @@ class BackendApiService {
       effectiveBody ??= <String, dynamic>{};
       effectiveBody['recaptchaToken'] = recaptchaToken;
     }
+    final retryTransientConnectionFailure =
+        _shouldRetryTransientConnectionFailure(path: path, method: method);
+    final preferFreshConnection = _shouldPreferFreshConnection(path);
+    Future<http.Response> sendJsonAttempt({
+      required Map<String, String> currentHeaders,
+      required bool closeConnection,
+    }) {
+      final requestHeaders = Map<String, String>.from(currentHeaders);
+      if (closeConnection) {
+        requestHeaders['Connection'] = 'close';
+      }
+      return _sendRequest(method, uri, requestHeaders, effectiveBody, timeout);
+    }
 
-    var res = await _sendRequest(method, uri, headers, effectiveBody, timeout);
+    late http.Response res;
+    Object? lastTransientConnectionError;
+    for (
+      var attempt = 0;
+      attempt < (retryTransientConnectionFailure ? 2 : 1);
+      attempt++
+    ) {
+      try {
+        res = await sendJsonAttempt(
+          currentHeaders: headers,
+          closeConnection: preferFreshConnection || attempt > 0,
+        );
+        lastTransientConnectionError = null;
+        break;
+      } catch (error) {
+        lastTransientConnectionError = error;
+        final canRetry =
+            retryTransientConnectionFailure &&
+            attempt == 0 &&
+            _isTransientConnectionFailure(error);
+        if (!canRetry) {
+          rethrow;
+        }
+        debugPrint(
+          '[BackendApi] Retrying $method $path after transient connection '
+          'failure: $error',
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 260));
+      }
+    }
+    if (lastTransientConnectionError != null) {
+      throw lastTransientConnectionError;
+    }
 
     if (!usesBearerOverride &&
         (res.statusCode == 401 || res.statusCode == 403)) {
@@ -289,7 +404,10 @@ class BackendApiService {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
         };
-        res = await _sendRequest(method, uri, headers, effectiveBody, timeout);
+        res = await sendJsonAttempt(
+          currentHeaders: headers,
+          closeConnection: preferFreshConnection,
+        );
       }
     }
 
@@ -301,7 +419,10 @@ class BackendApiService {
       for (var attempt = 1; attempt <= 2; attempt++) {
         final waitMs = 350 * attempt;
         await Future<void>.delayed(Duration(milliseconds: waitMs));
-        res = await _sendRequest(method, uri, headers, effectiveBody, timeout);
+        res = await sendJsonAttempt(
+          currentHeaders: headers,
+          closeConnection: preferFreshConnection,
+        );
         if (res.statusCode != 429) break;
       }
     }
@@ -318,7 +439,7 @@ class BackendApiService {
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
       if (path == '/api/users/profile' && normalizedMethod == 'PUT') {
-        debugPrint('[ProfileUpdate] HTTP ${res.statusCode} body: ${res.body}');
+        debugPrint('[ProfileUpdate] HTTP ${res.statusCode} response received');
       }
       final msg =
           data?['message']?.toString() ?? data?['error']?.toString() ?? '';
@@ -828,6 +949,25 @@ class BackendApiService {
     return _requestJson('/api/votes/$resourceId', method: 'GET');
   }
 
+  Future<Map<String, dynamic>> getBulkResourceStates({
+    required Iterable<String> resourceIds,
+  }) async {
+    final ids = resourceIds
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+    if (ids.isEmpty) {
+      return const {'states': <Map<String, dynamic>>[]};
+    }
+
+    return _requestJson(
+      '/api/resources/state',
+      method: 'POST',
+      body: <String, dynamic>{'resourceIds': ids},
+    );
+  }
+
   Future<Map<String, dynamic>> getBookmarks() async {
     return _requestJson('/api/bookmarks', method: 'GET');
   }
@@ -855,6 +995,7 @@ class BackendApiService {
   }
 
   Future<bool> checkBookmark(String itemId) async {
+    _cleanupExpiredBookmarkCheckRateLimits();
     final cooldownUntil = _bookmarkCheckRateLimitUntil[itemId];
     if (cooldownUntil != null && DateTime.now().isBefore(cooldownUntil)) {
       return false;
@@ -870,6 +1011,7 @@ class BackendApiService {
     } catch (e) {
       final message = e.toString().toLowerCase();
       if (message.contains('rate limit') || message.contains('429')) {
+        _cleanupExpiredBookmarkCheckRateLimits();
         _bookmarkCheckRateLimitUntil[itemId] = DateTime.now().add(
           const Duration(seconds: 20),
         );
@@ -1173,7 +1315,7 @@ class BackendApiService {
   }) async {
     final cooldownUntil = _notificationsRateLimitUntil;
     if (cooldownUntil != null && DateTime.now().isBefore(cooldownUntil)) {
-      throw Exception('Rate limit exceeded. Please try again later.');
+      return List<Map<String, dynamic>>.from(_lastNotificationsCache);
     }
 
     try {
@@ -1183,13 +1325,18 @@ class BackendApiService {
       );
       _notificationsRateLimitUntil = null;
       final list = (data['notifications'] as List?) ?? const [];
-      return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      final notifications = list
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+      _lastNotificationsCache = notifications;
+      return notifications;
     } catch (e) {
       final message = e.toString().toLowerCase();
       if (message.contains('rate limit') || message.contains('429')) {
         _notificationsRateLimitUntil = DateTime.now().add(
           const Duration(seconds: 20),
         );
+        return List<Map<String, dynamic>>.from(_lastNotificationsCache);
       }
       debugPrint('Backend /api/notifications query failed. Bubbling up: $e');
       rethrow;
@@ -1223,17 +1370,23 @@ class BackendApiService {
   Future<Map<String, dynamic>> checkFollowStatus(String targetEmail) async {
     final encoded = Uri.encodeComponent(targetEmail.trim());
     try {
-      return await _requestJson(
-        '/api/follows/status?targetEmail=$encoded',
-        method: 'GET',
-      );
+      return await _requestJson('/api/follow/status/$encoded', method: 'GET');
     } on BackendApiHttpException catch (e) {
       if (isBackendCompatibilityFallbackError(e)) {
-        // Older backend: try alternative endpoint
-        return await _requestJson(
-          '/api/users/${Uri.encodeComponent(targetEmail.trim())}/follow-status',
-          method: 'GET',
-        );
+        try {
+          return await _requestJson(
+            '/api/follows/status?targetEmail=$encoded',
+            method: 'GET',
+          );
+        } on BackendApiHttpException catch (fallbackError) {
+          if (isBackendCompatibilityFallbackError(fallbackError)) {
+            return await _requestJson(
+              '/api/users/${Uri.encodeComponent(targetEmail.trim())}/follow-status',
+              method: 'GET',
+            );
+          }
+          rethrow;
+        }
       }
       rethrow;
     }
@@ -1246,18 +1399,30 @@ class BackendApiService {
   }) async {
     try {
       return await _requestJson(
-        '/api/follows',
+        '/api/follow/request',
         method: 'POST',
         body: {'targetEmail': targetEmail.trim()},
         requireAuthToken: true,
       );
     } on BackendApiHttpException catch (e) {
       if (isBackendCompatibilityFallbackError(e)) {
-        return await _requestJson(
-          '/api/users/${Uri.encodeComponent(targetEmail.trim())}/follow',
-          method: 'POST',
-          requireAuthToken: true,
-        );
+        try {
+          return await _requestJson(
+            '/api/follows',
+            method: 'POST',
+            body: {'targetEmail': targetEmail.trim()},
+            requireAuthToken: true,
+          );
+        } on BackendApiHttpException catch (fallbackError) {
+          if (isBackendCompatibilityFallbackError(fallbackError)) {
+            return await _requestJson(
+              '/api/users/${Uri.encodeComponent(targetEmail.trim())}/follow',
+              method: 'POST',
+              requireAuthToken: true,
+            );
+          }
+          rethrow;
+        }
       }
       rethrow;
     }
@@ -1268,19 +1433,31 @@ class BackendApiService {
     final encoded = Uri.encodeComponent(targetEmail.trim());
     try {
       await _requestJson(
-        '/api/follows/$encoded',
+        '/api/follow/$encoded',
         method: 'DELETE',
         requireAuthToken: true,
       );
       return;
     } on BackendApiHttpException catch (e) {
       if (isBackendCompatibilityFallbackError(e)) {
-        await _requestJson(
-          '/api/users/$encoded/unfollow',
-          method: 'POST',
-          requireAuthToken: true,
-        );
-        return;
+        try {
+          await _requestJson(
+            '/api/follows/$encoded',
+            method: 'DELETE',
+            requireAuthToken: true,
+          );
+          return;
+        } on BackendApiHttpException catch (fallbackError) {
+          if (isBackendCompatibilityFallbackError(fallbackError)) {
+            await _requestJson(
+              '/api/users/$encoded/unfollow',
+              method: 'POST',
+              requireAuthToken: true,
+            );
+            return;
+          }
+          rethrow;
+        }
       }
       rethrow;
     }
@@ -1293,19 +1470,31 @@ class BackendApiService {
   }) async {
     try {
       await _requestJson(
-        '/api/follows/requests/$requestId',
+        '/api/follow/request/$requestId',
         method: 'DELETE',
         requireAuthToken: true,
       );
       return;
     } on BackendApiHttpException catch (e) {
       if (isBackendCompatibilityFallbackError(e)) {
-        await _requestJson(
-          '/api/follows/$requestId/cancel',
-          method: 'POST',
-          requireAuthToken: true,
-        );
-        return;
+        try {
+          await _requestJson(
+            '/api/follows/requests/$requestId',
+            method: 'DELETE',
+            requireAuthToken: true,
+          );
+          return;
+        } on BackendApiHttpException catch (fallbackError) {
+          if (isBackendCompatibilityFallbackError(fallbackError)) {
+            await _requestJson(
+              '/api/follows/$requestId/cancel',
+              method: 'POST',
+              requireAuthToken: true,
+            );
+            return;
+          }
+          rethrow;
+        }
       }
       rethrow;
     }
@@ -1793,8 +1982,9 @@ class BackendApiService {
         'top_k': ?topK,
         'min_score': ?minScore,
         'allow_web': allowWeb == true,
-        // TODO: replace with searchMode enum after Section B UI
+        // Keep only one retrieval selector to avoid duplicated semantics.
         'retrieval_mode': allowWeb == true ? 'web' : 'local',
+        'strict_notes_mode': allowWeb != true,
         'file_id': ?fileId,
         'video_url': ?videoUrl,
         'use_ocr': ?useOcr,
@@ -2145,6 +2335,7 @@ class BackendApiService {
     final headers = <String, String>{
       'Content-Type': 'application/json',
       'Accept': 'text/event-stream',
+      'Connection': 'close',
       if (token != null) 'Authorization': 'Bearer $token',
     };
 
@@ -2157,8 +2348,9 @@ class BackendApiService {
         'top_k': ?topK,
         'min_score': ?minScore,
         'allow_web': allowWeb == true,
-        // TODO: replace with searchMode enum after Section B UI
+        // Keep only one retrieval selector to avoid duplicated semantics.
         'retrieval_mode': allowWeb == true ? 'web' : 'local',
+        'strict_notes_mode': allowWeb != true,
         'file_id': ?fileId,
         'video_url': ?videoUrl,
         'use_ocr': ?useOcr,

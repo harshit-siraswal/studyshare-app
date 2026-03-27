@@ -84,6 +84,23 @@ Uri buildYoutubeAppUri(String videoId, {int startSeconds = 0}) {
   return Uri.parse('vnd.youtube://$videoId$query');
 }
 
+List<Uri> buildYoutubeAppUris(String videoId, {int startSeconds = 0}) {
+  final watchQuery = <String, String>{'v': videoId};
+  if (startSeconds > 0) {
+    watchQuery['t'] = '${startSeconds}s';
+  }
+
+  return <Uri>[
+    Uri.parse(
+      'youtube://www.youtube.com/watch?${Uri(queryParameters: watchQuery).query}',
+    ),
+    Uri.parse(
+      'vnd.youtube://www.youtube.com/watch?${Uri(queryParameters: watchQuery).query}',
+    ),
+    buildYoutubeAppUri(videoId, startSeconds: startSeconds),
+  ];
+}
+
 /// Returns a URL with `https://` if scheme is missing.
 String normalizeExternalUrl(String rawUrl) {
   var normalized = _extractLikelyExternalToken(rawUrl);
@@ -465,17 +482,28 @@ Future<bool> launchExternalUri(Uri uri) async {
   }
 }
 
-Future<bool> openYoutubeExternally(ParsedYoutubeLink youtubeLink) async {
-  final appUri = buildYoutubeAppUri(
+Future<bool> openYoutubeInAppOnly(ParsedYoutubeLink youtubeLink) async {
+  final candidates = buildYoutubeAppUris(
     youtubeLink.videoId,
     startSeconds: youtubeLink.startSeconds,
   );
-  try {
-    if (await launchUrl(appUri, mode: LaunchMode.externalNonBrowserApplication)) {
-      return true;
+  for (final uri in candidates) {
+    try {
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalNonBrowserApplication,
+      );
+      if (launched) {
+        return true;
+      }
+    } catch (e) {
+      debugPrint('openYoutubeInAppOnly failed for $uri: $e');
     }
-  } catch (e) {
-    debugPrint('openYoutubeExternally app launch failed: $e');
   }
+  return false;
+}
+
+Future<bool> openYoutubeExternally(ParsedYoutubeLink youtubeLink) async {
+  if (await openYoutubeInAppOnly(youtubeLink)) return true;
   return launchExternalUri(youtubeLink.watchUri);
 }

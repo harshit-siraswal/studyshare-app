@@ -292,11 +292,16 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
         ],
       ),
       floatingActionButton: canWrite
-          ? FloatingActionButton(
-              heroTag: 'fab_main',
-              onPressed: _showCreateRoomDialog,
-              backgroundColor: AppTheme.primary,
-              child: const Icon(Icons.add, color: Colors.white),
+          ? Hero(
+              tag: 'fab_main',
+              createRectTween: (begin, end) =>
+                  MaterialRectCenterArcTween(begin: begin, end: end),
+              child: FloatingActionButton(
+                heroTag: null,
+                onPressed: _showCreateRoomDialog,
+                backgroundColor: AppTheme.primary,
+                child: const Icon(Icons.add, color: Colors.white),
+              ),
             )
           : null,
     );
