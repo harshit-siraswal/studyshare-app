@@ -916,15 +916,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                       switchInCurve: Curves.easeOutBack,
                       switchOutCurve: Curves.easeInBack,
                       transitionBuilder: (child, animation) {
-                        final turns = Tween<double>(
-                          begin: 0.0,
-                          end: 0.18,
-                        ).animate(animation);
-                        return RotationTransition(
-                          turns: turns,
+                        final turns = Tween<double>(begin: 0.04, end: 0.0)
+                            .animate(
+                              CurvedAnimation(
+                                parent: animation,
+                                curve: Curves.easeOutCubic,
+                              ),
+                            );
+                        return FadeTransition(
+                          opacity: animation,
                           child: ScaleTransition(
                             scale: animation,
-                            child: child,
+                            child: RotationTransition(
+                              turns: turns,
+                              child: child,
+                            ),
                           ),
                         );
                       },
