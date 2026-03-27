@@ -4817,9 +4817,7 @@ Return STRICT JSON only (no markdown). Schema:
                       color: Colors.transparent,
                       child: InkWell(
                         key: _coachAttachKey,
-                        onTap: composerBusy
-                            ? null
-                            : _pickAttachment,
+                        onTap: composerBusy ? null : _pickAttachment,
                         borderRadius: BorderRadius.circular(999),
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 180),

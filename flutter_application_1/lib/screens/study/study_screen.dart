@@ -312,7 +312,7 @@ class _StudyScreenState extends State<StudyScreen>
       }
 
       if (resolvedType != null &&
-          (resource.type ?? '').trim().toLowerCase() != resolvedType) {
+          resource.type.trim().toLowerCase() != resolvedType) {
         return false;
       }
       if (resolvedSemester != null &&
@@ -1195,6 +1195,7 @@ class _StudyScreenState extends State<StudyScreen>
 
     return Container(
       height: 60,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: searchBarColor,
         borderRadius: BorderRadius.circular(30),
@@ -1212,7 +1213,6 @@ class _StudyScreenState extends State<StudyScreen>
       ),
       child: Row(
         children: [
-          const SizedBox(width: 12),
           Container(
             width: 36,
             height: 36,
@@ -1272,17 +1272,7 @@ class _StudyScreenState extends State<StudyScreen>
           Material(
             color: Colors.transparent,
             child: InkWell(
-              onTap: () {
-                showModalBottomSheet(
-                  context: context,
-                  backgroundColor: Colors.transparent,
-                  isScrollControlled: true,
-                  builder: (context) => StatefulBuilder(
-                    builder: (context, setModalState) =>
-                        _buildFollowingFilterSheetContent(setModalState),
-                  ),
-                );
-              },
+              onTap: _showFollowingFilterOptionsSheet,
               borderRadius: BorderRadius.circular(18),
               child: Stack(
                 clipBehavior: Clip.none,
@@ -1332,8 +1322,19 @@ class _StudyScreenState extends State<StudyScreen>
               ),
             ),
           ),
-          const SizedBox(width: 12),
         ],
+      ),
+    );
+  }
+
+  void _showFollowingFilterOptionsSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) =>
+            _buildFollowingFilterSheetContent(setModalState),
       ),
     );
   }
@@ -1407,7 +1408,9 @@ class _StudyScreenState extends State<StudyScreen>
                         isDark: isDark,
                         onSelected: (value) {
                           setState(() {
-                            _followingSelectedType = value == 'All' ? null : value;
+                            _followingSelectedType = value == 'All'
+                                ? null
+                                : value;
                           });
                           syncSheet();
                         },
@@ -1459,7 +1462,8 @@ class _StudyScreenState extends State<StudyScreen>
                   _buildSheetSelectionRow(
                     label: 'Semester',
                     value: _followingUsesRelevantScope
-                        ? (_resolvedFollowingSemesterFilter() ?? 'Profile not set')
+                        ? (_resolvedFollowingSemesterFilter() ??
+                              'Profile not set')
                         : (_followingSelectedSemester ?? 'All'),
                     isDark: isDark,
                     enabled: !_followingUsesRelevantScope,
@@ -1469,12 +1473,14 @@ class _StudyScreenState extends State<StudyScreen>
                             _showPickerSheet(
                               title: 'Semester',
                               items: _semesters.isEmpty ? ['All'] : _semesters,
-                              selectedValue: _followingSelectedSemester ?? 'All',
+                              selectedValue:
+                                  _followingSelectedSemester ?? 'All',
                               isDark: isDark,
                               onSelected: (value) {
                                 setState(() {
-                                  _followingSelectedSemester =
-                                      value == 'All' ? null : value;
+                                  _followingSelectedSemester = value == 'All'
+                                      ? null
+                                      : value;
                                 });
                                 syncSheet();
                                 if (_canManageAdminResources) {
@@ -1488,7 +1494,8 @@ class _StudyScreenState extends State<StudyScreen>
                   _buildSheetSelectionRow(
                     label: 'Branch',
                     value: _followingUsesRelevantScope
-                        ? (_resolvedFollowingBranchFilter() ?? 'Profile not set')
+                        ? (_resolvedFollowingBranchFilter() ??
+                              'Profile not set')
                         : (_followingSelectedBranch ?? 'All'),
                     isDark: isDark,
                     enabled: !_followingUsesRelevantScope,
@@ -1502,8 +1509,9 @@ class _StudyScreenState extends State<StudyScreen>
                               isDark: isDark,
                               onSelected: (value) {
                                 setState(() {
-                                  _followingSelectedBranch =
-                                      value == 'All' ? null : value;
+                                  _followingSelectedBranch = value == 'All'
+                                      ? null
+                                      : value;
                                   _followingSelectedSubject = null;
                                 });
                                 syncSheet();
@@ -1519,7 +1527,8 @@ class _StudyScreenState extends State<StudyScreen>
                   _buildSheetSelectionRow(
                     label: 'Subject',
                     value: _followingUsesRelevantScope
-                        ? (_resolvedFollowingSubjectFilter() ?? 'Profile not set')
+                        ? (_resolvedFollowingSubjectFilter() ??
+                              'Profile not set')
                         : (_followingSelectedSubject ??
                               (_followingSelectedBranch == null
                                   ? 'Select branch first'
@@ -1544,8 +1553,9 @@ class _StudyScreenState extends State<StudyScreen>
                               isDark: isDark,
                               onSelected: (value) {
                                 setState(() {
-                                  _followingSelectedSubject =
-                                      value == 'All' ? null : value;
+                                  _followingSelectedSubject = value == 'All'
+                                      ? null
+                                      : value;
                                 });
                                 syncSheet();
                                 if (_canManageAdminResources) {
@@ -1647,72 +1657,6 @@ class _StudyScreenState extends State<StudyScreen>
           ),
         ),
       ],
-    );
-  }
-
-  void _showModerationStatusFilterSheet() {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final options = <String>[
-      'all',
-      'pending',
-      'approved',
-      'rejected',
-      'retracted',
-    ];
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const SizedBox(height: 8),
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: isDark ? Colors.white24 : Colors.black12,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-              ),
-              const SizedBox(height: 12),
-              for (final option in options)
-                ListTile(
-                  title: Text(
-                    option == 'all'
-                        ? 'All'
-                        : option[0].toUpperCase() + option.substring(1),
-                    style: GoogleFonts.inter(
-                      fontWeight: FontWeight.w600,
-                      color: isDark ? Colors.white : Colors.black87,
-                    ),
-                  ),
-                  trailing: _moderationStatusFilter == option
-                      ? Icon(Icons.check_rounded, color: AppTheme.primary)
-                      : null,
-                  onTap: () {
-                    Navigator.pop(context);
-                    if (_moderationStatusFilter == option) return;
-                    setState(() {
-                      _moderationStatusFilter = option;
-                      _followingResources = [];
-                      _moderationPage = 1;
-                      _hasMoreModeration = true;
-                      _isLoadingFollowing = true;
-                    });
-                    _loadFollowingFeed();
-                  },
-                ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        );
-      },
     );
   }
 
