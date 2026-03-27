@@ -118,7 +118,6 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
   bool _useOcr = true;
   bool _forceOcr = false;
-  String _ocrProvider = 'gemini';
   bool _showAnswers = false;
   final Map<int, String> _selectedAnswers = {};
   final Set<int> _flippedCardIndexes = <int>{};
@@ -131,15 +130,6 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   bool _isFullscreen = false;
 
   bool get _supportsOcr => widget.resourceType != 'video';
-
-  String _ocrProviderLabelFor(String provider) {
-    switch (provider) {
-      case 'gemini':
-        return 'Gemini';
-      default:
-        return 'Gemini';
-    }
-  }
 
   @override
   void initState() {
@@ -276,10 +266,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     );
     if (items == null) return const [];
 
-    return items
-        .map(_parseQuizQuestionItem)
-        .whereType<QuizQuestion>()
-        .toList();
+    return items.map(_parseQuizQuestionItem).whereType<QuizQuestion>().toList();
   }
 
   List<Flashcard> _parseFlashcardPayload(dynamic raw) {
@@ -294,9 +281,15 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         'results',
       ],
     );
-    if (items == null) return const [];
+    if (items != null) {
+      final parsed = items
+          .map(_parseFlashcardItem)
+          .whereType<Flashcard>()
+          .toList();
+      if (parsed.isNotEmpty) return parsed;
+    }
 
-    return items.map(_parseFlashcardItem).whereType<Flashcard>().toList();
+    return _parseFlashcardTextFallback(raw);
   }
 
   List<dynamic>? _extractStructuredList(
@@ -332,16 +325,111 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
       if (current is! String) return current;
       final trimmed = _stripCodeFence(current).trim();
       if (trimmed.isEmpty) return null;
-      if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) {
-        return trimmed;
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        try {
+          current = jsonDecode(trimmed);
+          continue;
+        } catch (_) {
+          return trimmed;
+        }
       }
-      try {
-        current = jsonDecode(trimmed);
-      } catch (_) {
-        return trimmed;
+
+      final firstObject = trimmed.indexOf('{');
+      final lastObject = trimmed.lastIndexOf('}');
+      if (firstObject != -1 && lastObject > firstObject) {
+        final objectSlice = trimmed.substring(firstObject, lastObject + 1);
+        try {
+          current = jsonDecode(objectSlice);
+          continue;
+        } catch (_) {}
       }
+
+      final firstArray = trimmed.indexOf('[');
+      final lastArray = trimmed.lastIndexOf(']');
+      if (firstArray != -1 && lastArray > firstArray) {
+        final arraySlice = trimmed.substring(firstArray, lastArray + 1);
+        try {
+          current = jsonDecode(arraySlice);
+          continue;
+        } catch (_) {}
+      }
+
+      return trimmed;
     }
     return current;
+  }
+
+  List<Flashcard> _parseFlashcardTextFallback(dynamic raw) {
+    final decoded = _decodeStructuredValue(raw);
+    if (decoded is! String) return const [];
+    final text = decoded.trim();
+    if (text.isEmpty) return const [];
+
+    final blocks = text
+        .split(RegExp(r'\n\s*\n+'))
+        .map((block) => block.trim())
+        .where((block) => block.isNotEmpty)
+        .toList();
+    final parsed = <Flashcard>[];
+
+    for (final block in blocks) {
+      final lines = block
+          .split(RegExp(r'\n+'))
+          .map((line) => line.trim())
+          .where((line) => line.isNotEmpty)
+          .toList();
+      if (lines.isEmpty) continue;
+
+      String? front;
+      String? back;
+
+      for (final line in lines) {
+        if (front == null) {
+          final frontMatch = RegExp(
+            r'^(?:q(?:uestion)?|front|term|prompt)\s*[:\-]\s*(.+)$',
+            caseSensitive: false,
+          ).firstMatch(line);
+          if (frontMatch != null) {
+            front = frontMatch.group(1)?.trim();
+            continue;
+          }
+        }
+        if (back == null) {
+          final backMatch = RegExp(
+            r'^(?:a(?:nswer)?|back|definition|explanation|response)\s*[:\-]\s*(.+)$',
+            caseSensitive: false,
+          ).firstMatch(line);
+          if (backMatch != null) {
+            back = backMatch.group(1)?.trim();
+            continue;
+          }
+        }
+      }
+
+      if ((front == null || back == null) && lines.length >= 2) {
+        front ??= lines.first;
+        back ??= lines.sublist(1).join(' ').trim();
+      }
+
+      if (front == null || back == null) continue;
+
+      final normalizedFront = _normalizeOptionText(front);
+      final normalizedBack = _normalizeOptionText(back);
+      if (normalizedFront == null || normalizedBack == null) continue;
+
+      parsed.add(Flashcard(front: normalizedFront, back: normalizedBack));
+    }
+
+    final seen = <String>{};
+    final deduped = <Flashcard>[];
+    for (final card in parsed) {
+      final key = card.front.toLowerCase();
+      if (seen.add(key)) {
+        deduped.add(card);
+      }
+      if (deduped.length >= 25) break;
+    }
+    return deduped;
   }
 
   String _stripCodeFence(String raw) {
@@ -1039,9 +1127,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
             const SizedBox(width: 8),
             Expanded(
               child: Text(
-                _useOcr
-                    ? 'OCR on • ${_ocrProviderLabelFor(_ocrProvider)}'
-                    : 'OCR off',
+                _useOcr ? 'OCR on' : 'OCR off',
                 style: GoogleFonts.inter(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w700,
@@ -1133,40 +1219,56 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                       ),
                     ),
                     const SizedBox(height: 8),
-                    Text(
-                      'Provider',
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: isDark
-                            ? Colors.white70
-                            : const Color(0xFF334155),
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    SizedBox(
+                    Container(
                       width: double.infinity,
-                      child: SegmentedButton<String>(
-                        segments: const [
-                          ButtonSegment<String>(
-                            value: 'google',
-                            label: Text('Google'),
-                            icon: Icon(Icons.visibility_rounded, size: 16),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: isDark
+                            ? Colors.white.withValues(alpha: 0.05)
+                            : const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.08)
+                              : const Color(0xFFE2E8F0),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.auto_awesome_rounded,
+                            size: 18,
+                            color: _studioBlue,
                           ),
-                          ButtonSegment<String>(
-                            value: 'sarvam',
-                            label: Text('Sarvam'),
-                            icon: Icon(Icons.bolt_rounded, size: 16),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'OCR is automatic',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: isDark
+                                        ? Colors.white
+                                        : const Color(0xFF0F172A),
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'AI Studio chooses the OCR path automatically when this toggle is enabled.',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 11.5,
+                                    color: isDark
+                                        ? Colors.white70
+                                        : const Color(0xFF475569),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ],
-                        selected: {_ocrProvider},
-                        onSelectionChanged: _useOcr
-                            ? (next) {
-                                if (next.isEmpty) return;
-                                setState(() => _ocrProvider = next.first);
-                                setSheetState(() {});
-                              }
-                            : null,
                       ),
                     ),
                   ],
@@ -2152,13 +2254,20 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
               width: double.infinity,
               child: ElevatedButton.icon(
                 onPressed: () {
-                  if (widget.resourceId.isEmpty) return;
+                  final trimmedResourceId = widget.resourceId.trim();
+                  final trimmedVideoUrl = widget.videoUrl?.trim() ?? '';
+                  if (trimmedResourceId.isEmpty && trimmedVideoUrl.isEmpty) {
+                    return;
+                  }
                   final ctx = ResourceContext(
-                    fileId: widget.resourceId,
+                    fileId: trimmedResourceId.isEmpty
+                        ? null
+                        : trimmedResourceId,
                     title: widget.resourceTitle,
                     subject: widget.subject,
                     semester: widget.semester,
                     branch: widget.branch,
+                    videoUrl: trimmedVideoUrl.isEmpty ? null : trimmedVideoUrl,
                   );
                   final nav = Navigator.of(context);
                   nav.pop();
