@@ -80,6 +80,7 @@ class BackendApiService {
   DateTime? _ragStreamUnavailableSince;
   static const Duration _requestTimeout = Duration(seconds: 20);
   static const Duration _streamRequestTimeout = Duration(seconds: 120);
+  static const Duration _streamIdleTimeout = Duration(seconds: 45);
   static const Duration _aiRequestTimeout = Duration(seconds: 120);
   static const Set<int> _hardUnsupportedRagStreamStatuses =
       kBackendCompatibilityFallbackStatuses;
@@ -382,6 +383,17 @@ class BackendApiService {
 
   Future<http.StreamedResponse> _sendStreamedRequest(http.BaseRequest request) {
     return _httpClient.send(request).timeout(_streamRequestTimeout);
+  }
+
+  Future<http.StreamedResponse> _sendStreamedRequestAtUri({
+    required Uri uri,
+    required Map<String, String> headers,
+    required Map<String, dynamic> body,
+  }) {
+    final request = http.Request('POST', uri)
+      ..headers.addAll(headers)
+      ..body = jsonEncode(body);
+    return _sendStreamedRequest(request);
   }
 
   String _compactErrorBody(String body, {int maxLength = 220}) {
@@ -2483,6 +2495,8 @@ class BackendApiService {
     String? dialectIntensity,
     String? languageHint,
   }) async* {
+    const path = '/api/rag/query/stream';
+
     Stream<String> fallbackStream() {
       return _queryRagAsSyntheticStream(
         question: question,
@@ -2518,61 +2532,93 @@ class BackendApiService {
     }
 
     final token = await _getIdToken();
-    final uri = Uri.parse('$_baseUrl/api/rag/query/stream');
     final headers = <String, String>{
       'Content-Type': 'application/json',
       'Accept': 'text/event-stream',
       'Connection': 'close',
       if (token != null) 'Authorization': 'Bearer $token',
     };
+    final requestBody = <String, dynamic>{
+      'question': question,
+      'college_id': ?collegeId,
+      'session_id': ?sessionId,
+      'top_k': ?topK,
+      'min_score': ?minScore,
+      'allow_web': allowWeb == true,
+      // Keep only one retrieval selector to avoid duplicated semantics.
+      'retrieval_mode': allowWeb == true ? 'web' : 'local',
+      'strict_notes_mode': allowWeb != true,
+      'file_id': ?fileId,
+      'video_url': ?videoUrl,
+      'use_ocr': ?useOcr,
+      'force_ocr': ?forceOcr,
+      'attachments': ?attachments,
+      'history': ?history,
+      'filters': ?filters,
+      'source_switch_for_turn': ?sourceSwitchForTurn,
+      'exclude_file_ids': ?excludeFileIds,
+      'dialect_intensity': ?dialectIntensity,
+      'language_hint': ?languageHint,
+    };
 
-    final request = http.Request('POST', uri)
-      ..headers.addAll(headers)
-      ..body = jsonEncode(<String, dynamic>{
-        'question': question,
-        'college_id': ?collegeId,
-        'session_id': ?sessionId,
-        'top_k': ?topK,
-        'min_score': ?minScore,
-        'allow_web': allowWeb == true,
-        // Keep only one retrieval selector to avoid duplicated semantics.
-        'retrieval_mode': allowWeb == true ? 'web' : 'local',
-        'strict_notes_mode': allowWeb != true,
-        'file_id': ?fileId,
-        'video_url': ?videoUrl,
-        'use_ocr': ?useOcr,
-        'force_ocr': ?forceOcr,
-        'attachments': ?attachments,
-        'history': ?history,
-        'filters': ?filters,
-        'source_switch_for_turn': ?sourceSwitchForTurn,
-        'exclude_file_ids': ?excludeFileIds,
-        'dialect_intensity': ?dialectIntensity,
-        'language_hint': ?languageHint,
-      });
+    http.StreamedResponse? response;
+    Object? lastTransportError;
+    final candidateUris = _backendUris(path);
+    for (var index = 0; index < candidateUris.length; index++) {
+      final uri = candidateUris[index];
+      try {
+        response = await _sendStreamedRequestAtUri(
+          uri: uri,
+          headers: headers,
+          body: requestBody,
+        );
+        lastTransportError = null;
+        break;
+      } catch (error) {
+        lastTransportError = error;
+        final shouldTryNext =
+            index < candidateUris.length - 1 &&
+            _shouldFallbackToNextBaseUrl(error, path, 'POST');
+        if (!shouldTryNext) {
+          break;
+        }
+        debugPrint(
+          '[BackendApi] Retrying stream request on next backend base URL '
+          'after transport failure: $error',
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 260));
+      }
+    }
 
-    http.StreamedResponse response;
-    try {
-      response = await _sendStreamedRequest(request);
-    } on TimeoutException catch (error) {
+    if (response == null && lastTransportError is TimeoutException) {
+      final error = lastTransportError;
       debugPrint(
         '[BackendApi] Stream request timed out. Falling back to /api/rag/query. '
         '$error',
       );
       yield* fallbackStream();
       return;
-    } on SocketException catch (error) {
+    }
+    if (response == null && lastTransportError is SocketException) {
+      final error = lastTransportError;
       debugPrint(
         '[BackendApi] Stream socket failure. Falling back to /api/rag/query. '
         '$error',
       );
       yield* fallbackStream();
       return;
-    } on http.ClientException catch (error) {
+    }
+    if (response == null && lastTransportError is http.ClientException) {
+      final error = lastTransportError;
       debugPrint(
         '[BackendApi] Stream client failure. Falling back to /api/rag/query. '
         '$error',
       );
+      yield* fallbackStream();
+      return;
+    }
+    if (response == null) {
+      if (lastTransportError != null) throw lastTransportError;
       yield* fallbackStream();
       return;
     }
@@ -2613,15 +2659,53 @@ class BackendApiService {
       );
     }
 
+    var receivedPayload = false;
     final lineStream = response.stream
+        .timeout(_streamIdleTimeout)
         .transform(utf8.decoder)
         .transform(const LineSplitter());
 
-    await for (final line in lineStream) {
-      if (!line.startsWith('data:')) continue;
-      final payload = line.substring(5).trim();
-      if (payload.isEmpty) continue;
-      yield payload;
+    try {
+      await for (final line in lineStream) {
+        if (!line.startsWith('data:')) continue;
+        final payload = line.substring(5).trim();
+        if (payload.isEmpty) continue;
+        receivedPayload = true;
+        yield payload;
+      }
+    } on TimeoutException catch (error) {
+      debugPrint(
+        '[BackendApi] Stream stalled while reading response. '
+        '${receivedPayload ? 'Finishing partial stream.' : 'Falling back to /api/rag/query. '}'
+        '$error',
+      );
+      if (!receivedPayload) {
+        yield* fallbackStream();
+        return;
+      }
+      yield jsonEncode({'type': 'done'});
+    } on SocketException catch (error) {
+      debugPrint(
+        '[BackendApi] Stream socket interrupted. '
+        '${receivedPayload ? 'Finishing partial stream.' : 'Falling back to /api/rag/query. '}'
+        '$error',
+      );
+      if (!receivedPayload) {
+        yield* fallbackStream();
+        return;
+      }
+      yield jsonEncode({'type': 'done'});
+    } on http.ClientException catch (error) {
+      debugPrint(
+        '[BackendApi] Stream client interrupted. '
+        '${receivedPayload ? 'Finishing partial stream.' : 'Falling back to /api/rag/query. '}'
+        '$error',
+      );
+      if (!receivedPayload) {
+        yield* fallbackStream();
+        return;
+      }
+      yield jsonEncode({'type': 'done'});
     }
   }
   // ----------------------------
