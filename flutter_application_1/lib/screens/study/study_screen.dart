@@ -102,12 +102,15 @@ class _StudyScreenState extends State<StudyScreen>
   bool _hasAttendanceFeature = false;
   String _moderationStatusFilter = 'all';
   String _followingSearchQuery = '';
-  List<Resource>? _cachedFilteredFollowingResources;
-  String _lastFollowingFilterQuery = '';
+  String? _followingSelectedSemester;
+  String? _followingSelectedBranch;
+  String? _followingSelectedSubject;
+  String? _followingSelectedType;
+  String _followingSelectedSort = 'Recent';
+  List<String> _followingSubjects = [];
 
   void _invalidateFollowingFilterCache() {
-    _cachedFilteredFollowingResources = null;
-    _lastFollowingFilterQuery = '';
+    // Following filters are lightweight enough to compute on demand.
   }
 
   // Filters
@@ -285,30 +288,61 @@ class _StudyScreenState extends State<StudyScreen>
 
   List<Resource> get _filteredFollowingResources {
     final query = _followingSearchQuery.trim().toLowerCase();
-    if (query.isEmpty) {
-      _cachedFilteredFollowingResources = null;
-      _lastFollowingFilterQuery = '';
-      return _followingResources;
-    }
+    final resolvedType = _mapResourceType(_followingSelectedType);
+    final resolvedSemester = _resolvedFollowingSemesterFilter()?.toLowerCase();
+    final resolvedBranch = _resolvedFollowingBranchFilter()?.toLowerCase();
+    final resolvedSubject = _resolvedFollowingSubjectFilter()?.toLowerCase();
 
-    if (_cachedFilteredFollowingResources != null &&
-        _lastFollowingFilterQuery == query) {
-      return _cachedFilteredFollowingResources!;
-    }
+    final filtered = _followingResources.where((resource) {
+      if (query.isNotEmpty) {
+        final haystacks = <String>[
+          resource.title,
+          resource.description ?? '',
+          resource.subject ?? '',
+          resource.branch ?? '',
+          resource.semester ?? '',
+          resource.uploadedByName ?? '',
+        ];
+        final matchesQuery = haystacks.any(
+          (value) => value.toLowerCase().contains(query),
+        );
+        if (!matchesQuery) {
+          return false;
+        }
+      }
 
-    _cachedFilteredFollowingResources = _followingResources.where((resource) {
-      final haystacks = <String>[
-        resource.title,
-        resource.description ?? '',
-        resource.subject ?? '',
-        resource.branch ?? '',
-        resource.semester ?? '',
-        resource.uploadedByName ?? '',
-      ];
-      return haystacks.any((value) => value.toLowerCase().contains(query));
+      if (resolvedType != null &&
+          (resource.type ?? '').trim().toLowerCase() != resolvedType) {
+        return false;
+      }
+      if (resolvedSemester != null &&
+          (resource.semester ?? '').trim().toLowerCase() != resolvedSemester) {
+        return false;
+      }
+      if (resolvedBranch != null &&
+          (resource.branch ?? '').trim().toLowerCase() != resolvedBranch) {
+        return false;
+      }
+      if (resolvedSubject != null &&
+          (resource.subject ?? '').trim().toLowerCase() != resolvedSubject) {
+        return false;
+      }
+      return true;
     }).toList();
-    _lastFollowingFilterQuery = query;
-    return _cachedFilteredFollowingResources!;
+
+    final sortBy = _mapSortOption(_followingSelectedSort);
+    if (sortBy == 'upvotes') {
+      filtered.sort((a, b) => b.upvotes.compareTo(a.upvotes));
+    } else if (sortBy == 'teacher') {
+      filtered.sort((a, b) {
+        if (a.isTeacherUpload == b.isTeacherUpload) return 0;
+        return a.isTeacherUpload ? -1 : 1;
+      });
+    } else {
+      filtered.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    }
+
+    return filtered;
   }
 
   void _handleResourceVoteChanged() {
@@ -335,22 +369,37 @@ class _StudyScreenState extends State<StudyScreen>
 
       if (_canManageAdminResources) {
         const requestPage = 1;
-        final scopeCandidates = _buildModerationScopeCandidates();
-        var selectedScope = scopeCandidates.first;
+        var selectedScope = (
+          semester: _resolvedFollowingSemesterFilter(),
+          branch: _resolvedFollowingBranchFilter(),
+          subject: _resolvedFollowingSubjectFilter(),
+        );
         List<Resource> resources = const <Resource>[];
 
-        for (final scope in scopeCandidates) {
-          final scopedResources = await _loadAdminResourcesForScope(
-            page: requestPage,
-            semester: scope.semester,
-            branch: scope.branch,
-            subject: scope.subject,
-          );
-          selectedScope = scope;
-          resources = scopedResources;
-          if (scopedResources.isNotEmpty || !_moderationRelevantOnly) {
-            break;
+        if (_moderationRelevantOnly) {
+          final scopeCandidates = _buildModerationScopeCandidates();
+          selectedScope = scopeCandidates.first;
+
+          for (final scope in scopeCandidates) {
+            final scopedResources = await _loadAdminResourcesForScope(
+              page: requestPage,
+              semester: scope.semester,
+              branch: scope.branch,
+              subject: scope.subject,
+            );
+            selectedScope = scope;
+            resources = scopedResources;
+            if (scopedResources.isNotEmpty) {
+              break;
+            }
           }
+        } else {
+          resources = await _loadAdminResourcesForScope(
+            page: requestPage,
+            semester: selectedScope.semester,
+            branch: selectedScope.branch,
+            subject: selectedScope.subject,
+          );
         }
 
         final activeEmail = _effectiveUserEmail;
@@ -426,9 +475,9 @@ class _StudyScreenState extends State<StudyScreen>
     try {
       final resources = await _loadAdminResourcesForScope(
         page: nextPage,
-        semester: _resolvedModerationSemesterFilter(),
-        branch: _resolvedModerationBranchFilter(),
-        subject: _resolvedModerationSubjectFilter(),
+        semester: _resolvedFollowingSemesterFilter(),
+        branch: _resolvedFollowingBranchFilter(),
+        subject: _resolvedFollowingSubjectFilter(),
       );
       final activeEmail = _effectiveUserEmail;
       if (activeEmail.isNotEmpty && resources.isNotEmpty) {
@@ -616,6 +665,44 @@ class _StudyScreenState extends State<StudyScreen>
     );
   }
 
+  String? _resolvedFollowingSemesterFilter() {
+    if (_followingUsesRelevantScope) {
+      return _resolvedModerationSemesterFilter();
+    }
+    return _normalizeFilterValue(_followingSelectedSemester);
+  }
+
+  String? _resolvedFollowingBranchFilter() {
+    if (_followingUsesRelevantScope) {
+      return _resolvedModerationBranchFilter();
+    }
+    return _normalizeFilterValue(_followingSelectedBranch);
+  }
+
+  String? _resolvedFollowingSubjectFilter() {
+    if (_followingUsesRelevantScope) {
+      return _resolvedModerationSubjectFilter();
+    }
+    return _normalizeFilterValue(_followingSelectedSubject);
+  }
+
+  Future<void> _loadFollowingSubjects() async {
+    if (_followingSelectedBranch != null && _followingSelectedBranch != 'All') {
+      final subjects = await _supabaseService.getUniqueValues(
+        'subject',
+        widget.collegeId,
+        branch: _followingSelectedBranch,
+      );
+      if (!mounted) return;
+      setState(() {
+        _followingSubjects = ['All', ...subjects];
+      });
+    } else {
+      if (!mounted) return;
+      setState(() => _followingSubjects = []);
+    }
+  }
+
   Future<void> _loadResources({bool refresh = false}) async {
     if (refresh) {
       _loadUnreadNotificationCount();
@@ -707,6 +794,31 @@ class _StudyScreenState extends State<StudyScreen>
 
   bool get _hasManualAcademicFilters => _manualAcademicFilterCount > 0;
 
+  bool get _followingUsesRelevantScope =>
+      _canManageAdminResources && _moderationRelevantOnly;
+
+  int get _manualFollowingAcademicFilterCount {
+    if (_followingUsesRelevantScope) return 0;
+    return [
+      _followingSelectedSemester != null && _followingSelectedSemester != 'All',
+      _followingSelectedBranch != null && _followingSelectedBranch != 'All',
+      _followingSelectedSubject != null && _followingSelectedSubject != 'All',
+    ].where((isApplied) => isApplied).length;
+  }
+
+  bool get _hasFollowingManualAcademicFilters =>
+      _manualFollowingAcademicFilterCount > 0;
+
+  int get _activeFollowingFilterCount {
+    return _manualFollowingAcademicFilterCount +
+        (_followingSelectedType != null && _followingSelectedType != 'All'
+            ? 1
+            : 0) +
+        (_followingSelectedSort != 'Recent' ? 1 : 0) +
+        (_followingUsesRelevantScope ? 0 : (_canManageAdminResources ? 1 : 0)) +
+        (_canManageAdminResources && _moderationStatusFilter != 'all' ? 1 : 0);
+  }
+
   int get _activeResourceFilterCount {
     return _manualAcademicFilterCount +
         (_selectedType != null && _selectedType != 'All' ? 1 : 0) +
@@ -720,6 +832,15 @@ class _StudyScreenState extends State<StudyScreen>
         _selectedSort != 'Recent' ||
         !_resourcesRelevantOnly ||
         _searchController.text.trim().isNotEmpty;
+  }
+
+  bool get _hasFollowingActiveFilters {
+    return _hasFollowingManualAcademicFilters ||
+        (_followingSelectedType != null && _followingSelectedType != 'All') ||
+        _followingSelectedSort != 'Recent' ||
+        (_canManageAdminResources && !_followingUsesRelevantScope) ||
+        (_canManageAdminResources && _moderationStatusFilter != 'all') ||
+        _followingSearchQuery.trim().isNotEmpty;
   }
 
   void _onScroll() {
@@ -1058,44 +1179,56 @@ class _StudyScreenState extends State<StudyScreen>
 
   Widget _buildFollowingSearchBar() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final showModerationFilter = _canManageAdminResources;
-    final hasModerationFilter = _moderationStatusFilter != 'all';
+    final hasActiveFilters = _hasFollowingActiveFilters;
+    final activeFilterCount = _activeFollowingFilterCount;
+    final searchBarColor = isDark ? Colors.black : const Color(0xFFF4F6FB);
+    final borderColor = hasActiveFilters
+        ? AppTheme.primary.withValues(alpha: 0.55)
+        : (isDark ? Colors.white24 : const Color(0xFFE1E7F0));
     final dividerColor = isDark ? Colors.white10 : Colors.black12;
-    final filterBackground = hasModerationFilter
+    final filterBackground = hasActiveFilters
         ? AppTheme.primary.withValues(alpha: isDark ? 0.22 : 0.12)
         : (isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.06));
-    final filterTextColor = hasModerationFilter
+    final filterTextColor = hasActiveFilters
         ? AppTheme.primary
         : (isDark ? Colors.white70 : const Color(0xFF111827));
 
     return Container(
-      height: 52,
+      height: 60,
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : Colors.white,
-        borderRadius: BorderRadius.circular(18),
+        color: searchBarColor,
+        borderRadius: BorderRadius.circular(30),
         border: Border.all(
-          color: isDark ? Colors.white12 : const Color(0xFFE2E8F0),
+          color: borderColor,
+          width: hasActiveFilters ? 1.2 : 0.9,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
       ),
       child: Row(
         children: [
           const SizedBox(width: 12),
           Container(
-            width: 34,
-            height: 34,
+            width: 36,
+            height: 36,
             decoration: BoxDecoration(
               color: isDark
-                  ? Colors.white.withValues(alpha: 0.08)
-                  : const Color(0xFFE2E8F0),
-              borderRadius: BorderRadius.circular(17),
+                  ? Colors.white.withValues(alpha: 0.1)
+                  : const Color(0xFFDCE3EE),
+              borderRadius: BorderRadius.circular(18),
             ),
-            child: const Icon(
+            child: Icon(
               Icons.search_rounded,
               size: 18,
-              color: AppTheme.textMuted,
+              color: isDark ? Colors.white70 : const Color(0xFF19212E),
             ),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 12),
           Expanded(
             child: TextField(
               controller: _followingSearchController,
@@ -1103,92 +1236,417 @@ class _StudyScreenState extends State<StudyScreen>
                 setState(() => _followingSearchQuery = value);
               },
               style: GoogleFonts.inter(
-                fontSize: 14,
-                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+                color: isDark ? Colors.white : const Color(0xFF111827),
               ),
               decoration: InputDecoration(
                 hintText: _canManageAdminResources
                     ? 'Search moderation queue...'
                     : 'Search following feed...',
                 hintStyle: GoogleFonts.inter(
-                  fontSize: 14,
-                  color: isDark ? Colors.white54 : const Color(0xFF64748B),
+                  fontSize: 15,
+                  color: isDark ? Colors.grey[400] : const Color(0xFF4B5563),
                 ),
-                suffixIcon: _followingSearchQuery.trim().isEmpty
-                    ? null
-                    : IconButton(
-                        onPressed: () {
-                          _followingSearchController.clear();
-                          setState(() => _followingSearchQuery = '');
-                        },
-                        icon: const Icon(Icons.close_rounded, size: 18),
-                      ),
                 border: InputBorder.none,
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(vertical: 14),
               ),
             ),
           ),
-          if (showModerationFilter) ...[
-            Container(width: 1, height: 28, color: dividerColor),
-            const SizedBox(width: 8),
-            Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: _showModerationStatusFilterSheet,
-                borderRadius: BorderRadius.circular(18),
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Container(
-                      width: 34,
-                      height: 34,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: filterBackground,
-                        borderRadius: BorderRadius.circular(17),
-                        border: Border.all(
-                          color: hasModerationFilter
-                              ? AppTheme.primary.withValues(alpha: 0.4)
-                              : dividerColor,
-                        ),
-                      ),
-                      child: Icon(
-                        Icons.tune_rounded,
-                        color: filterTextColor,
-                        size: 18,
+          if (_followingSearchQuery.trim().isNotEmpty)
+            IconButton(
+              iconSize: 18,
+              visualDensity: VisualDensity.compact,
+              icon: Icon(
+                Icons.clear_rounded,
+                color: isDark ? Colors.grey[400] : const Color(0xFF6B7280),
+              ),
+              onPressed: () {
+                _followingSearchController.clear();
+                setState(() => _followingSearchQuery = '');
+              },
+            ),
+          Container(width: 1, height: 30, color: dividerColor),
+          const SizedBox(width: 8),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () {
+                showModalBottomSheet(
+                  context: context,
+                  backgroundColor: Colors.transparent,
+                  isScrollControlled: true,
+                  builder: (context) => StatefulBuilder(
+                    builder: (context, setModalState) =>
+                        _buildFollowingFilterSheetContent(setModalState),
+                  ),
+                );
+              },
+              borderRadius: BorderRadius.circular(18),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: filterBackground,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: hasActiveFilters
+                            ? AppTheme.primary.withValues(alpha: 0.4)
+                            : dividerColor,
                       ),
                     ),
-                    if (hasModerationFilter)
-                      Positioned(
-                        right: -4,
-                        top: -4,
-                        child: Container(
-                          width: 16,
-                          height: 16,
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: AppTheme.primary,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Text(
-                            '1',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 9,
-                              fontWeight: FontWeight.w700,
-                            ),
+                    child: Icon(
+                      Icons.tune_rounded,
+                      color: filterTextColor,
+                      size: 18,
+                    ),
+                  ),
+                  if (activeFilterCount > 0)
+                    Positioned(
+                      right: -4,
+                      top: -5,
+                      child: Container(
+                        width: 18,
+                        height: 18,
+                        alignment: Alignment.center,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF0EA5E9),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Text(
+                          activeFilterCount.toString(),
+                          style: GoogleFonts.inter(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
                       ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFollowingFilterSheetContent(StateSetter setModalState) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bgColor = isDark ? const Color(0xFF0F1116) : Colors.white;
+    void syncSheet() => setModalState(() {});
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.74,
+      decoration: BoxDecoration(
+        color: bgColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
+      ),
+      child: Column(
+        children: [
+          _buildFollowingFilterHeader(isDark, syncSheet),
+          Divider(
+            height: 1,
+            color: isDark ? Colors.white10 : const Color(0xFFE5E7EB),
+          ),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+              child: Column(
+                children: [
+                  if (_followingUsesRelevantScope)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Relevant scope uses profile semester/branch/subject. '
+                          'Switch the moderation scope to All to apply manual academic filters.',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: isDark ? Colors.white60 : Colors.black54,
+                          ),
+                        ),
+                      ),
+                    ),
+                  _buildSheetSelectionRow(
+                    label: 'Sort by',
+                    value: _followingSelectedSort,
+                    isDark: isDark,
+                    onTap: () {
+                      _showPickerSheet(
+                        title: 'Sort by',
+                        items: _sortOptions,
+                        selectedValue: _followingSelectedSort,
+                        isDark: isDark,
+                        onSelected: (value) {
+                          setState(() => _followingSelectedSort = value);
+                          syncSheet();
+                        },
+                      );
+                    },
+                  ),
+                  _divider(isDark),
+                  _buildSheetSelectionRow(
+                    label: 'Type',
+                    value: _followingSelectedType ?? 'All',
+                    isDark: isDark,
+                    onTap: () {
+                      _showPickerSheet(
+                        title: 'Type',
+                        items: _types,
+                        selectedValue: _followingSelectedType ?? 'All',
+                        isDark: isDark,
+                        onSelected: (value) {
+                          setState(() {
+                            _followingSelectedType = value == 'All' ? null : value;
+                          });
+                          syncSheet();
+                        },
+                      );
+                    },
+                  ),
+                  _divider(isDark),
+                  if (_canManageAdminResources) ...[
+                    _buildSheetSelectionRow(
+                      label: 'Status',
+                      value: _moderationStatusFilter == 'all'
+                          ? 'All'
+                          : _moderationStatusFilter[0].toUpperCase() +
+                                _moderationStatusFilter.substring(1),
+                      isDark: isDark,
+                      onTap: () {
+                        _showPickerSheet(
+                          title: 'Status',
+                          items: const [
+                            'All',
+                            'Pending',
+                            'Approved',
+                            'Rejected',
+                            'Retracted',
+                          ],
+                          selectedValue: _moderationStatusFilter == 'all'
+                              ? 'All'
+                              : _moderationStatusFilter[0].toUpperCase() +
+                                    _moderationStatusFilter.substring(1),
+                          isDark: isDark,
+                          onSelected: (value) {
+                            final normalized = value.toLowerCase();
+                            if (_moderationStatusFilter == normalized) return;
+                            setState(() {
+                              _moderationStatusFilter = normalized;
+                              _followingResources = [];
+                              _moderationPage = 1;
+                              _hasMoreModeration = true;
+                              _isLoadingFollowing = true;
+                            });
+                            syncSheet();
+                            _loadFollowingFeed();
+                          },
+                        );
+                      },
+                    ),
+                    _divider(isDark),
                   ],
+                  _buildSheetSelectionRow(
+                    label: 'Semester',
+                    value: _followingUsesRelevantScope
+                        ? (_resolvedFollowingSemesterFilter() ?? 'Profile not set')
+                        : (_followingSelectedSemester ?? 'All'),
+                    isDark: isDark,
+                    enabled: !_followingUsesRelevantScope,
+                    onTap: _followingUsesRelevantScope
+                        ? null
+                        : () {
+                            _showPickerSheet(
+                              title: 'Semester',
+                              items: _semesters.isEmpty ? ['All'] : _semesters,
+                              selectedValue: _followingSelectedSemester ?? 'All',
+                              isDark: isDark,
+                              onSelected: (value) {
+                                setState(() {
+                                  _followingSelectedSemester =
+                                      value == 'All' ? null : value;
+                                });
+                                syncSheet();
+                                if (_canManageAdminResources) {
+                                  _loadFollowingFeed();
+                                }
+                              },
+                            );
+                          },
+                  ),
+                  _divider(isDark),
+                  _buildSheetSelectionRow(
+                    label: 'Branch',
+                    value: _followingUsesRelevantScope
+                        ? (_resolvedFollowingBranchFilter() ?? 'Profile not set')
+                        : (_followingSelectedBranch ?? 'All'),
+                    isDark: isDark,
+                    enabled: !_followingUsesRelevantScope,
+                    onTap: _followingUsesRelevantScope
+                        ? null
+                        : () {
+                            _showPickerSheet(
+                              title: 'Branch',
+                              items: _branches.isEmpty ? ['All'] : _branches,
+                              selectedValue: _followingSelectedBranch ?? 'All',
+                              isDark: isDark,
+                              onSelected: (value) {
+                                setState(() {
+                                  _followingSelectedBranch =
+                                      value == 'All' ? null : value;
+                                  _followingSelectedSubject = null;
+                                });
+                                syncSheet();
+                                _loadFollowingSubjects();
+                                if (_canManageAdminResources) {
+                                  _loadFollowingFeed();
+                                }
+                              },
+                            );
+                          },
+                  ),
+                  _divider(isDark),
+                  _buildSheetSelectionRow(
+                    label: 'Subject',
+                    value: _followingUsesRelevantScope
+                        ? (_resolvedFollowingSubjectFilter() ?? 'Profile not set')
+                        : (_followingSelectedSubject ??
+                              (_followingSelectedBranch == null
+                                  ? 'Select branch first'
+                                  : 'All')),
+                    isDark: isDark,
+                    enabled:
+                        !_followingUsesRelevantScope &&
+                        _followingSelectedBranch != null &&
+                        _followingSelectedBranch != 'All',
+                    onTap:
+                        (_followingUsesRelevantScope ||
+                            _followingSelectedBranch == null ||
+                            _followingSelectedBranch == 'All')
+                        ? null
+                        : () {
+                            _showPickerSheet(
+                              title: 'Subject',
+                              items: _followingSubjects.isEmpty
+                                  ? ['All']
+                                  : _followingSubjects,
+                              selectedValue: _followingSelectedSubject ?? 'All',
+                              isDark: isDark,
+                              onSelected: (value) {
+                                setState(() {
+                                  _followingSelectedSubject =
+                                      value == 'All' ? null : value;
+                                });
+                                syncSheet();
+                                if (_canManageAdminResources) {
+                                  _loadFollowingFeed();
+                                }
+                              },
+                            );
+                          },
+                  ),
+                  _divider(isDark),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+            child: ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primary,
+                foregroundColor: Colors.white,
+                minimumSize: const Size(double.infinity, 52),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                elevation: 0,
+              ),
+              child: Text(
+                'Show results',
+                style: GoogleFonts.inter(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ),
-            const SizedBox(width: 10),
-          ],
+          ),
         ],
       ),
+    );
+  }
+
+  Widget _buildFollowingFilterHeader(bool isDark, VoidCallback syncSheet) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(height: 10),
+        Container(
+          width: 44,
+          height: 5,
+          decoration: BoxDecoration(
+            color: isDark ? Colors.white24 : Colors.black12,
+            borderRadius: BorderRadius.circular(999),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 16, 8),
+          child: Row(
+            children: [
+              const SizedBox(width: 56),
+              Expanded(
+                child: Text(
+                  'Sort & filter',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? Colors.white : const Color(0xFF111827),
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    _followingSelectedSemester = null;
+                    _followingSelectedBranch = null;
+                    _followingSelectedSubject = null;
+                    _followingSelectedType = null;
+                    _followingSelectedSort = 'Recent';
+                    _followingSubjects = [];
+                    if (_canManageAdminResources) {
+                      _moderationStatusFilter = 'all';
+                      _moderationRelevantOnly = true;
+                    }
+                  });
+                  syncSheet();
+                  if (_canManageAdminResources) {
+                    _loadFollowingFeed();
+                  }
+                },
+                child: Text(
+                  'Clear',
+                  style: GoogleFonts.inter(
+                    color: isDark ? Colors.white70 : Colors.black54,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 

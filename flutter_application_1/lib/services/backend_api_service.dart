@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 import 'package:flutter/material.dart';
 import '../config/app_config.dart';
 import 'recaptcha_service.dart';
@@ -50,9 +51,13 @@ class BackendApiService {
   BackendApiService({
     FirebaseAuth? firebaseAuth,
     http.Client? httpClient,
+    List<String>? apiBaseUrls,
     bool startMaintenanceTimer = true,
   }) : _injectedAuth = firebaseAuth,
-       _httpClient = httpClient ?? _sharedHttpClient {
+       _httpClient = httpClient ?? _sharedHttpClient,
+       _apiBaseUrls = List.unmodifiable(
+         _normalizeApiBaseUrls(apiBaseUrls ?? AppConfig.apiBaseUrls),
+       ) {
     if (startMaintenanceTimer) {
       _bookmarkRateLimitCleanupTimer ??= Timer.periodic(
         const Duration(minutes: 10),
@@ -61,10 +66,15 @@ class BackendApiService {
     }
   }
 
-  static final http.Client _sharedHttpClient = http.Client();
+  static const String _primaryBackendHost = 'api.studyshare.in';
+  static const String _primaryBackendFallbackIp = '13.61.19.178';
+  static const Duration _connectionAttemptTimeout = Duration(seconds: 10);
+
+  static final http.Client _sharedHttpClient = _createSharedHttpClient();
 
   final FirebaseAuth? _injectedAuth;
   final http.Client _httpClient;
+  final List<String> _apiBaseUrls;
   bool _ragStreamUnavailable = false;
   static const Duration _ragStreamDisableTtl = Duration(minutes: 10);
   DateTime? _ragStreamUnavailableSince;
@@ -95,6 +105,100 @@ class BackendApiService {
     525,
     526,
   };
+
+  static List<String> _normalizeApiBaseUrls(List<String> baseUrls) {
+    final normalized = <String>[];
+    final seen = <String>{};
+    for (final baseUrl in baseUrls) {
+      final trimmed = baseUrl.trim();
+      if (trimmed.isEmpty) continue;
+      final stripped = trimmed.replaceAll(RegExp(r'/+$'), '');
+      if (seen.add(stripped)) {
+        normalized.add(stripped);
+      }
+    }
+    if (normalized.isEmpty) {
+      normalized.add(AppConfig.apiUrl);
+    }
+    return normalized;
+  }
+
+  static http.Client _createSharedHttpClient() {
+    final inner = HttpClient();
+    inner.findProxy = (uri) => 'DIRECT';
+    inner.connectionFactory = _backendConnectionFactory;
+    return IOClient(inner);
+  }
+
+  static Future<ConnectionTask<Socket>> _backendConnectionFactory(
+    Uri uri,
+    String? proxyHost,
+    int? proxyPort,
+  ) async {
+    final port = uri.hasPort ? uri.port : (uri.scheme == 'https' ? 443 : 80);
+    final addresses = await _resolveBackendAddresses(uri.host);
+    Object? lastError;
+
+    for (final address in addresses) {
+      try {
+        final socket = await Socket.connect(
+          address,
+          port,
+        ).timeout(_connectionAttemptTimeout);
+        if (uri.scheme == 'https') {
+          final secureSocket = await SecureSocket.secure(
+            socket,
+            host: uri.host,
+          ).timeout(_connectionAttemptTimeout);
+          return ConnectionTask.fromSocket(
+            Future<Socket>.value(secureSocket),
+            () => secureSocket.destroy(),
+          );
+        }
+
+        return ConnectionTask.fromSocket(
+          Future<Socket>.value(socket),
+          () => socket.destroy(),
+        );
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw SocketException(
+      'Failed to connect to ${uri.host}: ${lastError ?? 'unknown error'}',
+    );
+  }
+
+  static Future<List<InternetAddress>> _resolveBackendAddresses(
+    String host,
+  ) async {
+    final addresses = <InternetAddress>[];
+
+    if (host == _primaryBackendHost) {
+      addresses.add(InternetAddress(_primaryBackendFallbackIp));
+    }
+
+    try {
+      final resolved = await InternetAddress.lookup(
+        host,
+      ).timeout(_connectionAttemptTimeout);
+      for (final address in resolved) {
+        if (addresses.any((existing) => existing.address == address.address)) {
+          continue;
+        }
+        addresses.add(address);
+      }
+    } catch (_) {
+      // Keep the explicit fallback address if DNS resolution fails.
+    }
+
+    if (addresses.isEmpty) {
+      throw SocketException('No backend addresses available for $host');
+    }
+
+    return addresses;
+  }
 
   bool _isRecaptchaTransientFailure(Object error) {
     final lowered = error.toString().toLowerCase();
@@ -172,7 +276,12 @@ class BackendApiService {
           lowered.contains('connection abort') ||
           lowered.contains('software caused connection abort') ||
           lowered.contains('stream terminated') ||
-          lowered.contains('timed out');
+          lowered.contains('timed out') ||
+          lowered.contains('host lookup') ||
+          lowered.contains('failed host lookup') ||
+          lowered.contains('no address associated with hostname') ||
+          lowered.contains('name or service not known') ||
+          lowered.contains('socketfailed');
     }
 
     final lowered = error.toString().toLowerCase();
@@ -181,7 +290,12 @@ class BackendApiService {
         lowered.contains('broken pipe') ||
         lowered.contains('connection abort') ||
         lowered.contains('socketexception') ||
-        lowered.contains('timed out');
+        lowered.contains('timed out') ||
+        lowered.contains('host lookup') ||
+        lowered.contains('failed host lookup') ||
+        lowered.contains('no address associated with hostname') ||
+        lowered.contains('name or service not known') ||
+        lowered.contains('socketfailed');
   }
 
   static final Map<String, DateTime> _bookmarkCheckRateLimitUntil =
@@ -215,6 +329,12 @@ class BackendApiService {
 
   String get _baseUrl =>
       AppConfig.apiUrl; // e.g. https://studyspace-backend.onrender.com
+
+  List<Uri> _backendUris(String path) {
+    return _apiBaseUrls
+        .map((baseUrl) => Uri.parse('$baseUrl$path'))
+        .toList(growable: false);
+  }
 
   Future<String?> _getIdToken({bool forceRefresh = false}) async {
     final auth = _auth;
@@ -297,27 +417,39 @@ class BackendApiService {
     return '$fallbackMessage (HTTP $statusCode): $compact';
   }
 
-  Future<Map<String, dynamic>> _requestJson(
-    String path, {
-    String method = 'GET',
+  bool _shouldFallbackToNextBaseUrl(Object error, String path, String method) {
+    if (_apiBaseUrls.length <= 1) return false;
+    if (!_isTransientConnectionFailure(error)) return false;
+
+    final normalizedMethod = method.toUpperCase();
+    if (_isAiOrRagPath(path)) {
+      return true;
+    }
+
+    return normalizedMethod == 'GET';
+  }
+
+  Future<Map<String, dynamic>> _requestJsonAtUri(
+    Uri uri, {
+    required String path,
+    required String method,
     Map<String, dynamic>? body,
     Duration timeout = _requestTimeout,
-    bool requireAuthToken = false,
-    String? bearerOverride,
-    BuildContext? securityContext,
-    bool includeRecaptchaToken = false,
-    String recaptchaAction = 'mobile_write',
+    required bool requireAuthToken,
+    required String? bearerOverride,
+    required BuildContext? securityContext,
+    required bool includeRecaptchaToken,
+    required String recaptchaAction,
+    required bool usesBearerOverride,
+    required bool preferFreshConnection,
+    required bool allowTransientConnectionRetry,
   }) async {
-    final trimmedBearerOverride = bearerOverride?.trim();
-    final usesBearerOverride =
-        trimmedBearerOverride != null && trimmedBearerOverride.isNotEmpty;
     String? token = usesBearerOverride
-        ? trimmedBearerOverride
+        ? bearerOverride?.trim()
         : await _getIdToken();
     if (requireAuthToken && (token == null || token.isEmpty)) {
       throw Exception('Authentication required');
     }
-    final uri = Uri.parse('$_baseUrl$path');
 
     var headers = <String, String>{
       'Content-Type': 'application/json',
@@ -343,9 +475,7 @@ class BackendApiService {
       effectiveBody ??= <String, dynamic>{};
       effectiveBody['recaptchaToken'] = recaptchaToken;
     }
-    final retryTransientConnectionFailure =
-        _shouldRetryTransientConnectionFailure(path: path, method: method);
-    final preferFreshConnection = _shouldPreferFreshConnection(path);
+
     Future<http.Response> sendJsonAttempt({
       required Map<String, String> currentHeaders,
       required bool closeConnection,
@@ -359,6 +489,9 @@ class BackendApiService {
 
     late http.Response res;
     Object? lastTransientConnectionError;
+    final retryTransientConnectionFailure =
+        allowTransientConnectionRetry &&
+        _shouldRetryTransientConnectionFailure(path: path, method: method);
     for (
       var attempt = 0;
       attempt < (retryTransientConnectionFailure ? 2 : 1);
@@ -468,6 +601,60 @@ class BackendApiService {
       );
     }
     return data;
+  }
+
+  Future<Map<String, dynamic>> _requestJson(
+    String path, {
+    String method = 'GET',
+    Map<String, dynamic>? body,
+    Duration timeout = _requestTimeout,
+    bool requireAuthToken = false,
+    String? bearerOverride,
+    BuildContext? securityContext,
+    bool includeRecaptchaToken = false,
+    String recaptchaAction = 'mobile_write',
+  }) async {
+    final trimmedBearerOverride = bearerOverride?.trim();
+    final usesBearerOverride =
+        trimmedBearerOverride != null && trimmedBearerOverride.isNotEmpty;
+    final preferFreshConnection = _shouldPreferFreshConnection(path);
+    final allowTransientConnectionRetry =
+        !_isAiOrRagPath(path) || _apiBaseUrls.length <= 1;
+    Object? lastError;
+    final candidateUris = _backendUris(path);
+    for (final uri in candidateUris) {
+      try {
+        return await _requestJsonAtUri(
+          uri,
+          path: path,
+          method: method,
+          body: body,
+          timeout: timeout,
+          requireAuthToken: requireAuthToken,
+          bearerOverride: bearerOverride,
+          securityContext: securityContext,
+          includeRecaptchaToken: includeRecaptchaToken,
+          recaptchaAction: recaptchaAction,
+          usesBearerOverride: usesBearerOverride,
+          preferFreshConnection: preferFreshConnection,
+          allowTransientConnectionRetry: allowTransientConnectionRetry,
+        );
+      } catch (error) {
+        lastError = error;
+        if (!_shouldFallbackToNextBaseUrl(error, path, method)) {
+          rethrow;
+        }
+        debugPrint(
+          '[BackendApi] Retrying $method $path on next backend base URL '
+          'after transport failure: $error',
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 260));
+      }
+    }
+    if (lastError != null) {
+      throw lastError;
+    }
+    throw Exception('API request failed for $path');
   }
 
   // ----------------------------

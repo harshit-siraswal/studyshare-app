@@ -184,6 +184,42 @@ void main() {
     expect(requestCount, 2);
   });
 
+  test(
+    'getAiFlashcards falls back to the next API base URL on socket failure',
+    () async {
+      final requests = <http.BaseRequest>[];
+
+      final client = MockClient((request) async {
+        requests.add(request);
+        if (request.url.host == 'primary.example.com') {
+          throw http.ClientException(
+            "SocketFailed host lookup: 'api.studyshare.in' (OS Error: No address associated with hostname, errno = 7)",
+            request.url,
+          );
+        }
+        return http.Response('{"flashcards":[{"front":"A","back":"B"}]}', 200);
+      });
+
+      final service = BackendApiService(
+        httpClient: client,
+        apiBaseUrls: <String>[
+          'https://primary.example.com',
+          'https://backup.example.com',
+        ],
+        startMaintenanceTimer: false,
+      );
+
+      final response = await service.getAiFlashcards(fileId: 'file-123');
+
+      expect(response['flashcards'], isA<List>());
+      expect(requests, hasLength(2));
+      expect(requests.first.url.host, 'primary.example.com');
+      expect(requests.last.url.host, 'backup.example.com');
+      expect(requests.last.method, 'POST');
+      expect(requests.last.url.path, '/api/ai/flashcards');
+    },
+  );
+
   test('checkFollowStatus uses the singular follow status endpoint', () async {
     http.BaseRequest? capturedRequest;
 

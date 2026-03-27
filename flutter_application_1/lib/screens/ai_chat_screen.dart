@@ -4737,148 +4737,212 @@ Return STRICT JSON only (no markdown). Schema:
     required TextStyle textFieldStyle,
     required TextStyle hintStyle,
   }) {
-    final iconColor = isDark ? Colors.white70 : Colors.black87;
-    final mutedIconColor = isDark ? Colors.white54 : Colors.black45;
-    final fieldBg = isDark ? const Color(0xFF12151C) : Colors.white;
-    final fieldBorder = isDark
-        ? Colors.white.withValues(alpha: 0.12)
-        : const Color(0xFFD8E0EF);
+    final iconColor = isDark ? Colors.white70 : const Color(0xFF1F2937);
+    final mutedIconColor = isDark ? Colors.white54 : const Color(0xFF6B7280);
+    final composerSurface = isDark ? const Color(0xFF0C1118) : Colors.white;
+    final composerBorder = isDark
+        ? Colors.white.withValues(alpha: 0.1)
+        : const Color(0xFFDCE4F2);
+    final chipSurface = isDark
+        ? Colors.white.withValues(alpha: 0.06)
+        : const Color(0xFFF3F6FB);
     final composerBusy =
         _isLoading || _isUploadingAttachment || _isSendAttemptInProgress;
     final canSend = hasComposerContent && !composerBusy;
-    final textFieldMinHeight = math.max(
-      48.0,
-      math.max(attachButtonSize, sendButtonSize),
-    );
-    final toggleBackground = _allowWebMode
-        ? AppTheme.primary.withValues(alpha: isDark ? 0.18 : 0.12)
-        : Colors.transparent;
+    final sendSurface = canSend
+        ? AppTheme.primary
+        : (isDark ? Colors.white12 : const Color(0xFFE5E7EB));
+    final sendIconColor = canSend
+        ? Colors.white
+        : (isDark ? Colors.white38 : const Color(0xFF9CA3AF));
+    final modeChipBackground = _allowWebMode
+        ? AppTheme.primary.withValues(alpha: isDark ? 0.2 : 0.12)
+        : chipSurface;
+    final modeChipBorder = _allowWebMode
+        ? AppTheme.primary.withValues(alpha: 0.28)
+        : composerBorder;
+    final modeChipIconColor = _allowWebMode ? AppTheme.primary : mutedIconColor;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(0, 4, 0, 8),
-      child: Container(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
         decoration: BoxDecoration(
-          color: fieldBg,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: fieldBorder),
+          color: composerSurface,
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(color: composerBorder),
           boxShadow: [
             BoxShadow(
               color: isDark
-                  ? Colors.black.withValues(alpha: 0.32)
-                  : const Color(0xFF0F172A).withValues(alpha: 0.05),
-              blurRadius: 14,
-              offset: const Offset(0, 5),
+                  ? Colors.black.withValues(alpha: 0.26)
+                  : const Color(0xFF0F172A).withValues(alpha: 0.04),
+              blurRadius: 18,
+              offset: const Offset(0, 8),
             ),
           ],
         ),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(4, 4, 6, 4),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
+          padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Tooltip(
-                message: 'Attach image or PDF',
-                child: SizedBox(
-                  width: attachButtonSize,
-                  height: attachButtonSize,
-                  child: Center(
-                    child: _isUploadingAttachment
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : IconButton(
-                            key: _coachAttachKey,
-                            onPressed: composerBusy ? null : _pickAttachment,
-                            visualDensity: VisualDensity.compact,
-                            splashRadius: 18,
-                            icon: Icon(
-                              Icons.attach_file_rounded,
-                              size: 20,
-                              color: composerBusy ? mutedIconColor : iconColor,
-                            ),
-                          ),
+              ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 58),
+                child: TextField(
+                  key: _coachInputKey,
+                  controller: _controller,
+                  minLines: 1,
+                  maxLines: 7,
+                  textInputAction: TextInputAction.send,
+                  onSubmitted: (_) => _sendMessage(),
+                  style: textFieldStyle.copyWith(
+                    height: 1.35,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'Message StudyShare AI',
+                    hintStyle: hintStyle.copyWith(color: mutedIconColor),
+                    border: InputBorder.none,
+                    isCollapsed: true,
                   ),
                 ),
               ),
-              const SizedBox(width: 4),
-              Expanded(
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(minHeight: textFieldMinHeight),
-                  child: TextField(
-                    key: _coachInputKey,
-                    controller: _controller,
-                    minLines: 1,
-                    maxLines: 6,
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (_) => _sendMessage(),
-                    style: textFieldStyle,
-                    decoration: InputDecoration(
-                      hintText: 'Ask anything about your notes...',
-                      hintStyle: hintStyle.copyWith(color: mutedIconColor),
-                      border: InputBorder.none,
-                      contentPadding: const EdgeInsets.fromLTRB(0, 14, 0, 14),
-                      isDense: true,
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Tooltip(
+                    message: 'Attach image or PDF',
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        key: _coachAttachKey,
+                        onTap: composerBusy
+                            ? null
+                            : _pickAttachment,
+                        borderRadius: BorderRadius.circular(999),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          height: attachButtonSize,
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          decoration: BoxDecoration(
+                            color: chipSurface,
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: composerBorder),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (_isUploadingAttachment)
+                                const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              else
+                                Icon(
+                                  Icons.add_rounded,
+                                  size: 18,
+                                  color: composerBusy
+                                      ? mutedIconColor
+                                      : iconColor,
+                                ),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Attach',
+                                style: GoogleFonts.inter(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: composerBusy
+                                      ? mutedIconColor
+                                      : iconColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                ),
-              ),
-              const SizedBox(width: 2),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 2),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Tooltip(
-                      message: _allowWebMode
-                          ? 'Web research on'
-                          : 'Web research off',
+                  const SizedBox(width: 8),
+                  Tooltip(
+                    message: _allowWebMode
+                        ? 'Web research enabled'
+                        : 'Answer from notes only',
+                    child: Material(
+                      color: Colors.transparent,
                       child: InkWell(
-                        borderRadius: BorderRadius.circular(12),
                         onTap: composerBusy
                             ? null
                             : () {
                                 if (!mounted) return;
                                 setState(() => _allowWebMode = !_allowWebMode);
                               },
+                        borderRadius: BorderRadius.circular(999),
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 180),
-                          padding: const EdgeInsets.all(10),
+                          height: attachButtonSize,
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
                           decoration: BoxDecoration(
-                            color: toggleBackground,
-                            borderRadius: BorderRadius.circular(12),
+                            color: modeChipBackground,
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: modeChipBorder),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _allowWebMode
+                                    ? Icons.public_rounded
+                                    : Icons.menu_book_rounded,
+                                size: 16,
+                                color: modeChipIconColor,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                _allowWebMode ? 'Web' : 'Notes',
+                                style: GoogleFonts.inter(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: _allowWebMode
+                                      ? AppTheme.primary
+                                      : mutedIconColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const Spacer(),
+                  SizedBox(
+                    key: _coachSendKey,
+                    width: math.max(sendButtonSize + 4, 42),
+                    height: math.max(sendButtonSize + 4, 42),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: canSend ? _sendMessage : null,
+                        borderRadius: BorderRadius.circular(999),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          decoration: BoxDecoration(
+                            color: sendSurface,
+                            borderRadius: BorderRadius.circular(999),
                           ),
                           child: Icon(
-                            _allowWebMode
-                                ? Icons.public_rounded
-                                : Icons.menu_book_rounded,
-                            size: 18,
-                            color: _allowWebMode
-                                ? AppTheme.primary
-                                : mutedIconColor,
+                            Icons.arrow_upward_rounded,
+                            size: 20,
+                            color: sendIconColor,
                           ),
                         ),
                       ),
                     ),
-                    SizedBox(
-                      key: _coachSendKey,
-                      width: sendButtonSize,
-                      height: sendButtonSize,
-                      child: IconButton(
-                        onPressed: canSend ? _sendMessage : null,
-                        visualDensity: VisualDensity.compact,
-                        splashRadius: 18,
-                        tooltip: 'Send',
-                        icon: Icon(
-                          Icons.arrow_upward_rounded,
-                          size: 20,
-                          color: canSend ? AppTheme.primary : mutedIconColor,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ],
           ),
