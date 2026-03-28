@@ -1181,81 +1181,37 @@ class _StudyScreenState extends State<StudyScreen>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final hasActiveFilters = _hasFollowingActiveFilters;
     final activeFilterCount = _activeFollowingFilterCount;
-    final searchBarColor = isDark ? Colors.black : const Color(0xFFF4F6FB);
-    final borderColor = hasActiveFilters
-        ? AppTheme.primary.withValues(alpha: 0.55)
-        : (isDark ? Colors.white24 : const Color(0xFFE1E7F0));
-    final dividerColor = isDark ? Colors.white10 : Colors.black12;
-    final filterBackground = hasActiveFilters
-        ? AppTheme.primary.withValues(alpha: isDark ? 0.22 : 0.12)
-        : (isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.06));
-    final filterTextColor = hasActiveFilters
-        ? AppTheme.primary
-        : (isDark ? Colors.white70 : const Color(0xFF111827));
-
-    return Container(
-      height: 60,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: searchBarColor,
-        borderRadius: BorderRadius.circular(30),
-        border: Border.all(
-          color: borderColor,
-          width: hasActiveFilters ? 1.2 : 0.9,
+    return _buildSearchBarShell(
+      isDark: isDark,
+      hasActiveFilters: hasActiveFilters,
+      activeFilterCount: activeFilterCount,
+      onFilterTap: _showFollowingFilterOptionsSheet,
+      searchContent: TextField(
+        controller: _followingSearchController,
+        onChanged: (value) {
+          setState(() => _followingSearchQuery = value);
+        },
+        style: GoogleFonts.inter(
+          fontSize: 15,
+          fontWeight: FontWeight.w500,
+          color: isDark ? Colors.white : const Color(0xFF111827),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.08),
-            blurRadius: 12,
-            offset: const Offset(0, 6),
+        decoration: InputDecoration(
+          hintText: _canManageAdminResources
+              ? 'Search moderation queue...'
+              : 'Search following feed...',
+          hintStyle: GoogleFonts.inter(
+            fontSize: 15,
+            color: isDark ? Colors.grey[400] : const Color(0xFF4B5563),
           ),
-        ],
+          border: InputBorder.none,
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(vertical: 14),
+        ),
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.1)
-                  : const Color(0xFFDCE3EE),
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Icon(
-              Icons.search_rounded,
-              size: 18,
-              color: isDark ? Colors.white70 : const Color(0xFF19212E),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: TextField(
-              controller: _followingSearchController,
-              onChanged: (value) {
-                setState(() => _followingSearchQuery = value);
-              },
-              style: GoogleFonts.inter(
-                fontSize: 15,
-                fontWeight: FontWeight.w500,
-                color: isDark ? Colors.white : const Color(0xFF111827),
-              ),
-              decoration: InputDecoration(
-                hintText: _canManageAdminResources
-                    ? 'Search moderation queue...'
-                    : 'Search following feed...',
-                hintStyle: GoogleFonts.inter(
-                  fontSize: 15,
-                  color: isDark ? Colors.grey[400] : const Color(0xFF4B5563),
-                ),
-                border: InputBorder.none,
-                isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 14),
-              ),
-            ),
-          ),
-          if (_followingSearchQuery.trim().isNotEmpty)
-            IconButton(
+      trailingSearchAction: _followingSearchQuery.trim().isEmpty
+          ? null
+          : IconButton(
               iconSize: 18,
               visualDensity: VisualDensity.compact,
               icon: Icon(
@@ -1267,63 +1223,6 @@ class _StudyScreenState extends State<StudyScreen>
                 setState(() => _followingSearchQuery = '');
               },
             ),
-          Container(width: 1, height: 30, color: dividerColor),
-          const SizedBox(width: 8),
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: _showFollowingFilterOptionsSheet,
-              borderRadius: BorderRadius.circular(18),
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Container(
-                    width: 36,
-                    height: 36,
-                    alignment: Alignment.center,
-                    decoration: BoxDecoration(
-                      color: filterBackground,
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(
-                        color: hasActiveFilters
-                            ? AppTheme.primary.withValues(alpha: 0.4)
-                            : dividerColor,
-                      ),
-                    ),
-                    child: Icon(
-                      Icons.tune_rounded,
-                      color: filterTextColor,
-                      size: 18,
-                    ),
-                  ),
-                  if (activeFilterCount > 0)
-                    Positioned(
-                      right: -4,
-                      top: -5,
-                      child: Container(
-                        width: 18,
-                        height: 18,
-                        alignment: Alignment.center,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF0EA5E9),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Text(
-                          activeFilterCount.toString(),
-                          style: GoogleFonts.inter(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -2310,18 +2209,6 @@ class _StudyScreenState extends State<StudyScreen>
         !_resourcesRelevantOnly;
     final activeFilterCount = _activeResourceFilterCount;
 
-    final searchBarColor = isDark ? Colors.black : const Color(0xFFF4F6FB);
-    final borderColor = hasActiveFilters
-        ? AppTheme.primary.withValues(alpha: 0.55)
-        : (isDark ? Colors.white24 : const Color(0xFFE1E7F0));
-    final dividerColor = isDark ? Colors.white10 : Colors.black12;
-    final filterBackground = hasActiveFilters
-        ? AppTheme.primary.withValues(alpha: isDark ? 0.22 : 0.12)
-        : (isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.06));
-    final filterTextColor = hasActiveFilters
-        ? AppTheme.primary
-        : (isDark ? Colors.white70 : const Color(0xFF111827));
-
     return GestureDetector(
       onTap: () {
         Navigator.of(context).push(
@@ -2352,111 +2239,143 @@ class _StudyScreenState extends State<StudyScreen>
           ),
         );
       },
-      child: Container(
-        height: 60,
+      child: _buildSearchBarShell(
+        isDark: isDark,
+        hasActiveFilters: hasActiveFilters,
+        activeFilterCount: activeFilterCount,
+        onFilterTap: _showFilterOptionsSheet,
         margin: const EdgeInsets.symmetric(horizontal: 20),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: searchBarColor,
-          borderRadius: BorderRadius.circular(30),
-          border: Border.all(
-            color: borderColor,
-            width: hasActiveFilters ? 1.2 : 0.9,
+        searchContent: Text(
+          'Search resources...',
+          style: GoogleFonts.inter(
+            color: isDark ? Colors.grey[400] : const Color(0xFF4B5563),
+            fontSize: 15,
+            fontWeight: FontWeight.w500,
           ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.08),
-              blurRadius: 12,
-              offset: const Offset(0, 6),
-            ),
-          ],
+          overflow: TextOverflow.ellipsis,
         ),
-        child: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: isDark
-                    ? Colors.white.withValues(alpha: 0.1)
-                    : const Color(0xFFDCE3EE),
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Icon(
-                Icons.search_rounded,
-                color: isDark ? Colors.white70 : const Color(0xFF19212E),
-                size: 18,
-              ),
+      ),
+    );
+  }
+
+  Widget _buildSearchBarShell({
+    required bool isDark,
+    required bool hasActiveFilters,
+    required int activeFilterCount,
+    required Widget searchContent,
+    required VoidCallback onFilterTap,
+    EdgeInsetsGeometry margin = EdgeInsets.zero,
+    Widget? trailingSearchAction,
+  }) {
+    final searchBarColor = isDark ? Colors.black : const Color(0xFFF4F6FB);
+    final borderColor = hasActiveFilters
+        ? AppTheme.primary.withValues(alpha: 0.55)
+        : (isDark ? Colors.white24 : const Color(0xFFE1E7F0));
+    final dividerColor = isDark ? Colors.white10 : Colors.black12;
+    final filterBackground = hasActiveFilters
+        ? AppTheme.primary.withValues(alpha: isDark ? 0.22 : 0.12)
+        : (isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.06));
+    final filterTextColor = hasActiveFilters
+        ? AppTheme.primary
+        : (isDark ? Colors.white70 : const Color(0xFF111827));
+
+    return Container(
+      height: 60,
+      margin: margin,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: searchBarColor,
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(
+          color: borderColor,
+          width: hasActiveFilters ? 1.2 : 0.9,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.1)
+                  : const Color(0xFFDCE3EE),
+              borderRadius: BorderRadius.circular(18),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Search resources...',
-                style: GoogleFonts.inter(
-                  color: isDark ? Colors.grey[400] : const Color(0xFF4B5563),
-                  fontSize: 15,
-                  fontWeight: FontWeight.w500,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
+            child: Icon(
+              Icons.search_rounded,
+              color: isDark ? Colors.white70 : const Color(0xFF19212E),
+              size: 18,
             ),
-            Container(width: 1, height: 30, color: dividerColor),
-            const SizedBox(width: 8),
-            Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: _showFilterOptionsSheet,
-                borderRadius: BorderRadius.circular(18),
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Container(
-                      width: 36,
-                      height: 36,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: filterBackground,
-                        borderRadius: BorderRadius.circular(18),
-                        border: Border.all(
-                          color: hasActiveFilters
-                              ? AppTheme.primary.withValues(alpha: 0.4)
-                              : dividerColor,
-                        ),
-                      ),
-                      child: Icon(
-                        Icons.tune_rounded,
-                        color: filterTextColor,
-                        size: 18,
+          ),
+          const SizedBox(width: 12),
+          Expanded(child: searchContent),
+          ...?trailingSearchAction == null
+              ? null
+              : <Widget>[trailingSearchAction],
+          Container(width: 1, height: 30, color: dividerColor),
+          const SizedBox(width: 8),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: onFilterTap,
+              borderRadius: BorderRadius.circular(18),
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    width: 36,
+                    height: 36,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: filterBackground,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: hasActiveFilters
+                            ? AppTheme.primary.withValues(alpha: 0.4)
+                            : dividerColor,
                       ),
                     ),
-                    if (activeFilterCount > 0)
-                      Positioned(
-                        right: -4,
-                        top: -5,
-                        child: Container(
-                          width: 18,
-                          height: 18,
-                          alignment: Alignment.center,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF0EA5E9),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Text(
-                            activeFilterCount.toString(),
-                            style: GoogleFonts.inter(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                            ),
+                    child: Icon(
+                      Icons.tune_rounded,
+                      color: filterTextColor,
+                      size: 18,
+                    ),
+                  ),
+                  if (activeFilterCount > 0)
+                    Positioned(
+                      right: -4,
+                      top: -5,
+                      child: Container(
+                        width: 18,
+                        height: 18,
+                        alignment: Alignment.center,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF0EA5E9),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Text(
+                          activeFilterCount.toString(),
+                          style: GoogleFonts.inter(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
                       ),
-                  ],
-                ),
+                    ),
+                ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

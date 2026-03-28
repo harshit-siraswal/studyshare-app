@@ -8,6 +8,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
+import 'analytics_service.dart';
 import 'backend_api_service.dart';
 import 'push_notification_service.dart';
 
@@ -160,6 +161,22 @@ class AuthService {
     return '$maskedLocal@$domain';
   }
 
+  String _classifyAuthError(Object error) {
+    if (error is firebase_auth.FirebaseAuthException) {
+      final code = error.code.trim().toLowerCase().replaceAll('-', '_');
+      if (code.isNotEmpty) return code;
+    }
+    final lowered = error.toString().toLowerCase();
+    if (lowered.contains('network')) return 'network';
+    if (lowered.contains('timeout')) return 'timeout';
+    if (lowered.contains('developer_error') ||
+        lowered.contains('status code 10') ||
+        lowered.contains('configuration')) {
+      return 'config';
+    }
+    return 'unknown';
+  }
+
   void incrementBanCheckFailure() {
     final now = DateTime.now();
     _banCheckFailureCount += 1;
@@ -239,6 +256,11 @@ class AuthService {
           _backgroundSaveUser(userCredential.user!);
         }
 
+        await AnalyticsService.instance.logEvent(
+          'auth_login',
+          parameters: const <String, Object?>{'method': 'google'},
+        );
+
         return userCredential;
       }
 
@@ -261,7 +283,14 @@ class AuthService {
             await _resetGoogleSignInClient(preferPlatformConfig: true);
             await Future<void>.delayed(const Duration(milliseconds: 350));
           }
-          return await _performMobileGoogleSignIn();
+          final userCredential = await _performMobileGoogleSignIn();
+          if (userCredential?.user != null) {
+            await AnalyticsService.instance.logEvent(
+              'auth_login',
+              parameters: const <String, Object?>{'method': 'google'},
+            );
+          }
+          return userCredential;
         } on PlatformException catch (e) {
           final errorMessage = '${e.code} ${e.message ?? ''}'.toLowerCase();
           debugPrint(
@@ -300,12 +329,26 @@ class AuthService {
     } on PlatformException catch (e) {
       final errorMessage = '${e.code} ${e.message ?? ''}'.toLowerCase();
       debugPrint('Google Sign-In platform error: $e');
+      await AnalyticsService.instance.logEvent(
+        'auth_login_error',
+        parameters: <String, Object?>{
+          'method': 'google',
+          'reason': _classifyAuthError(e),
+        },
+      );
       if (_looksLikeGoogleConfigIssue(errorMessage)) {
         _throwGoogleConfigError();
       }
       rethrow;
     } catch (e) {
       debugPrint('Error signing in with Google: $e');
+      await AnalyticsService.instance.logEvent(
+        'auth_login_error',
+        parameters: <String, Object?>{
+          'method': 'google',
+          'reason': _classifyAuthError(e),
+        },
+      );
       rethrow;
     }
   }
@@ -339,9 +382,21 @@ class AuthService {
         _backgroundSaveUser(userCredential.user!);
       }
 
+      await AnalyticsService.instance.logEvent(
+        'auth_login',
+        parameters: const <String, Object?>{'method': 'email'},
+      );
+
       return userCredential;
     } catch (e) {
       debugPrint('Error signing in with email: $e');
+      await AnalyticsService.instance.logEvent(
+        'auth_login_error',
+        parameters: <String, Object?>{
+          'method': 'email',
+          'reason': _classifyAuthError(e),
+        },
+      );
       rethrow;
     }
   }
@@ -365,9 +420,20 @@ class AuthService {
       if (userCredential.user != null) {
         _backgroundSaveUser(userCredential.user!);
       }
+      await AnalyticsService.instance.logEvent(
+        'auth_signup',
+        parameters: const <String, Object?>{'method': 'email'},
+      );
       return userCredential;
     } catch (e) {
       debugPrint('Error creating account: $e');
+      await AnalyticsService.instance.logEvent(
+        'auth_signup_error',
+        parameters: <String, Object?>{
+          'method': 'email',
+          'reason': _classifyAuthError(e),
+        },
+      );
       rethrow;
     }
   }
@@ -376,8 +442,16 @@ class AuthService {
   Future<void> sendPasswordResetEmail(String email) async {
     try {
       await _auth.sendPasswordResetEmail(email: email);
+      await AnalyticsService.instance.logEvent(
+        'auth_password_reset',
+        parameters: const <String, Object?>{'method': 'email'},
+      );
     } catch (e) {
       debugPrint('Error sending password reset email: $e');
+      await AnalyticsService.instance.logEvent(
+        'auth_password_reset_error',
+        parameters: <String, Object?>{'reason': _classifyAuthError(e)},
+      );
       rethrow;
     }
   }
@@ -431,6 +505,7 @@ class AuthService {
           debugPrint('GoogleSignIn signOut error (ignored): $e');
         }
       }
+      await AnalyticsService.instance.logEvent('auth_logout');
       // Always sign out of Firebase
       await _auth.signOut();
     } catch (e) {

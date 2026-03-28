@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
@@ -9,6 +10,7 @@ import '../config/theme.dart';
 import '../models/ai_question_paper.dart';
 import '../screens/ai_chat_screen.dart';
 import '../screens/ai_question_paper_quiz_screen.dart';
+import '../services/analytics_service.dart';
 import '../services/ai_output_local_service.dart';
 import '../services/backend_api_service.dart';
 import '../services/summary_pdf_service.dart';
@@ -99,6 +101,7 @@ class AiStudyToolsSheet extends StatefulWidget {
 
 class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     with SingleTickerProviderStateMixin {
+  final AnalyticsService _analytics = AnalyticsService.instance;
   final BackendApiService _api = BackendApiService();
   final SupabaseService _supabaseService = SupabaseService();
   static const Color _studioBlue = Color(0xFF2563EB);
@@ -131,6 +134,57 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
   bool get _supportsOcr => widget.resourceType != 'video';
 
+  Map<String, Object?> _baseAnalyticsParameters() {
+    return <String, Object?>{
+      'resource_type': widget.resourceType,
+      'supports_ocr': _supportsOcr,
+      'has_video': widget.videoUrl?.trim().isNotEmpty == true,
+    };
+  }
+
+  String _tabNameForIndex(int index) {
+    switch (index) {
+      case 0:
+        return 'summary';
+      case 1:
+        return 'quiz';
+      case 2:
+        return 'flashcards';
+      case 3:
+        return 'chat';
+      default:
+        return 'unknown';
+    }
+  }
+
+  Future<void> _trackAiStudioOpened() async {
+    await _analytics.trackScreenView(screenName: 'ai_studio');
+    await _analytics.logEvent(
+      'ai_studio_open',
+      parameters: <String, Object?>{
+        ..._baseAnalyticsParameters(),
+        'initial_tab': _tabNameForIndex(_tabController.index),
+        'auto_type': widget.autoGenerateType?.trim().toLowerCase(),
+      },
+    );
+  }
+
+  String _classifyGenerationError(String message) {
+    final lowered = message.toLowerCase();
+    if (_looksLikeTokenLimitError(message)) return 'token_limit';
+    if (lowered.contains('socket') ||
+        lowered.contains('host lookup') ||
+        lowered.contains('network')) {
+      return 'network';
+    }
+    if (lowered.contains('timeout')) return 'timeout';
+    if (lowered.contains('valid quiz') ||
+        lowered.contains('valid flashcards')) {
+      return 'format';
+    }
+    return 'unknown';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -143,8 +197,18 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     );
     _tabController.addListener(() {
       if (_tabController.indexIsChanging) return;
+      unawaited(
+        _analytics.logEvent(
+          'ai_studio_tab_view',
+          parameters: <String, Object?>{
+            ..._baseAnalyticsParameters(),
+            'tab': _tabNameForIndex(_tabController.index),
+          },
+        ),
+      );
       if (mounted) setState(() {});
     });
+    unawaited(_trackAiStudioOpened());
     _loadSavedOutputs().then((_) {
       if (!mounted) return;
       _handleInitialAutoGeneration();
@@ -730,6 +794,8 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
   Future<void> _generate(String type, {required bool regenerate}) async {
     if (_isLoading) return;
+    final useOcr = _supportsOcr && (_useOcr || _forceOcr);
+    final forceOcr = _supportsOcr && _forceOcr;
     setState(() {
       _isLoading = true;
       _loadingType = type;
@@ -737,10 +803,19 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     });
 
     try {
-      final useOcr = _supportsOcr && (_useOcr || _forceOcr);
-      final forceOcr = _supportsOcr && _forceOcr;
+      await _analytics.logEvent(
+        'ai_studio_generate',
+        parameters: <String, Object?>{
+          ..._baseAnalyticsParameters(),
+          'content_type': type,
+          'regenerate': regenerate,
+          'use_ocr': useOcr,
+          'force_ocr': forceOcr,
+        },
+      );
 
       Map<String, dynamic> response;
+      var outputSize = 0;
       if (type == 'summary') {
         response = await _api.getAiSummary(
           fileId: widget.resourceId,
@@ -752,8 +827,10 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
           videoUrl: widget.videoUrl,
         );
         final data = response['data'];
+        final summaryText = data is String ? data : data?.toString();
+        outputSize = summaryText?.length ?? 0;
         setState(() {
-          _summary = data is String ? data : data?.toString();
+          _summary = summaryText;
           _cachedMap['summary'] = response['cached'] == true;
           _savedLocallyMap['summary'] = false;
         });
@@ -773,6 +850,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
             'Could not create a valid quiz from the AI response. Please try again.',
           );
         }
+        outputSize = parsed.length;
 
         setState(() {
           _quiz = parsed;
@@ -797,6 +875,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
             'Could not create valid flashcards from the AI response. Please try again.',
           );
         }
+        outputSize = parsed.length;
 
         setState(() {
           _flashcards = parsed;
@@ -807,9 +886,32 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         });
         _resetFlashcardDeckToStart();
       }
+      await _analytics.logEvent(
+        'ai_studio_generate_success',
+        parameters: <String, Object?>{
+          ..._baseAnalyticsParameters(),
+          'content_type': type,
+          'regenerate': regenerate,
+          'use_ocr': useOcr,
+          'force_ocr': forceOcr,
+          'cached': response['cached'] == true,
+          'output_size': outputSize,
+        },
+      );
       _supabaseService.markAiTokenBalanceStale();
     } catch (e) {
       final message = e.toString().replaceFirst('Exception: ', '');
+      await _analytics.logEvent(
+        'ai_studio_generate_error',
+        parameters: <String, Object?>{
+          ..._baseAnalyticsParameters(),
+          'content_type': type,
+          'regenerate': regenerate,
+          'use_ocr': useOcr,
+          'force_ocr': forceOcr,
+          'reason': _classifyGenerationError(message),
+        },
+      );
       setState(() {
         _error = _looksLikeTokenLimitError(message)
             ? 'Your AI tokens are exhausted for this cycle. Buy more AI tokens to continue.'

@@ -30,6 +30,7 @@ import 'screens/auth/banned_user_screen.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/notices/notice_detail_screen.dart';
+import 'services/analytics_service.dart';
 import 'services/auth_service.dart';
 import 'services/download_service.dart';
 import 'services/push_notification_service.dart';
@@ -56,6 +57,22 @@ String? _getCollegeIdFromPrefs(SharedPreferences prefs) {
     debugPrint('Error decoding selectedCollege JSON: $e');
   }
   return prefs.getString('selectedCollegeId');
+}
+
+String? _getCollegeDomainFromPrefs(SharedPreferences prefs) {
+  try {
+    final collegeJson = prefs.getString('selectedCollege');
+    if (collegeJson != null && collegeJson.isNotEmpty) {
+      final data = jsonDecode(collegeJson) as Map<String, dynamic>;
+      if (data['domain'] is String &&
+          (data['domain'] as String).trim().isNotEmpty) {
+        return (data['domain'] as String).trim();
+      }
+    }
+  } catch (e) {
+    debugPrint('Error decoding selectedCollege domain JSON: $e');
+  }
+  return prefs.getString('selectedCollegeDomain');
 }
 
 final Queue<String> _pendingDeepLinks = Queue<String>();
@@ -236,9 +253,15 @@ class _AppRootState extends State<AppRoot> {
     _authStateSubscription?.cancel();
     _authStateSubscription = _authService.authStateChanges.listen((user) async {
       if (user == null) {
+        await AnalyticsService.instance.clearUserContext();
         await _handleSignedOutFcmState();
         return;
       }
+      await AnalyticsService.instance.setUserContext(
+        userId: user.uid,
+        authProvider: _resolveAuthProviderForAnalytics(user.providerData),
+        emailVerified: user.emailVerified,
+      );
       final normalizedEmail = user.email?.trim().toLowerCase();
       if (normalizedEmail == null || normalizedEmail.isEmpty) {
         debugPrint('Skipping FCM sync: signed-in user has no email.');
@@ -246,6 +269,22 @@ class _AppRootState extends State<AppRoot> {
       }
       await _syncStoredFcmToken(currentEmail: normalizedEmail);
     });
+  }
+
+  String? _resolveAuthProviderForAnalytics(List<dynamic> providerData) {
+    for (final provider in providerData) {
+      final rawId = provider.providerId?.toString().trim();
+      if (rawId == null || rawId.isEmpty) continue;
+      switch (rawId) {
+        case 'password':
+          return 'email';
+        case 'google.com':
+          return 'google';
+        default:
+          return rawId.replaceAll('.', '_');
+      }
+    }
+    return null;
   }
 
   Future<void> _syncStoredFcmToken({String? currentEmail}) async {
@@ -456,6 +495,14 @@ class _AppRootState extends State<AppRoot> {
             'Please verify Firebase setup and try again.';
         if (mounted) setState(() => _appState = AppState.initializationError);
         return;
+      }
+
+      await AnalyticsService.instance.initialize();
+      if (_prefs != null) {
+        await AnalyticsService.instance.setCollegeContext(
+          collegeId: _getCollegeIdFromPrefs(_prefs!),
+          collegeDomain: _getCollegeDomainFromPrefs(_prefs!),
+        );
       }
 
       await _continueStartup();
@@ -715,6 +762,7 @@ class StudyShareApp extends StatelessWidget {
               ],
               supportedLocales: AppLocalizations.supportedLocales,
               navigatorKey: appNavigatorKey,
+              navigatorObservers: [AnalyticsService.instance.navigatorObserver],
               theme: lightTheme,
               darkTheme: darkTheme,
               themeMode: themeProvider.themeMode,
@@ -732,6 +780,7 @@ class StudyShareApp extends StatelessWidget {
 
                     if (collegeId != null && collegeId.isNotEmpty) {
                       return MaterialPageRoute(
+                        settings: settings,
                         builder: (_) => NoticeDeepLinkLoader(
                           noticeId: noticeId,
                           collegeId: collegeId,
@@ -744,6 +793,7 @@ class StudyShareApp extends StatelessWidget {
                         'Failed to route deep-link: no collegeId found.',
                       );
                       return MaterialPageRoute(
+                        settings: settings,
                         builder: (context) {
                           WidgetsBinding.instance.addPostFrameCallback((_) {
                             if (context.mounted) {
@@ -837,6 +887,20 @@ class _AppRouterState extends State<AppRouter> {
       _selectedCollegeData?['domain'] ??
       widget.prefs.getString('selectedCollegeDomain');
 
+  void _scheduleAnalyticsScreen(String screenName) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(
+        AnalyticsService.instance.setCollegeContext(
+          collegeId: _selectedCollegeId,
+          collegeDomain: _selectedCollegeDomain,
+        ),
+      );
+      unawaited(
+        AnalyticsService.instance.trackScreenView(screenName: screenName),
+      );
+    });
+  }
+
   void _onOnboardingComplete() async {
     await widget.prefs.setBool('hasSeenOnboarding', true);
     setState(() {});
@@ -847,6 +911,7 @@ class _AppRouterState extends State<AppRouter> {
     final legacyId = widget.prefs.getString('selectedCollegeId');
     final legacyName = widget.prefs.getString('selectedCollegeName');
     final legacyDomain = widget.prefs.getString('selectedCollegeDomain');
+    var didPersistSelection = false;
 
     try {
       final jsonString = jsonEncode({'id': id, 'name': name, 'domain': domain});
@@ -857,6 +922,7 @@ class _AppRouterState extends State<AppRouter> {
         widget.prefs.remove('selectedCollegeName'),
         widget.prefs.remove('selectedCollegeDomain'),
       ]);
+      didPersistSelection = true;
     } catch (e) {
       debugPrint('Error saving college selection: $e');
       // Rollback: remove broken new key and restore legacy if needed
@@ -870,6 +936,20 @@ class _AppRouterState extends State<AppRouter> {
       if (legacyDomain != null) {
         await widget.prefs.setString('selectedCollegeDomain', legacyDomain);
       }
+    }
+    if (didPersistSelection) {
+      unawaited(
+        AnalyticsService.instance.setCollegeContext(
+          collegeId: id,
+          collegeDomain: domain,
+        ),
+      );
+      unawaited(
+        AnalyticsService.instance.logEvent(
+          'college_selected',
+          parameters: <String, Object?>{'has_domain': domain.trim().isNotEmpty},
+        ),
+      );
     }
     setState(() {});
   }
@@ -887,6 +967,13 @@ class _AppRouterState extends State<AppRouter> {
     await widget.prefs.remove('selectedCollegeId');
     await widget.prefs.remove('selectedCollegeName');
     await widget.prefs.remove('selectedCollegeDomain');
+    unawaited(
+      AnalyticsService.instance.setCollegeContext(
+        collegeId: null,
+        collegeDomain: null,
+      ),
+    );
+    unawaited(AnalyticsService.instance.logEvent('college_cleared'));
     setState(() {});
   }
 
@@ -960,11 +1047,13 @@ class _AppRouterState extends State<AppRouter> {
     SupabaseService().attachContext(context);
     // First time: Show onboarding
     if (!_hasSeenOnboarding) {
+      _scheduleAnalyticsScreen('onboarding');
       return OnboardingScreen(onComplete: _onOnboardingComplete);
     }
 
     // No college selected: Show college selection
     if (_selectedCollegeId == null) {
+      _scheduleAnalyticsScreen('college_selection');
       return CollegeSelectionScreen(onCollegeSelected: _onCollegeSelected);
     }
 
@@ -984,6 +1073,7 @@ class _AppRouterState extends State<AppRouter> {
           if (_selectedCollegeId == null ||
               _selectedCollegeName == null ||
               _selectedCollegeDomain == null) {
+            _scheduleAnalyticsScreen('college_selection');
             return CollegeSelectionScreen(
               onCollegeSelected: _onCollegeSelected,
             );
@@ -991,6 +1081,7 @@ class _AppRouterState extends State<AppRouter> {
 
           final initialErrorMessage = _pendingLoginErrorMessage;
           _pendingLoginErrorMessage = null;
+          _scheduleAnalyticsScreen('login');
           return LoginScreen(
             collegeName: _selectedCollegeName!,
             collegeDomain: _selectedCollegeDomain!,
@@ -1003,6 +1094,7 @@ class _AppRouterState extends State<AppRouter> {
         // Ensure we have college info before showing home
         if (_selectedCollegeId == null || _selectedCollegeDomain == null) {
           // This case is rare but if user is logged in but prefs are cleared
+          _scheduleAnalyticsScreen('college_selection');
           return CollegeSelectionScreen(onCollegeSelected: _onCollegeSelected);
         }
 
@@ -1028,6 +1120,7 @@ class _AppRouterState extends State<AppRouter> {
             }
 
             if (gateResult.isBanned) {
+              _scheduleAnalyticsScreen('banned_user');
               return BannedUserScreen(
                 reason: gateResult.denialMessage ?? 'Account suspended.',
                 onSignOut: () {
@@ -1036,6 +1129,7 @@ class _AppRouterState extends State<AppRouter> {
               );
             }
 
+            _scheduleAnalyticsScreen('home');
             return HomeScreen(
               collegeId: _selectedCollegeId!,
               collegeName: _selectedCollegeName ?? '',

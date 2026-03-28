@@ -18,6 +18,7 @@ import '../models/ai_question_paper.dart';
 import '../models/study_ai_plan.dart';
 import '../services/auth_service.dart';
 import '../services/ai_chat_notification_service.dart';
+import '../services/analytics_service.dart';
 import '../services/backend_api_service.dart';
 import '../services/cloudinary_service.dart';
 import '../services/ai_chat_local_service.dart';
@@ -242,6 +243,7 @@ class _AIChatScreenState extends State<AIChatScreen>
   static const String _aiCoachMarksSeenKey = 'ai_chat_coach_marks_v1_seen';
   static const int _minLowTokenThreshold = 4000;
 
+  final AnalyticsService _analytics = AnalyticsService.instance;
   final BackendApiService _api = BackendApiService();
   final AuthService _auth = AuthService();
   final SupabaseService _supabase = SupabaseService();
@@ -326,6 +328,42 @@ class _AIChatScreenState extends State<AIChatScreen>
 
   String get _chatTitle => _isStudioChat ? 'AI Studio' : 'AI Chat';
 
+  Map<String, Object?> _baseAnalyticsParameters() {
+    return <String, Object?>{
+      'studio_chat': _isStudioChat,
+      'embedded': widget.embedded,
+      'has_resource': widget.resourceContext != null,
+      'has_video_context':
+          widget.resourceContext?.videoUrl?.trim().isNotEmpty == true,
+    };
+  }
+
+  Future<void> _trackAiChatOpened() async {
+    final screenName = _isStudioChat ? 'ai_studio_chat' : 'ai_chat';
+    await _analytics.trackScreenView(screenName: screenName);
+    await _analytics.logEvent(
+      '${screenName}_open',
+      parameters: _baseAnalyticsParameters(),
+    );
+  }
+
+  String _classifyAiChatError(String message) {
+    final lowered = message.toLowerCase();
+    if (lowered.contains('token') &&
+        (lowered.contains('limit') || lowered.contains('balance'))) {
+      return 'token_limit';
+    }
+    if (lowered.contains('socket') ||
+        lowered.contains('host lookup') ||
+        lowered.contains('network')) {
+      return 'network';
+    }
+    if (lowered.contains('timeout')) return 'timeout';
+    if (lowered.contains('ocr')) return 'ocr';
+    if (lowered.contains('stream')) return 'stream';
+    return 'unknown';
+  }
+
   AnimationController get _splashAnimationController =>
       _animations.splashController;
   Animation<double> get _iconScaleAnimation => _animations.iconScaleAnimation;
@@ -361,6 +399,7 @@ class _AIChatScreenState extends State<AIChatScreen>
     );
 
     _aiNotificationService.initialize();
+    unawaited(_trackAiChatOpened());
     _prepareCoachMarks();
     _refreshAiTokenStatus();
     _controller.addListener(() {
@@ -3444,6 +3483,13 @@ Return STRICT JSON only (no markdown). Schema:
         if (_aiTokenStatusLoaded &&
             _aiTokenBudgetTokens > 0 &&
             _aiTokenRemainingTokens <= 0) {
+          await _analytics.logEvent(
+            'ai_chat_blocked',
+            parameters: <String, Object?>{
+              ..._baseAnalyticsParameters(),
+              'reason': 'insufficient_tokens',
+            },
+          );
           setState(() => _showAiTokenLowBanner = true);
           _showAiTokenTopUpSnackBar(_buildAiTokenShortageMessage());
           return;
@@ -3546,6 +3592,22 @@ Return STRICT JSON only (no markdown). Schema:
         final isSummaryExportRequest = _isSummaryExportIntent(
           prompt: userPrompt,
           hasAttachments: hasAttachments,
+        );
+        final analyticsParameters = <String, Object?>{
+          ..._baseAnalyticsParameters(),
+          'has_attachments': hasAttachments,
+          'attachment_count': effectiveAttachments.length,
+          'allow_web': effectiveAllowWeb,
+          'search_all_pdfs': searchAllForPrompt,
+          'use_ocr': effectiveUseOcr,
+          'force_ocr': effectiveForceOcr,
+          'summary_export': isSummaryExportRequest,
+          'question_paper': isQuestionPaperRequest,
+        };
+
+        await _analytics.logEvent(
+          'ai_chat_send',
+          parameters: analyticsParameters,
         );
 
         if (isSummaryExportRequest) {
@@ -3817,6 +3879,18 @@ Return STRICT JSON only (no markdown). Schema:
             _supabase.markAiTokenBalanceStale();
             _refreshAiTokenStatus(forceRefresh: true);
           }
+          await _analytics.logEvent(
+            'ai_chat_response',
+            parameters: <String, Object?>{
+              ...analyticsParameters,
+              'has_sources': aiMessage.sources.isNotEmpty,
+              'source_count': aiMessage.sources.length,
+              'ocr_error_count': aiMessage.ocrErrors.length,
+              'answer_origin': aiMessage.answerOrigin?.wireValue,
+              'response_chars': aiMessage.content.trim().length,
+              'malformed_chunks': malformedChunkCount,
+            },
+          );
         } catch (e) {
           final errorMessage = _cleanUserVisibleErrorMessage(e);
           _handlePotentialTokenLimitError(errorMessage);
@@ -3836,6 +3910,13 @@ Return STRICT JSON only (no markdown). Schema:
             });
             await _persistCurrentSession();
           }
+          await _analytics.logEvent(
+            'ai_chat_error',
+            parameters: <String, Object?>{
+              ...analyticsParameters,
+              'reason': _classifyAiChatError(errorMessage),
+            },
+          );
         } finally {
           _resetTypingRenderer();
           if (mounted) {
