@@ -111,6 +111,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   bool _isLoading = false;
   bool _isSaving = false;
   bool _isDownloadingSummary = false;
+  bool _isDownloadingFlashcards = false;
   final GlobalKey _pdfButtonKey = GlobalKey();
   String? _loadingType;
   String? _error;
@@ -1028,6 +1029,47 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     }
   }
 
+  Future<void> _downloadFlashcardsPdf() async {
+    final cards = _flashcards;
+    if (cards == null || cards.isEmpty) return;
+
+    setState(() => _isDownloadingFlashcards = true);
+    try {
+      final file = await widget.summaryPdfService.saveFlashcardsPdf(
+        title: widget.resourceTitle,
+        flashcards: cards
+            .map(
+              (card) =>
+                  FlashcardPdfEntry(term: card.front, definition: card.back),
+            )
+            .toList(growable: false),
+        subtitle: 'AI Flashcards',
+        watermarkText: 'StudyShare Cards',
+      );
+      if (!mounted) return;
+      final box =
+          _pdfButtonKey.currentContext?.findRenderObject() as RenderBox?;
+      final sharePositionOrigin = (box != null && box.hasSize)
+          ? box.localToGlobal(Offset.zero) & box.size
+          : const Rect.fromLTWH(0, 0, 1, 1);
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path)],
+          text: 'StudyShare flashcards PDF',
+          subject: 'StudyShare Flashcards',
+          sharePositionOrigin: sharePositionOrigin,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to export PDF: $e')));
+    } finally {
+      if (mounted) setState(() => _isDownloadingFlashcards = false);
+    }
+  }
+
   int _resolveQuizAnswerIndex(QuizQuestion question) {
     final options = question.options;
     if (options.isEmpty) return 0;
@@ -1477,6 +1519,14 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     required bool isSavedLocally,
     required String activeLabel,
   }) {
+    final showPdfAction =
+        hasOutput && (_activeType == 'summary' || _activeType == 'flashcards');
+    final isDownloadingPdf = _activeType == 'flashcards'
+        ? _isDownloadingFlashcards
+        : _isDownloadingSummary;
+    final downloadPdf = _activeType == 'flashcards'
+        ? _downloadFlashcardsPdf
+        : _downloadSummaryPdf;
     final chips = <Widget>[];
     if (_activeType != 'chat') {
       if (_cachedMap[_activeType] == true) {
@@ -1528,10 +1578,10 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                     ),
                     const SizedBox(width: 6),
                   ],
-                  if (hasOutput && _activeType == 'summary') ...[
+                  if (showPdfAction) ...[
                     _buildActionIconButton(
                       buttonKey: _pdfButtonKey,
-                      icon: _isDownloadingSummary
+                      icon: isDownloadingPdf
                           ? const SizedBox(
                               width: 14,
                               height: 14,
@@ -1539,9 +1589,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                             )
                           : const Icon(Icons.picture_as_pdf_outlined, size: 18),
                       tooltip: 'Download PDF',
-                      onPressed: _isDownloadingSummary
-                          ? null
-                          : _downloadSummaryPdf,
+                      onPressed: isDownloadingPdf ? null : downloadPdf,
                     ),
                     const SizedBox(width: 6),
                   ],
