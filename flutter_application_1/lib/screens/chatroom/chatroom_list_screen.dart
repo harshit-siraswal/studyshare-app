@@ -405,8 +405,16 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
       return;
     }
 
+    final roomId = room['id']?.toString().trim() ?? '';
+    if (roomId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open this room right now.')),
+      );
+      return;
+    }
+
     final isPrivate = room['is_private'] == true;
-    final isMember = _joinedRoomIds.contains(room['id']?.toString());
+    final isMember = _joinedRoomIds.contains(roomId);
 
     if (isPrivate && !isMember) {
       _showJoinRoomDialog();
@@ -417,7 +425,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
       context,
       MaterialPageRoute(
         builder: (context) => ChatRoomScreen(
-          roomId: room['id']?.toString() ?? '',
+          roomId: roomId,
           roomName: room['name'] ?? 'Chat Room',
           description: room['description'] ?? '',
           userEmail: widget.userEmail,

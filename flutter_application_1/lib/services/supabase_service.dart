@@ -2575,6 +2575,8 @@ class SupabaseService {
         final data = Map<String, dynamic>.from(e);
         // Fix count format
         data['comment_count'] = _normalizeCount(data['comment_count']);
+        data['upvotes'] = _normalizeCount(data['upvotes']);
+        data['downvotes'] = _normalizeCount(data['downvotes']);
         return data;
       }).toList();
 
@@ -2762,7 +2764,9 @@ class SupabaseService {
           .eq('message_id', postId)
           .order('created_at', ascending: true);
 
-      allComments = List<Map<String, dynamic>>.from(response);
+      allComments = List<Map<String, dynamic>>.from(response)
+          .map((row) => Map<String, dynamic>.from(row))
+          .toList();
     } catch (directError) {
       try {
         // Attempt 2: API Fallback (Existing)
@@ -2823,12 +2827,12 @@ class SupabaseService {
 
       // First pass: organize comments by parent_id
       for (var comment in allComments) {
-        final parentId =
-            comment['parentId'] as String? ?? comment['parent_id'] as String?;
+        final parentIdRaw = comment['parentId'] ?? comment['parent_id'];
+        final parentId = parentIdRaw?.toString().trim();
         // Ensure replies list exists
         comment['replies'] = <Map<String, dynamic>>[];
 
-        if (parentId == null) {
+        if (parentId == null || parentId.isEmpty) {
           topLevelComments.add(comment);
         } else {
           if (!commentMap.containsKey(parentId)) {
@@ -5105,12 +5109,16 @@ class SupabaseService {
     if (countVal is List && countVal.isNotEmpty) {
       final first = countVal[0];
       if (first is Map && first.containsKey('count')) {
-        return (first['count'] as int?) ?? 0;
+        return _normalizeCount(first['count']);
       }
       return 0;
-    } else if (countVal is int) {
-      return countVal;
     }
+    if (countVal is Map && countVal.containsKey('count')) {
+      return _normalizeCount(countVal['count']);
+    }
+    if (countVal is int) return countVal;
+    if (countVal is num) return countVal.toInt();
+    if (countVal is String) return int.tryParse(countVal.trim()) ?? 0;
     return 0;
   }
 }

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../config/theme.dart';
@@ -526,6 +527,12 @@ class ResourceCardState extends State<ResourceCard> {
     return null;
   }
 
+  bool get _hasPdfPeekPreview {
+    final fileUrl = widget.resource.fileUrl.trim();
+    final path = Uri.tryParse(fileUrl)?.path.toLowerCase() ?? fileUrl.toLowerCase();
+    return fileUrl.isNotEmpty && path.endsWith('.pdf');
+  }
+
   Widget _buildPeekPreviewVisual(bool isDark) {
     final previewUrl = _peekPreviewImageUrl;
     if (previewUrl != null) {
@@ -545,6 +552,54 @@ class ResourceCardState extends State<ResourceCard> {
                 return const Center(child: CircularProgressIndicator());
               },
             ),
+          ),
+        ),
+      );
+    }
+
+    if (_hasPdfPeekPreview) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: SizedBox(
+          height: 320,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: ColoredBox(
+                  color: isDark ? Colors.black : Colors.white,
+                  child: SfPdfViewer.network(
+                    widget.resource.fileUrl.trim(),
+                    canShowPaginationDialog: false,
+                    canShowScrollHead: false,
+                    canShowScrollStatus: false,
+                    enableDoubleTapZooming: false,
+                    pageLayoutMode: PdfPageLayoutMode.single,
+                  ),
+                ),
+              ),
+              Positioned(
+                top: 10,
+                right: 10,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.68),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    'PDF preview',
+                    style: GoogleFonts.inter(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       );
@@ -583,10 +638,11 @@ class ResourceCardState extends State<ResourceCard> {
 
   Widget _buildPeekPreviewCard(BuildContext overlayContext) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final description = widget.resource.description?.trim() ?? '';
     final maxWidth = MediaQuery.of(overlayContext).size.width > 460
         ? 420.0
         : MediaQuery.of(overlayContext).size.width - 28;
+
+    final showPdfOnlyPreview = _hasPdfPeekPreview && _peekPreviewImageUrl == null;
 
     return Center(
       child: ConstrainedBox(
@@ -656,40 +712,29 @@ class ResourceCardState extends State<ResourceCard> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 10),
-                    Text(
-                      widget.resource.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: isDark
-                            ? AppTheme.textOnDark
-                            : AppTheme.textPrimary,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      _resourceMetaText(),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white70 : Colors.black54,
-                      ),
-                    ),
-                    if (description.isNotEmpty) ...[
+                    if (!showPdfOnlyPreview) ...[
                       const SizedBox(height: 10),
                       Text(
-                        description,
-                        maxLines: 4,
+                        widget.resource.title,
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.inter(
-                          fontSize: 13,
-                          height: 1.45,
-                          color: isDark ? Colors.white70 : Colors.black87,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: isDark
+                              ? AppTheme.textOnDark
+                              : AppTheme.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _resourceMetaText(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white70 : Colors.black54,
                         ),
                       ),
                     ],

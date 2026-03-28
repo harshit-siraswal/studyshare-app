@@ -4903,7 +4903,7 @@ Return STRICT JSON only (no markdown). Schema:
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 180),
                           height: attachButtonSize,
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
                           decoration: BoxDecoration(
                             color: chipSurface,
                             borderRadius: BorderRadius.circular(999),
@@ -4923,7 +4923,7 @@ Return STRICT JSON only (no markdown). Schema:
                               else
                                 Icon(
                                   Icons.add_rounded,
-                                  size: 18,
+                                  size: 16,
                                   color: composerBusy
                                       ? mutedIconColor
                                       : iconColor,
@@ -4932,7 +4932,7 @@ Return STRICT JSON only (no markdown). Schema:
                               Text(
                                 'Attach',
                                 style: GoogleFonts.inter(
-                                  fontSize: 13,
+                                  fontSize: 12,
                                   fontWeight: FontWeight.w600,
                                   color: composerBusy
                                       ? mutedIconColor
@@ -4963,7 +4963,7 @@ Return STRICT JSON only (no markdown). Schema:
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 180),
                           height: attachButtonSize,
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
                           decoration: BoxDecoration(
                             color: modeChipBackground,
                             borderRadius: BorderRadius.circular(999),
@@ -4976,14 +4976,14 @@ Return STRICT JSON only (no markdown). Schema:
                                 _allowWebMode
                                     ? Icons.public_rounded
                                     : Icons.menu_book_rounded,
-                                size: 16,
+                                size: 14,
                                 color: modeChipIconColor,
                               ),
                               const SizedBox(width: 6),
                               Text(
                                 _allowWebMode ? 'Web' : 'Notes',
                                 style: GoogleFonts.inter(
-                                  fontSize: 13,
+                                  fontSize: 12,
                                   fontWeight: FontWeight.w600,
                                   color: _allowWebMode
                                       ? AppTheme.primary
@@ -5067,7 +5067,7 @@ Return STRICT JSON only (no markdown). Schema:
       horizontal: isSmallPhone ? 8 : 10,
       vertical: isSmallPhone ? 5 : 6,
     );
-    final attachButtonSize = 44.0;
+    final attachButtonSize = isSmallPhone ? 36.0 : 38.0;
     final sendButtonSize = isSmallPhone ? 36.0 : (isCompact ? 38.0 : 42.0);
     final hasComposerContent =
         _hasText || _attachments.isNotEmpty || _stickyAttachments.isNotEmpty;

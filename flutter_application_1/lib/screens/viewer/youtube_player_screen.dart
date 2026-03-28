@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 
 import '../../config/theme.dart';
 import '../../utils/youtube_link_utils.dart';
@@ -40,23 +40,12 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
   static const String _genericLoadErrorMessage =
       'Unable to load this YouTube video right now.';
 
-  WebViewController? _webViewController;
+  YoutubePlayerController? _playerController;
   int _currentStartSeconds = 0;
-  bool _isPlayerLoading = true;
   String? _playerErrorMessage;
 
   ParsedYoutubeLink get _activeLink =>
       widget.youtubeLink.copyWith(startSeconds: _currentStartSeconds);
-
-  Uri get _inAppWatchUri {
-    final query = <String, String>{
-      ..._activeLink.watchUri.queryParameters,
-      'app': 'm',
-      'autoplay': '1',
-      'playsinline': '1',
-    };
-    return Uri.https('m.youtube.com', '/watch', query);
-  }
 
   bool get _canUseAiStudio => widget.resourceId?.trim().isNotEmpty ?? false;
   bool get _hasVideoTranscriptContext =>
@@ -82,55 +71,48 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
 
   @override
   void dispose() {
+    unawaited(_playerController?.close() ?? Future<void>.value());
     super.dispose();
   }
 
   void _setupPlayer() {
-    late final WebViewController controller;
-    controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(Colors.black)
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onPageStarted: (_) {
-            if (!mounted || _webViewController != controller) return;
-            setState(() {
-              _isPlayerLoading = true;
-              _playerErrorMessage = null;
-            });
-          },
-          onPageFinished: (_) {
-            if (!mounted || _webViewController != controller) return;
-            setState(() {
-              _isPlayerLoading = false;
-              _playerErrorMessage = null;
-            });
-          },
-          onWebResourceError: (error) {
-            if (!mounted || _webViewController != controller) return;
-            final description = error.description.trim();
-            setState(() {
-              _isPlayerLoading = false;
-              _playerErrorMessage = description.isNotEmpty
-                  ? description
-                  : _genericLoadErrorMessage;
-            });
-          },
-        ),
-      );
+    late final YoutubePlayerController nextController;
+    nextController = YoutubePlayerController(
+      key: widget.youtubeLink.videoId,
+      params: const YoutubePlayerParams(
+        showControls: true,
+        showFullscreenButton: true,
+        strictRelatedVideos: true,
+        showVideoAnnotations: false,
+        interfaceLanguage: 'en',
+        color: 'white',
+      ),
+      onWebResourceError: (error) {
+        if (!mounted || _playerController != nextController) return;
+        final description = error.description.trim();
+        setState(() {
+          _playerErrorMessage = description.isNotEmpty
+              ? description
+              : _genericLoadErrorMessage;
+        });
+      },
+    );
 
+    final previousController = _playerController;
     setState(() {
-      _webViewController = controller;
-      _isPlayerLoading = true;
+      _playerController = nextController;
       _playerErrorMessage = null;
     });
 
+    unawaited(previousController?.close() ?? Future<void>.value());
     unawaited(
-      controller.loadRequest(_inAppWatchUri).catchError((error) {
-        if (!mounted || _webViewController != controller) return;
+      nextController.loadVideoById(
+        videoId: widget.youtubeLink.videoId,
+        startSeconds: _currentStartSeconds.toDouble(),
+      ).catchError((error) {
+        if (!mounted || _playerController != nextController) return;
         final description = error?.toString().trim() ?? '';
         setState(() {
-          _isPlayerLoading = false;
           _playerErrorMessage = description.isNotEmpty
               ? description
               : _genericLoadErrorMessage;
@@ -231,7 +213,7 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
   }
 
   Widget _buildPlayerSurface() {
-    final controller = _webViewController;
+    final controller = _playerController;
     if (controller == null) {
       return AspectRatio(
         aspectRatio: 16 / 9,
@@ -250,26 +232,36 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
       borderRadius: BorderRadius.circular(18),
       child: AspectRatio(
         aspectRatio: 16 / 9,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: ColoredBox(
-                color: Colors.black,
-                child: WebViewWidget(controller: controller),
-              ),
-            ),
-            if (_isPlayerLoading && _playerErrorMessage == null)
-              const Positioned.fill(
-                child: ColoredBox(
-                  color: Colors.black,
-                  child: Center(
-                    child: BrandedLoader(message: 'Loading video...'),
+        child: YoutubeValueBuilder(
+          controller: controller,
+          builder: (context, value) {
+            return Stack(
+              children: [
+                Positioned.fill(
+                  child: ColoredBox(
+                    color: Colors.black,
+                    child: YoutubePlayer(
+                      controller: controller,
+                      aspectRatio: 16 / 9,
+                    ),
                   ),
                 ),
-              ),
-            if (_playerErrorMessage != null)
-              Positioned.fill(child: _buildPlayerError()),
-          ],
+                if (value.playerState == PlayerState.unknown &&
+                    !value.hasError &&
+                    _playerErrorMessage == null)
+                  const Positioned.fill(
+                    child: ColoredBox(
+                      color: Colors.black,
+                      child: Center(
+                        child: BrandedLoader(message: 'Loading video...'),
+                      ),
+                    ),
+                  ),
+                if (_playerErrorMessage != null)
+                  Positioned.fill(child: _buildPlayerError()),
+              ],
+            );
+          },
         ),
       ),
     );

@@ -151,8 +151,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   void initState() {
     super.initState();
     _post = Map<String, dynamic>.from(widget.post);
-    _upvotes = _post['upvotes'] ?? 0;
-    _downvotes = _post['downvotes'] ?? 0;
+    _upvotes = _asSafeInt(_post['upvotes']);
+    _downvotes = _asSafeInt(_post['downvotes']);
     _primePhotoCacheFromPost(_post);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _supabaseService.attachContext(context);
@@ -980,8 +980,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
   Widget _buildPostContent(Map<String, dynamic> post, bool isDark) {
     // Parse title and content from full content
-    final fullContent = post['content'] ?? '';
-    final dbTitle = post['title'] as String?; // Fallback if column exists
+    final fullContent = post['content']?.toString() ?? '';
+    final dbTitle = post['title']?.toString().trim(); // Fallback if column exists
 
     String title;
     String content;
@@ -1002,8 +1002,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
     final authorEmail = (post['author_email'] ?? post['user_email'] ?? '')
         .toString();
-    final authorName =
-        post['author_name'] ?? authorEmail.split('@').first ?? 'User';
+    final authorName = (post['author_name']?.toString().trim().isNotEmpty ?? false)
+        ? post['author_name'].toString().trim()
+        : authorEmail.contains('@')
+        ? authorEmail.split('@').first
+        : 'User';
     final normalizedEmail = _normalizeEmail(authorEmail);
     final cachedPhoto = _profilePhotoCache[normalizedEmail];
     final fallbackPhoto = _resolvePhotoUrl(post, const [
@@ -1019,9 +1022,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       _ensureProfilePhotoCached(normalizedEmail);
     }
     final hasAuthorPhoto = resolvedPhoto.isNotEmpty;
-    final createdAt = post['created_at'] != null
-        ? DateTime.parse(post['created_at'])
-        : DateTime.now();
+    final createdAt =
+        DateTime.tryParse(post['created_at']?.toString() ?? '') ??
+        DateTime.now();
     final netVotes = _upvotes - _downvotes;
 
     return Container(
@@ -1323,12 +1326,13 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     int depth = 0,
   }) {
     final textColor = isDark ? Colors.white : Colors.black87;
-    final authorName =
-        (comment['author_name'] ??
-                comment['author_email']?.split('@')[0] ??
-                'User')
-            .toString();
+    final rawAuthorName = comment['author_name']?.toString().trim();
     final authorEmail = (comment['author_email'] ?? '').toString();
+    final authorName = rawAuthorName != null && rawAuthorName.isNotEmpty
+        ? rawAuthorName
+        : authorEmail.contains('@')
+        ? authorEmail.split('@').first
+        : 'User';
     final normalizedEmail = _normalizeEmail(authorEmail);
     final cachedPhoto = _profilePhotoCache[normalizedEmail];
     final fallbackPhoto = _resolvePhotoUrl(comment, const [
@@ -1346,14 +1350,12 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     }
     final hasAuthorPhoto = resolvedPhoto.isNotEmpty;
     final content = (comment['content'] ?? '').toString();
-    final createdAt = comment['created_at'] != null
-        ? DateTime.parse(comment['created_at'])
-        : DateTime.now();
+    final createdAt =
+        DateTime.tryParse(comment['created_at']?.toString() ?? '') ??
+        DateTime.now();
 
     final rawReplies = comment['replies'];
-    final replies = (rawReplies is List)
-        ? rawReplies.map((r) => r as Map<String, dynamic>).toList()
-        : <Map<String, dynamic>>[];
+    final replies = _safeReplyList(rawReplies);
     final hasReplies = replies.isNotEmpty;
     final commentId =
         comment['id']?.toString() ??
@@ -1679,6 +1681,21 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         ),
       ),
     );
+  }
+
+  int _asSafeInt(Object? value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value.trim()) ?? 0;
+    return 0;
+  }
+
+  List<Map<String, dynamic>> _safeReplyList(Object? rawReplies) {
+    if (rawReplies is! List) return const <Map<String, dynamic>>[];
+    return rawReplies
+        .whereType<Map>()
+        .map((reply) => Map<String, dynamic>.from(reply))
+        .toList();
   }
 
   String _normalizeEmail(String value) => value.trim().toLowerCase();

@@ -36,11 +36,34 @@ class _NotificationScreenState extends State<NotificationScreen>
 
   List<NotificationModel> get _filteredNotifications {
     if (_tabController.index == 1) {
-      return _notifications.where((n) => n.type == 'follow_request').toList();
+      return _notifications
+          .where(
+            (n) =>
+                _isFollowNotificationType(n.type) &&
+                (n.type != 'follow_request' || !n.actionTaken),
+          )
+          .toList();
     } else if (_tabController.index == 2) {
-      return _notifications.where((n) => n.type != 'follow_request').toList();
+      return _notifications
+          .where((n) => !_isFollowNotificationType(n.type))
+          .toList();
     }
     return _notifications;
+  }
+
+  bool _isFollowNotificationType(String type) {
+    return type == 'follow_request' ||
+        type == 'follow_accepted' ||
+        type == 'follow_rejected';
+  }
+
+  void _replaceNotification(
+    NotificationModel original,
+    NotificationModel updated,
+  ) {
+    final index = _notifications.indexWhere((element) => element.id == original.id);
+    if (index == -1) return;
+    _notifications[index] = updated;
   }
 
   @override
@@ -420,25 +443,51 @@ class _NotificationScreenState extends State<NotificationScreen>
   }
 
   String? _resolveActorEmail(NotificationModel n) {
-    final raw = n.actorId;
-    if (raw != null && raw.contains('@')) return raw;
+    final directCandidates = [
+      n.actorEmail,
+      n.actorId,
+    ];
+
+    for (final candidate in directCandidates) {
+      final email = _extractEmailCandidate(candidate);
+      if (email != null) return email;
+    }
 
     final data = n.data;
     if (data == null) return null;
 
     final candidates = [
+      data['requesterEmail'],
+      data['requester_email'],
       data['actor_email'],
       data['actorEmail'],
       data['user_email'],
       data['userEmail'],
+      data['follower_email'],
+      data['followerEmail'],
+      data['following_email'],
+      data['followingEmail'],
+      data['target_email'],
+      data['targetEmail'],
       data['email'],
+      (data['requester'] as Map?)?['email'],
+      (data['actor'] as Map?)?['email'],
+      (data['user'] as Map?)?['email'],
     ];
 
     for (final candidate in candidates) {
-      if (candidate is String && candidate.contains('@')) return candidate;
+      final email = _extractEmailCandidate(candidate);
+      if (email != null) return email;
     }
 
     return null;
+  }
+
+  String? _extractEmailCandidate(Object? value) {
+    if (value is! String) return null;
+    final normalized = value.trim();
+    if (!normalized.contains('@')) return null;
+    return normalized;
   }
 
   Future<void> _handleTap(NotificationModel n) async {
@@ -447,7 +496,7 @@ class _NotificationScreenState extends State<NotificationScreen>
     if (!mounted) return;
 
     // 1. Follow Request Navigation
-    if (n.type == 'follow_request' || n.type == 'follow_accepted') {
+    if (_isFollowNotificationType(n.type)) {
       final actorEmail = _resolveActorEmail(n);
       if (actorEmail != null) {
         Navigator.push(
@@ -729,43 +778,53 @@ class _NotificationScreenState extends State<NotificationScreen>
   }
 
   Future<void> _handleFollowAction(NotificationModel n, bool accept) async {
-    if (n.followRequestId == null) return;
-    try {
-      // Optimistic Update
-      setState(() {
-        final index = _notifications.indexWhere(
-          (element) => element.id == n.id,
-        );
-        if (index != -1) {
-          _notifications[index] = n.copyWith(actionTaken: true);
-        }
-      });
+    final requestIdRaw = n.followRequestId?.trim();
+    if (requestIdRaw == null || requestIdRaw.isEmpty) return;
 
-      final requestId = int.tryParse(n.followRequestId!);
-      if (requestId == null) {
-        throw FormatException(
-          'Invalid follow request ID: ${n.followRequestId}',
+    final requestId = int.tryParse(requestIdRaw);
+    if (requestId == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Invalid follow request ID: $requestIdRaw')),
         );
       }
+      return;
+    }
+
+    final updated = n.copyWith(actionTaken: true, isRead: true);
+
+    try {
+      setState(() {
+        _replaceNotification(n, updated);
+      });
 
       if (accept) {
         await _api.acceptFollowRequest(requestId, context: context);
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('Request accepted')));
-        }
       } else {
         await _api.rejectFollowRequest(requestId, context: context);
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('Request declined')));
+      }
+
+      if (!n.isRead) {
+        try {
+          await _api.markNotificationRead(n.id);
+        } catch (e) {
+          debugPrint('Failed to mark follow notification as read: $e');
         }
       }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(accept ? 'Request accepted' : 'Request declined'),
+          ),
+        );
+      }
+      await _loadNotifications();
     } catch (e) {
       if (mounted) {
-        _loadNotifications();
+        setState(() {
+          _replaceNotification(updated, n);
+        });
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Action failed: $e')));

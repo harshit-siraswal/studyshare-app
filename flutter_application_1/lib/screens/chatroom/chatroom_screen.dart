@@ -144,7 +144,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
 
       if (requestId != _loadRequestId || !mounted) return;
 
-      final posts = results[0] as List<Map<String, dynamic>>;
+      final posts = (results[0] as List<Map<String, dynamic>>)
+          .map(_normalizePostMetrics)
+          .toList();
       final info = results[1] as Map<String, dynamic>?;
       final isAdmin = results[2] as bool;
 
@@ -366,12 +368,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
             if (direction == 1) {
               updatedPost['upvotes'] = max(
                 0,
-                (updatedPost['upvotes'] as int) - 1,
+                _asSafeInt(updatedPost['upvotes']) - 1,
               );
             } else {
               updatedPost['downvotes'] = max(
                 0,
-                (updatedPost['downvotes'] as int) - 1,
+                _asSafeInt(updatedPost['downvotes']) - 1,
               );
             }
             _userVotes[postId] = 0;
@@ -381,26 +383,27 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
               // Remove old upvote
               updatedPost['upvotes'] = max(
                 0,
-                (updatedPost['upvotes'] as int) - 1,
+                _asSafeInt(updatedPost['upvotes']) - 1,
               );
             } else if (currentVote == -1) {
               // Remove old downvote
               updatedPost['downvotes'] = max(
                 0,
-                (updatedPost['downvotes'] as int) - 1,
+                _asSafeInt(updatedPost['downvotes']) - 1,
               );
             }
 
             // Add new vote
             if (direction == 1) {
-              updatedPost['upvotes'] = (updatedPost['upvotes'] as int) + 1;
+              updatedPost['upvotes'] = _asSafeInt(updatedPost['upvotes']) + 1;
             } else {
-              updatedPost['downvotes'] = (updatedPost['downvotes'] as int) + 1;
+              updatedPost['downvotes'] =
+                  _asSafeInt(updatedPost['downvotes']) + 1;
             }
             _userVotes[postId] = direction;
           }
 
-          _posts[index] = updatedPost;
+          _posts[index] = _normalizePostMetrics(updatedPost);
         });
       }
 
@@ -1001,9 +1004,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
     final createdAt =
         DateTime.tryParse(post['created_at']?.toString() ?? '') ??
         DateTime.now();
-    final upvotes = (post['upvotes'] ?? 0) as int;
-    final downvotes = (post['downvotes'] ?? 0) as int;
-    final commentCount = (post['comment_count'] ?? 0) as int;
+    final upvotes = _asSafeInt(post['upvotes']);
+    final downvotes = _asSafeInt(post['downvotes']);
+    final commentCount = _asSafeInt(post['comment_count']);
     final isSaved = _savedPosts[postId] ?? false;
 
     final textColor = isDark ? Colors.white : Colors.black;
@@ -3015,6 +3018,21 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         },
       ),
     );
+  }
+
+  int _asSafeInt(Object? value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value.trim()) ?? 0;
+    return 0;
+  }
+
+  Map<String, dynamic> _normalizePostMetrics(Map<String, dynamic> post) {
+    final normalized = Map<String, dynamic>.from(post);
+    normalized['upvotes'] = _asSafeInt(normalized['upvotes']);
+    normalized['downvotes'] = _asSafeInt(normalized['downvotes']);
+    normalized['comment_count'] = _asSafeInt(normalized['comment_count']);
+    return normalized;
   }
 
   String _normalizeEmail(String value) => value.trim().toLowerCase();

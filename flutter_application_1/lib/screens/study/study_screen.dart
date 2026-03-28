@@ -27,6 +27,7 @@ import '../../data/academic_subjects_data.dart';
 import '../../data/departments_data.dart'; // Added for DepartmentData and DepartmentsProvider
 import '../../utils/admin_access.dart';
 import 'attendance_screen.dart';
+import 'following_search_screen.dart';
 
 class StudyScreen extends StatefulWidget {
   final String collegeId;
@@ -60,8 +61,6 @@ class _StudyScreenState extends State<StudyScreen>
   final SubscriptionService _subscriptionService = SubscriptionService();
   final DownloadService _downloadService = DownloadService();
   final TextEditingController _searchController = TextEditingController();
-  final TextEditingController _followingSearchController =
-      TextEditingController();
   final ScrollController _scrollController = ScrollController();
   late TabController _tabController;
 
@@ -101,7 +100,6 @@ class _StudyScreenState extends State<StudyScreen>
   bool _canUploadSyllabus = false;
   bool _hasAttendanceFeature = false;
   String _moderationStatusFilter = 'all';
-  String _followingSearchQuery = '';
   String? _followingSelectedSemester;
   String? _followingSelectedBranch;
   String? _followingSelectedSubject;
@@ -280,37 +278,18 @@ class _StudyScreenState extends State<StudyScreen>
     _retryTimer = null;
     _voteRefreshDebounce?.cancel();
     _searchController.dispose();
-    _followingSearchController.dispose();
     _scrollController.dispose();
     _tabController.dispose();
     super.dispose();
   }
 
   List<Resource> get _filteredFollowingResources {
-    final query = _followingSearchQuery.trim().toLowerCase();
     final resolvedType = _mapResourceType(_followingSelectedType);
     final resolvedSemester = _resolvedFollowingSemesterFilter()?.toLowerCase();
     final resolvedBranch = _resolvedFollowingBranchFilter()?.toLowerCase();
     final resolvedSubject = _resolvedFollowingSubjectFilter()?.toLowerCase();
 
     final filtered = _followingResources.where((resource) {
-      if (query.isNotEmpty) {
-        final haystacks = <String>[
-          resource.title,
-          resource.description ?? '',
-          resource.subject ?? '',
-          resource.branch ?? '',
-          resource.semester ?? '',
-          resource.uploadedByName ?? '',
-        ];
-        final matchesQuery = haystacks.any(
-          (value) => value.toLowerCase().contains(query),
-        );
-        if (!matchesQuery) {
-          return false;
-        }
-      }
-
       if (resolvedType != null &&
           resource.type.trim().toLowerCase() != resolvedType) {
         return false;
@@ -839,8 +818,7 @@ class _StudyScreenState extends State<StudyScreen>
         (_followingSelectedType != null && _followingSelectedType != 'All') ||
         _followingSelectedSort != 'Recent' ||
         (_canManageAdminResources && !_followingUsesRelevantScope) ||
-        (_canManageAdminResources && _moderationStatusFilter != 'all') ||
-        _followingSearchQuery.trim().isNotEmpty;
+        (_canManageAdminResources && _moderationStatusFilter != 'all');
   }
 
   void _onScroll() {
@@ -1181,48 +1159,68 @@ class _StudyScreenState extends State<StudyScreen>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final hasActiveFilters = _hasFollowingActiveFilters;
     final activeFilterCount = _activeFollowingFilterCount;
-    return _buildSearchBarShell(
-      isDark: isDark,
-      hasActiveFilters: hasActiveFilters,
-      activeFilterCount: activeFilterCount,
-      onFilterTap: _showFollowingFilterOptionsSheet,
-      searchContent: TextField(
-        controller: _followingSearchController,
-        onChanged: (value) {
-          setState(() => _followingSearchQuery = value);
-        },
-        style: GoogleFonts.inter(
-          fontSize: 15,
-          fontWeight: FontWeight.w500,
-          color: isDark ? Colors.white : const Color(0xFF111827),
-        ),
-        decoration: InputDecoration(
-          hintText: _canManageAdminResources
-              ? 'Search moderation queue...'
-              : 'Search following feed...',
-          hintStyle: GoogleFonts.inter(
-            fontSize: 15,
-            color: isDark ? Colors.grey[400] : const Color(0xFF4B5563),
+    return GestureDetector(
+      onTap: () {
+        Navigator.of(context).push(
+          PageRouteBuilder(
+            pageBuilder: (context, animation, secondaryAnimation) =>
+                FollowingSearchScreen(
+                  collegeId: widget.collegeId,
+                  userEmail: _effectiveUserEmail,
+                  canManageAdminResources: _canManageAdminResources,
+                  searchHint: _canManageAdminResources
+                      ? 'Search moderation queue...'
+                      : 'Search following feed...',
+                  resources: _followingResources,
+                  onModerate: _canManageAdminResources
+                      ? _moderateResource
+                      : null,
+                  onDelete: _canManageAdminResources ? _deleteResource : null,
+                ),
+            transitionsBuilder:
+                (context, animation, secondaryAnimation, child) {
+                  const begin = Offset(0.0, 0.05);
+                  const end = Offset.zero;
+                  const curve = Curves.easeOutCubic;
+                  final tween = Tween(
+                    begin: begin,
+                    end: end,
+                  ).chain(CurveTween(curve: curve));
+                  return FadeTransition(
+                    opacity: animation,
+                    child: SlideTransition(
+                      position: animation.drive(tween),
+                      child: child,
+                    ),
+                  );
+                },
+            transitionDuration: const Duration(milliseconds: 200),
           ),
-          border: InputBorder.none,
-          isDense: true,
-          contentPadding: const EdgeInsets.symmetric(vertical: 14),
+        );
+      },
+      child: Hero(
+        tag: 'following_search_bar',
+        child: Material(
+          color: Colors.transparent,
+          child: _buildSearchBarShell(
+            isDark: isDark,
+            hasActiveFilters: hasActiveFilters,
+            activeFilterCount: activeFilterCount,
+            onFilterTap: _showFollowingFilterOptionsSheet,
+            searchContent: Text(
+              _canManageAdminResources
+                  ? 'Search moderation queue...'
+                  : 'Search following feed...',
+              style: GoogleFonts.inter(
+                color: isDark ? Colors.grey[400] : const Color(0xFF4B5563),
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
         ),
       ),
-      trailingSearchAction: _followingSearchQuery.trim().isEmpty
-          ? null
-          : IconButton(
-              iconSize: 18,
-              visualDensity: VisualDensity.compact,
-              icon: Icon(
-                Icons.clear_rounded,
-                color: isDark ? Colors.grey[400] : const Color(0xFF6B7280),
-              ),
-              onPressed: () {
-                _followingSearchController.clear();
-                setState(() => _followingSearchQuery = '');
-              },
-            ),
     );
   }
 
@@ -1744,10 +1742,8 @@ class _StudyScreenState extends State<StudyScreen>
 
   Widget _buildFollowingGrid() {
     final isTeacher = _canManageAdminResources;
-    final isFiltering = _followingSearchQuery.trim().isNotEmpty;
     final showLoadMore =
         isTeacher &&
-        !isFiltering &&
         (_hasMoreModeration || _isLoadingMoreModeration);
     final visibleResources = _filteredFollowingResources;
 
@@ -2239,20 +2235,26 @@ class _StudyScreenState extends State<StudyScreen>
           ),
         );
       },
-      child: _buildSearchBarShell(
-        isDark: isDark,
-        hasActiveFilters: hasActiveFilters,
-        activeFilterCount: activeFilterCount,
-        onFilterTap: _showFilterOptionsSheet,
-        margin: const EdgeInsets.symmetric(horizontal: 20),
-        searchContent: Text(
-          'Search resources...',
-          style: GoogleFonts.inter(
-            color: isDark ? Colors.grey[400] : const Color(0xFF4B5563),
-            fontSize: 15,
-            fontWeight: FontWeight.w500,
+      child: Hero(
+        tag: 'resource_search_bar',
+        child: Material(
+          color: Colors.transparent,
+          child: _buildSearchBarShell(
+            isDark: isDark,
+            hasActiveFilters: hasActiveFilters,
+            activeFilterCount: activeFilterCount,
+            onFilterTap: _showFilterOptionsSheet,
+            margin: const EdgeInsets.symmetric(horizontal: 20),
+            searchContent: Text(
+              'Search resources...',
+              style: GoogleFonts.inter(
+                color: isDark ? Colors.grey[400] : const Color(0xFF4B5563),
+                fontSize: 15,
+                fontWeight: FontWeight.w500,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
-          overflow: TextOverflow.ellipsis,
         ),
       ),
     );
