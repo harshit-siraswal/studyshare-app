@@ -107,9 +107,11 @@ class AuthService {
 
   /// Fire-and-forget save of user data to the backend database.
   void _backgroundSaveUser(firebase_auth.User user) {
-    unawaited(_saveUserToDatabase(user).catchError((e) {
-      debugPrint('Background save error: $e');
-    }));
+    unawaited(
+      _saveUserToDatabase(user).catchError((e) {
+        debugPrint('Background save error: $e');
+      }),
+    );
   }
 
   /// Logs Google config details and throws a user-facing config error.
@@ -262,7 +264,9 @@ class AuthService {
           return await _performMobileGoogleSignIn();
         } on PlatformException catch (e) {
           final errorMessage = '${e.code} ${e.message ?? ''}'.toLowerCase();
-          debugPrint('Google Sign-In platform error (attempt ${attempt + 1}): $e');
+          debugPrint(
+            'Google Sign-In platform error (attempt ${attempt + 1}): $e',
+          );
           if (_looksLikeGoogleConfigIssue(errorMessage)) {
             _throwGoogleConfigError();
           }
@@ -656,7 +660,8 @@ class AuthService {
       if (_looksLikeGoogleNetworkIssue(message)) {
         return 'Google Sign-In could not reach Google services. Check internet and try again.';
       }
-      if (message.contains('sign_in_canceled') || message.contains('canceled')) {
+      if (message.contains('sign_in_canceled') ||
+          message.contains('canceled')) {
         return 'Google sign-in was cancelled';
       }
       return error.message ?? error.toString();

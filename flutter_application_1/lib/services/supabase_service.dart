@@ -360,8 +360,7 @@ class SupabaseService {
   Future<({int? userVote, int upvotes, int downvotes})> getResourceVoteStatus(
     String resourceId, {
     String? userEmail,
-  }
-  ) async {
+  }) async {
     _pruneExpiredRateLimits();
     final key = _resourceStateKey(resourceId, userEmail: userEmail);
     final cached = _voteStateCache[key];
@@ -447,8 +446,9 @@ class SupabaseService {
         .toList();
     if (ids.isEmpty) return;
 
-    final safeMaxConcurrent =
-        maxConcurrent < 1 ? 1 : (maxConcurrent > 20 ? 20 : maxConcurrent);
+    final safeMaxConcurrent = maxConcurrent < 1
+        ? 1
+        : (maxConcurrent > 20 ? 20 : maxConcurrent);
 
     for (var i = 0; i < ids.length; i += safeMaxConcurrent) {
       final end = (i + safeMaxConcurrent) > ids.length
@@ -488,12 +488,18 @@ class SupabaseService {
       final row = Map<String, dynamic>.from(item);
 
       final resourceId =
-          (row['resourceId'] ?? row['resource_id'] ?? row['id'] ?? row['itemId'])
+          (row['resourceId'] ??
+                  row['resource_id'] ??
+                  row['id'] ??
+                  row['itemId'])
               ?.toString()
               .trim() ??
           '';
       if (resourceId.isEmpty) continue;
-      final cacheKey = _resourceStateKey(resourceId, userEmail: normalizedEmail);
+      final cacheKey = _resourceStateKey(
+        resourceId,
+        userEmail: normalizedEmail,
+      );
 
       final rawBookmarked =
           row['isBookmarked'] ?? row['bookmarked'] ?? row['is_bookmarked'];
@@ -626,9 +632,7 @@ class SupabaseService {
       final results = await Future.wait([
         _client
             .from('users')
-            .select(
-              'id, email, display_name, profile_photo_url, username, photo_url',
-            )
+            .select('id, email, display_name, profile_photo_url, username')
             .inFilter('id', ids)
             .catchError((e) {
               debugPrint('Error fetching users by id: $e');
@@ -636,9 +640,7 @@ class SupabaseService {
             }),
         _client
             .from('users')
-            .select(
-              'id, email, display_name, profile_photo_url, username, photo_url',
-            )
+            .select('id, email, display_name, profile_photo_url, username')
             .inFilter('firebase_uid', ids)
             .catchError((e) {
               debugPrint('Error fetching users by firebase uid: $e');
@@ -652,7 +654,9 @@ class SupabaseService {
         for (final user in result) {
           final userId = user['id'];
           if (userId != null) {
-            deduped[userId] = user;
+            deduped[userId] = _normalizeReadableUserRecord(
+              Map<String, dynamic>.from(user),
+            );
           }
         }
       }
@@ -674,6 +678,21 @@ class SupabaseService {
     return '';
   }
 
+  Map<String, dynamic> _normalizeReadableUserRecord(Map<String, dynamic> raw) {
+    final normalized = Map<String, dynamic>.from(raw);
+    final resolvedPhoto = _firstNonEmptyValue(normalized, const [
+      'photo_url',
+      'profile_photo_url',
+      'avatar_url',
+    ]);
+    if (resolvedPhoto.isNotEmpty) {
+      normalized['photo_url'] = resolvedPhoto;
+      normalized['profile_photo_url'] = resolvedPhoto;
+      normalized['avatar_url'] = resolvedPhoto;
+    }
+    return normalized;
+  }
+
   Future<Map<String, Map<String, dynamic>>> _fetchUsersByEmails(
     Iterable<String> rawEmails,
   ) async {
@@ -693,13 +712,13 @@ class SupabaseService {
           .join(',');
       final rows = await _client
           .from('users')
-          .select(
-            'email, display_name, username, profile_photo_url, photo_url, avatar_url',
-          )
+          .select('email, display_name, username, profile_photo_url')
           .or(filters);
       final map = <String, Map<String, dynamic>>{};
       for (final row in (rows as List).whereType<Map>()) {
-        final entry = Map<String, dynamic>.from(row);
+        final entry = _normalizeReadableUserRecord(
+          Map<String, dynamic>.from(row),
+        );
         final email = _normalizeEmail(entry['email']?.toString());
         if (email.isEmpty) continue;
         map[email] = entry;
@@ -814,14 +833,14 @@ class SupabaseService {
     final normalizedType = type?.trim();
     final normalizedSearch = searchQuery?.trim() ?? '';
     final escapedBranch = normalizedBranch == null
-      ? null
-      : _escapeLikePattern(normalizedBranch);
+        ? null
+        : _escapeLikePattern(normalizedBranch);
     final escapedSubject = normalizedSubject == null
-      ? null
-      : _escapeLikePattern(normalizedSubject);
+        ? null
+        : _escapeLikePattern(normalizedSubject);
     final escapedType = normalizedType == null
-      ? null
-      : _escapeLikePattern(normalizedType);
+        ? null
+        : _escapeLikePattern(normalizedType);
     final escapedSearch = _escapeLikePattern(normalizedSearch);
     final cacheKey = _resourceListCacheKey(
       collegeId: collegeId,
@@ -1361,11 +1380,13 @@ class SupabaseService {
       final res = await _client
           .from('users')
           .select(
-            'id, email, display_name, profile_photo_url, photo_url, avatar_url, username, bio, semester, branch, subject',
+            'id, email, display_name, profile_photo_url, username, bio, semester, branch, subject',
           )
           .eq('email', email)
           .maybeSingle();
-      return res;
+      return res == null
+          ? null
+          : _normalizeReadableUserRecord(Map<String, dynamic>.from(res));
     } catch (e) {
       debugPrint('Error fetching user info: $e');
       return null;
@@ -1420,7 +1441,14 @@ class SupabaseService {
             .update(updates)
             .eq(column, value)
             .select(selectColumns.join(', '))
-            .maybeSingle();
+            .maybeSingle()
+            .then(
+              (value) => value == null
+                  ? null
+                  : _normalizeReadableUserRecord(
+                      Map<String, dynamic>.from(value),
+                    ),
+            );
       } catch (e) {
         if (_isNoRowsSingleObjectError(e)) {
           return null;
@@ -1435,7 +1463,14 @@ class SupabaseService {
             .from('users')
             .select(selectColumns.join(', '))
             .eq(column, value)
-            .maybeSingle();
+            .maybeSingle()
+            .then(
+              (value) => value == null
+                  ? null
+                  : _normalizeReadableUserRecord(
+                      Map<String, dynamic>.from(value),
+                    ),
+            );
       } catch (e) {
         if (_isNoRowsSingleObjectError(e)) {
           return null;
@@ -1795,7 +1830,9 @@ class SupabaseService {
       }
 
       final response = await dbQuery.limit(50);
-      return List<Map<String, dynamic>>.from(response);
+      return List<Map<String, dynamic>>.from(
+        response,
+      ).map(_normalizeReadableUserRecord).toList();
     } catch (e) {
       debugPrint('Error getting users by college: $e');
       return [];
@@ -1863,7 +1900,7 @@ class SupabaseService {
 
       final usersResponse = await _client
           .from('users')
-          .select('email, display_name, profile_photo_url, username, photo_url')
+          .select('email, display_name, profile_photo_url, username')
           .inFilter('email', followerEmails);
 
       return _normalizeSocialUsers(usersResponse);
@@ -1932,7 +1969,7 @@ class SupabaseService {
 
       final usersResponse = await _client
           .from('users')
-          .select('email, display_name, profile_photo_url, username, photo_url')
+          .select('email, display_name, profile_photo_url, username')
           .inFilter('email', followingEmails);
 
       return _normalizeSocialUsers(usersResponse);
@@ -2359,8 +2396,9 @@ class SupabaseService {
                 '',
           );
           normalized['user_email'] = email;
-          normalized['role'] =
-              (normalized['role'] ?? 'member').toString().toLowerCase();
+          normalized['role'] = (normalized['role'] ?? 'member')
+              .toString()
+              .toLowerCase();
           final resolvedPhoto = _firstNonEmptyValue(normalized, const [
             'profile_photo_url',
             'photo_url',
@@ -4074,9 +4112,7 @@ class SupabaseService {
           'No-rows mutation result while updating resource status: '
           '${backendError.toString()}',
         );
-        throw Exception(
-          'Operation failed; please try again.',
-        );
+        throw Exception('Operation failed; please try again.');
       }
       rethrow;
     }
@@ -4124,7 +4160,7 @@ class SupabaseService {
     if (row == null) {
       throw Exception(
         'Contribution not found for ${resource.id}: '
-         '${backendError.toString()}',
+        '${backendError.toString()}',
       );
     }
 
@@ -4918,7 +4954,8 @@ class SupabaseService {
 
     try {
       final response = await _api.getBookmarks();
-      final raw = (response['bookmarks'] ?? response['items']) as List? ?? const [];
+      final raw =
+          (response['bookmarks'] ?? response['items']) as List? ?? const [];
       final bookmarkedIds = <String>{};
 
       for (final item in raw) {

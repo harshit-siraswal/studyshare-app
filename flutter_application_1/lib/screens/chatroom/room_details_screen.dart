@@ -74,7 +74,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
     try {
       final results = await Future.wait<dynamic>([
         _backendApiService.getChatRoomInfo(widget.roomId),
-        _backendApiService.getChatRoomMembers(widget.roomId),
+        _supabaseService.getRoomMembers(widget.roomId),
         _supabaseService.getRoomPostCounts(widget.roomId),
       ]);
 
@@ -92,7 +92,8 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
       // Keep local room info shape compatible with existing UI fallbacks.
       roomMap['isMember'] = roomPayload['isMember'] == true;
       roomMap['isAdmin'] = roomPayload['isAdmin'] == true;
-      if (roomMap['created_by_email'] == null && roomMap['created_by'] != null) {
+      if (roomMap['created_by_email'] == null &&
+          roomMap['created_by'] != null) {
         roomMap['created_by_email'] = roomMap['created_by'];
       }
       if (roomMap['member_count'] == null) {
@@ -157,8 +158,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
 
   bool _isSameUser(Map<String, dynamic> member, String email) {
     final memberEmail = (member['user_email'] ?? '').toString().toLowerCase();
-    return memberEmail.isNotEmpty &&
-        memberEmail == email.trim().toLowerCase();
+    return memberEmail.isNotEmpty && memberEmail == email.trim().toLowerCase();
   }
 
   bool _isAdminMember(Map<String, dynamic> member, String email) {
@@ -181,10 +181,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(
-              'Leave',
-              style: TextStyle(color: Colors.red),
-            ),
+            child: const Text('Leave', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -226,10 +223,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(
-              'Delete',
-              style: TextStyle(color: Colors.red),
-            ),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -241,9 +235,9 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
       await _backendApiService.deleteChatRoom(widget.roomId);
       if (!mounted) return;
       Navigator.pop(context, true);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Room deleted')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Room deleted')));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -261,7 +255,8 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: background ??
+        color:
+            background ??
             (isDark ? Colors.white12 : Colors.black.withValues(alpha: 0.06)),
         borderRadius: BorderRadius.circular(999),
       ),
@@ -366,7 +361,11 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
     );
   }
 
-  void _showMemberActions(Map<String, dynamic> member, String role, bool isDark) {
+  void _showMemberActions(
+    Map<String, dynamic> member,
+    String role,
+    bool isDark,
+  ) {
     final email = (member['user_email'] ?? '').toString().trim();
     if (email.isEmpty) return;
     final isAdminRole = role == 'admin';
@@ -437,9 +436,9 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
       await _loadDetails();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to update role: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to update role: $e')));
     }
   }
 
@@ -452,9 +451,9 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
       await _loadDetails();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to remove member: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to remove member: $e')));
     }
   }
 
@@ -486,21 +485,21 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
       );
     }
 
-    final createdByEmail = ((_roomInfo?['created_by_email'] ??
-                _roomInfo?['created_by'] ??
-                _roomInfo?['createdBy'] ??
-                '')
-            .toString())
-        .trim()
-        .toLowerCase();
-    final memberCount =
-        _members.isNotEmpty
-            ? _members.length
-            : (_roomInfo?['member_count'] ?? 0);
+    final createdByEmail =
+        ((_roomInfo?['created_by_email'] ??
+                    _roomInfo?['created_by'] ??
+                    _roomInfo?['createdBy'] ??
+                    '')
+                .toString())
+            .trim()
+            .toLowerCase();
+    final memberCount = _members.isNotEmpty
+        ? _members.length
+        : (_roomInfo?['member_count'] ?? 0);
     final activeLabel = widget.activeMemberCount != null
         ? widget.activeMemberCount == 0
-            ? 'No active members'
-            : '${widget.activeMemberCount} active now'
+              ? 'No active members'
+              : '${widget.activeMemberCount} active now'
         : null;
 
     final admins = _members.where((member) {
@@ -515,11 +514,11 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
           member['is_founder'] == true || _isSameUser(member, createdByEmail);
       return role != 'admin' && !isFounder;
     }).toList();
-    final roomCode = ((_roomInfo?['room_code'] ?? _roomInfo?['code'] ?? '')
-            .toString())
-        .trim();
-    final isPrivate = _roomInfo?['is_private'] == true ||
-        _roomInfo?['is_private'] == 'true';
+    final roomCode =
+        ((_roomInfo?['room_code'] ?? _roomInfo?['code'] ?? '').toString())
+            .trim();
+    final isPrivate =
+        _roomInfo?['is_private'] == true || _roomInfo?['is_private'] == 'true';
     final showRoomCode = (_roomInfo?['show_room_code'] ?? true) == true;
     final canShowRoomCode =
         isPrivate && roomCode.isNotEmpty && (showRoomCode || _isAdmin);
@@ -546,8 +545,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.fromLTRB(18, 12, 18, 26),
           children: [
-            if (_isLoading)
-              const LinearProgressIndicator(minHeight: 2),
+            if (_isLoading) const LinearProgressIndicator(minHeight: 2),
             if (_loadError != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 12),
@@ -691,7 +689,8 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                 itemBuilder: (context, index) => _memberTile(
                   admins[index],
                   isDark,
-                  showFounderBadge: admins[index]['is_founder'] == true ||
+                  showFounderBadge:
+                      admins[index]['is_founder'] == true ||
                       _isSameUser(admins[index], createdByEmail),
                 ),
               ),

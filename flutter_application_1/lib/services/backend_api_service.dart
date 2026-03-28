@@ -1389,6 +1389,7 @@ class BackendApiService {
       body['bio'] = bio.trim();
     }
     if (profilePhotoUrl != null) {
+      body['photo_url'] = profilePhotoUrl.trim();
       body['profile_photo_url'] = profilePhotoUrl.trim();
     }
     if (college != null) {
