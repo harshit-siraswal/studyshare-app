@@ -4667,12 +4667,9 @@ class SupabaseService {
           .eq('college_id', collegeId)
           .order('created_at', ascending: false);
 
-      final rooms = (response as List).map((e) {
-        final data = Map<String, dynamic>.from(e);
-        // Fix count format if it comes as list
-        data['member_count'] = _normalizeCount(data['member_count']);
-        return data;
-      }).toList();
+      final rooms = (response as List)
+          .map((e) => _normalizeChatRoomRecord(e))
+          .toList();
 
       final now = DateTime.now().toUtc();
       return rooms.where((room) {
@@ -5120,5 +5117,69 @@ class SupabaseService {
     if (countVal is num) return countVal.toInt();
     if (countVal is String) return int.tryParse(countVal.trim()) ?? 0;
     return 0;
+  }
+
+  Map<String, dynamic> _normalizeChatRoomRecord(dynamic raw) {
+    final data = raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+    final normalized = Map<String, dynamic>.from(data);
+
+    normalized['id'] = _normalizeString(data['id']);
+    normalized['name'] = _normalizeString(data['name'], fallback: 'Untitled');
+    normalized['description'] = _normalizeString(data['description']);
+    normalized['member_count'] = _normalizeCount(data['member_count']);
+    normalized['is_private'] = _normalizeBool(
+      data['is_private'] ?? data['isPrivate'],
+    );
+    normalized['is_active'] = _normalizeBool(
+      data['is_active'] ?? data['isActive'],
+      fallback: true,
+    );
+    normalized['created_at'] = _normalizeString(
+      data['created_at'] ?? data['createdAt'],
+    );
+    normalized['updated_at'] = _normalizeString(
+      data['updated_at'] ?? data['updatedAt'],
+      fallback: normalized['created_at']?.toString() ?? '',
+    );
+    normalized['expiry_date'] = _normalizeString(
+      data['expiry_date'] ?? data['expiryDate'],
+    );
+    normalized['tags'] = _normalizeStringList(data['tags']);
+    return normalized;
+  }
+
+  String _normalizeString(dynamic value, {String fallback = ''}) {
+    final normalized = value?.toString().trim() ?? '';
+    return normalized.isEmpty ? fallback : normalized;
+  }
+
+  bool _normalizeBool(dynamic value, {bool fallback = false}) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    final normalized = value?.toString().trim().toLowerCase() ?? '';
+    if (normalized.isEmpty) return fallback;
+    return normalized == 'true' ||
+        normalized == '1' ||
+        normalized == 'yes' ||
+        normalized == 'y';
+  }
+
+  List<String> _normalizeStringList(dynamic value) {
+    if (value is List) {
+      return value
+          .map((entry) => entry?.toString().trim() ?? '')
+          .where((entry) => entry.isNotEmpty)
+          .toList(growable: false);
+    }
+    final normalized = value?.toString().trim() ?? '';
+    if (normalized.isEmpty) return const <String>[];
+    if (normalized.contains(',')) {
+      return normalized
+          .split(',')
+          .map((entry) => entry.trim())
+          .where((entry) => entry.isNotEmpty)
+          .toList(growable: false);
+    }
+    return <String>[normalized];
   }
 }

@@ -317,7 +317,8 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
 
     // "Last activity: 2m ago" - dummy for now or based on updated_at
     final updatedAt = room['updated_at'] ?? room['created_at'];
-    final timeStr = updatedAt != null ? _formatTimeAgo(updatedAt) : 'Recently';
+    final timeStr = _formatTimeAgo(updatedAt);
+    final roomName = _roomText(room, 'name', fallback: 'Untitled');
 
     return Material(
       color: Colors.transparent,
@@ -336,7 +337,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
             children: [
               // Title
               Text(
-                room['name'] ?? 'Untitled',
+                roomName,
                 style: GoogleFonts.inter(
                   fontSize: 18,
                   fontWeight:
@@ -426,8 +427,8 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
       MaterialPageRoute(
         builder: (context) => ChatRoomScreen(
           roomId: roomId,
-          roomName: room['name'] ?? 'Chat Room',
-          description: room['description'] ?? '',
+          roomName: _roomText(room, 'name', fallback: 'Chat Room'),
+          description: _roomText(room, 'description'),
           userEmail: widget.userEmail,
           collegeDomain: widget.collegeDomain,
         ),
@@ -435,7 +436,9 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
     );
   }
 
-  String _formatTimeAgo(String dateStr) {
+  String _formatTimeAgo(dynamic rawDate) {
+    final dateStr = rawDate?.toString().trim() ?? '';
+    if (dateStr.isEmpty) return 'Recently';
     try {
       final date = DateTime.parse(dateStr);
       final diff = DateTime.now().difference(date);
@@ -444,8 +447,17 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
       if (diff.inDays < 30) return '${diff.inDays}d ago';
       return 'Long ago';
     } catch (e) {
-      return '';
+      return 'Recently';
     }
+  }
+
+  String _roomText(
+    Map<String, dynamic> room,
+    String key, {
+    String fallback = '',
+  }) {
+    final value = room[key]?.toString().trim() ?? '';
+    return value.isEmpty ? fallback : value;
   }
 
   // Simplify Dialogs for brevity in this rewrite, keeping styles consistent

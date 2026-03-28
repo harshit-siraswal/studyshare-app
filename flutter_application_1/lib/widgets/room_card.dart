@@ -23,8 +23,9 @@ class RoomCard extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
 
-    final tagsList = room['tags'] as List?;
-    final tags = tagsList?.map((e) => e.toString()).toList() ?? [];
+    final tags = _extractTags(room['tags']);
+    final roomName = _roomValue('name', fallback: _defaultRoomName);
+    final description = _roomValue('description', fallback: 'No description');
 
     void openRoom() {
       final roomId = room['id']?.toString() ?? '';
@@ -38,8 +39,8 @@ class RoomCard extends StatelessWidget {
         MaterialPageRoute(
           builder: (context) => ChatRoomScreen(
             roomId: roomId,
-            roomName: room['name'] ?? _defaultRoomName,
-            description: room['description'] ?? '',
+            roomName: roomName,
+            description: _roomValue('description'),
             userEmail: userEmail,
             collegeDomain: collegeDomain,
           ),
@@ -82,7 +83,7 @@ class RoomCard extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      room['name'] ?? _defaultRoomName,
+                      roomName,
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 14,
@@ -101,7 +102,7 @@ class RoomCard extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 child: Text(
-                  room['description'] ?? 'No description',
+                  description,
                   style: TextStyle(
                     color: isDark ? Colors.white54 : Colors.grey.shade600,
                     fontSize: 12,
@@ -174,6 +175,30 @@ class RoomCard extends StatelessWidget {
           ],
         ),
       ),    );
+  }
+
+  String _roomValue(String key, {String fallback = ''}) {
+    final value = room[key]?.toString().trim() ?? '';
+    return value.isEmpty ? fallback : value;
+  }
+
+  List<String> _extractTags(dynamic rawTags) {
+    if (rawTags is List) {
+      return rawTags
+          .map((entry) => entry?.toString().trim() ?? '')
+          .where((entry) => entry.isNotEmpty)
+          .toList(growable: false);
+    }
+    final normalized = rawTags?.toString().trim() ?? '';
+    if (normalized.isEmpty) return const <String>[];
+    if (normalized.contains(',')) {
+      return normalized
+          .split(',')
+          .map((entry) => entry.trim())
+          .where((entry) => entry.isNotEmpty)
+          .toList(growable: false);
+    }
+    return <String>[normalized];
   }
 
   Widget _buildTagChip(String label, bool isDark, {bool isPlaceholder = false}) {
