@@ -2112,21 +2112,27 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
                         final frontStart = const Color(0xFF60A5FA);
                         final frontEnd = _studioBlueDark;
-                        final backStart = const Color(0xFF0284C7);
-                        final backEnd = _studioBlue;
+                        final backStart = const Color(0xFF34D399);
+                        final backEnd = const Color(0xFF047857);
+                        final faceBlend =
+                            (progress < 0.5
+                                    ? progress * 2
+                                    : (progress - 0.5) * 2)
+                                .clamp(0.0, 1.0);
+                        final fromStart = isBackFace ? frontStart : backStart;
+                        final toStart = isBackFace ? backStart : frontStart;
+                        final fromEnd = isBackFace ? frontEnd : backEnd;
+                        final toEnd = isBackFace ? backEnd : frontEnd;
+                        final fromGlow = isBackFace ? _studioBlueDark : backEnd;
+                        final toGlow = isBackFace ? backEnd : _studioBlueDark;
 
                         final gradientStart =
-                            Color.lerp(frontStart, backStart, progress) ??
-                            frontStart;
+                            Color.lerp(fromStart, toStart, faceBlend) ??
+                            toStart;
                         final gradientEnd =
-                            Color.lerp(frontEnd, backEnd, progress) ?? frontEnd;
+                            Color.lerp(fromEnd, toEnd, faceBlend) ?? toEnd;
                         final glowColor =
-                            Color.lerp(
-                              _studioBlueDark,
-                              _studioBlue,
-                              progress,
-                            ) ??
-                            _studioBlueDark;
+                            Color.lerp(fromGlow, toGlow, faceBlend) ?? toGlow;
 
                         return Transform(
                           alignment: Alignment.center,

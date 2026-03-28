@@ -2236,6 +2236,69 @@ class BackendApiService {
     return normalized;
   }
 
+  Map<String, dynamic> _normalizeRagSourceEntry(Map<dynamic, dynamic> item) {
+    final normalized = Map<String, dynamic>.from(item);
+    final rawFileUrl =
+        normalized['file_url']?.toString().trim() ??
+        normalized['source_url']?.toString().trim() ??
+        normalized['url']?.toString().trim() ??
+        normalized['href']?.toString().trim() ??
+        '';
+    final rawVideoUrl =
+        normalized['video_url']?.toString().trim() ??
+        normalized['youtube_url']?.toString().trim() ??
+        '';
+    final existingType = normalized['source_type']?.toString().trim().toLowerCase();
+    final looksLikeYoutube =
+        rawVideoUrl.toLowerCase().contains('youtu') ||
+        rawFileUrl.toLowerCase().contains('youtu');
+    final looksLikePdf =
+        rawFileUrl.toLowerCase().contains('.pdf') ||
+        rawFileUrl.toLowerCase().contains('/pdf') ||
+        rawFileUrl.toLowerCase().contains('application/pdf');
+
+    if (normalized['file_url'] == null && rawFileUrl.isNotEmpty) {
+      normalized['file_url'] = rawFileUrl;
+    }
+    if (normalized['video_url'] == null && rawVideoUrl.isNotEmpty) {
+      normalized['video_url'] = rawVideoUrl;
+    }
+    if ((existingType == null || existingType.isEmpty) &&
+        (rawFileUrl.isNotEmpty || rawVideoUrl.isNotEmpty)) {
+      normalized['source_type'] = looksLikeYoutube
+          ? 'youtube'
+          : (looksLikePdf ? 'pdf' : 'web');
+    }
+
+    return normalized;
+  }
+
+  bool _ragPayloadContainsAnswerText(String payload) {
+    try {
+      final decoded = jsonDecode(payload);
+      if (decoded is Map) {
+        final data = decoded.cast<String, dynamic>();
+        final type = data['type']?.toString();
+        if (type == 'metadata' || type == 'done') {
+          return false;
+        }
+        final text =
+            data['text']?.toString() ??
+            data['answer']?.toString() ??
+            data['response']?.toString() ??
+            data['message']?.toString() ??
+            '';
+        return text.trim().isNotEmpty;
+      }
+      if (decoded is String) {
+        return decoded.trim().isNotEmpty;
+      }
+    } catch (_) {
+      return payload.trim().isNotEmpty;
+    }
+    return false;
+  }
+
   Future<Map<String, dynamic>> uploadNotebookSource({
     required String filePath,
     required String collegeId,
@@ -2399,7 +2462,7 @@ class BackendApiService {
 
     final normalizedSources = sourcesRaw
         .whereType<Map>()
-        .map((item) => Map<String, dynamic>.from(item))
+        .map(_normalizeRagSourceEntry)
         .toList();
     final noLocal =
         response['no_local'] == true ||
@@ -2443,7 +2506,13 @@ class BackendApiService {
         response['strict_notes_mode'] ??
         (data is Map ? data['strict_notes_mode'] : null);
 
-    if (normalizedSources.isNotEmpty || noLocal || answerOrigin != null) {
+    final hasOcrDiagnostics =
+        ocrFailureAffectsRetrieval == true ||
+        (ocrErrors is List && ocrErrors.isNotEmpty);
+    if (normalizedSources.isNotEmpty ||
+        noLocal ||
+        answerOrigin != null ||
+        hasOcrDiagnostics) {
       yield jsonEncode({
         'type': 'metadata',
         'data': <String, dynamic>{
@@ -2518,6 +2587,16 @@ class BackendApiService {
         dialectIntensity: dialectIntensity,
         languageHint: languageHint,
       );
+    }
+
+    final shouldPreferSyntheticStream =
+        allowWeb != true && (useOcr == true || forceOcr == true);
+    if (shouldPreferSyntheticStream) {
+      debugPrint(
+        '[BackendApi] Using synthetic stream for OCR-sensitive RAG request.',
+      );
+      yield* fallbackStream();
+      return;
     }
 
     if (_ragStreamUnavailable) {
@@ -2661,6 +2740,7 @@ class BackendApiService {
     }
 
     var receivedPayload = false;
+    var receivedAnswerPayload = false;
     final lineStream = response.stream
         .timeout(_streamIdleTimeout)
         .transform(utf8.decoder)
@@ -2672,7 +2752,17 @@ class BackendApiService {
         final payload = line.substring(5).trim();
         if (payload.isEmpty) continue;
         receivedPayload = true;
+        receivedAnswerPayload =
+            receivedAnswerPayload || _ragPayloadContainsAnswerText(payload);
         yield payload;
+      }
+      if (!receivedAnswerPayload) {
+        debugPrint(
+          '[BackendApi] Stream completed without answer chunks. '
+          'Falling back to /api/rag/query.',
+        );
+        yield* fallbackStream();
+        return;
       }
     } on TimeoutException catch (error) {
       debugPrint(
@@ -2680,7 +2770,7 @@ class BackendApiService {
         '${receivedPayload ? 'Finishing partial stream.' : 'Falling back to /api/rag/query. '}'
         '$error',
       );
-      if (!receivedPayload) {
+      if (!receivedAnswerPayload) {
         yield* fallbackStream();
         return;
       }
@@ -2691,7 +2781,7 @@ class BackendApiService {
         '${receivedPayload ? 'Finishing partial stream.' : 'Falling back to /api/rag/query. '}'
         '$error',
       );
-      if (!receivedPayload) {
+      if (!receivedAnswerPayload) {
         yield* fallbackStream();
         return;
       }
@@ -2702,7 +2792,7 @@ class BackendApiService {
         '${receivedPayload ? 'Finishing partial stream.' : 'Falling back to /api/rag/query. '}'
         '$error',
       );
-      if (!receivedPayload) {
+      if (!receivedAnswerPayload) {
         yield* fallbackStream();
         return;
       }

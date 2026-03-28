@@ -37,7 +37,16 @@ import '../utils/ai_question_paper_parser.dart';
 import '../utils/link_navigation_utils.dart';
 import 'ai_question_paper_quiz_screen.dart';
 import 'viewer/pdf_viewer_screen.dart';
+import 'viewer/web_source_viewer_screen.dart';
 import '../utils/youtube_link_utils.dart';
+
+bool _looksLikePdfSourceUrl(String value) {
+  final normalized = value.trim().toLowerCase();
+  if (normalized.isEmpty) return false;
+  return normalized.contains('.pdf') ||
+      normalized.contains('/pdf') ||
+      normalized.contains('application/pdf');
+}
 
 class RagSource {
   final String fileId;
@@ -68,20 +77,32 @@ class RagSource {
     final pages = json['pages'] as Map<String, dynamic>?;
     final start = pages?['start'];
     final end = pages?['end'];
+    final resolvedFileUrl =
+        json['file_url']?.toString() ??
+        json['source_url']?.toString() ??
+        json['url']?.toString() ??
+        json['href']?.toString();
+    final resolvedVideoUrl =
+        json['video_url']?.toString() ?? json['youtube_url']?.toString();
+    final explicitType = json['source_type']?.toString().trim().toLowerCase();
+    final inferredType = explicitType?.isNotEmpty == true
+        ? explicitType!
+        : ((resolvedVideoUrl?.toLowerCase().contains('youtu') ?? false) ||
+                (resolvedFileUrl?.toLowerCase().contains('youtu') ?? false)
+            ? 'youtube'
+            : ((resolvedFileUrl != null && resolvedFileUrl.isNotEmpty)
+                ? (_looksLikePdfSourceUrl(resolvedFileUrl) ? 'pdf' : 'web')
+                : 'pdf'));
     return RagSource(
       fileId: json['file_id']?.toString() ?? '',
       title: json['title']?.toString() ?? 'Source',
-      sourceType:
-          json['source_type']?.toString().toLowerCase() ??
-          ((json['video_url']?.toString().isNotEmpty == true)
-              ? 'youtube'
-              : 'pdf'),
+      sourceType: inferredType,
       startPage: start is int ? start : int.tryParse(start?.toString() ?? ''),
       endPage: end is int ? end : int.tryParse(end?.toString() ?? ''),
       timestamp: json['timestamp']?.toString(),
       score: (json['score'] is num) ? (json['score'] as num).toDouble() : null,
-      fileUrl: json['file_url']?.toString(),
-      videoUrl: json['video_url']?.toString(),
+      fileUrl: resolvedFileUrl,
+      videoUrl: resolvedVideoUrl,
       isPrimary: json['is_primary'] == true,
     );
   }
@@ -1262,7 +1283,10 @@ class _AIChatScreenState extends State<AIChatScreen>
       _showSourceUrlErrorSnackBar('Web source');
       return;
     }
-    await _openExternalSourceLink(uri: uri, sourceTitle: 'Web source');
+    await _openWebSourceInAppOrExternal(
+      uri: uri,
+      sourceTitle: 'Web source',
+    );
   }
 
   Future<void> _openPlanVideoSource(String url, String? timestamp) async {
@@ -3284,6 +3308,27 @@ Return STRICT JSON only (no markdown). Schema:
     }
   }
 
+  Future<void> _openWebSourceInAppOrExternal({
+    required Uri uri,
+    required String sourceTitle,
+  }) async {
+    if (!mounted) return;
+    try {
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => WebSourceViewerScreen(
+            initialUrl: uri.toString(),
+            title: sourceTitle,
+          ),
+        ),
+      );
+    } catch (e) {
+      debugPrint('Opening web source in app failed for "$sourceTitle": $e');
+      await _openExternalSourceLink(uri: uri, sourceTitle: sourceTitle);
+    }
+  }
+
   Future<void> _handleSummaryExport({
     required String userPrompt,
     required String userVisible,
@@ -3553,10 +3598,14 @@ Return STRICT JSON only (no markdown). Schema:
         final hasImageAttachments = attachmentPayload.any(
           (item) => item['type']?.toString().toLowerCase() == 'image',
         );
+        final hasPdfAttachments = attachmentPayload.any(
+          (item) => item['type']?.toString().toLowerCase() == 'pdf',
+        );
+        final hasPinnedPdfContext =
+            widget.resourceContext != null &&
+            (widget.resourceContext?.videoUrl ?? '').isEmpty;
         final shouldEnableOcr =
-            attachmentPayload.isNotEmpty ||
-            (widget.resourceContext != null &&
-                (widget.resourceContext?.videoUrl ?? '').isEmpty);
+            attachmentPayload.isNotEmpty || hasPinnedPdfContext;
         final effectiveAllowWeb = _allowWebMode;
         final effectiveFileId = effectiveAllowWeb
             ? null
@@ -3577,7 +3626,7 @@ Return STRICT JSON only (no markdown). Schema:
         final effectiveUseOcr = effectiveAllowWeb ? false : shouldEnableOcr;
         final effectiveForceOcr = effectiveAllowWeb
             ? false
-            : hasImageAttachments;
+            : (hasImageAttachments || hasPdfAttachments || hasPinnedPdfContext);
         final minScore = localContextRequired
             ? (isPdfOverviewPrompt ? 0.16 : 0.08)
             : null;
@@ -4477,6 +4526,7 @@ Return STRICT JSON only (no markdown). Schema:
                   s.sourceType == 'youtube' ||
                   (s.videoUrl?.toLowerCase().contains('youtu') ?? false) ||
                   (s.fileUrl?.toLowerCase().contains('youtu') ?? false);
+              final isWebSource = s.sourceType == 'web';
               final launchTarget = (s.videoUrl?.trim().isNotEmpty == true)
                   ? s.videoUrl!.trim()
                   : (s.fileUrl?.trim() ?? '');
@@ -4532,6 +4582,11 @@ Return STRICT JSON only (no markdown). Schema:
                             } else if (!opened) {
                               _showSourceUrlErrorSnackBar(s.title);
                             }
+                          } else if (isWebSource && uri != null) {
+                            await _openWebSourceInAppOrExternal(
+                              uri: uri,
+                              sourceTitle: s.title,
+                            );
                           } else if (uri != null) {
                             Navigator.push(
                               context,
