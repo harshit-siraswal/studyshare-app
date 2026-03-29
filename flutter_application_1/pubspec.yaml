@@ -149,10 +149,6 @@ flutter:
     - assets/videos/
     - assets/animations/
     - assets/stickers/
-    - assets/stickers/animated_reactions/
-    - assets/stickers/animated_study/
-    - assets/stickers/animated_celebration/
-    - assets/stickers/animated_moods/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
