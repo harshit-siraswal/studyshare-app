@@ -984,6 +984,11 @@ class _AppRouterState extends State<AppRouter> {
   }
 
   Future<_AuthGateResult> _checkCurrentSessionAccess(String collegeId) async {
+    final blockingReason = await _authService.getCurrentSessionBlockingReason();
+    if (blockingReason != null) {
+      return _AuthGateResult.denied(blockingReason);
+    }
+
     final email = _authService.userEmail?.trim();
     if (email == null || email.isEmpty) {
       return const _AuthGateResult.denied(
@@ -995,9 +1000,11 @@ class _AppRouterState extends State<AppRouter> {
       final banResult = await _authService.checkBanStatus(email, collegeId);
       if (banResult?['banCheckSkipped'] == true) {
         debugPrint(
-          'Ban check skipped for $email in college $collegeId; allowing access in limited verification mode.',
+          'Ban check skipped for $email in college $collegeId; denying access until verification checks recover.',
         );
-        return const _AuthGateResult.allowed();
+        return const _AuthGateResult.denied(
+          'Unable to verify account security right now. Please sign in again later.',
+        );
       }
       if (banResult?['isBanned'] == true) {
         final reason =
@@ -1096,6 +1103,24 @@ class _AppRouterState extends State<AppRouter> {
           // This case is rare but if user is logged in but prefs are cleared
           _scheduleAnalyticsScreen('college_selection');
           return CollegeSelectionScreen(onCollegeSelected: _onCollegeSelected);
+        }
+
+        if (_authService.requiresEmailVerificationForCurrentUser) {
+          _scheduleAnalyticsScreen('email_verification');
+          return LoginScreen(
+            collegeName: _selectedCollegeName ?? '',
+            collegeDomain: _selectedCollegeDomain!,
+            collegeId: _selectedCollegeId!,
+            onChangeCollege: _onChangeCollege,
+            initialErrorMessage: 'Verify your email before continuing.',
+            startInEmailVerificationMode: true,
+            initialEmail: _authService.userEmail,
+            onUseDifferentEmail: () async {
+              await _authService.signOut();
+              if (!mounted) return;
+              setState(() => _resetAuthGateCache());
+            },
+          );
         }
 
         return FutureBuilder<_AuthGateResult>(

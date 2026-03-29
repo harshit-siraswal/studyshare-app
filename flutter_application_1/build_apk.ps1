@@ -53,7 +53,7 @@ if (Test-Path "$badgerDir\build.gradle") {
     Write-Host "flutter_app_badger patched successfully." -ForegroundColor Green
 }
 
-$buildArgs = @("build", "apk", "--release", "--verbose")
+$buildArgs = @("build", "apk", "--release", "--target-platform=android-arm64")
 
 $envFile = Join-Path $PSScriptRoot ".env"
 $envFileContent = $null
@@ -97,7 +97,16 @@ $defineKeys = @(
     "GIPHY_API_KEY",
     "REMOVE_BG_API_KEY",
     "RAZORPAY_KEY_ID",
-    "GOOGLE_SERVER_CLIENT_ID"
+    "GOOGLE_SERVER_CLIENT_ID",
+    "RECAPTCHA_SITE_KEY",
+    "TENOR_API_KEY",
+    "MAX_SESSION_AGE_HOURS",
+    "FIREBASE_API_KEY",
+    "FIREBASE_APP_ID",
+    "FIREBASE_MESSAGING_SENDER_ID",
+    "FIREBASE_PROJECT_ID",
+    "FIREBASE_AUTH_DOMAIN",
+    "FIREBASE_STORAGE_BUCKET"
 )
 
 foreach ($key in $defineKeys) {
@@ -119,6 +128,14 @@ if (-not $env:GIPHY_API_KEY -and -not (Test-EnvKeyPresent -Content $envFileConte
 
 if (-not $env:REMOVE_BG_API_KEY -and -not (Test-EnvKeyPresent -Content $envFileContent -Key "REMOVE_BG_API_KEY")) {
     Write-Host "REMOVE_BG_API_KEY not supplied. Background removal will fail at runtime." -ForegroundColor Yellow
+}
+
+if (-not $env:RECAPTCHA_SITE_KEY -and -not (Test-EnvKeyPresent -Content $envFileContent -Key "RECAPTCHA_SITE_KEY")) {
+    Write-Host "RECAPTCHA_SITE_KEY not supplied. Sensitive write protection will be reduced." -ForegroundColor Yellow
+}
+
+if (-not $env:TENOR_API_KEY -and -not (Test-EnvKeyPresent -Content $envFileContent -Key "TENOR_API_KEY")) {
+    Write-Host "TENOR_API_KEY not supplied. Tenor features will be disabled." -ForegroundColor Yellow
 }
 
 # Build APK

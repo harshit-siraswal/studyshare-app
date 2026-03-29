@@ -5,10 +5,10 @@ class AppConfig {
   static const String _defaultApiUrl = 'https://api.studyshare.in';
   static const String _defaultSupabaseUrl =
       'https://iayuwsvguwfqjgjsvjiy.supabase.co';
-  static const String _defaultSupabaseAnonKey =
-      'YOUR_SUPABASE_ANON_KEY';
+  static const String _defaultSupabaseAnonKey = '';
   static const String _defaultGiphyApiKey = '';
   static const String _defaultRemoveBgApiKey = '';
+  static const String _defaultRecaptchaSiteKey = '';
 
   static const String _supabaseUrlFromEnv = String.fromEnvironment(
     'SUPABASE_URL',
@@ -47,10 +47,25 @@ class AppConfig {
     defaultValue: _defaultRemoveBgApiKey,
   );
 
-  static const String imgflipUsername = '';
-  static const String imgflipPassword = '';
-  static const String tenorApiKey = '';
-  static const String telegramBotToken = '';
+  static const String recaptchaSiteKey = String.fromEnvironment(
+    'RECAPTCHA_SITE_KEY',
+    defaultValue: _defaultRecaptchaSiteKey,
+  );
+
+  static const String tenorApiKey = String.fromEnvironment(
+    'TENOR_API_KEY',
+    defaultValue: '',
+  );
+
+  static const String googleServerClientId = String.fromEnvironment(
+    'GOOGLE_SERVER_CLIENT_ID',
+    defaultValue: '',
+  );
+
+  static const int maxSessionAgeHours = int.fromEnvironment(
+    'MAX_SESSION_AGE_HOURS',
+    defaultValue: 168,
+  );
 
   static const List<String> apiBaseUrls = [_defaultApiUrl];
 }

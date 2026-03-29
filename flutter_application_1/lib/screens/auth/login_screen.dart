@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import '../../config/theme.dart';
@@ -10,6 +11,9 @@ class LoginScreen extends StatefulWidget {
   final String collegeId;
   final VoidCallback onChangeCollege;
   final String? initialErrorMessage;
+  final bool startInEmailVerificationMode;
+  final String? initialEmail;
+  final Future<void> Function()? onUseDifferentEmail;
 
   const LoginScreen({
     super.key,
@@ -18,6 +22,9 @@ class LoginScreen extends StatefulWidget {
     required this.collegeId,
     required this.onChangeCollege,
     this.initialErrorMessage,
+    this.startInEmailVerificationMode = false,
+    this.initialEmail,
+    this.onUseDifferentEmail,
   });
 
   @override
@@ -41,6 +48,11 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   void initState() {
     super.initState();
+    final initialEmail = widget.initialEmail?.trim();
+    if (initialEmail != null && initialEmail.isNotEmpty) {
+      _emailController.text = initialEmail;
+    }
+    _showEmailVerification = widget.startInEmailVerificationMode;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final initialError = widget.initialErrorMessage?.trim();
       if (!mounted || initialError == null || initialError.isEmpty) return;
@@ -109,6 +121,13 @@ class _LoginScreenState extends State<LoginScreen> {
           _passwordController.text,
         );
         debugPrint('Email Sign-In completed');
+        if (_authService.requiresEmailVerificationForCurrentUser) {
+          if (mounted) {
+            setState(() => _showEmailVerification = true);
+            _showWarning('Verify your email before continuing.');
+          }
+          return;
+        }
         final allowed = await _validateBanAfterLogin();
         if (!allowed) {
           return;
@@ -129,6 +148,11 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (e, stackTrace) {
       debugPrint('Email Auth Error: $e');
       debugPrint('Stack trace: $stackTrace');
+      if (mounted &&
+          e is firebase_auth.FirebaseAuthException &&
+          e.code == 'email-not-verified') {
+        setState(() => _showEmailVerification = true);
+      }
       if (mounted) {
         _showError(_authService.getErrorMessage(e));
       }
@@ -177,12 +201,13 @@ class _LoginScreenState extends State<LoginScreen> {
         widget.collegeId,
       );
       if (banResult?['banCheckSkipped'] == true) {
+        await _authService.signOut();
         if (mounted) {
-          _showWarning(
-            'Limited verification mode: some security checks are temporarily unavailable.',
+          _showError(
+            'Unable to verify account security right now. Please try again later.',
           );
         }
-        return true;
+        return false;
       }
       if (banResult?['isBanned'] == true) {
         final reason =
@@ -371,6 +396,16 @@ class _LoginScreenState extends State<LoginScreen> {
                           if (value == null || value.isEmpty) {
                             return 'Please enter your name';
                           }
+                          final normalized = value.trim().replaceAll(
+                            RegExp(r'\s+'),
+                            ' ',
+                          );
+                          if (normalized.length < 2) {
+                            return 'Name must be at least 2 characters';
+                          }
+                          if (normalized.length > 80) {
+                            return 'Name must be 80 characters or fewer';
+                          }
                           return null;
                         },
                       ),
@@ -419,8 +454,19 @@ class _LoginScreenState extends State<LoginScreen> {
                         if (value == null || value.isEmpty) {
                           return 'Please enter your password';
                         }
-                        if (!_isLogin && value.length < 6) {
-                          return 'Password must be at least 6 characters';
+                        if (!_isLogin) {
+                          final hasUppercase = RegExp(r'[A-Z]').hasMatch(value);
+                          final hasLowercase = RegExp(r'[a-z]').hasMatch(value);
+                          final hasDigit = RegExp(r'\d').hasMatch(value);
+                          if (value.length < 12 ||
+                              !hasUppercase ||
+                              !hasLowercase ||
+                              !hasDigit) {
+                            return 'Use at least 12 characters with upper-case, lower-case, and a number.';
+                          }
+                        }
+                        if (value.length > 128) {
+                          return 'Password must be 128 characters or fewer';
                         }
                         return null;
                       },
@@ -855,8 +901,15 @@ class _LoginScreenState extends State<LoginScreen> {
 
               // Back/Change email option
               TextButton(
-                onPressed: () {
-                  setState(() => _showEmailVerification = false);
+                onPressed: () async {
+                  final callback = widget.onUseDifferentEmail;
+                  if (callback != null) {
+                    await callback();
+                    return;
+                  }
+                  if (mounted) {
+                    setState(() => _showEmailVerification = false);
+                  }
                 },
                 child: Text(
                   'Use a different email',

@@ -12,6 +12,19 @@ import 'analytics_service.dart';
 import 'backend_api_service.dart';
 import 'push_notification_service.dart';
 
+class LocalRateLimitException implements Exception {
+  const LocalRateLimitException({
+    required this.message,
+    required this.retryAfter,
+  });
+
+  final String message;
+  final Duration retryAfter;
+
+  @override
+  String toString() => message;
+}
+
 class AuthService {
   int _banCheckFailureCount = 0;
   DateTime? _lastBanCheckFailureAt;
@@ -20,6 +33,16 @@ class AuthService {
   static const Duration _banCheckRetryWindow = Duration(seconds: 30);
   static const Duration _banCheckAlertCooldown = Duration(minutes: 5);
   static const int _banCheckAlertThreshold = 3;
+  static const Duration _emailLoginRateLimitWindow = Duration(minutes: 15);
+  static const Duration _googleLoginRateLimitWindow = Duration(minutes: 15);
+  static const Duration _signupRateLimitWindow = Duration(hours: 1);
+  static const Duration _passwordResetRateLimitWindow = Duration(hours: 1);
+  static const Duration _verificationEmailRateLimitWindow = Duration(hours: 1);
+  static const int _emailLoginRateLimitMaxAttempts = 5;
+  static const int _googleLoginRateLimitMaxAttempts = 8;
+  static const int _signupRateLimitMaxAttempts = 3;
+  static const int _passwordResetRateLimitMaxAttempts = 3;
+  static const int _verificationEmailRateLimitMaxAttempts = 5;
 
   firebase_auth.FirebaseAuth get _auth => firebase_auth.FirebaseAuth.instance;
 
@@ -148,6 +171,94 @@ class AuthService {
   // Get photo URL
   String? get photoUrl => currentUser?.photoURL;
 
+  bool get requiresEmailVerificationForCurrentUser {
+    final user = currentUser;
+    if (user == null) return false;
+    return _requiresEmailVerification(user);
+  }
+
+  bool _requiresEmailVerification(firebase_auth.User user) {
+    final hasPasswordProvider = user.providerData.any(
+      (provider) => provider.providerId == 'password',
+    );
+    return hasPasswordProvider && !user.emailVerified;
+  }
+
+  DateTime? _coerceDateTime(Object? value) {
+    if (value == null) return null;
+    if (value is DateTime) return value;
+    return DateTime.tryParse(value.toString());
+  }
+
+  Future<DateTime?> _getAuthenticationTime(firebase_auth.User user) async {
+    final fromMetadata = _coerceDateTime(user.metadata.lastSignInTime);
+    if (fromMetadata != null) {
+      return fromMetadata.toUtc();
+    }
+
+    try {
+      final tokenResult = await user.getIdTokenResult(true);
+      final fromToken = _coerceDateTime(tokenResult.authTime);
+      if (fromToken != null) {
+        return fromToken.toUtc();
+      }
+    } catch (error, stackTrace) {
+      developer.log(
+        'Unable to resolve auth_time for session validation.',
+        name: 'auth.session',
+        level: 900,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+    return null;
+  }
+
+  Future<String?> getCurrentSessionBlockingReason() async {
+    final user = currentUser;
+    if (user == null) {
+      return 'Your session expired. Please sign in again.';
+    }
+
+    try {
+      await user.reload();
+    } catch (error, stackTrace) {
+      developer.log(
+        'Failed to refresh auth session state.',
+        name: 'auth.session',
+        level: 900,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    }
+
+    final refreshedUser = currentUser;
+    if (refreshedUser == null) {
+      return 'Your session expired. Please sign in again.';
+    }
+
+    if (_requiresEmailVerification(refreshedUser)) {
+      return 'Verify your email before continuing.';
+    }
+
+    final authenticatedAt = await _getAuthenticationTime(refreshedUser);
+    if (authenticatedAt == null) {
+      return null;
+    }
+
+    final sessionAge = DateTime.now().toUtc().difference(authenticatedAt);
+    if (sessionAge > AppConfig.maxSessionAge) {
+      developer.log(
+        'session_expired age_hours=${sessionAge.inHours}',
+        name: 'auth.session',
+        level: 1000,
+      );
+      return 'Your session expired. Please sign in again.';
+    }
+
+    return null;
+  }
+
   String _maskEmail(String email) {
     final trimmed = email.trim().toLowerCase();
     final atIndex = trimmed.indexOf('@');
@@ -175,6 +286,131 @@ class AuthService {
       return 'config';
     }
     return 'unknown';
+  }
+
+  String _rateLimitKey({required String scope, required String subject}) {
+    final normalizedSubject = subject.trim().toLowerCase();
+    return 'security_rate_limit::$scope::${normalizedSubject.isEmpty ? 'device' : normalizedSubject}';
+  }
+
+  Future<void> _consumeRateLimit({
+    required String scope,
+    required String subject,
+    required int maxAttempts,
+    required Duration window,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    final thresholdMs = nowMs - window.inMilliseconds;
+    final key = _rateLimitKey(scope: scope, subject: subject);
+    final timestamps =
+        (prefs.getStringList(key) ?? const <String>[])
+            .map(int.tryParse)
+            .whereType<int>()
+            .where((timestamp) => timestamp >= thresholdMs)
+            .toList()
+          ..sort();
+
+    if (timestamps.length >= maxAttempts) {
+      await prefs.setStringList(
+        key,
+        timestamps.map((timestamp) => timestamp.toString()).toList(),
+      );
+      final oldestAttempt = timestamps.first;
+      final retryAfterMs =
+          window.inMilliseconds -
+          (nowMs - oldestAttempt).clamp(0, window.inMilliseconds);
+      final retryAfter = Duration(milliseconds: retryAfterMs);
+      developer.log(
+        'rate_limit_blocked scope=$scope subject=${subject.trim().toLowerCase()}',
+        name: 'auth.abuse',
+        level: 1000,
+      );
+      throw LocalRateLimitException(
+        message: 'Too many attempts. Please wait and try again.',
+        retryAfter: retryAfter,
+      );
+    }
+
+    timestamps.add(nowMs);
+    await prefs.setStringList(
+      key,
+      timestamps.map((timestamp) => timestamp.toString()).toList(),
+    );
+  }
+
+  Future<void> _clearRateLimit({
+    required String scope,
+    required String subject,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_rateLimitKey(scope: scope, subject: subject));
+  }
+
+  String _normalizeAndValidateEmail(String email) {
+    final normalized = email.trim().toLowerCase();
+    final emailPattern = RegExp(
+      r'^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$',
+    );
+    if (normalized.isEmpty || !emailPattern.hasMatch(normalized)) {
+      throw Exception('Please enter a valid email address.');
+    }
+    if (normalized.length > 254) {
+      throw Exception('Email address is too long.');
+    }
+    return normalized;
+  }
+
+  void _validatePassword({required String password, required bool isSignup}) {
+    final trimmed = password.trim();
+    if (trimmed.isEmpty) {
+      throw Exception('Password is required.');
+    }
+    if (password.length > 128) {
+      throw Exception('Password is too long.');
+    }
+    if (isSignup) {
+      final hasUppercase = RegExp(r'[A-Z]').hasMatch(password);
+      final hasLowercase = RegExp(r'[a-z]').hasMatch(password);
+      final hasDigit = RegExp(r'\d').hasMatch(password);
+      if (password.length < 12 || !hasUppercase || !hasLowercase || !hasDigit) {
+        throw Exception(
+          'Password must be at least 12 characters and include upper-case, lower-case, and a number.',
+        );
+      }
+    }
+  }
+
+  String _normalizeDisplayName(String displayName) {
+    final normalized = displayName.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (normalized.length < 2) {
+      throw Exception('Display name must be at least 2 characters.');
+    }
+    if (normalized.length > 80) {
+      throw Exception('Display name must be 80 characters or fewer.');
+    }
+    if (RegExp(r'[\u0000-\u001F\u007F]').hasMatch(normalized)) {
+      throw Exception('Display name contains invalid characters.');
+    }
+    return normalized;
+  }
+
+  void _logAuthAudit({
+    required String action,
+    required String outcome,
+    String? email,
+    String? method,
+    Object? error,
+    StackTrace? stackTrace,
+  }) {
+    developer.log(
+      'action=$action outcome=$outcome method=${method ?? 'unknown'} '
+      'email=${email == null || email.trim().isEmpty ? '[unknown]' : _maskEmail(email)}',
+      name: 'auth.audit',
+      level: outcome == 'success' ? 800 : 1000,
+      error: error,
+      stackTrace: stackTrace,
+    );
   }
 
   void incrementBanCheckFailure() {
@@ -245,6 +481,14 @@ class AuthService {
   /// Sign in with Google
   Future<firebase_auth.UserCredential?> signInWithGoogle() async {
     try {
+      await _consumeRateLimit(
+        scope: 'google_login',
+        subject: 'device',
+        maxAttempts: _googleLoginRateLimitMaxAttempts,
+        window: _googleLoginRateLimitWindow,
+      );
+      _logAuthAudit(action: 'login', outcome: 'attempt', method: 'google');
+
       if (kIsWeb) {
         final provider = firebase_auth.GoogleAuthProvider();
         provider.addScope('email');
@@ -260,6 +504,7 @@ class AuthService {
           'auth_login',
           parameters: const <String, Object?>{'method': 'google'},
         );
+        _logAuthAudit(action: 'login', outcome: 'success', method: 'google');
 
         return userCredential;
       }
@@ -288,6 +533,12 @@ class AuthService {
             await AnalyticsService.instance.logEvent(
               'auth_login',
               parameters: const <String, Object?>{'method': 'google'},
+            );
+            _logAuthAudit(
+              action: 'login',
+              outcome: 'success',
+              method: 'google',
+              email: userCredential?.user?.email,
             );
           }
           return userCredential;
@@ -339,6 +590,12 @@ class AuthService {
       if (_looksLikeGoogleConfigIssue(errorMessage)) {
         _throwGoogleConfigError();
       }
+      _logAuthAudit(
+        action: 'login',
+        outcome: 'failure',
+        method: 'google',
+        error: e,
+      );
       rethrow;
     } catch (e) {
       debugPrint('Error signing in with Google: $e');
@@ -348,6 +605,12 @@ class AuthService {
           'method': 'google',
           'reason': _classifyAuthError(e),
         },
+      );
+      _logAuthAudit(
+        action: 'login',
+        outcome: 'failure',
+        method: 'google',
+        error: e,
       );
       rethrow;
     }
@@ -371,20 +634,53 @@ class AuthService {
     String email,
     String password,
   ) async {
+    final normalizedEmail = _normalizeAndValidateEmail(email);
+    _validatePassword(password: password, isSignup: false);
     try {
+      await _consumeRateLimit(
+        scope: 'email_login',
+        subject: normalizedEmail,
+        maxAttempts: _emailLoginRateLimitMaxAttempts,
+        window: _emailLoginRateLimitWindow,
+      );
+      _logAuthAudit(
+        action: 'login',
+        outcome: 'attempt',
+        method: 'email',
+        email: normalizedEmail,
+      );
       final userCredential = await _auth.signInWithEmailAndPassword(
-        email: email,
+        email: normalizedEmail,
         password: password,
       );
+      if (userCredential.user != null &&
+          _requiresEmailVerification(userCredential.user!)) {
+        try {
+          await userCredential.user!.sendEmailVerification();
+        } catch (_) {}
+        await _auth.signOut();
+        throw firebase_auth.FirebaseAuthException(
+          code: 'email-not-verified',
+          message:
+              'Please verify your email before signing in. A new verification email has been sent.',
+        );
+      }
 
       // Save/update user in database (non-blocking)
       if (userCredential.user != null) {
         _backgroundSaveUser(userCredential.user!);
       }
+      await _clearRateLimit(scope: 'email_login', subject: normalizedEmail);
 
       await AnalyticsService.instance.logEvent(
         'auth_login',
         parameters: const <String, Object?>{'method': 'email'},
+      );
+      _logAuthAudit(
+        action: 'login',
+        outcome: 'success',
+        method: 'email',
+        email: normalizedEmail,
       );
 
       return userCredential;
@@ -397,6 +693,13 @@ class AuthService {
           'reason': _classifyAuthError(e),
         },
       );
+      _logAuthAudit(
+        action: 'login',
+        outcome: 'failure',
+        method: 'email',
+        email: normalizedEmail,
+        error: e,
+      );
       rethrow;
     }
   }
@@ -407,22 +710,44 @@ class AuthService {
     required String password,
     required String displayName,
   }) async {
+    final normalizedEmail = _normalizeAndValidateEmail(email);
+    final normalizedDisplayName = _normalizeDisplayName(displayName);
+    _validatePassword(password: password, isSignup: true);
     try {
+      await _consumeRateLimit(
+        scope: 'email_signup',
+        subject: normalizedEmail,
+        maxAttempts: _signupRateLimitMaxAttempts,
+        window: _signupRateLimitWindow,
+      );
+      _logAuthAudit(
+        action: 'signup',
+        outcome: 'attempt',
+        method: 'email',
+        email: normalizedEmail,
+      );
       final userCredential = await _auth.createUserWithEmailAndPassword(
-        email: email,
+        email: normalizedEmail,
         password: password,
       );
 
-      await userCredential.user?.updateDisplayName(displayName);
+      await userCredential.user?.updateDisplayName(normalizedDisplayName);
       await userCredential.user?.sendEmailVerification();
       await userCredential.user?.reload();
 
       if (userCredential.user != null) {
         _backgroundSaveUser(userCredential.user!);
       }
+      await _auth.signOut();
       await AnalyticsService.instance.logEvent(
         'auth_signup',
         parameters: const <String, Object?>{'method': 'email'},
+      );
+      _logAuthAudit(
+        action: 'signup',
+        outcome: 'success',
+        method: 'email',
+        email: normalizedEmail,
       );
       return userCredential;
     } catch (e) {
@@ -434,23 +759,56 @@ class AuthService {
           'reason': _classifyAuthError(e),
         },
       );
+      _logAuthAudit(
+        action: 'signup',
+        outcome: 'failure',
+        method: 'email',
+        email: normalizedEmail,
+        error: e,
+      );
       rethrow;
     }
   }
 
   /// Send password reset email
   Future<void> sendPasswordResetEmail(String email) async {
+    final normalizedEmail = _normalizeAndValidateEmail(email);
     try {
-      await _auth.sendPasswordResetEmail(email: email);
+      await _consumeRateLimit(
+        scope: 'password_reset',
+        subject: normalizedEmail,
+        maxAttempts: _passwordResetRateLimitMaxAttempts,
+        window: _passwordResetRateLimitWindow,
+      );
+      _logAuthAudit(
+        action: 'password_reset',
+        outcome: 'attempt',
+        method: 'email',
+        email: normalizedEmail,
+      );
+      await _auth.sendPasswordResetEmail(email: normalizedEmail);
       await AnalyticsService.instance.logEvent(
         'auth_password_reset',
         parameters: const <String, Object?>{'method': 'email'},
+      );
+      _logAuthAudit(
+        action: 'password_reset',
+        outcome: 'success',
+        method: 'email',
+        email: normalizedEmail,
       );
     } catch (e) {
       debugPrint('Error sending password reset email: $e');
       await AnalyticsService.instance.logEvent(
         'auth_password_reset_error',
         parameters: <String, Object?>{'reason': _classifyAuthError(e)},
+      );
+      _logAuthAudit(
+        action: 'password_reset',
+        outcome: 'failure',
+        method: 'email',
+        email: normalizedEmail,
+        error: e,
       );
       rethrow;
     }
@@ -459,9 +817,29 @@ class AuthService {
   /// Resend verification email
   Future<void> resendVerificationEmail() async {
     try {
+      final email = _normalizeAndValidateEmail(currentUser?.email ?? '');
+      await _consumeRateLimit(
+        scope: 'verification_email',
+        subject: email,
+        maxAttempts: _verificationEmailRateLimitMaxAttempts,
+        window: _verificationEmailRateLimitWindow,
+      );
       await currentUser?.sendEmailVerification();
+      _logAuthAudit(
+        action: 'verification_email',
+        outcome: 'success',
+        method: 'email',
+        email: email,
+      );
     } catch (e) {
       debugPrint('Error resending verification email: $e');
+      _logAuthAudit(
+        action: 'verification_email',
+        outcome: 'failure',
+        method: 'email',
+        email: currentUser?.email,
+        error: e,
+      );
       rethrow;
     }
   }
@@ -534,6 +912,14 @@ class AuthService {
     }
 
     try {
+      final rpcResult = await _checkBanStatusViaRpc(
+        normalizedCollegeId: normalizedCollegeId,
+      );
+      if (rpcResult != null) {
+        _resetBanCheckFailureState();
+        return rpcResult;
+      }
+
       bool schemaQueryable = false;
 
       Future<Map<String, dynamic>> findBan({
@@ -670,42 +1056,28 @@ class AuthService {
         debugPrint('User email is null, skipping database save');
         return;
       }
-
-      // Check if user already exists
-      final existingUser = await _supabase
-          .from('users')
-          .select('id')
-          .eq('email', email)
-          .maybeSingle()
-          .timeout(const Duration(seconds: 5)); // Add timeout
-
-      if (existingUser == null) {
-        // Create new user record
-        final now = DateTime.now().toIso8601String();
-        await _supabase
-            .from('users')
-            .insert({
-              'email': email,
-              'display_name': user.displayName ?? email.split('@')[0],
-              'profile_photo_url': user.photoURL,
-              'created_at': now,
-              'updated_at': now,
-            })
-            .timeout(const Duration(seconds: 5));
-        debugPrint('User saved to database.');
-      } else {
-        // Update existing user
-        await _supabase
-            .from('users')
-            .update({
-              'display_name': user.displayName ?? email.split('@')[0],
-              'profile_photo_url': user.photoURL,
-              'updated_at': DateTime.now().toIso8601String(),
-            })
-            .eq('email', email)
-            .timeout(const Duration(seconds: 5));
-        debugPrint('User updated in database.');
+      final normalizedEmail = email.trim().toLowerCase();
+      final userId = user.uid.trim();
+      if (userId.isEmpty) {
+        debugPrint('User id is empty, skipping database save');
+        return;
       }
+
+      final now = DateTime.now().toIso8601String();
+      final payload = <String, dynamic>{
+        'id': userId,
+        'email': normalizedEmail,
+        'display_name': user.displayName ?? normalizedEmail.split('@')[0],
+        'profile_photo_url': user.photoURL,
+        'updated_at': now,
+        'created_at': now,
+      };
+
+      await _supabase
+          .from('users')
+          .upsert(payload, onConflict: 'id')
+          .timeout(const Duration(seconds: 5));
+      debugPrint('User saved to database.');
     } on TimeoutException {
       debugPrint('Database save timeout - user sign-in will proceed');
       // Don't throw - allow sign-in to proceed
@@ -741,6 +1113,10 @@ class AuthService {
       }
       return error.message ?? error.toString();
     }
+    if (error is LocalRateLimitException) {
+      final seconds = error.retryAfter.inSeconds.clamp(1, 3600);
+      return 'Too many attempts. Try again in about $seconds second${seconds == 1 ? '' : 's'}.';
+    }
     if (error is firebase_auth.FirebaseAuthException) {
       switch (error.code) {
         case 'user-not-found':
@@ -750,9 +1126,11 @@ class AuthService {
         case 'email-already-in-use':
           return 'Email is already registered';
         case 'weak-password':
-          return 'Password should be at least 6 characters';
+          return 'Password must be at least 12 characters and include upper-case, lower-case, and a number.';
         case 'invalid-email':
           return 'Invalid email address';
+        case 'email-not-verified':
+          return 'Please verify your email before signing in. A new verification email has been sent.';
         case 'too-many-requests':
           return 'Too many attempts. Please try again later.';
         case 'network-request-failed':
@@ -762,5 +1140,55 @@ class AuthService {
       }
     }
     return error.toString();
+  }
+
+  Future<Map<String, dynamic>?> _checkBanStatusViaRpc({
+    required String? normalizedCollegeId,
+  }) async {
+    try {
+      final payload = normalizedCollegeId == null
+          ? await _supabase.rpc('get_my_ban_status')
+          : await _supabase.rpc(
+              'get_my_ban_status',
+              params: {'target_college_id': normalizedCollegeId},
+            );
+
+      Map<String, dynamic>? row;
+      if (payload is Map<String, dynamic>) {
+        row = Map<String, dynamic>.from(payload);
+      } else if (payload is Map) {
+        row = Map<String, dynamic>.from(payload);
+      } else if (payload is List && payload.isNotEmpty) {
+        final first = payload.first;
+        if (first is Map<String, dynamic>) {
+          row = Map<String, dynamic>.from(first);
+        } else if (first is Map) {
+          row = Map<String, dynamic>.from(first);
+        }
+      }
+
+      if (row == null) return null;
+      return {
+        'isBanned': row['is_banned'] == true,
+        'reason': row['reason'],
+        'isGlobal': row['is_global'] == true,
+        'banCheckSkipped': false,
+      };
+    } catch (error) {
+      final lowered = error.toString().toLowerCase();
+      final missingFunction =
+          lowered.contains('get_my_ban_status') &&
+          (lowered.contains('does not exist') || lowered.contains('42883'));
+      if (missingFunction) {
+        return null;
+      }
+      developer.log(
+        'Ban status RPC failed; falling back to direct query.',
+        name: 'auth.ban_check',
+        level: 900,
+        error: error,
+      );
+      return null;
+    }
   }
 }

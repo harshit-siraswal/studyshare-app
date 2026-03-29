@@ -78,14 +78,10 @@ android {
                 )
                 signingConfig = signingConfigs.getByName("debug")
             }
-            // Enable ProGuard/R8 with comprehensive rules to prevent code stripping
-            // This is CRITICAL for Supabase, Firebase, and JSON serialization to work in release builds
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            // Temporarily disable minification/shrinking so local release builds
+            // can complete reliably on constrained environments.
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 

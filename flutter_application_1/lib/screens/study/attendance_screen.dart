@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:add_2_calendar/add_2_calendar.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -32,7 +31,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   bool _isSyncing = false;
   bool _isManualSyncing = false;
   bool _isLoadingDaywise = false;
-  bool _autoSyncAttempted = false;
+  bool _hasSavedSession = false;
   String? _lastSyncErrorMessage;
   String? _lastSyncErrorCode;
 
@@ -41,20 +40,21 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     collegeName: widget.collegeName,
   );
 
-  String get _autoSyncKey => 'attendance_auto_sync_${widget.collegeId}';
-  String get _autoSyncAttemptKey =>
-      'attendance_auto_sync_attempt_${widget.collegeId}';
   String get _syncCooldownUntilKey =>
       'attendance_sync_cooldown_until_${widget.collegeId}';
 
-  Future<void> _syncScheduleWidget([AttendanceSnapshot? snapshot]) {
+  Future<void> _syncScheduleWidget([AttendanceSnapshot? snapshot]) async {
     final effectiveSnapshot = snapshot ?? _snapshot;
-    return HomeWidgetService.instance.syncSchedule(
-      collegeId: widget.collegeId,
-      semester: effectiveSnapshot?.student.semesterName ?? '',
-      branch: effectiveSnapshot?.student.branchShortName ?? '',
-      snapshot: effectiveSnapshot,
-    );
+    try {
+      await HomeWidgetService.instance.syncSchedule(
+        collegeId: widget.collegeId,
+        semester: effectiveSnapshot?.student.semesterName ?? '',
+        branch: effectiveSnapshot?.student.branchShortName ?? '',
+        snapshot: effectiveSnapshot,
+      );
+    } catch (error) {
+      debugPrint('Attendance widget sync failed: $error');
+    }
   }
 
   @override
@@ -68,52 +68,17 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       setState(() => _isLoading = false);
       return;
     }
+    final token = await _attendanceService.loadSavedToken(widget.collegeId);
     final snapshot = await _attendanceService.loadCachedSnapshot(
       widget.collegeId,
     );
     if (!mounted) return;
     setState(() {
       _snapshot = snapshot;
+      _hasSavedSession = token != null && token.trim().isNotEmpty;
       _isLoading = false;
     });
     unawaited(_syncScheduleWidget(snapshot));
-    _triggerBackgroundSyncIfPossible();
-  }
-
-  Future<void> _triggerBackgroundSyncIfPossible() async {
-    if (_autoSyncAttempted || !_isKietCollege || _isSyncing) return;
-    _autoSyncAttempted = true;
-
-    if (!await _ensureSyncAllowed()) return;
-
-    final prefs = await SharedPreferences.getInstance();
-    final todayKey = DateTime.now().toIso8601String().split('T').first;
-    final lastSyncedDate = prefs.getString(_autoSyncKey);
-    if (lastSyncedDate == todayKey) return;
-    final lastAttemptMillis = prefs.getInt(_autoSyncAttemptKey);
-    if (lastAttemptMillis != null) {
-      final lastAttempt = DateTime.fromMillisecondsSinceEpoch(
-        lastAttemptMillis,
-      );
-      if (DateTime.now().difference(lastAttempt) <
-          const Duration(minutes: 20)) {
-        return;
-      }
-    }
-
-    final token = await _attendanceService.loadSavedToken(widget.collegeId);
-    if (!mounted || token == null || token.isEmpty) return;
-
-    try {
-      await prefs.setInt(
-        _autoSyncAttemptKey,
-        DateTime.now().millisecondsSinceEpoch,
-      );
-      await _syncWithToken(token, showSuccessToast: false);
-      await prefs.setString(_autoSyncKey, todayKey);
-    } catch (error) {
-      debugPrint('Attendance background sync skipped: $error');
-    }
   }
 
   Future<void> _connectAndSync() async {
@@ -207,11 +172,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final token = await _attendanceService.loadSavedToken(widget.collegeId);
     if (!mounted) return;
     if (token == null || token.isEmpty) {
+      setState(() => _hasSavedSession = false);
       if (promptIfMissingToken) {
         await _connectAndSync();
       }
       return;
     }
+    setState(() => _hasSavedSession = true);
     try {
       await _syncWithToken(token, isManualSync: true);
     } catch (error) {
@@ -240,7 +207,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     if (!mounted) return;
     setState(() {
       _snapshot = null;
-      _autoSyncAttempted = false;
+      _hasSavedSession = false;
       _lastSyncErrorMessage = null;
       _lastSyncErrorCode = null;
     });
@@ -280,6 +247,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       if (!mounted) return;
       setState(() {
         _snapshot = snapshot;
+        _hasSavedSession = true;
         _lastSyncErrorMessage = null;
         _lastSyncErrorCode = null;
       });
@@ -515,67 +483,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }).toList();
   }
 
-  DateTime _parseEntryDateTime(String dateRaw, String timeRaw) {
-    final baseDate = _attendanceService.tryParseDate(dateRaw) ?? DateTime.now();
-    final trimmed = timeRaw.trim();
-    if (trimmed.isEmpty) {
-      return DateTime(baseDate.year, baseDate.month, baseDate.day, 9);
-    }
-
-    final amPmMatch = RegExp(
-      r'(\d{1,2}):(\d{2})\s*([AaPp][Mm])',
-    ).firstMatch(trimmed);
-    if (amPmMatch != null) {
-      final hourRaw = int.tryParse(amPmMatch.group(1) ?? '') ?? 9;
-      final minute = int.tryParse(amPmMatch.group(2) ?? '') ?? 0;
-      final meridiem = amPmMatch.group(3)!.toLowerCase();
-      var hour = hourRaw % 12;
-      if (meridiem == 'pm') hour += 12;
-      return DateTime(
-        baseDate.year,
-        baseDate.month,
-        baseDate.day,
-        hour,
-        minute,
-      );
-    }
-
-    final parts = trimmed.split(':');
-    final hour = parts.isNotEmpty ? int.tryParse(parts[0]) ?? 9 : 9;
-    final minute = parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0;
-    return DateTime(baseDate.year, baseDate.month, baseDate.day, hour, minute);
-  }
-
-  Future<void> _addAllToCalendar(List<AttendanceScheduleEntry> entries) async {
-    if (entries.isEmpty) return;
-    for (final entry in entries) {
-      final start = _parseEntryDateTime(entry.lectureDate, entry.start);
-      final end = _parseEntryDateTime(entry.lectureDate, entry.end);
-      final safeEnd = end.isAfter(start)
-          ? end
-          : start.add(const Duration(hours: 1));
-      final title = entry.courseName.isEmpty
-          ? (entry.title.isEmpty ? 'Class' : entry.title)
-          : entry.courseName;
-      final description = '${entry.courseComponentName} • ${entry.facultyName}'
-          .trim();
-      final event = Event(
-        title: title,
-        description: description,
-        location: entry.classRoom,
-        startDate: start,
-        endDate: safeEnd,
-      );
-      await Add2Calendar.addEvent2Cal(event);
-      await Future.delayed(const Duration(milliseconds: 300));
-    }
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('All classes added to your calendar')),
-      );
-    }
-  }
-
   Future<void> _openWeeklyScheduleSheet() async {
     final snapshot = _snapshot;
     if (snapshot == null) return;
@@ -706,7 +613,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 ),
                 IconButton(
                   tooltip: 'Log out',
-                  onPressed: _isManualSyncing || _snapshot == null
+                  onPressed: _isManualSyncing || !_hasSavedSession
                       ? null
                       : _logoutKietSession,
                   icon: const Icon(Icons.logout_rounded),
@@ -837,6 +744,18 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                     style: GoogleFonts.inter(fontWeight: FontWeight.w600),
                   ),
                 ),
+                if (_hasSavedSession) ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: _isManualSyncing
+                        ? null
+                        : () => _syncWithSavedToken(
+                            promptIfMissingToken: false,
+                          ),
+                    icon: const Icon(Icons.sync_rounded),
+                    label: const Text('Refresh with saved session'),
+                  ),
+                ],
               ],
             ),
           ),
@@ -848,7 +767,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       );
     }
 
-    final weeklyEntries = _weeklyScheduleEntries(snapshot);
     final upcomingEntries = _upcomingScheduleEntries(snapshot).take(5).toList();
 
     return RefreshIndicator(
@@ -865,79 +783,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             _buildLowAttendanceCard(snapshot, isDark),
             const SizedBox(height: 16),
           ],
-          if (weeklyEntries.isNotEmpty) ...[
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: isDark ? AppTheme.darkCard : Colors.white,
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: isDark ? Colors.white10 : Colors.black12,
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Weekly schedule',
-                    style: GoogleFonts.inter(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      color: isDark
-                          ? AppTheme.darkTextPrimary
-                          : AppTheme.lightTextPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Open the full week view or push the timetable to your calendar in one step.',
-                    style: GoogleFonts.inter(
-                      fontSize: 13,
-                      height: 1.4,
-                      color: isDark
-                          ? AppTheme.darkTextSecondary
-                          : AppTheme.lightTextSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: [
-                      OutlinedButton.icon(
-                        onPressed: _isManualSyncing
-                            ? null
-                            : () => _syncWithSavedToken(),
-                        icon: _isSyncing
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(Icons.sync_rounded),
-                        label: Text(
-                          _isSyncing ? 'Refreshing...' : 'Refresh latest',
-                        ),
-                      ),
-                      FilledButton.icon(
-                        onPressed: _openWeeklyScheduleSheet,
-                        icon: const Icon(Icons.calendar_month_rounded),
-                        label: const Text('Open weekly view'),
-                      ),
-                      OutlinedButton.icon(
-                        onPressed: () => _addAllToCalendar(weeklyEntries),
-                        icon: const Icon(Icons.event_available_rounded),
-                        label: const Text('Add all to calendar'),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-          ],
+          const SizedBox(height: 4),
           Text(
             'Subjects',
             style: GoogleFonts.inter(

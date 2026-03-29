@@ -36,30 +36,7 @@
 </head>
 
 <body>
-  <!-- Firebase SDK -->
-  <script src="https://www.gstatic.com/firebasejs/12.10.0/firebase-app-compat.js"></script>
-
   <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
-
-  <script>
-    // TODO(studyshare-migration): This still points to legacy project
-    // "studyspace-kiet". Firebase project IDs are immutable. Planned migration:
-    // 1) Create StudyShare Firebase project
-    // 2) Migrate required data/services
-    // 3) Replace firebaseConfig values here
-    // Also enforce API key referrer restrictions + App Check in Firebase/GCP.
-    const firebaseConfig = {
-      apiKey: "AIzaSyDt_mnuBryHcssBjRSdnPlh9VIC58LKL9Q",
-      authDomain: "studyspace-kiet.firebaseapp.com",
-      projectId: "studyspace-kiet",
-      storageBucket: "studyspace-kiet.appspot.com",
-      messagingSenderId: "28032445048",
-      appId: "1:28032445048:web:025624ffdb03cfd54b1b8d"
-    };
-
-    // Initialize Firebase
-    firebase.initializeApp(firebaseConfig);
-  </script>
 
   <script src="flutter_bootstrap.js" async></script>
 </body>

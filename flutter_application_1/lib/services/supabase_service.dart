@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -93,6 +95,28 @@ class SupabaseService {
   }
 
   String _normalizeEmail(String? email) => email?.trim().toLowerCase() ?? '';
+
+  String _requireCurrentSessionEmail({
+    String? claimedEmail,
+    required String action,
+  }) {
+    final sessionEmail = _currentSessionEmail();
+    if (sessionEmail.isEmpty) {
+      throw Exception('Please sign in to continue.');
+    }
+
+    final normalizedClaimed = _normalizeEmail(claimedEmail);
+    if (normalizedClaimed.isNotEmpty && normalizedClaimed != sessionEmail) {
+      developer.log(
+        'action=$action claimed_email=$normalizedClaimed session_email=$sessionEmail',
+        name: 'security.ownership_mismatch',
+        level: 1000,
+      );
+      throw Exception('Authenticated user mismatch. Please sign in again.');
+    }
+
+    return sessionEmail;
+  }
 
   void _pruneExpiredRateLimits() {
     final now = DateTime.now();
@@ -2080,9 +2104,13 @@ class SupabaseService {
 
   /// Check if following a user (Legacy check mostly, but useful)
   Future<bool> isFollowing(String followerEmail, String followingEmail) async {
+    final normalizedFollower = _requireCurrentSessionEmail(
+      claimedEmail: followerEmail,
+      action: 'is_following',
+    );
     try {
       final response = await _client.from('follows').select().match({
-        'follower_email': followerEmail,
+        'follower_email': normalizedFollower,
         'following_email': followingEmail,
       }).maybeSingle();
       return response != null;
@@ -3460,7 +3488,10 @@ class SupabaseService {
     String userEmail, {
     String? roomId,
   }) async {
-    final normalizedEmail = _normalizeEmail(userEmail);
+    final normalizedEmail = _requireCurrentSessionEmail(
+      claimedEmail: userEmail,
+      action: 'save_post',
+    );
 
     try {
       await _savePostDirect(postId, normalizedEmail, roomId: roomId);
@@ -3545,11 +3576,15 @@ class SupabaseService {
 
   /// Check if a post is saved
   Future<bool> isPostSaved(String postId, String userEmail) async {
+    final normalizedEmail = _requireCurrentSessionEmail(
+      claimedEmail: userEmail,
+      action: 'is_post_saved',
+    );
     final normalizedPostId = postId.trim();
     if (normalizedPostId.isEmpty) return false;
 
     try {
-      final directSavedIds = await _getSavedPostIdsDirect(userEmail);
+      final directSavedIds = await _getSavedPostIdsDirect(normalizedEmail);
       if (directSavedIds.contains(normalizedPostId)) {
         return true;
       }
@@ -3569,7 +3604,7 @@ class SupabaseService {
           .from('saved_posts')
           .select('id')
           .eq('message_id', normalizedPostId)
-          .eq('user_email', _normalizeEmail(userEmail))
+          .eq('user_email', normalizedEmail)
           .maybeSingle();
       return response != null;
     } catch (e) {
@@ -3579,7 +3614,7 @@ class SupabaseService {
             .from('saved_posts')
             .select('id')
             .eq('post_id', normalizedPostId)
-            .eq('user_email', _normalizeEmail(userEmail))
+            .eq('user_email', normalizedEmail)
             .maybeSingle();
         return response != null;
       } catch (e2) {
@@ -3594,7 +3629,10 @@ class SupabaseService {
     String userEmail, {
     String? roomId,
   }) async {
-    final normalizedEmail = _normalizeEmail(userEmail);
+    final normalizedEmail = _requireCurrentSessionEmail(
+      claimedEmail: userEmail,
+      action: 'unsave_post',
+    );
 
     try {
       await _unsavePostDirect(postId, normalizedEmail);
@@ -3618,11 +3656,15 @@ class SupabaseService {
 
   /// Get all saved post IDs for a user (Batch Optimization)
   Future<Set<String>> getSavedPostIds(String userEmail) async {
+    final normalizedEmail = _requireCurrentSessionEmail(
+      claimedEmail: userEmail,
+      action: 'get_saved_post_ids',
+    );
     final combinedIds = <String>{};
     var hasAuthoritativeSource = false;
 
     try {
-      final directIds = await _getSavedPostIdsDirect(userEmail);
+      final directIds = await _getSavedPostIdsDirect(normalizedEmail);
       combinedIds.addAll(directIds);
       hasAuthoritativeSource = true;
     } catch (e) {
@@ -3647,7 +3689,6 @@ class SupabaseService {
     }
 
     try {
-      final normalizedEmail = _normalizeEmail(userEmail);
       final response = await _client
           .from('saved_posts')
           .select('message_id')
@@ -3660,7 +3701,6 @@ class SupabaseService {
           .toSet();
     } catch (e) {
       try {
-        final normalizedEmail = _normalizeEmail(userEmail);
         final fallback = await _client
             .from('saved_posts')
             .select('post_id')
@@ -3679,6 +3719,10 @@ class SupabaseService {
 
   /// Get all saved posts for a user
   Future<List<Map<String, dynamic>>> getSavedPosts(String userEmail) async {
+    final normalizedEmail = _requireCurrentSessionEmail(
+      claimedEmail: userEmail,
+      action: 'get_saved_posts',
+    );
     final merged = <String, Map<String, dynamic>>{};
     DateTime? parseSavedAt(Map<String, dynamic> row) => DateTime.tryParse(
       (row['_saved_at'] ?? row['savedAt'] ?? row['created_at'] ?? '')
@@ -3703,7 +3747,7 @@ class SupabaseService {
     }
 
     try {
-      mergeRows(await _getSavedPostsDirect(userEmail));
+      mergeRows(await _getSavedPostsDirect(normalizedEmail));
     } catch (e) {
       debugPrint('Direct getSavedPosts failed: $e');
     }
@@ -4042,6 +4086,11 @@ class SupabaseService {
     required BuildContext context,
   }) async {
     final payload = _buildDirectResourcePayload(input);
+    final uploaderEmail = _requireCurrentSessionEmail(
+      claimedEmail: payload['uploaded_by_email']?.toString(),
+      action: 'create_resource',
+    );
+    payload['uploaded_by_email'] = uploaderEmail;
 
     try {
       await _api.createResource(payload, context: context);
@@ -4190,10 +4239,10 @@ class SupabaseService {
     required Resource resource,
     String? ownerEmail,
   }) async {
-    final normalizedOwner = _normalizeEmail(ownerEmail);
-    final activeOwner = normalizedOwner.isNotEmpty
-        ? normalizedOwner
-        : _currentSessionEmail();
+    final activeOwner = _requireCurrentSessionEmail(
+      claimedEmail: ownerEmail,
+      action: 'delete_owned_resource',
+    );
     if (activeOwner.isEmpty) {
       throw Exception('No signed-in user found to delete this contribution.');
     }
@@ -4280,7 +4329,10 @@ class SupabaseService {
     String collegeId,
     String userEmail,
   ) async {
-    final normalizedEmail = _normalizeEmail(userEmail);
+    final normalizedEmail = _requireCurrentSessionEmail(
+      claimedEmail: userEmail,
+      action: 'follow_department',
+    );
 
     try {
       // Sync with users target array
@@ -4372,7 +4424,10 @@ class SupabaseService {
     String userEmail, {
     String? collegeId,
   }) async {
-    final normalizedEmail = _normalizeEmail(userEmail);
+    final normalizedEmail = _requireCurrentSessionEmail(
+      claimedEmail: userEmail,
+      action: 'unfollow_department',
+    );
 
     try {
       // Sync with users target array
@@ -4456,7 +4511,10 @@ class SupabaseService {
     String userEmail, {
     String? collegeId,
   }) async {
-    final normalizedEmail = _normalizeEmail(userEmail);
+    final normalizedEmail = _requireCurrentSessionEmail(
+      claimedEmail: userEmail,
+      action: 'is_following_department',
+    );
     final userId = currentUserId;
     final filters = <Map<String, String>>[
       if (userId != null && userId.isNotEmpty)
@@ -4669,6 +4727,10 @@ class SupabaseService {
   /// Save (Bookmark) a notice
   Future<void> saveNotice(String noticeId, String userEmail) async {
     try {
+      _requireCurrentSessionEmail(
+        claimedEmail: userEmail,
+        action: 'save_notice',
+      );
       final ctx = _ctx;
       if (ctx == null) throw Exception('Security context not initialized');
       await _api.addBookmark(itemId: noticeId, type: 'notice', context: ctx);
@@ -4681,6 +4743,10 @@ class SupabaseService {
   /// Unsave a notice
   Future<void> unsaveNotice(String noticeId, String userEmail) async {
     try {
+      _requireCurrentSessionEmail(
+        claimedEmail: userEmail,
+        action: 'unsave_notice',
+      );
       final ctx = _ctx;
       if (ctx == null) throw Exception('Security context not initialized');
       await _api.removeBookmarkByItem(itemId: noticeId, context: ctx);
@@ -4693,6 +4759,10 @@ class SupabaseService {
   /// Check if notice is saved
   Future<bool> isNoticeSaved(String noticeId, String userEmail) async {
     try {
+      _requireCurrentSessionEmail(
+        claimedEmail: userEmail,
+        action: 'is_notice_saved',
+      );
       return await _api.checkBookmark(noticeId);
     } catch (e) {
       return false;
@@ -4911,11 +4981,15 @@ class SupabaseService {
   }
 
   Future<List<String>> getUserRoomIds(String userEmail) async {
+    final normalizedEmail = _requireCurrentSessionEmail(
+      claimedEmail: userEmail,
+      action: 'get_user_room_ids',
+    );
     try {
       final res = await _client
           .from('room_members')
           .select('room_id')
-          .eq('user_email', userEmail);
+          .eq('user_email', normalizedEmail);
       return (res as List).map((e) => e['room_id'] as String).toList();
     } catch (e) {
       debugPrint('Error getting joined rooms: $e');
@@ -4925,12 +4999,19 @@ class SupabaseService {
 
   /// Toggle bookmark for a resource - returns new bookmark state
   Future<bool> toggleBookmark(String userEmail, String resourceId) async {
+    final normalizedEmail = _requireCurrentSessionEmail(
+      claimedEmail: userEmail,
+      action: 'toggle_bookmark',
+    );
     try {
       _pruneExpiredRateLimits();
       final ctx = _ctx;
       if (ctx == null) throw Exception('Security context not initialized');
 
-      final cacheKey = _resourceStateKey(resourceId, userEmail: userEmail);
+      final cacheKey = _resourceStateKey(
+        resourceId,
+        userEmail: normalizedEmail,
+      );
       final isMarked =
           _bookmarkStateCache[cacheKey] ?? await _api.checkBookmark(resourceId);
       if (isMarked) {
@@ -4954,8 +5035,12 @@ class SupabaseService {
 
   /// Check if a resource is bookmarked by the user
   Future<bool> isBookmarked(String userEmail, String resourceId) async {
+    final normalizedEmail = _requireCurrentSessionEmail(
+      claimedEmail: userEmail,
+      action: 'is_bookmarked',
+    );
     _pruneExpiredRateLimits();
-    final cacheKey = _resourceStateKey(resourceId, userEmail: userEmail);
+    final cacheKey = _resourceStateKey(resourceId, userEmail: normalizedEmail);
     final cached = _bookmarkStateCache[cacheKey];
     if (cached != null) return cached;
 
@@ -4991,7 +5076,11 @@ class SupabaseService {
   }
 
   bool? getCachedBookmarkState(String userEmail, String resourceId) {
-    final cacheKey = _resourceStateKey(resourceId, userEmail: userEmail);
+    final normalizedEmail = _requireCurrentSessionEmail(
+      claimedEmail: userEmail,
+      action: 'get_cached_bookmark_state',
+    );
+    final cacheKey = _resourceStateKey(resourceId, userEmail: normalizedEmail);
     return _bookmarkStateCache[cacheKey];
   }
 
@@ -4999,7 +5088,10 @@ class SupabaseService {
     required String userEmail,
     required Iterable<String> resourceIds,
   }) async {
-    final normalizedEmail = _normalizeEmail(userEmail);
+    final normalizedEmail = _requireCurrentSessionEmail(
+      claimedEmail: userEmail,
+      action: 'prefetch_bookmarks',
+    );
     if (normalizedEmail.isEmpty) return;
 
     final ids = resourceIds

@@ -62,6 +62,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
   }
 
   void _onSearchFocusChange() {
+    if (!mounted) return;
     setState(() {
       _isSearchFocused = _searchFocusNode.hasFocus;
     });
@@ -97,21 +98,29 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
         widget.collegeId,
       );
       final joinedIds = await _supabaseService.getUserRoomIds(widget.userEmail);
+      final joinedIdSet = joinedIds
+          .map((id) => id.toString().trim())
+          .where((id) => id.isNotEmpty)
+          .toSet();
 
       // Filter to show only joined rooms
       final joinedRooms = rooms
-          .where((r) => joinedIds.contains(r['id'].toString()))
+          .where((r) {
+            final roomId = r['id']?.toString().trim() ?? '';
+            return roomId.isNotEmpty && joinedIdSet.contains(roomId);
+          })
           .toList();
 
       if (mounted) {
         setState(() {
           _rooms = joinedRooms;
           _filteredRooms = joinedRooms;
-          _joinedRoomIds = joinedIds.toSet();
+          _joinedRoomIds = joinedIdSet;
           _isLoading = false;
         });
       }
     } catch (e) {
+      debugPrint('ChatroomListScreen._loadRooms failed: $e');
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -395,7 +404,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
     bool isDark,
     Color cardColor,
   ) {
-    final memberCount = room['member_count'] ?? 0;
+    final memberCount = _safeMemberCount(room['member_count']);
 
     // "Last activity: 2m ago" - dummy for now or based on updated_at
     final updatedAt = room['updated_at'] ?? room['created_at'];
@@ -504,18 +513,55 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
       return;
     }
 
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => ChatRoomScreen(
-          roomId: roomId,
-          roomName: _roomText(room, 'name', fallback: 'Chat Room'),
-          description: _roomText(room, 'description'),
-          userEmail: widget.userEmail,
-          collegeDomain: widget.collegeDomain,
+    try {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => ChatRoomScreen(
+            roomId: roomId,
+            roomName: _roomText(room, 'name', fallback: 'Chat Room'),
+            description: _roomText(room, 'description'),
+            userEmail: widget.userEmail,
+            collegeDomain: widget.collegeDomain,
+          ),
         ),
-      ),
-    );
+      );
+    } catch (e) {
+      debugPrint('ChatroomListScreen._handleRoomTap failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open room right now.')),
+      );
+    }
+  }
+
+  int _safeMemberCount(dynamic raw) {
+    if (raw is int) return raw;
+    if (raw is String) return int.tryParse(raw) ?? 0;
+    if (raw is List && raw.isNotEmpty) {
+      final first = raw.first;
+      if (first is Map<String, dynamic>) {
+        final nested = first['count'];
+        if (nested is int) return nested;
+        return int.tryParse(nested?.toString() ?? '') ?? 0;
+      }
+      if (first is Map) {
+        final nested = first['count'];
+        if (nested is int) return nested;
+        return int.tryParse(nested?.toString() ?? '') ?? 0;
+      }
+    }
+    if (raw is Map<String, dynamic>) {
+      final nested = raw['count'];
+      if (nested is int) return nested;
+      return int.tryParse(nested?.toString() ?? '') ?? 0;
+    }
+    if (raw is Map) {
+      final nested = raw['count'];
+      if (nested is int) return nested;
+      return int.tryParse(nested?.toString() ?? '') ?? 0;
+    }
+    return 0;
   }
 
   String _formatTimeAgo(dynamic rawDate) {
@@ -858,6 +904,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
   }
 
   Future<void> _navigateToDiscoverRooms() async {
+    if (!mounted) return;
     await Navigator.push(
       context,
       MaterialPageRoute(
@@ -868,6 +915,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
         ),
       ),
     );
+    if (!mounted) return;
     _loadRooms();
   }
 

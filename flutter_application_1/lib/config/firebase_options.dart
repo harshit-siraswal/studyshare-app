@@ -35,29 +35,20 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions _webOptions = FirebaseOptions(
-    apiKey: String.fromEnvironment(
-      'FIREBASE_API_KEY',
-      defaultValue: 'AIzaSyDt_mnuBryHcssBjRSdnPlh9VIC58LKL9Q',
-    ),
-    appId: String.fromEnvironment(
-      'FIREBASE_APP_ID',
-      defaultValue: '1:28032445048:web:025624ffdb03cfd54b1b8d',
-    ),
+    apiKey: String.fromEnvironment('FIREBASE_API_KEY', defaultValue: ''),
+    appId: String.fromEnvironment('FIREBASE_APP_ID', defaultValue: ''),
     messagingSenderId: String.fromEnvironment(
       'FIREBASE_MESSAGING_SENDER_ID',
-      defaultValue: '28032445048',
+      defaultValue: '',
     ),
-    projectId: String.fromEnvironment(
-      'FIREBASE_PROJECT_ID',
-      defaultValue: 'studyspace-kiet',
-    ),
+    projectId: String.fromEnvironment('FIREBASE_PROJECT_ID', defaultValue: ''),
     authDomain: String.fromEnvironment(
       'FIREBASE_AUTH_DOMAIN',
-      defaultValue: 'studyspace-kiet.firebaseapp.com',
+      defaultValue: '',
     ),
     storageBucket: String.fromEnvironment(
       'FIREBASE_STORAGE_BUCKET',
-      defaultValue: 'studyspace-kiet.appspot.com',
+      defaultValue: '',
     ),
   );
 

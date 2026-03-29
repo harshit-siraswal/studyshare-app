@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:async';
+import 'dart:developer' as developer;
 import 'dart:io';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:file_picker/file_picker.dart';
@@ -299,6 +300,8 @@ class BackendApiService {
   static final Map<String, DateTime> _bookmarkCheckRateLimitUntil =
       <String, DateTime>{};
   static Timer? _bookmarkRateLimitCleanupTimer;
+  static final Map<String, List<DateTime>> _clientRateLimitEvents =
+      <String, List<DateTime>>{};
   DateTime? _notificationsRateLimitUntil;
   int? _lastUnreadNotificationCount;
   List<Map<String, dynamic>> _lastNotificationsCache =
@@ -332,6 +335,94 @@ class BackendApiService {
     return _apiBaseUrls
         .map((baseUrl) => Uri.parse('$baseUrl$path'))
         .toList(growable: false);
+  }
+
+  bool _shouldRequireAuthForPath(String path, String method) {
+    final normalizedMethod = method.toUpperCase();
+    if (normalizedMethod != 'GET') {
+      return true;
+    }
+
+    return path.startsWith('/api/bookmarks') ||
+        path.startsWith('/api/follow') ||
+        path.startsWith('/api/notifications') ||
+        path.startsWith('/api/resources/mine') ||
+        path.startsWith('/api/resources/state') ||
+        path.startsWith('/api/votes') ||
+        path.startsWith('/api/notebooks') ||
+        _isAiOrRagPath(path);
+  }
+
+  void _enforceClientRateLimit({
+    required String bucket,
+    required int maxRequests,
+    required Duration window,
+  }) {
+    final now = DateTime.now();
+    final events = _clientRateLimitEvents.putIfAbsent(
+      bucket,
+      () => <DateTime>[],
+    );
+    events.removeWhere((timestamp) => now.difference(timestamp) > window);
+    if (events.length >= maxRequests) {
+      developer.log(
+        'bucket=$bucket max_requests=$maxRequests window_seconds=${window.inSeconds}',
+        name: 'api.abuse',
+        level: 1000,
+      );
+      throw const BackendApiHttpException(
+        statusCode: 429,
+        message: 'Too many requests. Please slow down and try again shortly.',
+      );
+    }
+    events.add(now);
+  }
+
+  void _enforceAbuseProtection(String path, String method) {
+    final normalizedMethod = method.toUpperCase();
+    if (normalizedMethod != 'GET') {
+      _enforceClientRateLimit(
+        bucket: 'write',
+        maxRequests: 40,
+        window: const Duration(minutes: 1),
+      );
+    }
+
+    if (_isAiOrRagPath(path)) {
+      _enforceClientRateLimit(
+        bucket: 'ai',
+        maxRequests: 6,
+        window: const Duration(minutes: 1),
+      );
+    }
+
+    if (path.contains('/upload') || path.contains('/sources/upload')) {
+      _enforceClientRateLimit(
+        bucket: 'upload',
+        maxRequests: 4,
+        window: const Duration(minutes: 10),
+      );
+    }
+  }
+
+  void _logApiSecurityEvent({
+    required String path,
+    required String method,
+    required int statusCode,
+    required String outcome,
+  }) {
+    final shouldLog =
+        statusCode == 401 ||
+        statusCode == 403 ||
+        statusCode == 429 ||
+        statusCode >= 500;
+    if (!shouldLog) return;
+
+    developer.log(
+      'method=${method.toUpperCase()} path=$path status=$statusCode outcome=$outcome',
+      name: 'api.security',
+      level: statusCode >= 500 ? 1000 : 900,
+    );
   }
 
   Future<String?> _getIdToken({bool forceRefresh = false}) async {
@@ -580,6 +671,12 @@ class BackendApiService {
     } catch (_) {}
 
     if (res.statusCode < 200 || res.statusCode >= 300) {
+      _logApiSecurityEvent(
+        path: path,
+        method: method,
+        statusCode: res.statusCode,
+        outcome: 'error',
+      );
       if (path == '/api/users/profile' && normalizedMethod == 'PUT') {
         debugPrint('[ProfileUpdate] HTTP ${res.statusCode} response received');
       }
@@ -623,12 +720,15 @@ class BackendApiService {
     bool includeRecaptchaToken = false,
     String recaptchaAction = 'mobile_write',
   }) async {
+    _enforceAbuseProtection(path, method);
     final trimmedBearerOverride = bearerOverride?.trim();
     final usesBearerOverride =
         trimmedBearerOverride != null && trimmedBearerOverride.isNotEmpty;
     final preferFreshConnection = _shouldPreferFreshConnection(path);
     final allowTransientConnectionRetry =
         !_isAiOrRagPath(path) || _apiBaseUrls.length <= 1;
+    final effectiveRequireAuthToken =
+        requireAuthToken || _shouldRequireAuthForPath(path, method);
     Object? lastError;
     final candidateUris = _backendUris(path);
     for (final uri in candidateUris) {
@@ -639,7 +739,7 @@ class BackendApiService {
           method: method,
           body: body,
           timeout: timeout,
-          requireAuthToken: requireAuthToken,
+          requireAuthToken: effectiveRequireAuthToken,
           bearerOverride: bearerOverride,
           securityContext: securityContext,
           includeRecaptchaToken: includeRecaptchaToken,
@@ -2321,7 +2421,11 @@ class BackendApiService {
     String? title,
     String? sourceScope,
   }) async {
+    _enforceAbuseProtection('/api/notebooks/sources/upload', 'POST');
     final token = await _getIdToken();
+    if (token == null || token.isEmpty) {
+      throw Exception('Authentication required');
+    }
     final uri = Uri.parse('$_baseUrl/api/notebooks/sources/upload');
     final request = http.MultipartRequest('POST', uri)
       ..fields['college_id'] = collegeId;
@@ -2335,9 +2439,7 @@ class BackendApiService {
     if (sourceScope != null && sourceScope.trim().isNotEmpty) {
       request.fields['source_scope'] = sourceScope.trim();
     }
-    if (token != null && token.isNotEmpty) {
-      request.headers['Authorization'] = 'Bearer $token';
-    }
+    request.headers['Authorization'] = 'Bearer $token';
 
     request.files.add(await http.MultipartFile.fromPath('file', filePath));
     final streamed = await _sendStreamedRequest(request);
@@ -2581,6 +2683,7 @@ class BackendApiService {
     String? languageHint,
   }) async* {
     const path = '/api/rag/query/stream';
+    _enforceAbuseProtection(path, 'POST');
 
     Stream<String> fallbackStream() {
       return _queryRagAsSyntheticStream(
@@ -2627,11 +2730,14 @@ class BackendApiService {
     }
 
     final token = await _getIdToken();
+    if (token == null || token.isEmpty) {
+      throw Exception('Authentication required');
+    }
     final headers = <String, String>{
       'Content-Type': 'application/json',
       'Accept': 'text/event-stream',
       'Connection': 'close',
-      if (token != null) 'Authorization': 'Bearer $token',
+      'Authorization': 'Bearer $token',
     };
     final requestBody = <String, dynamic>{
       'question': question,
@@ -2719,6 +2825,12 @@ class BackendApiService {
     }
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
+      _logApiSecurityEvent(
+        path: path,
+        method: 'POST',
+        statusCode: response.statusCode,
+        outcome: 'stream_error',
+      );
       final body = await response.stream.bytesToString();
       if (_shouldFallbackRagStreamStatus(response.statusCode)) {
         if (_isUnsupportedRagStreamStatus(response.statusCode)) {
