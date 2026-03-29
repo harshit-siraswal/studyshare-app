@@ -15,6 +15,7 @@ import 'package:http/http.dart' as http;
 import 'success_overlay.dart';
 import '../utils/contribution_badge.dart';
 import '../utils/youtube_link_utils.dart';
+import '../utils/admin_access.dart';
 import '../data/academic_subjects_data.dart';
 
 class UploadResourceDialog extends StatefulWidget {
@@ -75,16 +76,11 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
   static final Map<String, String> branches = <String, String>{
     for (final option in branchOptions) option.shortLabel: option.value,
   };
-  static const Set<String> _teacherSourceRoles = {
-    'admin',
-    'moderator',
-    'teacher',
-  };
 
   List<String> get availableSubjects =>
       _catalogSubjectsForCurrentScope.isNotEmpty
-          ? _catalogSubjectsForCurrentScope
-          : getSubjectsForBranchAndSemester(_branch, _semester);
+      ? _catalogSubjectsForCurrentScope
+      : getSubjectsForBranchAndSemester(_branch, _semester);
 
   List<String> get _catalogSubjectsForCurrentScope {
     final offerings = (_academicCatalog?['offerings'] as List?) ?? const [];
@@ -105,17 +101,19 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     return subjects;
   }
 
-  bool get _isCatalogSelectMode {
-    final branchModes = (_academicCatalog?['branchModes'] as List?) ?? const [];
-    return branchModes
-        .whereType<Map>()
-        .map((item) => Map<String, dynamic>.from(item))
-        .any(
-          (item) =>
-              item['branch']?.toString() == _branch &&
-              item['semester']?.toString() == _semester &&
-              item['mode']?.toString() == 'catalog_select',
-        );
+  bool get _canSelectSubject =>
+      _semester.trim().isNotEmpty &&
+      _branch.trim().isNotEmpty &&
+      availableSubjects.isNotEmpty;
+
+  String get _subjectSelectorLabel {
+    if (_semester.trim().isEmpty || _branch.trim().isEmpty) {
+      return 'Select semester and branch first';
+    }
+    if (availableSubjects.isEmpty) {
+      return 'No subjects available for this scope';
+    }
+    return _subject;
   }
 
   @override
@@ -392,17 +390,17 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
       String uploaderSource = 'student';
       var uploadStatus = Resource.pendingStatus;
       try {
-        final userInfo = await supabaseService.getUserInfo(widget.userEmail);
-        if (userInfo != null) {
-          final role = userInfo['role']?.toString().toLowerCase();
-          if (role != null && _teacherSourceRoles.contains(role)) {
-            uploaderSource = 'teacher';
-          }
+        final profile = await supabaseService.getCurrentUserProfile(
+          maxAttempts: 1,
+        );
+        if (profile.isNotEmpty && isTeacherOrAdminProfile(profile)) {
+          uploaderSource = 'teacher';
         }
       } catch (e) {
         debugPrint('Error fetching user role for upload: $e');
       }
 
+      if (!mounted) return;
       await backendApi.createResource({
         'college_id': widget.collegeId,
         'title': _title.trim(),
@@ -725,57 +723,16 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                     const SizedBox(height: 12),
 
                     // Subject
-                    if (_branch.isNotEmpty)
-                      (_isCatalogSelectMode
-                          ? _buildChipSelector(
-                              'Subject',
-                              availableSubjects,
-                              _subject,
-                              (v) => setState(() => _setSubjectValue(v)),
-                              isDark,
-                            )
-                          : TextField(
-                              controller: _subjectController,
-                              onChanged: (value) =>
-                                  setState(() => _subject = value),
-                              enabled: !_isUploading && _semester.isNotEmpty,
-                              style: GoogleFonts.inter(
-                                color: isDark
-                                    ? Colors.white
-                                    : AppTheme.textPrimary,
-                                fontSize: 14,
-                              ),
-                              decoration: InputDecoration(
-                                hintText: _semester.isEmpty
-                                    ? 'Select semester first'
-                                    : 'Enter subject',
-                                hintStyle: TextStyle(
-                                  color: isDark
-                                      ? AppTheme.textMuted
-                                      : Colors.grey.shade500,
-                                ),
-                                filled: true,
-                                fillColor: isDark
-                                    ? Colors.black26
-                                    : Colors.grey.shade100,
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                  borderSide: BorderSide.none,
-                                ),
-                                prefixIcon: Icon(
-                                  Icons.menu_book_rounded,
-                                  size: 18,
-                                  color: isDark
-                                      ? AppTheme.textMuted
-                                      : Colors.grey.shade500,
-                                ),
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 14,
-                                  vertical: 12,
-                                ),
-                              ),
-                            )),
-                    if (_branch.isNotEmpty) const SizedBox(height: 12),
+                    _buildChipSelector(
+                      'Subject',
+                      availableSubjects,
+                      _subject,
+                      (v) => setState(() => _setSubjectValue(v)),
+                      isDark,
+                      enabled: _canSelectSubject,
+                      placeholder: _subjectSelectorLabel,
+                    ),
+                    const SizedBox(height: 12),
 
                     // Chapter & Topic
                     if (_subject.isNotEmpty) ...[
@@ -1117,15 +1074,21 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     List<String> items,
     String selected,
     Function(String) onSelect,
-    bool isDark,
-  ) {
+    bool isDark, {
+    bool enabled = true,
+    String? placeholder,
+  }) {
     final cardColor = isDark ? AppTheme.darkCard : Colors.grey.shade100;
     final borderColor = isDark ? AppTheme.glassBorder : Colors.transparent;
     final textColor = isDark ? Colors.white : AppTheme.textPrimary;
     final hintColor = AppTheme.textMuted;
+    final effectiveEnabled = enabled && items.isNotEmpty;
+    final displayText = selected.isEmpty
+        ? (placeholder ?? 'Select $label')
+        : selected;
 
     return GestureDetector(
-      onTap: _isUploading
+      onTap: _isUploading || !effectiveEnabled
           ? null
           : () => _showBottomSheetPicker(
               label,
@@ -1145,14 +1108,24 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
           children: [
             Expanded(
               child: Text(
-                selected.isEmpty ? 'Select $label' : selected,
+                displayText,
                 style: GoogleFonts.inter(
                   fontSize: 14,
-                  color: selected.isEmpty ? hintColor : textColor,
+                  color: selected.isEmpty
+                      ? hintColor
+                      : (effectiveEnabled
+                            ? textColor
+                            : textColor.withValues(alpha: 0.55)),
                 ),
               ),
             ),
-            Icon(Icons.keyboard_arrow_down_rounded, color: hintColor, size: 20),
+            Icon(
+              effectiveEnabled
+                  ? Icons.keyboard_arrow_down_rounded
+                  : Icons.lock_outline_rounded,
+              color: hintColor,
+              size: 20,
+            ),
           ],
         ),
       ),

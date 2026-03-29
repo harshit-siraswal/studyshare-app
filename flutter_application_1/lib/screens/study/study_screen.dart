@@ -26,6 +26,7 @@ import '../../widgets/study/department_card_3d.dart';
 import '../../data/academic_subjects_data.dart';
 import '../../data/departments_data.dart'; // Added for DepartmentData and DepartmentsProvider
 import '../../utils/admin_access.dart';
+import '../../services/attendance_service.dart';
 import 'attendance_screen.dart';
 import 'following_search_screen.dart';
 
@@ -55,6 +56,7 @@ class StudyScreen extends StatefulWidget {
 class _StudyScreenState extends State<StudyScreen>
     with SingleTickerProviderStateMixin {
   final SupabaseService _supabaseService = SupabaseService();
+  final AttendanceService _attendanceService = AttendanceService();
   final ResourceStateRepository _resourceStateRepository =
       ResourceStateRepository();
   final BackendApiService _apiService = BackendApiService();
@@ -202,6 +204,11 @@ class _StudyScreenState extends State<StudyScreen>
   @override
   void initState() {
     super.initState();
+    _hasAttendanceFeature = _attendanceService.isKietCollege(
+      collegeId: widget.collegeId,
+      collegeName: widget.collegeName,
+      collegeDomain: widget.collegeDomain,
+    );
     _tabController = TabController(
       length: 3,
       vsync: this,
@@ -227,12 +234,29 @@ class _StudyScreenState extends State<StudyScreen>
   }
 
   Future<void> _loadUserProfile({bool forceRefresh = false}) async {
+    final collegeHasAttendance = _attendanceService.isKietCollege(
+      collegeId: widget.collegeId,
+      collegeName: widget.collegeName,
+      collegeDomain: widget.collegeDomain,
+    );
     try {
       final profile = await _supabaseService.getCurrentUserProfile(
         forceRefresh: forceRefresh,
         maxAttempts: forceRefresh ? 2 : 1,
       );
-      if (profile.isEmpty) return;
+      if (profile.isEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _profileSemesterFilter = null;
+          _profileBranchFilter = null;
+          _profileSubjectFilter = null;
+          _canManageAdminResources = false;
+          _canUploadSyllabus = false;
+          _hasAttendanceFeature = collegeHasAttendance;
+        });
+        _notifySyllabusContextChanged();
+        return;
+      }
       final semester = _normalizeFilterValue(profile['semester']?.toString());
       final branch = _normalizeFilterValue(profile['branch']?.toString());
       final subject = isTeacherOrAdminProfile(profile)
@@ -251,7 +275,8 @@ class _StudyScreenState extends State<StudyScreen>
           attendanceFlag == false ||
           (featureFlags is Map && featureFlags['attendance'] == false) ||
           (features is Map && features['attendance'] == false);
-      final hasAttendanceFeature = !hasExplicitAttendanceDisable;
+      final hasAttendanceFeature =
+          collegeHasAttendance || !hasExplicitAttendanceDisable;
       if (mounted) {
         setState(() {
           _profileSemesterFilter = semester;
@@ -269,6 +294,16 @@ class _StudyScreenState extends State<StudyScreen>
       }
     } catch (e) {
       debugPrint('Error loading user profile in StudyScreen: $e');
+      if (!mounted) return;
+      setState(() {
+        _profileSemesterFilter = null;
+        _profileBranchFilter = null;
+        _profileSubjectFilter = null;
+        _canManageAdminResources = false;
+        _canUploadSyllabus = false;
+        _hasAttendanceFeature = collegeHasAttendance;
+      });
+      _notifySyllabusContextChanged();
     }
   }
 
@@ -360,25 +395,38 @@ class _StudyScreenState extends State<StudyScreen>
           selectedScope = scopeCandidates.first;
 
           for (final scope in scopeCandidates) {
-            final scopedResources = await _loadAdminResourcesForScope(
-              page: requestPage,
-              semester: scope.semester,
-              branch: scope.branch,
-              subject: scope.subject,
-            );
-            selectedScope = scope;
-            resources = scopedResources;
-            if (scopedResources.isNotEmpty) {
-              break;
+            try {
+              final scopedResources = await _loadAdminResourcesForScope(
+                page: requestPage,
+                semester: scope.semester,
+                branch: scope.branch,
+                subject: scope.subject,
+              );
+              selectedScope = scope;
+              resources = scopedResources;
+              if (scopedResources.isNotEmpty) {
+                break;
+              }
+            } catch (scopeError) {
+              debugPrint(
+                'Skipping moderation scope after load failure '
+                '(${scope.semester}/${scope.branch}/${scope.subject}): '
+                '$scopeError',
+              );
             }
           }
         } else {
-          resources = await _loadAdminResourcesForScope(
-            page: requestPage,
-            semester: selectedScope.semester,
-            branch: selectedScope.branch,
-            subject: selectedScope.subject,
-          );
+          try {
+            resources = await _loadAdminResourcesForScope(
+              page: requestPage,
+              semester: selectedScope.semester,
+              branch: selectedScope.branch,
+              subject: selectedScope.subject,
+            );
+          } catch (scopeError) {
+            debugPrint('Error loading moderation feed: $scopeError');
+            resources = const <Resource>[];
+          }
         }
 
         final activeEmail = _effectiveUserEmail;
@@ -598,8 +646,10 @@ class _StudyScreenState extends State<StudyScreen>
       page: page,
       pageSize: _moderationPageSize,
     );
+    final enrichedPayload = await _supabaseService
+        .enrichResourceRowsWithUploaderProfiles(resourcesPayload);
 
-    return resourcesPayload.map((json) => Resource.fromJson(json)).toList();
+    return enrichedPayload.map((json) => Resource.fromJson(json)).toList();
   }
 
   String? _resolvedResourceSemesterFilter() {
@@ -737,13 +787,10 @@ class _StudyScreenState extends State<StudyScreen>
 
       // Update Home Widget by filtering syllabus resources
       if (_selectedType == null) {
-        final syllabusResources = resources
-            .where((r) => r.type.toLowerCase() == 'syllabus')
-            .toList();
-        HomeWidgetService.instance.syncSyllabus(
-          _userSemester,
-          _userBranch,
-          syllabusResources,
+        HomeWidgetService.instance.syncSchedule(
+          collegeId: widget.collegeId,
+          semester: _userSemester,
+          branch: _userBranch,
         );
       }
     } catch (e) {
@@ -1743,8 +1790,7 @@ class _StudyScreenState extends State<StudyScreen>
   Widget _buildFollowingGrid() {
     final isTeacher = _canManageAdminResources;
     final showLoadMore =
-        isTeacher &&
-        (_hasMoreModeration || _isLoadingMoreModeration);
+        isTeacher && (_hasMoreModeration || _isLoadingMoreModeration);
     final visibleResources = _filteredFollowingResources;
 
     return ListView.builder(

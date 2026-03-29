@@ -3,26 +3,18 @@ package me.studyshare.android
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.content.Context
-import android.content.Intent
 import android.content.SharedPreferences
+import android.net.Uri
 import android.widget.RemoteViews
+import es.antonborri.home_widget.HomeWidgetLaunchIntent
 import es.antonborri.home_widget.HomeWidgetProvider
 
 class NoticesWidgetProvider : HomeWidgetProvider() {
     private fun launchPendingIntent(
         context: Context,
-        appWidgetId: Int
+        uri: Uri? = null,
     ): PendingIntent {
-        val intent = Intent(context, MainActivity::class.java).apply {
-            putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        return PendingIntent.getActivity(
-            context,
-            appWidgetId,
-            intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        return HomeWidgetLaunchIntent.getActivity(context, MainActivity::class.java, uri)
     }
 
     override fun onUpdate(
@@ -33,6 +25,7 @@ class NoticesWidgetProvider : HomeWidgetProvider() {
     ) {
         for (appWidgetId in appWidgetIds) {
             val views = RemoteViews(context.packageName, R.layout.notices_widget_layout).apply {
+                val noticesUri = Uri.parse("studyshare://widget/notices")
                 val noticesTitle = widgetData.getString("notices_title", "Campus Notices") ?: "Campus Notices"
                 val noticesSubtitle = widgetData.getString(
                     "notices_subtitle",
@@ -52,7 +45,7 @@ class NoticesWidgetProvider : HomeWidgetProvider() {
                 )
                 setOnClickPendingIntent(
                     R.id.widget_container,
-                    launchPendingIntent(context, appWidgetId)
+                    launchPendingIntent(context, noticesUri)
                 )
             }
             appWidgetManager.updateAppWidget(appWidgetId, views)

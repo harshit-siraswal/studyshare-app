@@ -107,9 +107,24 @@ class _FollowButtonState extends State<FollowButton> {
     try {
       if (_status == FollowStatus.following) {
         await _api.unfollowUser(widget.targetEmail, context: context);
+        if (mounted) {
+          setState(() {
+            _status = FollowStatus.notFollowing;
+            _requestId = null;
+          });
+        }
       } else if (_status == FollowStatus.pending) {
         if (_requestId != null && _requestId!.trim().isNotEmpty) {
-          await _api.cancelFollowRequest(int.parse(_requestId!), context: context);
+          await _api.cancelFollowRequest(
+            int.parse(_requestId!),
+            context: context,
+          );
+          if (mounted) {
+            setState(() {
+              _status = FollowStatus.notFollowing;
+              _requestId = null;
+            });
+          }
         } else {
           await _checkStatus();
           return;
@@ -119,11 +134,25 @@ class _FollowButtonState extends State<FollowButton> {
         if (currentEmail == null || currentEmail.isEmpty) {
           throw Exception('User not logged in');
         }
-        await _api.sendFollowRequest(widget.targetEmail, context: context);
+        final result = await _api.sendFollowRequest(
+          widget.targetEmail,
+          context: context,
+        );
+        if (mounted) {
+          setState(() {
+            _status = FollowStatus.pending;
+            _requestId = result['requestId']?.toString() ??
+                result['request_id']?.toString() ??
+                _requestId;
+          });
+        }
       }
 
-      await _checkStatus(showLoading: false);
       widget.onFollowChanged?.call();
+      Future<void>.delayed(const Duration(milliseconds: 350), () async {
+        if (!mounted) return;
+        await _checkStatus(showLoading: false);
+      });
     } catch (e) {
       debugPrint('Error updating follow status: $e');
       if (mounted) {

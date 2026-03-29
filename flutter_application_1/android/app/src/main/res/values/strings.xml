@@ -2,13 +2,15 @@
 <resources>
     <string name="widget_title_campus_notices">Campus Notices</string>
     <string name="widget_message_loading">Syncing widget...</string>
-    <string name="widget_title_syllabus">Syllabus Tracker</string>
-    <string name="widget_description_syllabus">Shows your latest syllabus items</string>
+    <string name="widget_title_syllabus">Schedule</string>
+    <string name="widget_description_syllabus">Shows your live class and room</string>
     <string name="widget_chip_label_notices">Notice Board</string>
-    <string name="widget_chip_label_syllabus">Syllabus</string>
+    <string name="widget_chip_label_syllabus">Schedule</string>
     <string name="widget_hint_open">Tap to open</string>
     <string name="widget_subtitle_notices_default">Pinned campus updates at a glance</string>
-    <string name="widget_subtitle_syllabus_default">Your syllabus at a glance</string>
+    <string name="widget_subtitle_syllabus_default">Live class and room at a glance</string>
     <string name="widget_empty_notices">No recent notices yet. Tap to open StudyShare.</string>
-    <string name="widget_empty_syllabus">No syllabus items yet. Open StudyShare to browse more.</string>
+    <string name="widget_empty_syllabus">No schedule data yet. Open StudyShare to connect attendance.</string>
+    <string name="widget_hint_swipe">Swipe for next class</string>
+    <string name="widget_hint_expand">Tap to Expand</string>
 </resources>

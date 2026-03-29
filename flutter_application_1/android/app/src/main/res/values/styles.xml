@@ -22,11 +22,11 @@
         <item name="android:layout_height">wrap_content</item>
         <item name="android:background">@drawable/widget_notice_item_background</item>
         <item name="android:ellipsize">end</item>
-        <item name="android:maxLines">1</item>
-        <item name="android:paddingStart">12dp</item>
-        <item name="android:paddingTop">10dp</item>
-        <item name="android:paddingEnd">12dp</item>
-        <item name="android:paddingBottom">10dp</item>
+        <item name="android:maxLines">2</item>
+        <item name="android:paddingStart">14dp</item>
+        <item name="android:paddingTop">12dp</item>
+        <item name="android:paddingEnd">14dp</item>
+        <item name="android:paddingBottom">12dp</item>
         <item name="android:textColor">@color/widget_notice_item_text</item>
         <item name="android:textSize">@dimen/widget_item_text_size</item>
     </style>
@@ -37,12 +37,24 @@
         <item name="android:layout_height">wrap_content</item>
         <item name="android:background">@drawable/widget_item_background</item>
         <item name="android:ellipsize">end</item>
-        <item name="android:maxLines">1</item>
-        <item name="android:paddingStart">12dp</item>
-        <item name="android:paddingTop">10dp</item>
-        <item name="android:paddingEnd">12dp</item>
-        <item name="android:paddingBottom">10dp</item>
+        <item name="android:maxLines">2</item>
+        <item name="android:paddingStart">14dp</item>
+        <item name="android:paddingTop">12dp</item>
+        <item name="android:paddingEnd">14dp</item>
+        <item name="android:paddingBottom">12dp</item>
         <item name="android:textColor">@color/widget_item_text_color</item>
         <item name="android:textSize">@dimen/widget_item_text_size</item>
+    </style>
+
+    <style name="WidgetNoticeFeatureItem" parent="@style/WidgetNoticeItem">
+        <item name="android:background">@drawable/widget_notice_paper_background</item>
+        <item name="android:maxLines">2</item>
+        <item name="android:textColor">@color/widget_notice_heading_text</item>
+        <item name="android:textSize">15sp</item>
+    </style>
+
+    <style name="WidgetFeatureItem" parent="@style/WidgetItemText">
+        <item name="android:maxLines">2</item>
+        <item name="android:textSize">15sp</item>
     </style>
 </resources>

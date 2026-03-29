@@ -81,14 +81,13 @@ class Resource {
       isApproved: json['is_approved'] ?? json['isApproved'],
     );
     final resolvedFileUrl = _resolveFileUrl(json);
-    final resolvedPrimaryScope =
-        ResourcePrimaryScope.fromJson(
-          (json['primaryScope'] is Map)
-              ? Map<String, dynamic>.from(json['primaryScope'] as Map)
-              : ((json['primary_scope'] is Map)
-                    ? Map<String, dynamic>.from(json['primary_scope'] as Map)
-                    : const <String, dynamic>{}),
-        );
+    final resolvedPrimaryScope = ResourcePrimaryScope.fromJson(
+      (json['primaryScope'] is Map)
+          ? Map<String, dynamic>.from(json['primaryScope'] as Map)
+          : ((json['primary_scope'] is Map)
+                ? Map<String, dynamic>.from(json['primary_scope'] as Map)
+                : const <String, dynamic>{}),
+    );
     final resolvedScopesRaw =
         (json['scopes'] as List?) ??
         (json['resource_scopes'] as List?) ??
@@ -100,8 +99,7 @@ class Resource {
     final effectiveSemester =
         resolvedPrimaryScope?.semester ?? json['semester'];
     final effectiveBranch = resolvedPrimaryScope?.branch ?? json['branch'];
-    final effectiveSubject =
-        resolvedPrimaryScope?.subject ?? json['subject'];
+    final effectiveSubject = resolvedPrimaryScope?.subject ?? json['subject'];
 
     return Resource(
       id: json['id'] ?? '',
@@ -126,9 +124,7 @@ class Resource {
       collegeId: json['college_id'] ?? '',
       status: resolvedStatus,
       isApproved: isApprovedStatusValue(resolvedStatus),
-      isTeacherUpload:
-          json['uploader_role'] == 'TEACHER' ||
-          json['is_teacher_upload'] == true,
+      isTeacherUpload: _resolveTeacherUpload(json),
       createdAt: _parseCreatedAt(json),
     );
   }
@@ -151,11 +147,26 @@ class Resource {
     return '';
   }
 
-  static bool _coerceApprovedFlag(dynamic rawValue) {
+  static bool _coerceBooleanFlag(dynamic rawValue) {
     if (rawValue is bool) return rawValue;
     if (rawValue is num) return rawValue != 0;
     final normalized = rawValue?.toString().trim().toLowerCase() ?? '';
     return normalized == 'true' || normalized == '1' || normalized == 'yes';
+  }
+
+  static bool _resolveTeacherUpload(Map<String, dynamic> json) {
+    final uploaderRole =
+        json['uploader_role']?.toString().trim().toLowerCase() ?? '';
+    final source = json['source']?.toString().trim().toLowerCase() ?? '';
+
+    if (uploaderRole == 'teacher' ||
+        uploaderRole == 'admin' ||
+        uploaderRole == 'moderator') {
+      return true;
+    }
+
+    if (source == 'teacher') return true;
+    return _coerceBooleanFlag(json['is_teacher_upload']);
   }
 
   static String _normalizeStatusToken(String? rawStatus) {
@@ -171,7 +182,8 @@ class Resource {
         'rejectedStatusAliases, or pendingStatusAliases. Returning as-is.',
       );
     }
-    return normalized;  }
+    return normalized;
+  }
 
   static String normalizeStatusValue(
     dynamic rawStatus, {
@@ -180,8 +192,8 @@ class Resource {
   }) {
     final normalized = _normalizeStatusToken(rawStatus?.toString());
     if (normalized.isNotEmpty) return normalized;
-    if (_coerceApprovedFlag(isApproved)) return approvedStatus;
-    if (_coerceApprovedFlag(isRejected)) return rejectedStatus;
+    if (_coerceBooleanFlag(isApproved)) return approvedStatus;
+    if (_coerceBooleanFlag(isRejected)) return rejectedStatus;
     return pendingStatus;
   }
 
@@ -429,7 +441,8 @@ class ResourceScope {
       branch: json['branch']?.toString().trim() ?? '',
       semester: json['semester']?.toString().trim() ?? '',
       subject: json['subject']?.toString().trim() ?? '',
-      subjectKey: json['subjectKey']?.toString() ?? json['subject_key']?.toString(),
+      subjectKey:
+          json['subjectKey']?.toString() ?? json['subject_key']?.toString(),
       isPrimary: json['isPrimary'] == true || json['is_primary'] == true,
       source: json['source']?.toString(),
     );

@@ -30,8 +30,9 @@ class RoomCard extends StatelessWidget {
     void openRoom() {
       final roomId = room['id']?.toString() ?? '';
       if (roomId.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Error: Room ID missing')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Error: Room ID missing')));
         return;
       }
       Navigator.push(
@@ -53,6 +54,7 @@ class RoomCard extends StatelessWidget {
     return GestureDetector(
       onTap: openRoom,
       child: Container(
+        constraints: const BoxConstraints(minHeight: 176),
         decoration: BoxDecoration(
           color: cardColor,
           borderRadius: BorderRadius.circular(16),
@@ -66,6 +68,7 @@ class RoomCard extends StatelessWidget {
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             // Header with Icon
             Padding(
@@ -98,19 +101,17 @@ class RoomCard extends StatelessWidget {
             ),
 
             // Description
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text(
-                  description,
-                  style: TextStyle(
-                    color: isDark ? Colors.white54 : Colors.grey.shade600,
-                    fontSize: 12,
-                    height: 1.4,
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text(
+                description,
+                style: TextStyle(
+                  color: isDark ? Colors.white54 : Colors.grey.shade600,
+                  fontSize: 12,
+                  height: 1.4,
                 ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
               ),
             ),
 
@@ -129,18 +130,26 @@ class RoomCard extends StatelessWidget {
             Material(
               color: Colors.transparent,
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: isDark ? Colors.black26 : Colors.grey.shade50,
-                  borderRadius: const BorderRadius.vertical(bottom: Radius.circular(16)),
+                  borderRadius: const BorderRadius.vertical(
+                    bottom: Radius.circular(16),
+                  ),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.people_outline,
-                            size: 14, color: isDark ? Colors.white54 : Colors.grey),
+                        Icon(
+                          Icons.people_outline,
+                          size: 14,
+                          color: isDark ? Colors.white54 : Colors.grey,
+                        ),
                         const SizedBox(width: 4),
                         Text(
                           '${room['member_count'] ?? 0}',
@@ -156,16 +165,22 @@ class RoomCard extends StatelessWidget {
                       onTap: openRoom,
                       borderRadius: BorderRadius.circular(20),
                       child: Ink(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
                           color: AppTheme.primary,
                           borderRadius: BorderRadius.circular(20),
                         ),
-                        child: const Text('View',
-                            style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold)),
+                        child: const Text(
+                          'View',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -174,7 +189,8 @@ class RoomCard extends StatelessWidget {
             ),
           ],
         ),
-      ),    );
+      ),
+    );
   }
 
   String _roomValue(String key, {String fallback = ''}) {
@@ -201,7 +217,11 @@ class RoomCard extends StatelessWidget {
     return <String>[normalized];
   }
 
-  Widget _buildTagChip(String label, bool isDark, {bool isPlaceholder = false}) {
+  Widget _buildTagChip(
+    String label,
+    bool isDark, {
+    bool isPlaceholder = false,
+  }) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(

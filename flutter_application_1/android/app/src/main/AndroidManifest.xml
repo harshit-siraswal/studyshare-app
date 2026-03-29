@@ -95,6 +95,11 @@
                 android:resource="@xml/notices_widget_info" />
         </receiver>
 
+        <service
+            android:name="me.studyshare.android.ScheduleWidgetRemoteViewsService"
+            android:exported="false"
+            android:permission="android.permission.BIND_REMOTEVIEWS" />
+
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

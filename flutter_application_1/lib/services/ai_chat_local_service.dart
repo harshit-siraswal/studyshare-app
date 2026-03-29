@@ -9,9 +9,9 @@ class LocalAiChatMessage {
   final bool cached;
   final bool noLocal;
   final String? answerOrigin;
-  final String? planTitle;
-  final List<Map<String, dynamic>> planSteps;
-  final bool showPlanExport;
+  final String? liveTitle;
+  final List<Map<String, dynamic>> liveSteps;
+  final bool showLiveExport;
   final double? retrievalScore;
   final double? llmConfidenceScore;
   final double? combinedConfidence;
@@ -28,9 +28,9 @@ class LocalAiChatMessage {
     required this.cached,
     required this.noLocal,
     this.answerOrigin,
-    this.planTitle,
-    this.planSteps = const [],
-    this.showPlanExport = false,
+    this.liveTitle,
+    this.liveSteps = const [],
+    this.showLiveExport = false,
     this.retrievalScore,
     this.llmConfidenceScore,
     this.combinedConfidence,
@@ -44,7 +44,7 @@ class LocalAiChatMessage {
   factory LocalAiChatMessage.fromJson(Map<String, dynamic> json) {
     final rawSources = json['sources'];
     final rawOcrErrors = json['ocr_errors'];
-    final rawPlanSteps = json['plan_steps'];
+    final rawLiveSteps = json['live_steps'] ?? json['plan_steps'];
     final rawActionType = json['action_type']?.toString();
     final rawActionPayload = json['action_payload'];
     Map<String, dynamic>? normalizedActionPayload;
@@ -82,14 +82,15 @@ class LocalAiChatMessage {
       cached: json['cached'] == true,
       noLocal: json['no_local'] == true,
       answerOrigin: json['answer_origin']?.toString(),
-      planTitle: json['plan_title']?.toString(),
-      planSteps: rawPlanSteps is List
-          ? rawPlanSteps
+      liveTitle: (json['live_title'] ?? json['plan_title'])?.toString(),
+      liveSteps: rawLiveSteps is List
+          ? rawLiveSteps
                 .whereType<Map>()
                 .map((entry) => Map<String, dynamic>.from(entry))
                 .toList()
           : const [],
-      showPlanExport: json['show_plan_export'] == true,
+      showLiveExport:
+          json['show_live_export'] == true || json['show_plan_export'] == true,
       retrievalScore: json['retrieval_score'] is num
           ? (json['retrieval_score'] as num).toDouble()
           : double.tryParse(json['retrieval_score']?.toString() ?? ''),
@@ -124,9 +125,9 @@ class LocalAiChatMessage {
       'no_local': noLocal,
       if (answerOrigin != null && answerOrigin!.isNotEmpty)
         'answer_origin': answerOrigin,
-      if (planTitle != null && planTitle!.isNotEmpty) 'plan_title': planTitle,
-      if (planSteps.isNotEmpty) 'plan_steps': planSteps,
-      if (showPlanExport) 'show_plan_export': true,
+      if (liveTitle != null && liveTitle!.isNotEmpty) 'live_title': liveTitle,
+      if (liveSteps.isNotEmpty) 'live_steps': liveSteps,
+      if (showLiveExport) 'show_live_export': true,
       if (retrievalScore != null) 'retrieval_score': retrievalScore,
       if (llmConfidenceScore != null)
         'llm_confidence_score': llmConfidenceScore,

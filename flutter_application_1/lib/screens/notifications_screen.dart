@@ -28,6 +28,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     _fetchData();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _supabaseService.attachContext(context);
+  }
+
   Future<void> _fetchData() async {
     if (!mounted) return;
     setState(() => _isLoading = true);
@@ -77,6 +83,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           );
         }
       }
+      await _fetchData();
     } catch (e) {
       debugPrint('Error handling follow request: $e');
       _fetchData(); // Revert/Refresh
@@ -86,6 +93,25 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         );
       }
     }
+  }
+
+  void _openUserProfile({
+    required String? email,
+    required String name,
+    required String? photoUrl,
+  }) {
+    final normalizedEmail = email?.trim() ?? '';
+    if (normalizedEmail.isEmpty) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => UserProfileScreen(
+          userEmail: normalizedEmail,
+          userName: name,
+          userPhotoUrl: photoUrl,
+        ),
+      ),
+    );
   }
 
   @override
@@ -201,69 +227,76 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       ),
       child: Column(
         children: [
-          Row(
-            children: [
-               UserAvatar(
-                photoUrl: requesterPhoto,
-                radius: 20,
-                displayName: requesterName,
-                onTap: () {
-                  if (requester?['email'] != null) {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => UserProfileScreen(
-                          userEmail: requester['email'],
-                          userName: requesterName,
-                          userPhotoUrl: requesterPhoto,
-                        ),
-                      ),
-                    );
-                  }
-                },
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    RichText(
-                      text: TextSpan(
-                        style: GoogleFonts.inter(
-                          color: theme.textColor,
-                          fontSize: 14,
-                        ),
-                        children: [
-                          TextSpan(
-                            text: requesterName,
-                            style: const TextStyle(fontWeight: FontWeight.w600),
+          InkWell(
+            onTap: () => _openUserProfile(
+              email: requester?['email']?.toString(),
+              name: requesterName,
+              photoUrl: requesterPhoto?.toString(),
+            ),
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                children: [
+                  UserAvatar(
+                    photoUrl: requesterPhoto,
+                    radius: 20,
+                    displayName: requesterName,
+                    onTap: () => _openUserProfile(
+                      email: requester?['email']?.toString(),
+                      name: requesterName,
+                      photoUrl: requesterPhoto?.toString(),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        RichText(
+                          text: TextSpan(
+                            style: GoogleFonts.inter(
+                              color: theme.textColor,
+                              fontSize: 14,
+                            ),
+                            children: [
+                              TextSpan(
+                                text: requesterName,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const TextSpan(text: ' requested to follow you'),
+                            ],
                           ),
-                          const TextSpan(text: ' requested to follow you'),
-                        ],
-                      ),
-                    ),
-                    if (requesterUsername.isNotEmpty)
-                      Text(
-                        '@$requesterUsername',
-                        style: GoogleFonts.inter(
-                          color: theme.secondaryTextColor,
-                          fontSize: 12,
                         ),
-                      ),
-                    const SizedBox(height: 4),
-                    Text(
-                      timeago.format(
-                        DateTime.tryParse(request['created_at']?.toString() ?? '') ?? DateTime.now()
-                      ),
-                      style: GoogleFonts.inter(
-                        color: theme.secondaryTextColor,
-                        fontSize: 12,
-                      ),
+                        if (requesterUsername.isNotEmpty)
+                          Text(
+                            '@$requesterUsername',
+                            style: GoogleFonts.inter(
+                              color: theme.secondaryTextColor,
+                              fontSize: 12,
+                            ),
+                          ),
+                        const SizedBox(height: 4),
+                        Text(
+                          timeago.format(
+                            DateTime.tryParse(
+                                  request['created_at']?.toString() ?? '',
+                                ) ??
+                                DateTime.now(),
+                          ),
+                          style: GoogleFonts.inter(
+                            color: theme.secondaryTextColor,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
           const SizedBox(height: 12),
           Row(

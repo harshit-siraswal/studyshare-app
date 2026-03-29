@@ -26,23 +26,31 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _focusNode = FocusNode();
-  
+
   List<Map<String, dynamic>> _searchResults = [];
   List<String> _recentSearches = [];
   bool _isSearching = false;
 
   // Mock tags for discovery - In real app, could be derived from actual room tags
   final List<String> _suggestedTags = [
-    'Placement', 'Hackathon', 'DSA', 'Web Dev', 
-    'App Dev', 'Machine Learning', 'Events', 'General',
-    'Gaming', 'Music', 'Sports'
+    'Placement',
+    'Hackathon',
+    'DSA',
+    'Web Dev',
+    'App Dev',
+    'Machine Learning',
+    'Events',
+    'General',
+    'Gaming',
+    'Music',
+    'Sports',
   ];
 
   @override
   void initState() {
     super.initState();
     _loadRecentSearches();
-    
+
     // Auto-focus search field after transition
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _focusNode.requestFocus();
@@ -58,11 +66,14 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Future<void> _addRecentSearch(String query) async {
     if (query.trim().isEmpty) return;
-    
+
     final prefs = await SharedPreferences.getInstance();
-    List<String> updated = [query, ..._recentSearches.where((s) => s != query)]; // Add to top, remove dupes
+    List<String> updated = [
+      query,
+      ..._recentSearches.where((s) => s != query),
+    ]; // Add to top, remove dupes
     if (updated.length > 5) updated = updated.sublist(0, 5); // Keep max 5
-    
+
     await prefs.setStringList('recent_searches', updated);
     setState(() => _recentSearches = updated);
   }
@@ -87,9 +98,8 @@ class _SearchScreenState extends State<SearchScreen> {
         _searchResults = widget.allRooms.where((room) {
           final name = room['name']?.toString().toLowerCase() ?? '';
           final desc = room['description']?.toString().toLowerCase() ?? '';
-          final tagsList = room['tags'] as List?;
-          final tags = tagsList?.map((e) => e.toString().toLowerCase()).join(' ') ?? '';
-          
+          final tags = _extractTags(room['tags']).join(' ');
+
           final q = query.toLowerCase();
           return name.contains(q) || desc.contains(q) || tags.contains(q);
         }).toList();
@@ -103,6 +113,28 @@ class _SearchScreenState extends State<SearchScreen> {
     if (query.trim().isNotEmpty) {
       _addRecentSearch(query.trim());
     }
+  }
+
+  List<String> _extractTags(dynamic rawTags) {
+    if (rawTags is List) {
+      return rawTags
+          .map((entry) => entry?.toString().trim().toLowerCase() ?? '')
+          .where((entry) => entry.isNotEmpty)
+          .toList(growable: false);
+    }
+
+    final normalized = rawTags?.toString().trim().toLowerCase() ?? '';
+    if (normalized.isEmpty) return const <String>[];
+
+    if (normalized.contains(',')) {
+      return normalized
+          .split(',')
+          .map((entry) => entry.trim())
+          .where((entry) => entry.isNotEmpty)
+          .toList(growable: false);
+    }
+
+    return <String>[normalized];
   }
 
   @override
@@ -129,7 +161,11 @@ class _SearchScreenState extends State<SearchScreen> {
               child: Row(
                 children: [
                   IconButton(
-                    icon: Icon(Icons.arrow_back_ios_rounded, size: 20, color: isDark ? Colors.white : Colors.black),
+                    icon: Icon(
+                      Icons.arrow_back_ios_rounded,
+                      size: 20,
+                      color: isDark ? Colors.white : Colors.black,
+                    ),
                     onPressed: () => Navigator.pop(context),
                   ),
                   Expanded(
@@ -142,16 +178,33 @@ class _SearchScreenState extends State<SearchScreen> {
                           focusNode: _focusNode,
                           onChanged: _onSearchChanged,
                           onSubmitted: _onSearchSubmit,
-                          style: TextStyle(color: isDark ? Colors.white : Colors.black, fontSize: 16),
+                          style: TextStyle(
+                            color: isDark ? Colors.white : Colors.black,
+                            fontSize: 16,
+                          ),
                           decoration: InputDecoration(
                             hintText: 'Search rooms, tags...',
-                            hintStyle: TextStyle(color: isDark ? Colors.grey : Colors.grey.shade600),
+                            hintStyle: TextStyle(
+                              color: isDark
+                                  ? Colors.grey
+                                  : Colors.grey.shade600,
+                            ),
                             filled: true,
                             fillColor: cardColor,
-                            prefixIcon: Icon(Icons.search_rounded, color: isDark ? Colors.grey : Colors.grey.shade600),
-                            suffixIcon: _searchController.text.isNotEmpty 
+                            prefixIcon: Icon(
+                              Icons.search_rounded,
+                              color: isDark
+                                  ? Colors.grey
+                                  : Colors.grey.shade600,
+                            ),
+                            suffixIcon: _searchController.text.isNotEmpty
                                 ? IconButton(
-                                    icon: Icon(Icons.clear, color: isDark ? Colors.grey : Colors.grey.shade600),
+                                    icon: Icon(
+                                      Icons.clear,
+                                      color: isDark
+                                          ? Colors.grey
+                                          : Colors.grey.shade600,
+                                    ),
                                     onPressed: () {
                                       _searchController.clear();
                                       _onSearchChanged('');
@@ -162,7 +215,9 @@ class _SearchScreenState extends State<SearchScreen> {
                               borderRadius: BorderRadius.circular(12),
                               borderSide: BorderSide.none,
                             ),
-                            contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                            contentPadding: const EdgeInsets.symmetric(
+                              vertical: 12,
+                            ),
                           ),
                         ),
                       ),
@@ -171,10 +226,10 @@ class _SearchScreenState extends State<SearchScreen> {
                 ],
               ),
             ),
-            
+
             // Content
             Expanded(
-              child: _isSearching 
+              child: _isSearching
                   ? _buildSearchResults(isDark)
                   : _buildInitialContent(isDark),
             ),
@@ -205,11 +260,16 @@ class _SearchScreenState extends State<SearchScreen> {
                     _onSearchChanged(tag);
                   },
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
                     decoration: BoxDecoration(
                       color: isDark ? const Color(0xFF2C2C2E) : Colors.white,
                       borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: isDark ? Colors.white10 : Colors.grey.shade300),
+                      border: Border.all(
+                        color: isDark ? Colors.white10 : Colors.grey.shade300,
+                      ),
                     ),
                     child: Text(
                       tag,
@@ -224,9 +284,9 @@ class _SearchScreenState extends State<SearchScreen> {
               },
             ),
           ),
-          
+
           const SizedBox(height: 24),
-          
+
           // Recent Searches
           if (_recentSearches.isNotEmpty) ...[
             Row(
@@ -242,40 +302,63 @@ class _SearchScreenState extends State<SearchScreen> {
                 ),
                 TextButton(
                   onPressed: _clearRecentSearches,
-                  child: Text('Clear All', style: TextStyle(color: AppTheme.primary, fontSize: 12)),
+                  child: Text(
+                    'Clear All',
+                    style: TextStyle(color: AppTheme.primary, fontSize: 12),
+                  ),
                 ),
               ],
             ),
-            ..._recentSearches.map((term) => ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.history_rounded, color: isDark ? Colors.grey : Colors.grey.shade400),
-              title: Text(term, style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
-              trailing: IconButton(
-                icon: Icon(Icons.close, size: 16, color: isDark ? Colors.grey : Colors.grey.shade400),
-                onPressed: () => _removeRecentSearch(term),
+            ..._recentSearches.map(
+              (term) => ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  Icons.history_rounded,
+                  color: isDark ? Colors.grey : Colors.grey.shade400,
+                ),
+                title: Text(
+                  term,
+                  style: TextStyle(
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                ),
+                trailing: IconButton(
+                  icon: Icon(
+                    Icons.close,
+                    size: 16,
+                    color: isDark ? Colors.grey : Colors.grey.shade400,
+                  ),
+                  onPressed: () => _removeRecentSearch(term),
+                ),
+                onTap: () {
+                  _searchController.text = term;
+                  _onSearchChanged(term);
+                },
               ),
-              onTap: () {
-                _searchController.text = term;
-                _onSearchChanged(term);
-              },
-            )),
+            ),
           ],
-          
+
           if (_recentSearches.isEmpty) ...[
-             const SizedBox(height: 40),
-             Center(
-               child: Column(
-                 children: [
-                   Icon(Icons.manage_search_rounded, size: 64, color: isDark ? Colors.white10 : Colors.grey.shade200),
-                   const SizedBox(height: 16),
-                   Text(
-                     'Find study groups, events, and more',
-                     style: TextStyle(color: isDark ? Colors.white38 : Colors.grey.shade400),
-                   ),
-                 ],
-               ),
-             )
-          ]
+            const SizedBox(height: 40),
+            Center(
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.manage_search_rounded,
+                    size: 64,
+                    color: isDark ? Colors.white10 : Colors.grey.shade200,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Find study groups, events, and more',
+                    style: TextStyle(
+                      color: isDark ? Colors.white38 : Colors.grey.shade400,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -283,19 +366,23 @@ class _SearchScreenState extends State<SearchScreen> {
 
   Widget _buildSearchResults(bool isDark) {
     if (_searchResults.isEmpty) {
-       return Center(
-         child: Column(
-           mainAxisAlignment: MainAxisAlignment.center,
-           children: [
-             Icon(Icons.search_off_rounded, size: 64, color: isDark ? Colors.white12 : Colors.grey.shade300),
-             const SizedBox(height: 16),
-             Text(
-               'No rooms found for "${_searchController.text}"',
-               style: TextStyle(color: isDark ? Colors.white54 : Colors.grey),
-             ),
-           ],
-         ),
-       );
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.search_off_rounded,
+              size: 64,
+              color: isDark ? Colors.white12 : Colors.grey.shade300,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No rooms found for "${_searchController.text}"',
+              style: TextStyle(color: isDark ? Colors.white54 : Colors.grey),
+            ),
+          ],
+        ),
+      );
     }
 
     return AnimationLimiter(

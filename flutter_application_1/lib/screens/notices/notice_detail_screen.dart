@@ -27,9 +27,9 @@ import '../../widgets/user_avatar.dart';
 import '../../widgets/paywall_dialog.dart';
 import '../../utils/link_navigation_utils.dart';
 import '../../utils/profile_photo_utils.dart';
+import '../../utils/admin_access.dart';
 import '../viewer/pdf_viewer_screen.dart';
 import 'department_account_screen.dart';
-import '../../models/user.dart';
 
 class NoticeDetailScreen extends StatefulWidget {
   final Map<String, dynamic> notice;
@@ -77,16 +77,18 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     });
     _loadWriterRole();
     _extractMedia();
-    _loadComments();
     _checkSavedStatus();
   }
 
   Future<void> _loadWriterRole() async {
     try {
-      final role = await _supabaseService.getCurrentUserRole();
+      final profile = await _supabaseService.getCurrentUserProfile(
+        maxAttempts: 1,
+      );
       if (!mounted) return;
       setState(() {
-        _hasAccessOverride = role != AppRoles.readOnly;
+        _hasAccessOverride =
+            profile.isNotEmpty && isTeacherOrAdminProfile(profile);
       });
     } catch (e, st) {
       debugPrint('NoticeDetailScreen._loadWriterRole failed: $e\n$st');
@@ -98,30 +100,37 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     try {
       if (_hasAccessOverride) {
         _isReadOnly = false;
-        if (mounted) setState(() {});
-        return;
-      }
-      final prefs = await SharedPreferences.getInstance();
-      final domain = prefs.getString('selectedCollegeDomain') ?? '';
-      final email = _authService.userEmail ?? '';
-
-      // If no domain set or no email, user can still comment if they're authenticated
-      if (email.isEmpty) {
-        _isReadOnly = true;
-      } else if (domain.isEmpty) {
-        // If no domain selected but user is logged in, allow commenting
-        _isReadOnly = false;
       } else {
-        // Check if email ends with @domain or just domain
-        final domainToCheck = domain.startsWith('@') ? domain : '@$domain';
-        _isReadOnly = !email.toLowerCase().endsWith(
-          domainToCheck.toLowerCase(),
-        );
+        final prefs = await SharedPreferences.getInstance();
+        final domain = prefs.getString('selectedCollegeDomain') ?? '';
+        final email = _authService.userEmail ?? '';
+
+        if (email.isEmpty || domain.trim().isEmpty) {
+          _isReadOnly = true;
+        } else {
+          final domainToCheck = domain.startsWith('@') ? domain : '@$domain';
+          _isReadOnly = !email.toLowerCase().endsWith(
+            domainToCheck.toLowerCase(),
+          );
+        }
       }
-      if (mounted) setState(() {});
+      if (!mounted) return;
+      setState(() {
+        if (_isReadOnly) {
+          _isLoading = false;
+          _comments = [];
+        }
+      });
+      if (!_isReadOnly) {
+        await _loadComments();
+      }
     } catch (_) {
-      // On error, allow commenting if user is authenticated
-      _isReadOnly = _authService.userEmail == null;
+      _isReadOnly = true;
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _comments = [];
+      });
     }
   }
 
@@ -580,7 +589,9 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
 
                     // Comments Section Header
                     Text(
-                      'Comments (${_comments.length} threads)',
+                      _isReadOnly && !_hasAccessOverride
+                          ? 'Comments'
+                          : 'Comments (${_comments.length} threads)',
                       style: GoogleFonts.inter(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
@@ -590,7 +601,42 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                     const SizedBox(height: 16),
 
                     // Comments List
-                    if (_isLoading)
+                    if (_isReadOnly && !_hasAccessOverride)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 36),
+                        child: Center(
+                          child: Column(
+                            children: [
+                              Icon(
+                                Icons.lock_outline_rounded,
+                                size: 42,
+                                color: secondaryColor.withValues(alpha: 0.7),
+                              ),
+                              const SizedBox(height: 14),
+                              Text(
+                                'Login with college ID to access it.',
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.inter(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w700,
+                                  color: textColor,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'Comment threads are available only to college-linked accounts and approved teacher/admin accounts.',
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.inter(
+                                  fontSize: 12.5,
+                                  height: 1.45,
+                                  color: secondaryColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    else if (_isLoading)
                       const Center(
                         child: Padding(
                           padding: EdgeInsets.all(20),
@@ -633,11 +679,11 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                 ),
               ),
 
-              // Comment Input Area
-              SafeArea(
-                top: false,
-                child: _buildInputArea(isDark, textColor, secondaryColor),
-              ),
+              if (!(_isReadOnly && !_hasAccessOverride))
+                SafeArea(
+                  top: false,
+                  child: _buildInputArea(isDark, textColor, secondaryColor),
+                ),
             ],
           ),
         ),

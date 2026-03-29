@@ -2,55 +2,138 @@
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="rectangle">
-            <solid android:color="@color/widget_preview_background" />
-            <corners android:radius="18dp" />
+            <solid android:color="@color/widget_schedule_shell_background" />
+            <corners android:radius="26dp" />
             <stroke
                 android:width="1dp"
-                android:color="@color/widget_preview_stroke" />
+                android:color="@color/widget_schedule_shell_stroke" />
         </shape>
     </item>
 
     <item
-        android:left="16dp"
-        android:top="16dp"
-        android:right="170dp"
-        android:bottom="128dp">
+        android:left="20dp"
+        android:top="22dp"
+        android:right="232dp"
+        android:bottom="186dp">
         <shape android:shape="rectangle">
-            <solid android:color="@color/widget_syllabus_chip_background" />
+            <solid android:color="@color/widget_schedule_live_accent" />
+            <size
+                android:width="8dp"
+                android:height="8dp" />
             <corners android:radius="999dp" />
         </shape>
     </item>
 
     <item
-        android:left="16dp"
-        android:top="48dp"
-        android:right="56dp"
-        android:bottom="102dp">
+        android:left="34dp"
+        android:top="22dp"
+        android:right="204dp"
+        android:bottom="183dp">
         <shape android:shape="rectangle">
-            <solid android:color="@color/widget_preview_stroke" />
-            <corners android:radius="8dp" />
+            <solid android:color="@color/widget_schedule_live_accent" />
+            <corners android:radius="999dp" />
         </shape>
     </item>
 
     <item
-        android:left="16dp"
-        android:top="112dp"
-        android:right="16dp"
-        android:bottom="74dp">
+        android:left="226dp"
+        android:top="22dp"
+        android:right="20dp"
+        android:bottom="184dp">
         <shape android:shape="rectangle">
-            <solid android:color="@color/widget_preview_stroke" />
+            <solid android:color="@color/widget_schedule_hint_text" />
+            <corners android:radius="999dp" />
+        </shape>
+    </item>
+
+    <item
+        android:left="20dp"
+        android:top="54dp"
+        android:right="144dp"
+        android:bottom="144dp">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/widget_subtitle_text_color" />
+            <corners android:radius="999dp" />
+        </shape>
+    </item>
+
+    <item
+        android:left="20dp"
+        android:top="84dp"
+        android:right="112dp"
+        android:bottom="106dp">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/widget_title_text_color" />
             <corners android:radius="12dp" />
         </shape>
     </item>
 
     <item
-        android:left="16dp"
-        android:top="156dp"
-        android:right="16dp"
-        android:bottom="30dp">
+        android:left="20dp"
+        android:top="124dp"
+        android:right="20dp"
+        android:bottom="22dp">
         <shape android:shape="rectangle">
-            <solid android:color="@color/widget_preview_stroke" />
+            <solid android:color="@color/widget_schedule_card_background" />
+            <corners android:radius="22dp" />
+            <stroke
+                android:width="1dp"
+                android:color="@color/widget_schedule_card_stroke" />
+        </shape>
+    </item>
+
+    <item
+        android:left="38dp"
+        android:top="150dp"
+        android:right="92dp"
+        android:bottom="82dp">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/widget_title_text_color" />
             <corners android:radius="12dp" />
+        </shape>
+    </item>
+
+    <item
+        android:left="38dp"
+        android:top="184dp"
+        android:right="158dp"
+        android:bottom="70dp">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/widget_message_text_color" />
+            <corners android:radius="999dp" />
+        </shape>
+    </item>
+
+    <item
+        android:left="38dp"
+        android:top="236dp"
+        android:right="196dp"
+        android:bottom="60dp">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/widget_subtitle_text_color" />
+            <corners android:radius="999dp" />
+        </shape>
+    </item>
+
+    <item
+        android:left="204dp"
+        android:top="236dp"
+        android:right="38dp"
+        android:bottom="58dp">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/widget_schedule_live_accent" />
+            <corners android:radius="999dp" />
+        </shape>
+    </item>
+
+    <item
+        android:left="38dp"
+        android:top="266dp"
+        android:right="38dp"
+        android:bottom="46dp">
+        <shape android:shape="rectangle">
+            <solid android:color="@color/widget_schedule_indicator_inactive" />
+            <corners android:radius="999dp" />
         </shape>
     </item>
 </layer-list>

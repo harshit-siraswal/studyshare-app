@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:ui';
 import 'package:file_picker/file_picker.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:home_widget/home_widget.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../config/theme.dart';
 import '../../services/auth_service.dart';
@@ -16,6 +17,7 @@ import '../../widgets/upload_resource_dialog.dart';
 import '../../widgets/study_timer_widget.dart';
 import '../../widgets/global_timer_overlay.dart';
 import '../chatroom/discover_rooms_screen.dart';
+import '../study/attendance_screen.dart';
 import '../../widgets/help_overlay.dart';
 import '../../providers/theme_provider.dart';
 import '../../services/supabase_service.dart';
@@ -65,7 +67,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   bool _roleLoading = true;
   int _noticesRefreshToken = 0;
   StreamSubscription<IncomingSharePayload>? _shareSubscription;
+  StreamSubscription<Uri?>? _homeWidgetSubscription;
   bool _isHandlingIncomingShare = false;
+  bool _isHandlingWidgetLaunch = false;
   bool _isStudySyllabusTab = false;
   bool _canUploadSyllabusFromStudy = false;
   List<Widget> _screens = <Widget>[];
@@ -89,6 +93,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _checkHelpOverlay();
     _loadComposerAccess();
     _initializeIncomingShareHandling();
+    _initializeHomeWidgetHandling();
   }
 
   @override
@@ -106,6 +111,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   @override
   void dispose() {
     _shareSubscription?.cancel();
+    _homeWidgetSubscription?.cancel();
     super.dispose();
   }
 
@@ -373,6 +379,60 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final initialPayload = await _incomingShareService.consumeInitialShare();
     if (initialPayload != null) {
       await _handleIncomingSharePayload(initialPayload);
+    }
+  }
+
+  Future<void> _initializeHomeWidgetHandling() async {
+    final initialUri = await HomeWidget.initiallyLaunchedFromHomeWidget();
+    if (initialUri != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_handleHomeWidgetLaunch(initialUri));
+      });
+    }
+
+    _homeWidgetSubscription = HomeWidget.widgetClicked.listen((uri) {
+      if (uri == null) return;
+      unawaited(_handleHomeWidgetLaunch(uri));
+    });
+  }
+
+  Future<void> _handleHomeWidgetLaunch(Uri uri) async {
+    if (!mounted || _isHandlingWidgetLaunch) return;
+    if (uri.scheme != 'studyshare' || uri.host.toLowerCase() != 'widget') {
+      return;
+    }
+
+    final target = uri.pathSegments.isEmpty
+        ? ''
+        : uri.pathSegments.first.toLowerCase();
+    if (target.isEmpty) return;
+
+    _isHandlingWidgetLaunch = true;
+    try {
+      switch (target) {
+        case 'notices':
+          if (!mounted) return;
+          setState(() => _currentIndex = 2);
+          break;
+        case 'schedule':
+          if (!mounted) return;
+          setState(() => _currentIndex = 0);
+          await Future<void>.delayed(Duration.zero);
+          if (!mounted) return;
+          await Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => AttendanceScreen(
+                collegeId: widget.collegeId,
+                collegeName: widget.collegeName,
+              ),
+            ),
+          );
+          break;
+        default:
+          break;
+      }
+    } finally {
+      _isHandlingWidgetLaunch = false;
     }
   }
 
@@ -686,7 +746,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
                           1,
                           Icons.chat_bubble_outline_rounded,
                           Icons.chat_bubble_rounded,
-                          'Chats',
+                          'Rooms',
                         ),
                       ],
                     ),

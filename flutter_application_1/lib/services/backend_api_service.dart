@@ -206,8 +206,6 @@ class BackendApiService {
     return lowered.contains('security check timed out') ||
         lowered.contains('security verification') ||
         lowered.contains('recaptcha') ||
-        lowered.contains('timed out') ||
-        lowered.contains('unavailable') ||
         lowered.contains('not supported');
   }
 
@@ -220,7 +218,6 @@ class BackendApiService {
       final status = error.statusCode;
       return status == 408 ||
           status == 425 ||
-          status == 429 ||
           (status >= 500 && status <= 504) ||
           _edgeNetworkErrorStatuses.contains(status);
     }
@@ -1004,7 +1001,7 @@ class BackendApiService {
     Future<Map<String, dynamic>> performSync({
       required bool includeRecaptcha,
     }) async {
-      const maxAttempts = 3;
+      final maxAttempts = includeRecaptcha ? 2 : 1;
       for (var attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
           return await _requestJson(
@@ -1936,15 +1933,30 @@ class BackendApiService {
         'subject': subject.trim(),
     };
 
-    final data = await _requestJson(
-      Uri(
-        path: '/api/resources/moderation',
-        queryParameters: queryParams,
-      ).toString(),
-      method: 'GET',
-      bearerOverride: bearerToken,
-      requireAuthToken: true,
-    );
+    Map<String, dynamic> data;
+    try {
+      data = await _requestJson(
+        Uri(
+          path: '/api/resources/moderation',
+          queryParameters: queryParams,
+        ).toString(),
+        method: 'GET',
+        bearerOverride: bearerToken,
+        requireAuthToken: true,
+      );
+    } on BackendApiHttpException catch (error) {
+      if (!isBackendCompatibilityFallbackError(error)) rethrow;
+      return listAdminResources(
+        bearerToken: bearerToken,
+        collegeId: collegeId,
+        status: status,
+        semester: semester,
+        branch: branch,
+        subject: subject,
+        page: page,
+        pageSize: pageSize,
+      );
+    }
 
     final resourcesRaw = data['resources'];
     if (resourcesRaw is! List) return const [];
@@ -2248,7 +2260,10 @@ class BackendApiService {
         normalized['video_url']?.toString().trim() ??
         normalized['youtube_url']?.toString().trim() ??
         '';
-    final existingType = normalized['source_type']?.toString().trim().toLowerCase();
+    final existingType = normalized['source_type']
+        ?.toString()
+        .trim()
+        .toLowerCase();
     final looksLikeYoutube =
         rawVideoUrl.toLowerCase().contains('youtu') ||
         rawFileUrl.toLowerCase().contains('youtu');

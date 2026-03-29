@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../config/theme.dart';
 import '../../models/attendance_models.dart';
 import '../../services/attendance_service.dart';
+import '../../services/home_widget_service.dart';
 import 'attendance_web_login_screen.dart';
 
 class AttendanceScreen extends StatefulWidget {
@@ -32,6 +33,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   bool _isManualSyncing = false;
   bool _isLoadingDaywise = false;
   bool _autoSyncAttempted = false;
+  String? _lastSyncErrorMessage;
+  String? _lastSyncErrorCode;
 
   bool get _isKietCollege => _attendanceService.isKietCollege(
     collegeId: widget.collegeId,
@@ -39,6 +42,20 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   );
 
   String get _autoSyncKey => 'attendance_auto_sync_${widget.collegeId}';
+  String get _autoSyncAttemptKey =>
+      'attendance_auto_sync_attempt_${widget.collegeId}';
+  String get _syncCooldownUntilKey =>
+      'attendance_sync_cooldown_until_${widget.collegeId}';
+
+  Future<void> _syncScheduleWidget([AttendanceSnapshot? snapshot]) {
+    final effectiveSnapshot = snapshot ?? _snapshot;
+    return HomeWidgetService.instance.syncSchedule(
+      collegeId: widget.collegeId,
+      semester: effectiveSnapshot?.student.semesterName ?? '',
+      branch: effectiveSnapshot?.student.branchShortName ?? '',
+      snapshot: effectiveSnapshot,
+    );
+  }
 
   @override
   void initState() {
@@ -59,22 +76,39 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       _snapshot = snapshot;
       _isLoading = false;
     });
+    unawaited(_syncScheduleWidget(snapshot));
     _triggerBackgroundSyncIfPossible();
   }
 
   Future<void> _triggerBackgroundSyncIfPossible() async {
-    if (_autoSyncAttempted || !_isKietCollege) return;
+    if (_autoSyncAttempted || !_isKietCollege || _isSyncing) return;
     _autoSyncAttempted = true;
+
+    if (!await _ensureSyncAllowed()) return;
 
     final prefs = await SharedPreferences.getInstance();
     final todayKey = DateTime.now().toIso8601String().split('T').first;
     final lastSyncedDate = prefs.getString(_autoSyncKey);
     if (lastSyncedDate == todayKey) return;
+    final lastAttemptMillis = prefs.getInt(_autoSyncAttemptKey);
+    if (lastAttemptMillis != null) {
+      final lastAttempt = DateTime.fromMillisecondsSinceEpoch(
+        lastAttemptMillis,
+      );
+      if (DateTime.now().difference(lastAttempt) <
+          const Duration(minutes: 20)) {
+        return;
+      }
+    }
 
     final token = await _attendanceService.loadSavedToken(widget.collegeId);
     if (!mounted || token == null || token.isEmpty) return;
 
     try {
+      await prefs.setInt(
+        _autoSyncAttemptKey,
+        DateTime.now().millisecondsSinceEpoch,
+      );
       await _syncWithToken(token, showSuccessToast: false);
       await prefs.setString(_autoSyncKey, todayKey);
     } catch (error) {
@@ -84,8 +118,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   Future<void> _connectAndSync() async {
     if (_isSyncing) return;
+    if (!await _ensureSyncAllowed(showMessage: true)) return;
+    if (!mounted) return;
 
-    final token = await Navigator.of(context).push<String>(
+    final navigator = Navigator.of(context);
+    final token = await navigator.push<String>(
       MaterialPageRoute(builder: (_) => const AttendanceWebLoginScreen()),
     );
     if (!mounted || token == null || token.trim().isEmpty) return;
@@ -122,7 +159,51 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  Future<DateTime?> _loadSyncCooldownUntil() async {
+    final prefs = await SharedPreferences.getInstance();
+    final millis = prefs.getInt(_syncCooldownUntilKey);
+    if (millis == null || millis <= 0) return null;
+    return DateTime.fromMillisecondsSinceEpoch(millis);
+  }
+
+  Future<void> _setSyncCooldown(Duration duration) async {
+    final prefs = await SharedPreferences.getInstance();
+    final until = DateTime.now().add(duration).millisecondsSinceEpoch;
+    await prefs.setInt(_syncCooldownUntilKey, until);
+  }
+
+  Future<void> _clearSyncCooldown() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_syncCooldownUntilKey);
+  }
+
+  Future<bool> _ensureSyncAllowed({bool showMessage = false}) async {
+    final cooldownUntil = await _loadSyncCooldownUntil();
+    if (cooldownUntil == null || DateTime.now().isAfter(cooldownUntil)) {
+      return true;
+    }
+
+    if (showMessage && mounted) {
+      final remaining = cooldownUntil.difference(DateTime.now());
+      final minutes = remaining.inMinutes;
+      final seconds = remaining.inSeconds.remainder(60);
+      final waitLabel = minutes > 0
+          ? '$minutes min ${seconds.toString().padLeft(2, '0')} sec'
+          : '$seconds sec';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Attendance sync is cooling down. Please wait $waitLabel.',
+          ),
+        ),
+      );
+    }
+    return false;
+  }
+
   Future<void> _syncWithSavedToken({bool promptIfMissingToken = true}) async {
+    if (_isSyncing) return;
+    if (!await _ensureSyncAllowed(showMessage: promptIfMissingToken)) return;
     final token = await _attendanceService.loadSavedToken(widget.collegeId);
     if (!mounted) return;
     if (token == null || token.isEmpty) {
@@ -155,11 +236,15 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   Future<void> _logoutKietSession() async {
     await _attendanceService.clearSavedSession(widget.collegeId);
+    await _clearSyncCooldown();
     if (!mounted) return;
     setState(() {
       _snapshot = null;
       _autoSyncAttempted = false;
+      _lastSyncErrorMessage = null;
+      _lastSyncErrorCode = null;
     });
+    unawaited(_syncScheduleWidget());
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text('KIET session cleared.')));
@@ -170,6 +255,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     bool showSuccessToast = true,
     bool isManualSync = false,
   }) async {
+    if (_isSyncing) return;
+    if (!await _ensureSyncAllowed(showMessage: isManualSync)) return;
     if (isManualSync) {
       setState(() => _isManualSyncing = true);
     }
@@ -189,13 +276,34 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         Future.delayed(const Duration(milliseconds: 800)),
       ]);
       final snapshot = results.first as AttendanceSnapshot;
+      await _clearSyncCooldown();
       if (!mounted) return;
-      setState(() => _snapshot = snapshot);
+      setState(() {
+        _snapshot = snapshot;
+        _lastSyncErrorMessage = null;
+        _lastSyncErrorCode = null;
+      });
+      unawaited(_syncScheduleWidget(snapshot));
       if (showSuccessToast) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('KIET attendance synced successfully.')),
         );
       }
+    } catch (error) {
+      if (error is AttendanceSyncException) {
+        if (error.code == 'rate_limited') {
+          await _setSyncCooldown(const Duration(minutes: 2));
+        } else if (error.code == 'backend_unavailable') {
+          await _setSyncCooldown(const Duration(seconds: 45));
+        }
+        if (mounted) {
+          setState(() {
+            _lastSyncErrorMessage = error.message;
+            _lastSyncErrorCode = error.code;
+          });
+        }
+      }
+      rethrow;
     } finally {
       if (mounted) {
         setState(() {
@@ -322,6 +430,17 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   String _formatDate(String rawDate) {
     return _attendanceService.formatDateDdMmYyyy(rawDate);
+  }
+
+  Map<String, List<AttendanceScheduleEntry>> _groupScheduleEntries(
+    List<AttendanceScheduleEntry> entries,
+  ) {
+    final grouped = <String, List<AttendanceScheduleEntry>>{};
+    for (final entry in entries) {
+      final key = _formatDate(entry.lectureDate);
+      grouped.putIfAbsent(key, () => <AttendanceScheduleEntry>[]).add(entry);
+    }
+    return grouped;
   }
 
   List<AttendanceScheduleEntry> _upcomingScheduleEntries(
@@ -462,6 +581,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     if (snapshot == null) return;
 
     final entries = _weeklyScheduleEntries(snapshot);
+    final groupedEntries = _groupScheduleEntries(entries);
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -478,7 +598,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   Text(
                     'Weekly Schedule',
                     style: GoogleFonts.inter(
-                      fontSize: 18,
+                      fontSize: 20,
                       fontWeight: FontWeight.w700,
                       color: isDark
                           ? AppTheme.darkTextPrimary
@@ -507,35 +627,39 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                               ),
                             ),
                           )
-                        : ListView.separated(
-                            itemCount: entries.length,
-                            separatorBuilder: (_, __) =>
-                                const Divider(height: 1),
-                            itemBuilder: (context, index) {
-                              final entry = entries[index];
-                              final title = entry.courseName.isEmpty
-                                  ? (entry.title.isEmpty
-                                        ? 'Class'
-                                        : entry.title)
-                                  : entry.courseName;
-                              final location = entry.classRoom.isEmpty
-                                  ? 'Classroom TBA'
-                                  : entry.classRoom;
-                              return ListTile(
-                                contentPadding: EdgeInsets.zero,
-                                title: Text(
-                                  title,
-                                  style: GoogleFonts.inter(
-                                    fontWeight: FontWeight.w600,
-                                  ),
+                        : ListView(
+                            children: groupedEntries.entries.map((group) {
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 18),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      group.key,
+                                      style: GoogleFonts.inter(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                        color: isDark
+                                            ? AppTheme.darkTextSecondary
+                                            : AppTheme.lightTextSecondary,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    ...group.value.map(
+                                      (entry) => Padding(
+                                        padding: const EdgeInsets.only(
+                                          bottom: 10,
+                                        ),
+                                        child: _buildScheduleEntryCard(
+                                          entry,
+                                          isDark,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                subtitle: Text(
-                                  '${_formatDate(entry.lectureDate)} • ${entry.start} - ${entry.end}\n$location',
-                                  style: GoogleFonts.inter(height: 1.3),
-                                ),
-                                trailing: null,
                               );
-                            },
+                            }).toList(),
                           ),
                   ),
                 ],
@@ -635,72 +759,185 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
     final snapshot = _snapshot;
     if (snapshot == null) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      return ListView(
         children: [
-          Text(
-            'Connect your KIET ERP session to sync attendance.',
-            style: GoogleFonts.inter(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: isDark
-                  ? AppTheme.darkTextPrimary
-                  : AppTheme.lightTextPrimary,
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF121826) : Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: isDark ? Colors.white10 : Colors.black12,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 46,
+                  height: 46,
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(
+                    Icons.fact_check_rounded,
+                    color: AppTheme.primary,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Connect your KIET ERP session',
+                  style: GoogleFonts.inter(
+                    fontSize: 21,
+                    fontWeight: FontWeight.w700,
+                    color: isDark
+                        ? AppTheme.darkTextPrimary
+                        : AppTheme.lightTextPrimary,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  'StudyShare opens the official KIET ERP page, waits for the authenticated home state, and uses your session token to bring attendance and timetable into one place.',
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    height: 1.5,
+                    color: isDark
+                        ? AppTheme.darkTextSecondary
+                        : AppTheme.lightTextSecondary,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.05)
+                        : Colors.black.withValues(alpha: 0.035),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Text(
+                    'Attendance sync can take 1-2 minutes after login. If the KIET server is busy, StudyShare will keep your last synced snapshot and let you retry after a short cooldown.',
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      height: 1.45,
+                      color: isDark
+                          ? AppTheme.darkTextPrimary
+                          : AppTheme.lightTextPrimary,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                FilledButton.icon(
+                  onPressed: _isManualSyncing ? null : _connectAndSync,
+                  icon: const Icon(Icons.login_rounded),
+                  label: Text(
+                    _isSyncing ? 'Syncing...' : 'Connect KIET ERP',
+                    style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
             ),
           ),
-          const SizedBox(height: 12),
-          Text(
-            'StudyShare opens the official KIET ERP page, waits for the authenticated home state after login and reCAPTCHA, then reads the session token the same way the upstream bridge does.',
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              height: 1.4,
-              color: isDark
-                  ? AppTheme.darkTextSecondary
-                  : AppTheme.lightTextSecondary,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Attendance sync can take 1-2 minutes after login.',
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              height: 1.4,
-              color: isDark
-                  ? AppTheme.darkTextSecondary
-                  : AppTheme.lightTextSecondary,
-            ),
-          ),
-          const SizedBox(height: 24),
-          FilledButton.icon(
-            onPressed: _isManualSyncing ? null : _connectAndSync,
-            icon: const Icon(Icons.login_rounded),
-            label: Text(
-              _isSyncing ? 'Syncing...' : 'Connect KIET ERP',
-              style: GoogleFonts.inter(fontWeight: FontWeight.w600),
-            ),
-          ),
+          if (_lastSyncErrorMessage != null) ...[
+            const SizedBox(height: 16),
+            _buildSyncStatusBanner(isDark),
+          ],
         ],
       );
     }
+
+    final weeklyEntries = _weeklyScheduleEntries(snapshot);
+    final upcomingEntries = _upcomingScheduleEntries(snapshot).take(5).toList();
 
     return RefreshIndicator(
       onRefresh: _syncWithSavedToken,
       child: ListView(
         children: [
           _buildOverviewCard(snapshot, isDark),
+          if (_lastSyncErrorMessage != null) ...[
+            const SizedBox(height: 14),
+            _buildSyncStatusBanner(isDark),
+          ],
           const SizedBox(height: 16),
           if (snapshot.lowAttendance.isNotEmpty) ...[
             _buildLowAttendanceCard(snapshot, isDark),
             const SizedBox(height: 16),
           ],
-          if (_weeklyScheduleEntries(snapshot).isNotEmpty)
-            ElevatedButton.icon(
-              icon: const Icon(Icons.calendar_month_rounded),
-              label: const Text('Add All Classes to Calendar'),
-              onPressed: () =>
-                  _addAllToCalendar(_weeklyScheduleEntries(snapshot)),
+          if (weeklyEntries.isNotEmpty) ...[
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: isDark ? AppTheme.darkCard : Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: isDark ? Colors.white10 : Colors.black12,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Weekly schedule',
+                    style: GoogleFonts.inter(
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                      color: isDark
+                          ? AppTheme.darkTextPrimary
+                          : AppTheme.lightTextPrimary,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Open the full week view or push the timetable to your calendar in one step.',
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      height: 1.4,
+                      color: isDark
+                          ? AppTheme.darkTextSecondary
+                          : AppTheme.lightTextSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: _isManualSyncing
+                            ? null
+                            : () => _syncWithSavedToken(),
+                        icon: _isSyncing
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.sync_rounded),
+                        label: Text(
+                          _isSyncing ? 'Refreshing...' : 'Refresh latest',
+                        ),
+                      ),
+                      FilledButton.icon(
+                        onPressed: _openWeeklyScheduleSheet,
+                        icon: const Icon(Icons.calendar_month_rounded),
+                        label: const Text('Open weekly view'),
+                      ),
+                      OutlinedButton.icon(
+                        onPressed: () => _addAllToCalendar(weeklyEntries),
+                        icon: const Icon(Icons.event_available_rounded),
+                        label: const Text('Add all to calendar'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          const SizedBox(height: 20),
+            const SizedBox(height: 20),
+          ],
           Text(
             'Subjects',
             style: GoogleFonts.inter(
@@ -720,7 +957,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               ),
             ),
           ),
-          if (_upcomingScheduleEntries(snapshot).isNotEmpty) ...[
+          if (upcomingEntries.isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(
               'Upcoming Classes',
@@ -733,21 +970,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               ),
             ),
             const SizedBox(height: 12),
-            ..._upcomingScheduleEntries(snapshot)
-                .take(5)
-                .map(
-                  (entry) => ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(
-                      entry.courseName.isEmpty ? entry.title : entry.courseName,
-                      style: GoogleFonts.inter(fontWeight: FontWeight.w600),
-                    ),
-                    subtitle: Text(
-                      '${_formatDate(entry.lectureDate)} • ${entry.start} - ${entry.end}',
-                      style: GoogleFonts.inter(),
-                    ),
-                  ),
-                ),
+            ...upcomingEntries.map(
+              (entry) => Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: _buildScheduleEntryCard(entry, isDark),
+              ),
+            ),
           ],
         ],
       ),
@@ -755,19 +983,34 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   }
 
   Widget _buildOverviewCard(AttendanceSnapshot snapshot, bool isDark) {
+    final alert =
+        snapshot.overall.percentage < AttendanceService.lowAttendanceThreshold;
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
-        borderRadius: BorderRadius.circular(20),
+        color: isDark ? const Color(0xFF101827) : Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: isDark ? Colors.white10 : Colors.black12),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
+            'Current standing',
+            style: GoogleFonts.inter(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.24,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
             snapshot.student.fullName,
             style: GoogleFonts.inter(
-              fontSize: 18,
+              fontSize: 20,
               fontWeight: FontWeight.w700,
               color: isDark
                   ? AppTheme.darkTextPrimary
@@ -778,48 +1021,78 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           Text(
             '${snapshot.student.branchShortName} • ${snapshot.student.semesterName} • ${snapshot.student.sectionName}',
             style: GoogleFonts.inter(
+              fontSize: 13,
               color: isDark
                   ? AppTheme.darkTextSecondary
                   : AppTheme.lightTextSecondary,
             ),
           ),
-          const SizedBox(height: 16),
-          Text(
-            '${snapshot.overall.percentage.toStringAsFixed(2)}%',
-            style: GoogleFonts.inter(
-              fontSize: 32,
-              fontWeight: FontWeight.w800,
-              color:
-                  snapshot.overall.percentage <
-                      AttendanceService.lowAttendanceThreshold
-                  ? Colors.redAccent
-                  : Colors.green,
+          const SizedBox(height: 18),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: alert
+                  ? Colors.redAccent.withValues(alpha: isDark ? 0.15 : 0.08)
+                  : Colors.green.withValues(alpha: isDark ? 0.14 : 0.08),
+              borderRadius: BorderRadius.circular(20),
             ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '${snapshot.overall.presentClasses}/${snapshot.overall.totalClasses} classes attended',
-            style: GoogleFonts.inter(
-              color: isDark
-                  ? AppTheme.darkTextSecondary
-                  : AppTheme.lightTextSecondary,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${snapshot.overall.percentage.toStringAsFixed(2)}%',
+                  style: GoogleFonts.inter(
+                    fontSize: 34,
+                    fontWeight: FontWeight.w800,
+                    color: alert ? Colors.redAccent : Colors.green,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  alert
+                      ? 'You are below the safe threshold right now.'
+                      : 'You are above the safe threshold right now.',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: isDark
+                        ? AppTheme.darkTextPrimary
+                        : AppTheme.lightTextPrimary,
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 12),
-          Text(
-            'Last synced ${_formatSyncTime(snapshot.syncedAt)}',
-            style: GoogleFonts.inter(
-              fontSize: 12,
-              color: isDark
-                  ? AppTheme.darkTextSecondary
-                  : AppTheme.lightTextSecondary,
-            ),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _buildOverviewStat(
+                label: 'Attended',
+                value:
+                    '${snapshot.overall.presentClasses}/${snapshot.overall.totalClasses}',
+                isDark: isDark,
+              ),
+              _buildOverviewStat(
+                label: 'Last synced',
+                value: _formatSyncTime(snapshot.syncedAt),
+                isDark: isDark,
+              ),
+              _buildOverviewStat(
+                label: 'Low subjects',
+                value: snapshot.lowAttendance.length.toString(),
+                isDark: isDark,
+              ),
+            ],
           ),
           const SizedBox(height: 6),
           Text(
-            'Attendance sync can take 1-2 minutes to finish.',
+            'Read this number first. Everything below helps you decide what to recover next and which classes you cannot afford to miss.',
             style: GoogleFonts.inter(
-              fontSize: 12,
+              fontSize: 12.5,
+              height: 1.4,
               color: isDark
                   ? AppTheme.darkTextSecondary
                   : AppTheme.lightTextSecondary,
@@ -832,10 +1105,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   Widget _buildLowAttendanceCard(AttendanceSnapshot snapshot, bool isDark) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF3A1A1A) : const Color(0xFFFFEFEF),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.redAccent.withValues(alpha: 0.22)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -849,17 +1123,63 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             ),
           ),
           const SizedBox(height: 8),
+          Text(
+            'Focus on these first. Each card tells you exactly how many classes you need to attend to get back to safety.',
+            style: GoogleFonts.inter(
+              fontSize: 12.5,
+              height: 1.45,
+              color: isDark
+                  ? AppTheme.darkTextPrimary
+                  : AppTheme.lightTextPrimary,
+            ),
+          ),
+          const SizedBox(height: 14),
           ...snapshot.lowAttendance.map(
             (component) => Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text(
-                '${component.courseName} (${component.componentName}) • '
-                '${component.percentage.toStringAsFixed(2)}% • '
-                'Need ${component.classesNeededForThreshold} classes to recover',
-                style: GoogleFonts.inter(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
                   color: isDark
-                      ? AppTheme.darkTextPrimary
-                      : AppTheme.lightTextPrimary,
+                      ? Colors.white.withValues(alpha: 0.06)
+                      : Colors.white,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      component.courseName,
+                      style: GoogleFonts.inter(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w700,
+                        color: isDark
+                            ? AppTheme.darkTextPrimary
+                            : AppTheme.lightTextPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${component.componentName} • ${component.percentage.toStringAsFixed(2)}%',
+                      style: GoogleFonts.inter(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.redAccent,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Attend ${component.classesNeededForThreshold} more classes to reach ${component.threshold}%.',
+                      style: GoogleFonts.inter(
+                        fontSize: 12.5,
+                        height: 1.45,
+                        color: isDark
+                            ? AppTheme.darkTextPrimary
+                            : AppTheme.lightTextPrimary,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
@@ -872,10 +1192,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   Widget _buildComponentCard(AttendanceComponent component, bool isDark) {
     final accent = component.isLowAttendance ? Colors.redAccent : Colors.green;
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
         color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: isDark ? Colors.white10 : Colors.black12),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -927,25 +1248,70 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          Text(
-            '${component.attendedClasses}/${component.totalClasses} attended • '
-            '${component.extraAttendance} extra attendance',
-            style: GoogleFonts.inter(
-              color: isDark
-                  ? AppTheme.darkTextSecondary
-                  : AppTheme.lightTextSecondary,
+          const SizedBox(height: 14),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: LinearProgressIndicator(
+              minHeight: 7,
+              value: (component.percentage / 100).clamp(0.0, 1.0),
+              backgroundColor: isDark
+                  ? Colors.white.withValues(alpha: 0.08)
+                  : Colors.black.withValues(alpha: 0.06),
+              valueColor: AlwaysStoppedAnimation<Color>(accent),
             ),
           ),
-          const SizedBox(height: 8),
-          Text(
-            component.isLowAttendance
-                ? 'Recovery: attend ${component.classesNeededForThreshold} more classes to reach ${component.threshold}%.'
-                : 'Safe margin: you can miss ${component.bunkAllowance} classes and stay above ${component.threshold}%.',
-            style: GoogleFonts.inter(
-              color: isDark
-                  ? AppTheme.darkTextSecondary
-                  : AppTheme.lightTextSecondary,
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _buildComponentStatChip(
+                label: 'Attended',
+                value: '${component.attendedClasses}/${component.totalClasses}',
+                isDark: isDark,
+              ),
+              _buildComponentStatChip(
+                label: 'Extra',
+                value: '${component.extraAttendance}',
+                isDark: isDark,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: accent.withValues(alpha: isDark ? 0.14 : 0.08),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  component.isLowAttendance ? 'Next action' : 'Safe zone',
+                  style: GoogleFonts.inter(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.16,
+                    color: accent,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  component.isLowAttendance
+                      ? 'Attend ${component.classesNeededForThreshold} more classes to reach ${component.threshold}%.'
+                      : 'You can miss ${component.bunkAllowance} classes and stay above ${component.threshold}%.',
+                  style: GoogleFonts.inter(
+                    fontSize: 12.8,
+                    fontWeight: FontWeight.w600,
+                    height: 1.45,
+                    color: isDark
+                        ? AppTheme.darkTextPrimary
+                        : AppTheme.lightTextPrimary,
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 12),
@@ -959,6 +1325,210 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               label: Text(
                 'Daywise',
                 style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOverviewStat({
+    required String label,
+    required String value,
+    required bool isDark,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.05)
+            : Colors.black.withValues(alpha: 0.035),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            value,
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: isDark
+                  ? AppTheme.darkTextPrimary
+                  : AppTheme.lightTextPrimary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildComponentStatChip({
+    required String label,
+    required String value,
+    required bool isDark,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.white.withValues(alpha: 0.05)
+            : Colors.black.withValues(alpha: 0.035),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        '$label: $value',
+        style: GoogleFonts.inter(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w600,
+          color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildScheduleEntryCard(AttendanceScheduleEntry entry, bool isDark) {
+    final title = entry.courseName.isEmpty
+        ? (entry.title.isEmpty ? 'Class' : entry.title)
+        : entry.courseName;
+    final location = entry.classRoom.isEmpty
+        ? 'Classroom TBA'
+        : entry.classRoom;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.darkCard : Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: isDark ? Colors.white10 : Colors.black12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 82,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+            decoration: BoxDecoration(
+              color: AppTheme.primary.withValues(alpha: isDark ? 0.16 : 0.1),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  entry.start,
+                  style: GoogleFonts.inter(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.primary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  entry.end,
+                  style: GoogleFonts.inter(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.primary.withValues(alpha: 0.8),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  _formatDate(entry.lectureDate),
+                  style: GoogleFonts.inter(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w600,
+                    color: isDark
+                        ? AppTheme.darkTextSecondary
+                        : AppTheme.lightTextSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: GoogleFonts.inter(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w700,
+                    color: isDark
+                        ? AppTheme.darkTextPrimary
+                        : AppTheme.lightTextPrimary,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  entry.courseComponentName,
+                  style: GoogleFonts.inter(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.primary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  location,
+                  style: GoogleFonts.inter(
+                    fontSize: 12.5,
+                    height: 1.4,
+                    color: isDark
+                        ? AppTheme.darkTextSecondary
+                        : AppTheme.lightTextSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSyncStatusBanner(bool isDark) {
+    final isRateLimited = _lastSyncErrorCode == 'rate_limited';
+    final accent = isRateLimited ? Colors.orangeAccent : Colors.redAccent;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: isDark ? 0.15 : 0.08),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: accent.withValues(alpha: 0.24)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.info_outline_rounded, color: accent, size: 18),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              _lastSyncErrorMessage ??
+                  'Attendance sync is temporarily unavailable.',
+              style: GoogleFonts.inter(
+                fontSize: 12.8,
+                fontWeight: FontWeight.w600,
+                height: 1.4,
+                color: isDark
+                    ? AppTheme.darkTextPrimary
+                    : AppTheme.lightTextPrimary,
               ),
             ),
           ),

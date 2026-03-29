@@ -712,7 +712,9 @@ class SupabaseService {
           .join(',');
       final rows = await _client
           .from('users')
-          .select('email, display_name, username, profile_photo_url')
+          .select(
+            'email, display_name, username, profile_photo_url, role, admin_capabilities, scope_all_colleges, admin_college_id',
+          )
           .or(filters);
       final map = <String, Map<String, dynamic>>{};
       for (final row in (rows as List).whereType<Map>()) {
@@ -728,6 +730,46 @@ class SupabaseService {
       debugPrint('Error fetching users by emails: $e');
       return const {};
     }
+  }
+
+  bool _isTeacherLikeUploaderProfile(Map<String, dynamic> profile) {
+    final effectiveRole = _resolveEffectiveRole(profile);
+    return effectiveRole == AppRoles.teacher || effectiveRole == AppRoles.admin;
+  }
+
+  Future<List<Map<String, dynamic>>> enrichResourceRowsWithUploaderProfiles(
+    Iterable<Map<String, dynamic>> rawRows,
+  ) async {
+    final rows = rawRows.map((row) => Map<String, dynamic>.from(row)).toList();
+    if (rows.isEmpty) return rows;
+
+    final usersByEmail = await _fetchUsersByEmails(
+      rows.map((row) => row['uploaded_by_email']?.toString() ?? ''),
+    );
+
+    for (final row in rows) {
+      _applyProfileToRecord(
+        record: row,
+        emailKey: 'uploaded_by_email',
+        outputNameKey: 'uploaded_by_name',
+        outputPhotoKey: 'profile_photo_url',
+        usersByEmail: usersByEmail,
+        existingNameKeys: const ['display_name', 'uploader_name'],
+        existingPhotoKeys: const ['photo_url', 'avatar_url'],
+      );
+
+      final email = _normalizeEmail(row['uploaded_by_email']?.toString());
+      final uploaderProfile = usersByEmail[email];
+      if (uploaderProfile == null) continue;
+
+      if (_isTeacherLikeUploaderProfile(uploaderProfile)) {
+        row['uploader_role'] = 'TEACHER';
+        row['is_teacher_upload'] = true;
+        row['source'] = 'teacher';
+      }
+    }
+
+    return rows;
   }
 
   void _applyProfileToRecord({
@@ -900,17 +942,29 @@ class SupabaseService {
             ? query
                   .order('upvotes', ascending: false)
                   .order('created_at', ascending: false)
-            : sortBy == 'teacher'
-            ? query
-                  .order('uploaded_by_name', ascending: true)
-                  .order('created_at', ascending: false)
             : query.order('created_at', ascending: false);
 
         final response = await orderedQuery.range(offset, offset + limit - 1);
-        final rows = (response as List)
+        final rawRows = (response as List)
+            .whereType<Map>()
+            .map((json) => Map<String, dynamic>.from(json))
+            .toList();
+        final enrichedRows = await enrichResourceRowsWithUploaderProfiles(
+          rawRows,
+        );
+        final rows = enrichedRows
             .whereType<Map>()
             .map((json) => Resource.fromJson(Map<String, dynamic>.from(json)))
             .toList();
+
+        if (sortBy == 'teacher') {
+          rows.sort((a, b) {
+            if (a.isTeacherUpload != b.isTeacherUpload) {
+              return a.isTeacherUpload ? -1 : 1;
+            }
+            return b.createdAt.compareTo(a.createdAt);
+          });
+        }
 
         debugPrint(
           'SupabaseService.getResources: returned ${rows.length} resources',
@@ -968,9 +1022,12 @@ class SupabaseService {
           .order('created_at', ascending: false)
           .range(offset, offset + limit - 1);
 
-      final rows = (response as List)
-          .map((json) => Resource.fromJson(json as Map<String, dynamic>))
-          .toList();
+      final enrichedRows = await enrichResourceRowsWithUploaderProfiles(
+        (response as List).whereType<Map>().map(
+          (json) => Map<String, dynamic>.from(json),
+        ),
+      );
+      final rows = enrichedRows.map((json) => Resource.fromJson(json)).toList();
       if (rows.isNotEmpty) {
         return rows;
       }
@@ -992,7 +1049,7 @@ class SupabaseService {
           .order('created_at', ascending: false)
           .range(0, offset + fetchWindow - 1);
       final emailSet = normalizedEmails.toSet();
-      final filtered = (raw as List)
+      final filteredRows = (raw as List)
           .whereType<Map>()
           .map((row) => Map<String, dynamic>.from(row))
           .where(
@@ -1002,9 +1059,11 @@ class SupabaseService {
           )
           .skip(offset)
           .take(limit)
-          .map(Resource.fromJson)
           .toList();
-      return filtered;
+      final enrichedRows = await enrichResourceRowsWithUploaderProfiles(
+        filteredRows,
+      );
+      return enrichedRows.map(Resource.fromJson).toList();
     } catch (fallbackError) {
       debugPrint('Following feed fallback query failed: $fallbackError');
       return [];
@@ -1380,7 +1439,7 @@ class SupabaseService {
       final res = await _client
           .from('users')
           .select(
-            'id, email, display_name, profile_photo_url, username, bio, semester, branch, subject',
+            'id, email, display_name, profile_photo_url, username, bio, semester, branch, subject, role, admin_capabilities, scope_all_colleges, admin_college_id',
           )
           .eq('email', email)
           .maybeSingle();
@@ -1691,11 +1750,8 @@ class SupabaseService {
 
     final hasAttachment =
         normalizedImageUrl.isNotEmpty || normalizedFileUrl.isNotEmpty;
-    if (hasAttachment && backendError != null) {
-      Error.throwWithStackTrace(
-        backendError,
-        backendStackTrace ?? StackTrace.current,
-      );
+    if (hasAttachment) {
+      Error.throwWithStackTrace(backendError, backendStackTrace);
     }
 
     final email = _normalizeEmail(currentUserEmail);
@@ -2764,9 +2820,9 @@ class SupabaseService {
           .eq('message_id', postId)
           .order('created_at', ascending: true);
 
-      allComments = List<Map<String, dynamic>>.from(response)
-          .map((row) => Map<String, dynamic>.from(row))
-          .toList();
+      allComments = List<Map<String, dynamic>>.from(
+        response,
+      ).map((row) => Map<String, dynamic>.from(row)).toList();
     } catch (directError) {
       try {
         // Attempt 2: API Fallback (Existing)
@@ -5120,7 +5176,9 @@ class SupabaseService {
   }
 
   Map<String, dynamic> _normalizeChatRoomRecord(dynamic raw) {
-    final data = raw is Map ? Map<String, dynamic>.from(raw) : <String, dynamic>{};
+    final data = raw is Map
+        ? Map<String, dynamic>.from(raw)
+        : <String, dynamic>{};
     final normalized = Map<String, dynamic>.from(data);
 
     normalized['id'] = _normalizeString(data['id']);

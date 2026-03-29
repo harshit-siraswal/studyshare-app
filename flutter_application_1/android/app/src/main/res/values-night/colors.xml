@@ -26,4 +26,12 @@
     <color name="widget_syllabus_chip_text">#86EFAC</color>
     <color name="widget_preview_background">#0F172A</color>
     <color name="widget_preview_stroke">#334155</color>
+    <color name="widget_schedule_shell_background">#050505</color>
+    <color name="widget_schedule_shell_stroke">#1B1D21</color>
+    <color name="widget_schedule_card_background">#171717</color>
+    <color name="widget_schedule_card_stroke">#2B2E33</color>
+    <color name="widget_schedule_live_accent">#10B981</color>
+    <color name="widget_schedule_hint_text">#7485A8</color>
+    <color name="widget_schedule_indicator_active">#2563EB</color>
+    <color name="widget_schedule_indicator_inactive">#3F3F46</color>
 </resources>

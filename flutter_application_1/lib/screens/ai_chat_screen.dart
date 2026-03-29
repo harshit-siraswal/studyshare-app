@@ -15,7 +15,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../config/app_config.dart';
 import '../config/theme.dart';
 import '../models/ai_question_paper.dart';
-import '../models/study_ai_plan.dart';
+import '../models/study_ai_live_activity.dart';
 import '../services/auth_service.dart';
 import '../services/ai_chat_notification_service.dart';
 import '../services/analytics_service.dart';
@@ -31,7 +31,7 @@ import '../widgets/ai_formatted_text.dart';
 import '../widgets/ai_logo.dart';
 import '../widgets/onboarding_overlay.dart';
 import '../widgets/paywall_dialog.dart';
-import '../widgets/study_ai_plan_widget.dart';
+import '../widgets/study_ai_live_activity_card.dart';
 import '../utils/ai_token_budget_utils.dart';
 import '../utils/ai_question_paper_parser.dart';
 import '../utils/link_navigation_utils.dart';
@@ -157,10 +157,10 @@ class AIChatMessage {
   bool ocrFailureAffectsRetrieval;
   List<OcrErrorInfo> ocrErrors;
   AiQuestionPaper? quizActionPaper;
-  AnswerOrigin? answerOrigin;
-  List<PlanStep> planSteps;
-  String? planTitle;
-  bool showPlanExport;
+  AiAnswerOrigin? answerOrigin;
+  List<AiLiveActivityStep> liveSteps;
+  String? liveTitle;
+  bool showLiveExport;
 
   AIChatMessage({
     required this.isUser,
@@ -176,9 +176,9 @@ class AIChatMessage {
     this.ocrErrors = const [],
     this.quizActionPaper,
     this.answerOrigin,
-    this.planSteps = const [],
-    this.planTitle,
-    this.showPlanExport = false,
+    this.liveSteps = const [],
+    this.liveTitle,
+    this.showLiveExport = false,
   });
 }
 
@@ -1068,11 +1068,11 @@ class _AIChatScreenState extends State<AIChatScreen>
       cached: message.cached,
       noLocal: message.noLocal,
       answerOrigin: message.answerOrigin?.wireValue,
-      planTitle: message.planTitle,
-      planSteps: message.planSteps
+      liveTitle: message.liveTitle,
+      liveSteps: message.liveSteps
           .map((step) => step.toCompactJson())
           .toList(growable: false),
-      showPlanExport: message.showPlanExport,
+      showLiveExport: message.showLiveExport,
       retrievalScore: message.retrievalScore,
       llmConfidenceScore: message.llmConfidenceScore,
       combinedConfidence: message.combinedConfidence,
@@ -1096,8 +1096,8 @@ class _AIChatScreenState extends State<AIChatScreen>
     final sources = message.sources
         .map((source) => RagSource.fromJson(source))
         .toList();
-    final planSteps = message.planSteps
-        .map((step) => PlanStep.fromJson(step))
+    final liveSteps = message.liveSteps
+        .map((step) => AiLiveActivityStep.fromJson(step))
         .toList(growable: false);
     return AIChatMessage(
       isUser: message.isUser,
@@ -1106,10 +1106,10 @@ class _AIChatScreenState extends State<AIChatScreen>
       primarySource: sources.firstWhereOrNull((s) => s.isPrimary),
       cached: message.cached,
       noLocal: message.noLocal,
-      answerOrigin: AnswerOriginX.fromWireValue(message.answerOrigin),
-      planSteps: planSteps,
-      planTitle: message.planTitle,
-      showPlanExport: message.showPlanExport,
+      answerOrigin: AiAnswerOriginX.fromWireValue(message.answerOrigin),
+      liveSteps: liveSteps,
+      liveTitle: message.liveTitle,
+      showLiveExport: message.showLiveExport,
       retrievalScore: message.retrievalScore,
       llmConfidenceScore: message.llmConfidenceScore,
       combinedConfidence: message.combinedConfidence,
@@ -1121,117 +1121,125 @@ class _AIChatScreenState extends State<AIChatScreen>
     );
   }
 
-  bool _shouldShowPlanCard(AIChatMessage _) => false;
+  bool _shouldShowLiveActivityCard(AIChatMessage message) =>
+      message.liveSteps.isNotEmpty || message.showLiveExport;
 
-  SourceBadge _sourceBadgeFromRagSource(RagSource source) {
+  AiLiveSourceKind _sourceKindFromRagSource(RagSource source) {
     final normalized = source.sourceType.trim().toLowerCase();
-    if (normalized == 'web') return SourceBadge.web;
+    if (normalized == 'web') return AiLiveSourceKind.web;
     if (normalized == 'youtube' || normalized == 'video') {
-      return SourceBadge.video;
+      return AiLiveSourceKind.video;
     }
-    return SourceBadge.notes;
+    return AiLiveSourceKind.notes;
   }
 
-  List<PlanSource> _planSourcesFromRagSources(
+  List<AiLiveActivitySource> _activitySourcesFromRagSources(
     List<RagSource> sources, {
     int limit = 3,
   }) {
     final seen = <String>{};
-    final planSources = <PlanSource>[];
+    final activitySources = <AiLiveActivitySource>[];
 
     for (final source in sources) {
-      final badge = _sourceBadgeFromRagSource(source);
+      final kind = _sourceKindFromRagSource(source);
       final key = [
         source.fileId.trim(),
         source.title.trim(),
         source.startPage?.toString() ?? '',
-        badge.wireValue,
+        kind.wireValue,
       ].join('|');
       if (seen.contains(key)) continue;
       seen.add(key);
-      planSources.add(
-        PlanSource(
+      activitySources.add(
+        AiLiveActivitySource(
           title: source.title,
-          badge: badge,
+          kind: kind,
           page: source.startPage,
           timestamp: source.timestamp,
-          url: badge == SourceBadge.notes
+          url: kind == AiLiveSourceKind.notes
               ? source.fileUrl
               : (source.videoUrl ?? source.fileUrl),
           fileId: source.fileId.trim().isEmpty ? null : source.fileId.trim(),
         ),
       );
-      if (planSources.length >= limit) break;
+      if (activitySources.length >= limit) break;
     }
 
-    return planSources;
+    return activitySources;
   }
 
-  String _simplePlanStepTitle(AnswerOrigin? origin) {
+  String _activityTitleForAnswerOrigin(AiAnswerOrigin? origin) {
     switch (origin) {
-      case AnswerOrigin.webOnly:
-        return 'Searched the web';
-      case AnswerOrigin.notesPlusWeb:
-        return 'Gathered notes and web context';
-      case AnswerOrigin.insufficientNotes:
-        return 'Checked your notes';
-      case AnswerOrigin.notesOnly:
+      case AiAnswerOrigin.webOnly:
+        return 'Web search completed';
+      case AiAnswerOrigin.notesPlusWeb:
+        return 'Merged notes with web context';
+      case AiAnswerOrigin.insufficientNotes:
+        return 'Notes scan completed';
+      case AiAnswerOrigin.notesOnly:
       case null:
-        return 'Retrieved from your notes';
+        return 'Notes retrieval completed';
     }
   }
 
-  List<PlanStep> _buildSimplePlanSteps({
-    required AnswerOrigin? answerOrigin,
+  List<AiLiveActivityStep> _buildLiveAnswerSteps({
+    required AiAnswerOrigin? answerOrigin,
     required List<RagSource> sources,
     required bool noLocal,
     required bool answerCompleted,
   }) {
-    final planSources = _planSourcesFromRagSources(sources);
-    final StepStatus retrievalStatus;
+    final activitySources = _activitySourcesFromRagSources(sources);
+    final AiLiveActivityStatus retrievalStatus;
     switch (answerOrigin) {
-      case AnswerOrigin.insufficientNotes:
-        retrievalStatus = planSources.isNotEmpty
-            ? StepStatus.needHelp
-            : StepStatus.failed;
+      case AiAnswerOrigin.insufficientNotes:
+        retrievalStatus = activitySources.isNotEmpty
+            ? AiLiveActivityStatus.warning
+            : AiLiveActivityStatus.failed;
         break;
-      case AnswerOrigin.webOnly:
-      case AnswerOrigin.notesPlusWeb:
-      case AnswerOrigin.notesOnly:
-        retrievalStatus = StepStatus.completed;
+      case AiAnswerOrigin.webOnly:
+      case AiAnswerOrigin.notesPlusWeb:
+      case AiAnswerOrigin.notesOnly:
+        retrievalStatus = AiLiveActivityStatus.completed;
         break;
       case null:
-        if (planSources.isNotEmpty) {
-          retrievalStatus = StepStatus.completed;
+        if (activitySources.isNotEmpty) {
+          retrievalStatus = AiLiveActivityStatus.completed;
         } else if (noLocal) {
-          retrievalStatus = StepStatus.failed;
+          retrievalStatus = AiLiveActivityStatus.failed;
         } else {
-          retrievalStatus = StepStatus.inProgress;
+          retrievalStatus = AiLiveActivityStatus.active;
         }
         break;
     }
 
     final answerStatus = answerCompleted
-        ? StepStatus.completed
-        : StepStatus.inProgress;
+        ? AiLiveActivityStatus.completed
+        : AiLiveActivityStatus.active;
 
     return [
-      PlanStep(
+      AiLiveActivityStep(
         id: 'retrieve',
-        title: _simplePlanStepTitle(answerOrigin),
+        title: _activityTitleForAnswerOrigin(answerOrigin),
         status: retrievalStatus,
-        description: answerOrigin == AnswerOrigin.insufficientNotes
-            ? 'Only a partial match was found in your notes.'
+        description: answerOrigin == AiAnswerOrigin.insufficientNotes
+            ? 'Only a partial grounding match was found in the current notes.'
             : null,
-        sources: planSources,
+        sources: activitySources,
       ),
-      PlanStep(id: 'answer', title: 'Generated answer', status: answerStatus),
+      AiLiveActivityStep(
+        id: 'answer',
+        title: 'Response generation',
+        status: answerStatus,
+        description: answerCompleted
+            ? 'The answer is fully prepared and ready to read.'
+            : 'Drafting the final answer from the gathered context.',
+      ),
     ];
   }
 
-  List<PlanStep> _markSimplePlanAnswerStatus(
-    List<PlanStep> steps,
-    StepStatus status,
+  List<AiLiveActivityStep> _markLiveAnswerStatus(
+    List<AiLiveActivityStep> steps,
+    AiLiveActivityStatus status,
   ) {
     return steps
         .map(
@@ -1240,7 +1248,7 @@ class _AIChatScreenState extends State<AIChatScreen>
         .toList(growable: false);
   }
 
-  RagSource? _findSourceForPlanOpen(AIChatMessage message, String fileId) {
+  RagSource? _findSourceForLiveOpen(AIChatMessage message, String fileId) {
     if (message.primarySource?.fileId == fileId) {
       return message.primarySource;
     }
@@ -1249,12 +1257,12 @@ class _AIChatScreenState extends State<AIChatScreen>
     );
   }
 
-  Future<void> _openPlanPdfSource(
+  Future<void> _openLivePdfSource(
     AIChatMessage message,
     String fileId,
     int? page,
   ) async {
-    final source = _findSourceForPlanOpen(message, fileId);
+    final source = _findSourceForLiveOpen(message, fileId);
     final target = _normalizeExternalUrl(source?.fileUrl ?? '');
     final uri = _buildExternalLaunchUri(target);
     if (uri == null) {
@@ -1277,7 +1285,7 @@ class _AIChatScreenState extends State<AIChatScreen>
     );
   }
 
-  Future<void> _openPlanWebSource(String url) async {
+  Future<void> _openLiveWebSource(String url) async {
     final uri = _buildExternalLaunchUri(_normalizeExternalUrl(url));
     if (uri == null) {
       _showSourceUrlErrorSnackBar('Web source');
@@ -1289,7 +1297,7 @@ class _AIChatScreenState extends State<AIChatScreen>
     );
   }
 
-  Future<void> _openPlanVideoSource(String url, String? timestamp) async {
+  Future<void> _openLiveVideoSource(String url, String? timestamp) async {
     final normalized = _normalizeExternalUrl(url);
     if (normalized.isEmpty) {
       _showSourceUrlErrorSnackBar('Video source');
@@ -1315,7 +1323,7 @@ class _AIChatScreenState extends State<AIChatScreen>
           fallbackBaseUrl: AppConfig.apiUrl,
         );
       } catch (e) {
-        debugPrint('openStudyShareLink failed for plan source: $e');
+        debugPrint('openStudyShareLink failed for live activity source: $e');
       }
     }
 
@@ -1324,89 +1332,91 @@ class _AIChatScreenState extends State<AIChatScreen>
     }
   }
 
-  List<PlanSource> _planSourcesFromAttachmentMaps(
+  List<AiLiveActivitySource> _activitySourcesFromAttachmentMaps(
     List<Map<String, dynamic>> attachments, {
     int limit = 3,
   }) {
     final seen = <String>{};
-    final planSources = <PlanSource>[];
+    final activitySources = <AiLiveActivitySource>[];
     for (final attachment in attachments) {
       final title = attachment['name']?.toString().trim() ?? 'Study material';
       final rawUrl = attachment['url']?.toString().trim() ?? '';
       final normalizedType = attachment['type']?.toString().toLowerCase() ?? '';
-      final badge =
+      final kind =
           rawUrl.toLowerCase().contains('youtu') ||
               normalizedType == 'youtube' ||
               normalizedType == 'video'
-          ? SourceBadge.video
-          : (normalizedType == 'web' ? SourceBadge.web : SourceBadge.notes);
-      final key = '$title|${badge.wireValue}|$rawUrl';
+          ? AiLiveSourceKind.video
+          : (normalizedType == 'web'
+                ? AiLiveSourceKind.web
+                : AiLiveSourceKind.notes);
+      final key = '$title|${kind.wireValue}|$rawUrl';
       if (seen.contains(key)) continue;
       seen.add(key);
-      planSources.add(
-        PlanSource(
+      activitySources.add(
+        AiLiveActivitySource(
           title: title,
-          badge: badge,
+          kind: kind,
           url: rawUrl.isEmpty ? null : rawUrl,
         ),
       );
-      if (planSources.length >= limit) break;
+      if (activitySources.length >= limit) break;
     }
-    return planSources;
+    return activitySources;
   }
 
-  String _buildQuestionPaperPlanTitle({
+  String _buildQuestionPaperLiveTitle({
     required String inferredSubject,
     required _QuestionPaperRequestConfig config,
   }) {
     final subject = inferredSubject.trim();
     if (subject.isNotEmpty) {
-      return 'Preparing your $subject paper';
+      return 'Generating a $subject paper';
     }
-    return 'Preparing Sem ${config.semester} ${config.branch.toUpperCase()} paper';
+    return 'Generating Sem ${config.semester} ${config.branch.toUpperCase()} paper';
   }
 
-  List<PlanStep> _buildQuestionPaperPlan({
+  List<AiLiveActivityStep> _buildQuestionPaperLiveSteps({
     required String notesDescription,
-    List<PlanSource> noteSources = const [],
+    List<AiLiveActivitySource> noteSources = const [],
   }) {
     return [
-      const PlanStep(
+      const AiLiveActivityStep(
         id: 'qp_context',
         title: 'Resolved paper context',
-        status: StepStatus.pending,
+        status: AiLiveActivityStatus.pending,
       ),
-      PlanStep(
+      AiLiveActivityStep(
         id: 'qp_notes',
-        title: 'Loaded related notes',
-        status: StepStatus.pending,
+        title: 'Loaded supporting notes',
+        status: AiLiveActivityStatus.pending,
         description: notesDescription,
         sources: noteSources,
       ),
-      const PlanStep(
+      const AiLiveActivityStep(
         id: 'qp_generate',
-        title: 'Generated question paper',
-        status: StepStatus.pending,
+        title: 'Drafted question paper',
+        status: AiLiveActivityStatus.pending,
       ),
-      const PlanStep(
+      const AiLiveActivityStep(
         id: 'qp_validate',
-        title: 'Parsed and validated paper',
-        status: StepStatus.pending,
+        title: 'Validated quiz structure',
+        status: AiLiveActivityStatus.pending,
       ),
-      const PlanStep(
+      const AiLiveActivityStep(
         id: 'qp_ready',
-        title: 'Ready to quiz or download',
-        status: StepStatus.pending,
+        title: 'Ready to export',
+        status: AiLiveActivityStatus.pending,
       ),
     ];
   }
 
-  List<PlanStep> _updatePlanStepList(
-    List<PlanStep> steps,
+  List<AiLiveActivityStep> _updateLiveStepList(
+    List<AiLiveActivityStep> steps,
     String stepId, {
-    StepStatus? status,
+    AiLiveActivityStatus? status,
     String? description,
-    List<PlanSource>? sources,
+    List<AiLiveActivitySource>? sources,
   }) {
     return steps
         .map((step) {
@@ -1420,24 +1430,24 @@ class _AIChatScreenState extends State<AIChatScreen>
         .toList(growable: false);
   }
 
-  List<PlanStep> _upsertPlanSubstepList(
-    List<PlanStep> steps,
+  List<AiLiveActivityStep> _upsertLiveEventList(
+    List<AiLiveActivityStep> steps,
     String stepId,
-    PlanSubstep substep,
+    AiLiveActivityEvent event,
   ) {
     return steps
         .map((step) {
           if (step.id != stepId) return step;
-          final updatedSubsteps = [...step.substeps];
-          final existingIndex = updatedSubsteps.indexWhere(
-            (item) => item.id == substep.id,
+          final updatedEvents = [...step.events];
+          final existingIndex = updatedEvents.indexWhere(
+            (item) => item.id == event.id,
           );
           if (existingIndex >= 0) {
-            updatedSubsteps[existingIndex] = substep;
+            updatedEvents[existingIndex] = event;
           } else {
-            updatedSubsteps.add(substep);
+            updatedEvents.add(event);
           }
-          return step.copyWith(substeps: updatedSubsteps);
+          return step.copyWith(events: updatedEvents);
         })
         .toList(growable: false);
   }
@@ -2930,8 +2940,8 @@ Return STRICT JSON only (no markdown). Schema:
     final aiMessage = AIChatMessage(
       isUser: false,
       content: '',
-      planTitle: 'Preparing your question paper',
-      planSteps: _buildQuestionPaperPlan(
+      liveTitle: 'Generating your question paper',
+      liveSteps: _buildQuestionPaperLiveSteps(
         notesDescription: 'Collecting the most relevant notes for this paper.',
       ),
     );
@@ -2939,10 +2949,10 @@ Return STRICT JSON only (no markdown). Schema:
     setState(() {
       _messages.add(AIChatMessage(isUser: true, content: userVisible));
       _messages.add(aiMessage);
-      aiMessage.planSteps = _updatePlanStepList(
-        aiMessage.planSteps,
+      aiMessage.liveSteps = _updateLiveStepList(
+        aiMessage.liveSteps,
         'qp_context',
-        status: StepStatus.inProgress,
+        status: AiLiveActivityStatus.active,
       );
       _isLoading = true;
       _controller.clear();
@@ -2988,38 +2998,38 @@ Return STRICT JSON only (no markdown). Schema:
       final hasImageAttachments = mergedAttachments.any(
         (item) => item['type']?.toString().toLowerCase() == 'image',
       );
-      final noteSources = _planSourcesFromAttachmentMaps(mergedAttachments);
+      final noteSources = _activitySourcesFromAttachmentMaps(mergedAttachments);
       final notesDescription = totalAttachmentCount > 0
           ? 'Using $totalAttachmentCount note source'
                 '${totalAttachmentCount == 1 ? '' : 's'} for grounding.'
           : 'No related notes were found for this paper yet.';
       if (mounted) {
         setState(() {
-          aiMessage.planTitle = _buildQuestionPaperPlanTitle(
+          aiMessage.liveTitle = _buildQuestionPaperLiveTitle(
             inferredSubject: inferredSubject,
             config: config,
           );
-          aiMessage.planSteps = _updatePlanStepList(
-            aiMessage.planSteps,
+          aiMessage.liveSteps = _updateLiveStepList(
+            aiMessage.liveSteps,
             'qp_context',
-            status: StepStatus.completed,
+            status: AiLiveActivityStatus.completed,
             description: inferredSubject.trim().isNotEmpty
                 ? 'Resolved subject: $inferredSubject'
                 : 'Using Sem ${config.semester} • ${config.branch.toUpperCase()} context.',
           );
-          aiMessage.planSteps = _updatePlanStepList(
-            aiMessage.planSteps,
+          aiMessage.liveSteps = _updateLiveStepList(
+            aiMessage.liveSteps,
             'qp_notes',
             status: noteSources.isNotEmpty
-                ? StepStatus.completed
-                : StepStatus.needHelp,
+                ? AiLiveActivityStatus.completed
+                : AiLiveActivityStatus.warning,
             description: notesDescription,
             sources: noteSources,
           );
-          aiMessage.planSteps = _updatePlanStepList(
-            aiMessage.planSteps,
+          aiMessage.liveSteps = _updateLiveStepList(
+            aiMessage.liveSteps,
             'qp_generate',
-            status: StepStatus.inProgress,
+            status: AiLiveActivityStatus.active,
           );
         });
       }
@@ -3041,13 +3051,13 @@ Return STRICT JSON only (no markdown). Schema:
         }
         if (mounted) {
           setState(() {
-            aiMessage.planSteps = _upsertPlanSubstepList(
-              aiMessage.planSteps,
+            aiMessage.liveSteps = _upsertLiveEventList(
+              aiMessage.liveSteps,
               'qp_generate',
-              PlanSubstep(
+              AiLiveActivityEvent(
                 id: attemptId,
                 title: attemptTitle,
-                status: StepStatus.inProgress,
+                status: AiLiveActivityStatus.active,
               ),
             );
           });
@@ -3085,7 +3095,7 @@ Return STRICT JSON only (no markdown). Schema:
         aiInvoked = true;
         final answer = _extractRagAnswer(response);
         lastAnswer = answer;
-        aiMessage.answerOrigin = AnswerOriginX.fromWireValue(
+        aiMessage.answerOrigin = AiAnswerOriginX.fromWireValue(
           response['answer_origin']?.toString(),
         );
         final noLocal =
@@ -3101,7 +3111,7 @@ Return STRICT JSON only (no markdown). Schema:
                         RagSource.fromJson(Map<String, dynamic>.from(entry)),
                   )
                   .toList(growable: false);
-        final attemptSources = _planSourcesFromRagSources(responseSources);
+        final attemptSources = _activitySourcesFromRagSources(responseSources);
         debugPrint(
           'QuizGen attempt=${attempt + 1} noLocal=$noLocal '
           'attachments=${mergedAttachments.length} '
@@ -3110,13 +3120,13 @@ Return STRICT JSON only (no markdown). Schema:
         if (noLocal && hasPdfAttachments && !forceOcr) {
           if (mounted) {
             setState(() {
-              aiMessage.planSteps = _upsertPlanSubstepList(
-                aiMessage.planSteps,
+              aiMessage.liveSteps = _upsertLiveEventList(
+                aiMessage.liveSteps,
                 'qp_generate',
-                PlanSubstep(
+                AiLiveActivityEvent(
                   id: attemptId,
                   title: attemptTitle,
-                  status: StepStatus.needHelp,
+                  status: AiLiveActivityStatus.warning,
                   detail:
                       'The first pass did not find enough grounded note context. Retrying with OCR enabled.',
                   sources: attemptSources,
@@ -3141,13 +3151,13 @@ Return STRICT JSON only (no markdown). Schema:
           );
           if (mounted) {
             setState(() {
-              aiMessage.planSteps = _upsertPlanSubstepList(
-                aiMessage.planSteps,
+              aiMessage.liveSteps = _upsertLiveEventList(
+                aiMessage.liveSteps,
                 'qp_generate',
-                PlanSubstep(
+                AiLiveActivityEvent(
                   id: attemptId,
                   title: attemptTitle,
-                  status: StepStatus.failed,
+                  status: AiLiveActivityStatus.failed,
                   detail:
                       'The response could not be parsed into a usable question paper format.',
                   sources: attemptSources,
@@ -3164,13 +3174,13 @@ Return STRICT JSON only (no markdown). Schema:
           );
           if (mounted) {
             setState(() {
-              aiMessage.planSteps = _upsertPlanSubstepList(
-                aiMessage.planSteps,
+              aiMessage.liveSteps = _upsertLiveEventList(
+                aiMessage.liveSteps,
                 'qp_generate',
-                PlanSubstep(
+                AiLiveActivityEvent(
                   id: attemptId,
                   title: attemptTitle,
-                  status: StepStatus.needHelp,
+                  status: AiLiveActivityStatus.warning,
                   detail:
                       'The draft was incomplete, so StudyShare is trying a stricter generation pass.',
                   sources: attemptSources,
@@ -3182,26 +3192,26 @@ Return STRICT JSON only (no markdown). Schema:
         }
         if (mounted) {
           setState(() {
-            aiMessage.planSteps = _upsertPlanSubstepList(
-              aiMessage.planSteps,
+            aiMessage.liveSteps = _upsertLiveEventList(
+              aiMessage.liveSteps,
               'qp_generate',
-              PlanSubstep(
+              AiLiveActivityEvent(
                 id: attemptId,
                 title: attemptTitle,
-                status: StepStatus.completed,
+                status: AiLiveActivityStatus.completed,
                 detail: 'A valid question paper draft was generated.',
                 sources: attemptSources,
               ),
             );
-            aiMessage.planSteps = _updatePlanStepList(
-              aiMessage.planSteps,
+            aiMessage.liveSteps = _updateLiveStepList(
+              aiMessage.liveSteps,
               'qp_generate',
-              status: StepStatus.completed,
+              status: AiLiveActivityStatus.completed,
             );
-            aiMessage.planSteps = _updatePlanStepList(
-              aiMessage.planSteps,
+            aiMessage.liveSteps = _updateLiveStepList(
+              aiMessage.liveSteps,
               'qp_validate',
-              status: StepStatus.inProgress,
+              status: AiLiveActivityStatus.active,
             );
           });
         }
@@ -3224,24 +3234,24 @@ Return STRICT JSON only (no markdown). Schema:
                 ? fallback
                 : lastAnswer;
           }
-          aiMessage.showPlanExport = false;
-          aiMessage.planSteps = _updatePlanStepList(
-            aiMessage.planSteps,
+          aiMessage.showLiveExport = false;
+          aiMessage.liveSteps = _updateLiveStepList(
+            aiMessage.liveSteps,
             'qp_generate',
-            status: StepStatus.failed,
+            status: AiLiveActivityStatus.failed,
             description:
                 'StudyShare could not generate a valid paper from the current notes.',
           );
-          aiMessage.planSteps = _updatePlanStepList(
-            aiMessage.planSteps,
+          aiMessage.liveSteps = _updateLiveStepList(
+            aiMessage.liveSteps,
             'qp_validate',
-            status: StepStatus.failed,
+            status: AiLiveActivityStatus.failed,
             description: 'The generated response was not valid enough to use.',
           );
-          aiMessage.planSteps = _updatePlanStepList(
-            aiMessage.planSteps,
+          aiMessage.liveSteps = _updateLiveStepList(
+            aiMessage.liveSteps,
             'qp_ready',
-            status: StepStatus.failed,
+            status: AiLiveActivityStatus.failed,
             description:
                 'Download stays unavailable until a valid paper is ready.',
           );
@@ -3254,18 +3264,18 @@ Return STRICT JSON only (no markdown). Schema:
       setState(() {
         aiMessage.content = _buildQuestionPaperSummary(generatedPaper);
         aiMessage.quizActionPaper = generatedPaper;
-        aiMessage.showPlanExport = true;
-        aiMessage.planSteps = _updatePlanStepList(
-          aiMessage.planSteps,
+        aiMessage.showLiveExport = true;
+        aiMessage.liveSteps = _updateLiveStepList(
+          aiMessage.liveSteps,
           'qp_validate',
-          status: StepStatus.completed,
+          status: AiLiveActivityStatus.completed,
           description:
               'Questions, options, and explanations were validated successfully.',
         );
-        aiMessage.planSteps = _updatePlanStepList(
-          aiMessage.planSteps,
+        aiMessage.liveSteps = _updateLiveStepList(
+          aiMessage.liveSteps,
           'qp_ready',
-          status: StepStatus.completed,
+          status: AiLiveActivityStatus.completed,
           description: 'You can start the quiz or download the PDF now.',
         );
       });
@@ -3276,22 +3286,22 @@ Return STRICT JSON only (no markdown). Schema:
         aiMessage.content =
             'Question paper generation failed: '
             '${e.toString().replaceFirst('Exception: ', '')}';
-        aiMessage.showPlanExport = false;
-        aiMessage.planSteps = _updatePlanStepList(
-          aiMessage.planSteps,
+        aiMessage.showLiveExport = false;
+        aiMessage.liveSteps = _updateLiveStepList(
+          aiMessage.liveSteps,
           'qp_generate',
-          status: StepStatus.failed,
+          status: AiLiveActivityStatus.failed,
           description: 'The paper generation request failed before completion.',
         );
-        aiMessage.planSteps = _updatePlanStepList(
-          aiMessage.planSteps,
+        aiMessage.liveSteps = _updateLiveStepList(
+          aiMessage.liveSteps,
           'qp_validate',
-          status: StepStatus.failed,
+          status: AiLiveActivityStatus.failed,
         );
-        aiMessage.planSteps = _updatePlanStepList(
-          aiMessage.planSteps,
+        aiMessage.liveSteps = _updateLiveStepList(
+          aiMessage.liveSteps,
           'qp_ready',
-          status: StepStatus.failed,
+          status: AiLiveActivityStatus.failed,
         );
       });
       await _persistCurrentSession();
@@ -3762,10 +3772,10 @@ Return STRICT JSON only (no markdown). Schema:
                         primarySourceFileIdRaw.isNotEmpty
                     ? primarySourceFileIdRaw
                     : primarySource?.fileId;
-                final answerOrigin = AnswerOriginX.fromWireValue(
+                final answerOrigin = AiAnswerOriginX.fromWireValue(
                   data['answer_origin']?.toString(),
                 );
-                final simplePlan = _buildSimplePlanSteps(
+                final liveSteps = _buildLiveAnswerSteps(
                   answerOrigin: answerOrigin,
                   sources: orderedSources,
                   noLocal: data['no_local'] == true,
@@ -3777,7 +3787,8 @@ Return STRICT JSON only (no markdown). Schema:
                   aiMessage.sources = orderedSources;
                   aiMessage.noLocal = data['no_local'] == true;
                   aiMessage.answerOrigin = answerOrigin;
-                  aiMessage.planSteps = simplePlan;
+                  aiMessage.liveTitle = 'Tracing your answer';
+                  aiMessage.liveSteps = liveSteps;
                   aiMessage.retrievalScore = _toNullableDouble(
                     data['retrieval_score'],
                   );
@@ -3801,11 +3812,11 @@ Return STRICT JSON only (no markdown). Schema:
               } else if (type == 'error') {
                 _enqueueTypedChunk(aiMessage, '\n\nError: ${chunk['message']}');
               } else if (type == 'done') {
-                if (aiMessage.planSteps.isNotEmpty) {
+                if (aiMessage.liveSteps.isNotEmpty) {
                   setState(() {
-                    aiMessage.planSteps = _markSimplePlanAnswerStatus(
-                      aiMessage.planSteps,
-                      StepStatus.completed,
+                    aiMessage.liveSteps = _markLiveAnswerStatus(
+                      aiMessage.liveSteps,
+                      AiLiveActivityStatus.completed,
                     );
                   });
                 }
@@ -3850,10 +3861,11 @@ Return STRICT JSON only (no markdown). Schema:
                       aiMessage.primarySource = primarySource;
                       aiMessage.sources = orderedSources;
                       aiMessage.noLocal = chunk['no_local'] == true;
-                      aiMessage.answerOrigin ??= AnswerOriginX.fromWireValue(
+                      aiMessage.answerOrigin ??= AiAnswerOriginX.fromWireValue(
                         chunk['answer_origin']?.toString(),
                       );
-                      aiMessage.planSteps = _buildSimplePlanSteps(
+                      aiMessage.liveTitle = 'Tracing your answer';
+                      aiMessage.liveSteps = _buildLiveAnswerSteps(
                         answerOrigin: aiMessage.answerOrigin,
                         sources: orderedSources,
                         noLocal: chunk['no_local'] == true,
@@ -3948,10 +3960,10 @@ Return STRICT JSON only (no markdown). Schema:
           await _waitForTypingDrain();
           if (mounted) {
             setState(() {
-              if (aiMessageForError.planSteps.isNotEmpty) {
-                aiMessageForError.planSteps = _markSimplePlanAnswerStatus(
-                  aiMessageForError.planSteps,
-                  StepStatus.failed,
+              if (aiMessageForError.liveSteps.isNotEmpty) {
+                aiMessageForError.liveSteps = _markLiveAnswerStatus(
+                  aiMessageForError.liveSteps,
+                  AiLiveActivityStatus.failed,
                 );
               }
               final separator = aiMessageForError.content.isEmpty ? '' : '\n\n';
@@ -4286,14 +4298,14 @@ Return STRICT JSON only (no markdown). Schema:
         !msg.isUser && _isLoading && index == _messages.length - 1;
     final isStreamingPlaceholder =
         isStreamingAssistantMessage && msg.content.trim().isEmpty;
+    final showLegacyShimmer =
+        isStreamingPlaceholder && !_shouldShowLiveActivityCard(msg);
     final messageTextStyle = GoogleFonts.inter(
       fontSize: isCompact ? 13.5 : 14,
       height: 1.46,
       color: textColor,
       letterSpacing: 0.05,
     );
-    final showPlanCard =
-        _shouldShowPlanCard(msg) && !isStreamingAssistantMessage;
     final streamingHint = _allowWebMode
         ? 'Thinking through your sources and the web...'
         : 'Thinking through your notes...';
@@ -4380,27 +4392,7 @@ Return STRICT JSON only (no markdown). Schema:
             ],
           ),
         if (!msg.isUser) const SizedBox(height: 8),
-        if (showPlanCard) ...[
-          StudyAIPlanWidget(
-            title: msg.planTitle?.trim().isNotEmpty == true
-                ? msg.planTitle!.trim()
-                : _chatTitle,
-            answerOrigin: msg.answerOrigin,
-            steps: msg.planSteps,
-            isRunning: isStreamingAssistantMessage,
-            showExport: msg.showPlanExport,
-            onOpenPdf: (fileId, page) => _openPlanPdfSource(msg, fileId, page),
-            onOpenUrl: (url) => _openPlanWebSource(url),
-            onOpenVideo: (url, timestamp) =>
-                _openPlanVideoSource(url, timestamp),
-            onExport: msg.quizActionPaper == null
-                ? null
-                : () => _exportQuestionPaperFromMessage(msg),
-          ),
-          if (!(isStreamingAssistantMessage && msg.content.trim().isEmpty))
-            const SizedBox(height: 10),
-        ],
-        if (isStreamingPlaceholder)
+        if (showLegacyShimmer)
           Padding(
             padding: const EdgeInsets.only(top: 2, bottom: 2),
             child: Shimmer.fromColors(
@@ -4415,7 +4407,7 @@ Return STRICT JSON only (no markdown). Schema:
               ),
             ),
           )
-        else
+        else if (msg.content.trim().isNotEmpty)
           AiFormattedText(
             text: msg.content,
             baseStyle: messageTextStyle,
@@ -4719,6 +4711,27 @@ Return STRICT JSON only (no markdown). Schema:
       horizontalInset: bubbleInset,
       padding: bubblePadding,
       child: messageBody,
+    );
+  }
+
+  Widget _buildStandaloneLiveActivityCard(
+    AIChatMessage msg,
+    bool isStreamingAssistantMessage,
+  ) {
+    return StudyAiLiveActivityCard(
+      title: msg.liveTitle?.trim().isNotEmpty == true
+          ? msg.liveTitle!.trim()
+          : _chatTitle,
+      answerOrigin: msg.answerOrigin,
+      steps: msg.liveSteps,
+      isRunning: isStreamingAssistantMessage,
+      showExport: msg.showLiveExport,
+      onOpenPdf: (fileId, page) => _openLivePdfSource(msg, fileId, page),
+      onOpenUrl: _openLiveWebSource,
+      onOpenVideo: _openLiveVideoSource,
+      onExport: msg.quizActionPaper == null
+          ? null
+          : () => _exportQuestionPaperFromMessage(msg),
     );
   }
 
@@ -5371,6 +5384,15 @@ Return STRICT JSON only (no markdown). Schema:
                       itemCount: _messages.length,
                       itemBuilder: (context, index) {
                         final m = _messages[index];
+                        final isStreamingAssistantMessage =
+                            !m.isUser &&
+                            _isLoading &&
+                            index == _messages.length - 1;
+                        final showStandaloneLiveCard =
+                            !m.isUser && _shouldShowLiveActivityCard(m);
+                        final hideBubble =
+                            showStandaloneLiveCard &&
+                            m.content.trim().isEmpty;
 
                         return Align(
                           alignment: m.isUser
@@ -5383,13 +5405,21 @@ Return STRICT JSON only (no markdown). Schema:
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                _buildMessageBubble(
-                                  m,
-                                  isDark,
-                                  index,
-                                  screenWidth,
-                                  bubbleMaxWidth,
-                                ),
+                                if (showStandaloneLiveCard) ...[
+                                  _buildStandaloneLiveActivityCard(
+                                    m,
+                                    isStreamingAssistantMessage,
+                                  ),
+                                  if (!hideBubble) const SizedBox(height: 10),
+                                ],
+                                if (!hideBubble)
+                                  _buildMessageBubble(
+                                    m,
+                                    isDark,
+                                    index,
+                                    screenWidth,
+                                    bubbleMaxWidth,
+                                  ),
                               ],
                             ),
                           ),

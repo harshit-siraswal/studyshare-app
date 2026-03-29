@@ -6,7 +6,7 @@ import '../../services/backend_api_service.dart';
 
 import '../profile/saved_posts_screen.dart';
 import '../../services/subscription_service.dart';
-import '../../models/user.dart';
+import '../../utils/admin_access.dart';
 import 'chatroom_screen.dart';
 import 'discover_rooms_screen.dart';
 
@@ -44,10 +44,11 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
 
   bool get _isReadOnly {
     if (_isTeacherOrAdmin) return false;
-    final email = widget.userEmail;
-    final domain = widget.collegeDomain;
-    if (domain.isEmpty) return true;
-    return !email.endsWith(domain);
+    final email = widget.userEmail.trim().toLowerCase();
+    final domain = widget.collegeDomain.trim().toLowerCase();
+    if (email.isEmpty || domain.isEmpty) return true;
+    final normalizedDomain = domain.startsWith('@') ? domain : '@$domain';
+    return !email.endsWith(normalizedDomain);
   }
 
   @override
@@ -58,7 +59,6 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
     });
     _searchFocusNode.addListener(_onSearchFocusChange);
     _loadWriterRole();
-    _loadRooms();
   }
 
   void _onSearchFocusChange() {
@@ -76,6 +76,21 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
   }
 
   Future<void> _loadRooms() async {
+    if (_isReadOnly) {
+      if (mounted) {
+        setState(() {
+          _rooms = [];
+          _filteredRooms = [];
+          _joinedRoomIds = <String>{};
+          _isLoading = false;
+        });
+      }
+      return;
+    }
+
+    if (mounted) {
+      setState(() => _isLoading = true);
+    }
     try {
       final rooms = await _supabaseService.getChatRooms(
         widget.userEmail,
@@ -112,15 +127,22 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
 
   Future<void> _loadWriterRole() async {
     try {
-      final role = await _supabaseService.getCurrentUserRole();
+      final profile = await _supabaseService.getCurrentUserProfile(
+        maxAttempts: 1,
+      );
       if (!mounted) return;
       setState(() {
-        _isTeacherOrAdmin = role != AppRoles.readOnly;
+        _isTeacherOrAdmin =
+            profile.isNotEmpty && isTeacherOrAdminProfile(profile);
       });
+      await _loadRooms();
     } catch (e, st) {
       debugPrint('ChatroomListScreen._loadWriterRole failed: $e\n$st');
       if (!mounted) return;
-      setState(() => _isTeacherOrAdmin = false);
+      setState(() {
+        _isTeacherOrAdmin = false;
+        _isLoading = false;
+      });
     }
   }
 
@@ -143,25 +165,29 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
       resizeToAvoidBottomInset: false, // Fix bottom actions/nav from jumping up
       body: SafeArea(
         bottom: false,
-        child: Column(
-          children: [
-            const SizedBox(height: 16),
-            _buildSearchRow(isDark),
-            const SizedBox(height: 24),
-            Expanded(
-              child: RefreshIndicator(
+        child: _isReadOnly
+            ? _buildAccessLockedState(isDark)
+            : Column(
+                children: [
+                  const SizedBox(height: 16),
+                  _buildSearchRow(isDark),
+                  const SizedBox(height: 24),
+                  Expanded(
+                    child: RefreshIndicator(
                 onRefresh: _loadRooms,
                 color: Colors.white,
                 backgroundColor: const Color(0xFF1C1C1E),
                 child: _isLoading
                     ? _buildLoadingSkeleton(isDark)
+                    : _isReadOnly
+                    ? _buildCollegeAccessGate(isDark)
                     : _filteredRooms.isEmpty
                     ? _buildEmptyState(isDark)
                     : _buildRoomList(isDark, cardColor),
               ),
             ),
-          ],
-        ),
+                ],
+              ),
       ),
       // Image 1 shows + button in header range, not as FAB
       // But if scrolling list, FAB is standard.
@@ -286,6 +312,62 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
           ],
         ],
       ),
+    );
+  }
+
+  Widget _buildCollegeAccessGate(bool isDark) {
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, _bottomNavSpacing),
+      children: [
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+              color: isDark ? Colors.white10 : Colors.black12,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF3B82F6).withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.school_rounded,
+                  color: Color(0xFF3B82F6),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Rooms are locked for this account',
+                style: GoogleFonts.inter(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? Colors.white : Colors.black,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Login with college ID to access it.',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  height: 1.45,
+                  color: isDark
+                      ? const Color(0xFFB0B0B8)
+                      : const Color(0xFF5B6472),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 
@@ -573,11 +655,11 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                       widget.userEmail,
                       widget.collegeId,
                     );
-                    if (!mounted) return;
+                    if (!parentContext.mounted) return;
                     Navigator.of(parentContext).pop();
                     _loadRooms();
                   } catch (e) {
-                    if (!mounted) return;
+                    if (!parentContext.mounted) return;
                     messenger.showSnackBar(
                       SnackBar(content: Text('Failed to join room: $e')),
                     );
@@ -726,11 +808,11 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                         collegeId: widget.collegeId,
                         durationInDays: duration,
                       );
-                      if (!mounted) return;
+                      if (!parentContext.mounted) return;
                       Navigator.of(parentContext).pop();
                       _loadRooms();
                     } catch (e) {
-                      if (!mounted) return;
+                      if (!parentContext.mounted) return;
                       messenger.showSnackBar(
                         const SnackBar(
                           content: Text(
@@ -760,8 +842,8 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
     return ListView.separated(
       padding: EdgeInsets.fromLTRB(20, 0, 20, extraBottomPadding),
       itemCount: 5,
-      separatorBuilder: (_, __) => const SizedBox(height: 16),
-      itemBuilder: (_, __) => Shimmer.fromColors(
+      separatorBuilder: (_, index) => const SizedBox(height: 16),
+      itemBuilder: (_, index) => Shimmer.fromColors(
         baseColor: isDark ? const Color(0xFF2C2C2E) : Colors.grey.shade300,
         highlightColor: isDark ? const Color(0xFF3A3A3C) : Colors.grey.shade100,
         child: Container(
@@ -836,6 +918,59 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(30),
                   ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAccessLockedState(bool isDark) {
+    final extraBottomPadding =
+        MediaQuery.of(context).padding.bottom + _bottomNavSpacing;
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: EdgeInsets.fromLTRB(28, 96, 28, extraBottomPadding),
+      children: [
+        Center(
+          child: Column(
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: isDark ? Colors.white10 : Colors.black12,
+                  ),
+                ),
+                child: Icon(
+                  Icons.lock_outline_rounded,
+                  size: 30,
+                  color: isDark ? Colors.white70 : Colors.black54,
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                'Login with college ID to access it.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? Colors.white : Colors.black,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Rooms are only available to college-linked accounts and approved teacher/admin accounts.',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                  fontSize: 13.5,
+                  height: 1.45,
+                  color: isDark ? Colors.white60 : Colors.black54,
                 ),
               ),
             ],
