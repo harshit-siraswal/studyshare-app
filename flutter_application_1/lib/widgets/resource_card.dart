@@ -1061,16 +1061,18 @@ class ResourceCardState extends State<ResourceCard> {
     final moderationMetaRow = _buildModerationMetaRow();
     final moderationButtons = _buildModerationActionButtons();
 
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onLongPressStart: (_) => _showPeekPreview(),
-      onLongPressEnd: (_) => _hidePeekPreview(),
-      child: Material(
-        color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
+    return Material(
+      color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: _openResource,
         borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          onTap: _openResource,
-          borderRadius: BorderRadius.circular(12),
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onLongPressStart: (_) => _showPeekPreview(),
+          onLongPressEnd: (_) => _hidePeekPreview(),
+          onLongPressCancel: _hidePeekPreview,
+          onLongPressUp: _hidePeekPreview,
           child: Container(
             padding: EdgeInsets.all(isCompactCard ? 8 : 12),
             decoration: BoxDecoration(

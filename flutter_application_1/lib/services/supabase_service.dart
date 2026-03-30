@@ -108,7 +108,7 @@ class SupabaseService {
     final normalizedClaimed = _normalizeEmail(claimedEmail);
     if (normalizedClaimed.isNotEmpty && normalizedClaimed != sessionEmail) {
       developer.log(
-        'action=$action claimed_email=$normalizedClaimed session_email=$sessionEmail',
+        'action=$action ownership_mismatch=true claimed_present=true session_present=true',
         name: 'security.ownership_mismatch',
         level: 1000,
       );
@@ -4243,9 +4243,6 @@ class SupabaseService {
       claimedEmail: ownerEmail,
       action: 'delete_owned_resource',
     );
-    if (activeOwner.isEmpty) {
-      throw Exception('No signed-in user found to delete this contribution.');
-    }
 
     Object? backendError;
     try {
@@ -5076,10 +5073,12 @@ class SupabaseService {
   }
 
   bool? getCachedBookmarkState(String userEmail, String resourceId) {
-    final normalizedEmail = _requireCurrentSessionEmail(
-      claimedEmail: userEmail,
-      action: 'get_cached_bookmark_state',
-    );
+    final normalizedEmail = _currentSessionEmail();
+    if (normalizedEmail.isEmpty) return null;
+    final claimedEmail = _normalizeEmail(userEmail);
+    if (claimedEmail.isNotEmpty && claimedEmail != normalizedEmail) {
+      return null;
+    }
     final cacheKey = _resourceStateKey(resourceId, userEmail: normalizedEmail);
     return _bookmarkStateCache[cacheKey];
   }
@@ -5092,7 +5091,6 @@ class SupabaseService {
       claimedEmail: userEmail,
       action: 'prefetch_bookmarks',
     );
-    if (normalizedEmail.isEmpty) return;
 
     final ids = resourceIds
         .map((id) => id.trim())

@@ -396,7 +396,7 @@ class BackendApiService {
       );
     }
 
-    if (path.contains('/upload') || path.contains('/sources/upload')) {
+    if (path.contains('/upload')) {
       _enforceClientRateLimit(
         bucket: 'upload',
         maxRequests: 4,

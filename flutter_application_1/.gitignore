@@ -80,6 +80,3 @@ fetch_lotties.js
 # Firebase service config files must be provisioned via local secrets/CI.
 android/app/google-services.json
 ios/Runner/GoogleService-Info.plist
-../google-services.json
-../google-services (1).json
-../GoogleService-Info.plist

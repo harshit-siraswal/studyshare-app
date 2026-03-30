@@ -1000,11 +1000,9 @@ class _AppRouterState extends State<AppRouter> {
       final banResult = await _authService.checkBanStatus(email, collegeId);
       if (banResult?['banCheckSkipped'] == true) {
         debugPrint(
-          'Ban check skipped for $email in college $collegeId; denying access until verification checks recover.',
+          'Ban check skipped for $email in college $collegeId; allowing access and relying on backend enforcement.',
         );
-        return const _AuthGateResult.denied(
-          'Unable to verify account security right now. Please sign in again later.',
-        );
+        return const _AuthGateResult.allowed();
       }
       if (banResult?['isBanned'] == true) {
         final reason =
@@ -1015,10 +1013,10 @@ class _AppRouterState extends State<AppRouter> {
       }
       return const _AuthGateResult.allowed();
     } catch (e) {
-      debugPrint('Auth gate ban check failed: $e');
-      return const _AuthGateResult.denied(
-        'Unable to verify account access. Please try again later.',
+      debugPrint(
+        'Auth gate ban check failed for $email in college $collegeId; allowing access and relying on backend enforcement. Error: $e',
       );
+      return const _AuthGateResult.allowed();
     }
   }
 
@@ -1106,13 +1104,16 @@ class _AppRouterState extends State<AppRouter> {
         }
 
         if (_authService.requiresEmailVerificationForCurrentUser) {
+          final localizations = AppLocalizations.of(context);
           _scheduleAnalyticsScreen('email_verification');
           return LoginScreen(
             collegeName: _selectedCollegeName ?? '',
             collegeDomain: _selectedCollegeDomain!,
             collegeId: _selectedCollegeId!,
             onChangeCollege: _onChangeCollege,
-            initialErrorMessage: 'Verify your email before continuing.',
+            initialErrorMessage:
+                localizations?.verifyEmailBeforeContinuing ??
+                'Verify your email before continuing.',
             startInEmailVerificationMode: true,
             initialEmail: _authService.userEmail,
             onUseDifferentEmail: () async {

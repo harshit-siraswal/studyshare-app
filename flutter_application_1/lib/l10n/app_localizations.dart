@@ -37,6 +37,11 @@ class AppLocalizations {
     'Blocked untrusted URL',
     name: 'blockedUntrustedUrl',
   );
+
+  String get verifyEmailBeforeContinuing => Intl.message(
+    'Verify your email before continuing.',
+    name: 'verifyEmailBeforeContinuing',
+  );
 }
 
 class _AppLocalizationsDelegate

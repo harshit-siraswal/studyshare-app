@@ -44,6 +44,11 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _showEmailVerification = false;
   bool _isResendingVerification = false;
   bool _isVerifyingEmail = false;
+  bool _isChangingEmail = false;
+
+  String _normalizeDisplayName(String input) {
+    return input.trim().replaceAll(RegExp(r'\s+'), ' ');
+  }
 
   @override
   void initState() {
@@ -138,7 +143,7 @@ class _LoginScreenState extends State<LoginScreen> {
         await _authService.createAccountWithEmail(
           email: _emailController.text.trim(),
           password: _passwordController.text,
-          displayName: _nameController.text.trim(),
+          displayName: _normalizeDisplayName(_nameController.text),
         );
         debugPrint('Account Creation completed');
         if (mounted) {
@@ -148,12 +153,11 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (e, stackTrace) {
       debugPrint('Email Auth Error: $e');
       debugPrint('Stack trace: $stackTrace');
-      if (mounted &&
-          e is firebase_auth.FirebaseAuthException &&
+      if (!mounted) return;
+      if (e is firebase_auth.FirebaseAuthException &&
           e.code == 'email-not-verified') {
         setState(() => _showEmailVerification = true);
-      }
-      if (mounted) {
+      } else {
         _showError(_authService.getErrorMessage(e));
       }
     } finally {
@@ -201,13 +205,10 @@ class _LoginScreenState extends State<LoginScreen> {
         widget.collegeId,
       );
       if (banResult?['banCheckSkipped'] == true) {
-        await _authService.signOut();
-        if (mounted) {
-          _showError(
-            'Unable to verify account security right now. Please try again later.',
-          );
-        }
-        return false;
+        debugPrint(
+          'Ban check skipped after login for $email in ${widget.collegeId}; allowing session and relying on backend enforcement.',
+        );
+        return true;
       }
       if (banResult?['isBanned'] == true) {
         final reason =
@@ -223,11 +224,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
       return true;
     } catch (e) {
-      await _authService.signOut();
-      if (mounted) {
-        _showError('Unable to verify account access. Please try again later.');
-      }
-      return false;
+      debugPrint(
+        'Ban check failed after login for $email in ${widget.collegeId}; allowing session and relying on backend enforcement. Error: $e',
+      );
+      return true;
     }
   }
 
@@ -396,10 +396,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           if (value == null || value.isEmpty) {
                             return 'Please enter your name';
                           }
-                          final normalized = value.trim().replaceAll(
-                            RegExp(r'\s+'),
-                            ' ',
-                          );
+                          final normalized = _normalizeDisplayName(value);
                           if (normalized.length < 2) {
                             return 'Name must be at least 2 characters';
                           }
@@ -901,16 +898,27 @@ class _LoginScreenState extends State<LoginScreen> {
 
               // Back/Change email option
               TextButton(
-                onPressed: () async {
-                  final callback = widget.onUseDifferentEmail;
-                  if (callback != null) {
-                    await callback();
-                    return;
-                  }
-                  if (mounted) {
-                    setState(() => _showEmailVerification = false);
-                  }
-                },
+                onPressed: _isChangingEmail
+                    ? null
+                    : () async {
+                        if (_isChangingEmail) return;
+                        if (mounted) {
+                          setState(() => _isChangingEmail = true);
+                        }
+                        try {
+                          final callback = widget.onUseDifferentEmail;
+                          if (callback != null) {
+                            await callback();
+                          }
+                          if (mounted) {
+                            setState(() => _showEmailVerification = false);
+                          }
+                        } finally {
+                          if (mounted) {
+                            setState(() => _isChangingEmail = false);
+                          }
+                        }
+                      },
                 child: Text(
                   'Use a different email',
                   style: GoogleFonts.inter(

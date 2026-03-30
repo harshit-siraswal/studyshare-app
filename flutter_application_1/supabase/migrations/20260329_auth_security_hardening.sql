@@ -92,12 +92,14 @@ BEGIN
   ) INTO has_user_email;
 
   using_clause := '';
-  IF has_user_id THEN
+  IF has_user_id AND has_user_email THEN
+    using_clause :=
+      'user_id::text = auth.uid()::text AND ' ||
+      'lower(coalesce(user_email, '''')) = lower(coalesce(auth.jwt() ->> ''email'', ''''))';
+  ELSIF has_user_id THEN
     using_clause := 'user_id::text = auth.uid()::text';
-  END IF;
-  IF has_user_email THEN
-    using_clause := using_clause ||
-      CASE WHEN using_clause <> '' THEN ' OR ' ELSE '' END ||
+  ELSIF has_user_email THEN
+    using_clause :=
       'lower(coalesce(user_email, '''')) = lower(coalesce(auth.jwt() ->> ''email'', ''''))';
   END IF;
 
@@ -228,6 +230,10 @@ DECLARE
   current_email text := lower(coalesce(auth.jwt() ->> 'email', ''));
   has_email boolean;
   has_user_email boolean;
+  has_college_id boolean;
+  has_reason boolean;
+  select_reason text;
+  select_is_global text;
   sql text;
 BEGIN
   IF current_email = '' OR to_regclass('public.banned_users') IS NULL THEN
@@ -251,15 +257,43 @@ BEGIN
       AND column_name = 'user_email'
   ) INTO has_user_email;
 
+  SELECT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'banned_users'
+      AND column_name = 'college_id'
+  ) INTO has_college_id;
+
+  SELECT EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'banned_users'
+      AND column_name = 'reason'
+  ) INTO has_reason;
+
   IF NOT has_email AND NOT has_user_email THEN
     RETURN QUERY SELECT false, NULL::text, false;
     RETURN;
   END IF;
 
+  select_reason := CASE
+    WHEN has_reason THEN
+      'coalesce(reason, ''Your account has been restricted by an administrator.'') AS reason'
+    ELSE
+      '''Your account has been restricted by an administrator.'' AS reason'
+  END;
+
+  select_is_global := CASE
+    WHEN has_college_id THEN '(college_id IS NULL) AS is_global'
+    ELSE 'false AS is_global'
+  END;
+
   sql := '
     SELECT true AS is_banned,
-           coalesce(reason, ''Your account has been restricted by an administrator.'') AS reason,
-           (college_id IS NULL) AS is_global
+           ' || select_reason || ',
+           ' || select_is_global || '
     FROM public.banned_users
     WHERE (';
 
@@ -272,15 +306,22 @@ BEGIN
       'lower(coalesce(user_email, '''')) = $1';
   END IF;
 
-  sql := sql || ')
+  sql := sql || ')';
+
+  IF has_college_id THEN
+    sql := sql || '
       AND (
         college_id IS NULL OR
         ($2 IS NOT NULL AND college_id = $2)
       )
     ORDER BY CASE WHEN college_id IS NULL THEN 0 ELSE 1 END
     LIMIT 1';
-
-  RETURN QUERY EXECUTE sql USING current_email, target_college_id;
+    RETURN QUERY EXECUTE sql USING current_email, target_college_id;
+  ELSE
+    sql := sql || '
+    LIMIT 1';
+    RETURN QUERY EXECUTE sql USING current_email;
+  END IF;
 
   IF NOT FOUND THEN
     RETURN QUERY SELECT false, NULL::text, false;

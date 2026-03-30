@@ -102,8 +102,11 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
       )
       ..loadRequest(Uri.parse(_loginUrl));
 
-    _tokenPollTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      _tryCaptureToken();
+    Future.delayed(const Duration(seconds: 2), () {
+      if (!mounted) return;
+      _tokenPollTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+        _tryCaptureToken();
+      });
     });
   }
 
@@ -319,8 +322,7 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
               KietAttendanceBridge.postMessage('$_noTokenMessage');
             }
           }
-
-          pushToken(true);
+          pushToken(false);
 
           var lastUrl = window.location.href;
           new MutationObserver(function() {
@@ -401,7 +403,7 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
   void _handleBridgeMessage(String rawToken) {
     if (_didReturnToken) return;
     final normalized = rawToken.trim().replaceAll('"', '').replaceAll("'", '');
-    if (normalized.isEmpty || normalized == _noTokenMessage) {
+    if (normalized.isEmpty || normalized == _noTokenMessage || normalized.length < 8) {
       return;
     }
 

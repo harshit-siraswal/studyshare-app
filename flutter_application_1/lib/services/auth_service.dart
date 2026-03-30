@@ -655,14 +655,21 @@ class AuthService {
       );
       if (userCredential.user != null &&
           _requiresEmailVerification(userCredential.user!)) {
+        var verificationEmailSent = false;
         try {
           await userCredential.user!.sendEmailVerification();
-        } catch (_) {}
+          verificationEmailSent = true;
+        } catch (error, stackTrace) {
+          debugPrint(
+            'AuthService.signInWithEmail sendEmailVerification failed: $error\n$stackTrace',
+          );
+        }
         await _auth.signOut();
         throw firebase_auth.FirebaseAuthException(
           code: 'email-not-verified',
-          message:
-              'Please verify your email before signing in. A new verification email has been sent.',
+          message: verificationEmailSent
+              ? 'Please verify your email before signing in. A new verification email has been sent.'
+              : 'Please verify your email before signing in. We could not send a new verification email right now.',
         );
       }
 
@@ -817,14 +824,22 @@ class AuthService {
   /// Resend verification email
   Future<void> resendVerificationEmail() async {
     try {
-      final email = _normalizeAndValidateEmail(currentUser?.email ?? '');
+      final user = currentUser;
+      final rawEmail = user?.email?.trim() ?? '';
+      if (rawEmail.isEmpty) {
+        throw firebase_auth.FirebaseAuthException(
+          code: 'missing-email',
+          message: 'Unable to resend verification: no email on account.',
+        );
+      }
+      final email = _normalizeAndValidateEmail(rawEmail);
       await _consumeRateLimit(
         scope: 'verification_email',
         subject: email,
         maxAttempts: _verificationEmailRateLimitMaxAttempts,
         window: _verificationEmailRateLimitWindow,
       );
-      await currentUser?.sendEmailVerification();
+      await user?.sendEmailVerification();
       _logAuthAudit(
         action: 'verification_email',
         outcome: 'success',
@@ -1070,7 +1085,6 @@ class AuthService {
         'display_name': user.displayName ?? normalizedEmail.split('@')[0],
         'profile_photo_url': user.photoURL,
         'updated_at': now,
-        'created_at': now,
       };
 
       await _supabase

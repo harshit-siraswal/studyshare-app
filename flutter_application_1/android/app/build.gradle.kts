@@ -18,6 +18,10 @@ configurations.all {
 android {
     namespace = "me.studyshare.android"
     compileSdk = 36
+    val disableMinify =
+        project.findProperty("disableMinify")?.toString()?.toBooleanStrictOrNull() == true
+    val enableLocalRelease =
+        project.findProperty("enableLocalRelease")?.toString()?.toBooleanStrictOrNull() == true
     val keystorePath = System.getenv("KEYSTORE_PATH")?.trim().orEmpty()
     val keystorePassword = System.getenv("KEYSTORE_PASSWORD")?.trim().orEmpty()
     val keyAlias = System.getenv("KEY_ALIAS")?.trim().orEmpty()
@@ -78,10 +82,30 @@ android {
                 )
                 signingConfig = signingConfigs.getByName("debug")
             }
-            // Temporarily disable minification/shrinking so local release builds
-            // can complete reliably on constrained environments.
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // TODO(https://github.com/harshit-siraswal/studyshare-app/issues/230):
+            // Remove the local minification override once local constrained builds are stable.
+            // Keep release optimized by default.
+            isMinifyEnabled = !disableMinify
+            isShrinkResources = !disableMinify
+            if (disableMinify) {
+                logger.lifecycle(
+                    "Minification disabled via -PdisableMinify=true for local troubleshooting."
+                )
+            }
+        }
+
+        if (enableLocalRelease) {
+            create("localRelease") {
+                initWith(getByName("release"))
+                matchingFallbacks += listOf("release")
+                if (hasReleaseSigning) {
+                    signingConfig = signingConfigs.getByName("release")
+                } else {
+                    signingConfig = signingConfigs.getByName("debug")
+                }
+                isMinifyEnabled = false
+                isShrinkResources = false
+            }
         }
     }
 

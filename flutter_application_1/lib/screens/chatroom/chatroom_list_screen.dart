@@ -55,10 +55,12 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _supabaseService.attachContext(context);
+      if (mounted) {
+        _supabaseService.attachContext(context);
+        _loadWriterRole();
+      }
     });
     _searchFocusNode.addListener(_onSearchFocusChange);
-    _loadWriterRole();
   }
 
   void _onSearchFocusChange() {
@@ -146,12 +148,13 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
       });
       await _loadRooms();
     } catch (e, st) {
-      debugPrint('ChatroomListScreen._loadWriterRole failed: $e\n$st');
+      debugPrint('ChatroomListScreen._loadWriterRole failed: $e\\n$st');
       if (!mounted) return;
       setState(() {
         _isTeacherOrAdmin = false;
         _isLoading = false;
       });
+      await _loadRooms();
     }
   }
 
@@ -188,11 +191,9 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                 backgroundColor: const Color(0xFF1C1C1E),
                 child: _isLoading
                     ? _buildLoadingSkeleton(isDark)
-                    : _isReadOnly
-                    ? _buildCollegeAccessGate(isDark)
                     : _filteredRooms.isEmpty
-                    ? _buildEmptyState(isDark)
-                    : _buildRoomList(isDark, cardColor),
+                        ? _buildEmptyState(isDark)
+                        : _buildRoomList(isDark, cardColor),
               ),
             ),
                 ],
@@ -414,7 +415,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: () => _handleRoomTap(room),
+        onTap: () async => _handleRoomTap(room),
         borderRadius: BorderRadius.circular(24),
         child: Container(
           width: double.infinity,
@@ -489,7 +490,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
 
   // ... helper methods ...
 
-  void _handleRoomTap(Map<String, dynamic> room) {
+  Future<void> _handleRoomTap(Map<String, dynamic> room) async {
     if (_isReadOnly) {
       ScaffoldMessenger.of(
         context,
@@ -514,7 +515,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
     }
 
     try {
-      Navigator.push(
+      await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) => ChatRoomScreen(
@@ -535,31 +536,23 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
     }
   }
 
+  int _extractCountFromMap(Map raw) {
+    final nested = raw['count'];
+    if (nested is int) return nested;
+    return int.tryParse(nested?.toString() ?? '') ?? 0;
+  }
+
   int _safeMemberCount(dynamic raw) {
     if (raw is int) return raw;
     if (raw is String) return int.tryParse(raw) ?? 0;
     if (raw is List && raw.isNotEmpty) {
       final first = raw.first;
-      if (first is Map<String, dynamic>) {
-        final nested = first['count'];
-        if (nested is int) return nested;
-        return int.tryParse(nested?.toString() ?? '') ?? 0;
-      }
       if (first is Map) {
-        final nested = first['count'];
-        if (nested is int) return nested;
-        return int.tryParse(nested?.toString() ?? '') ?? 0;
+        return _extractCountFromMap(first);
       }
-    }
-    if (raw is Map<String, dynamic>) {
-      final nested = raw['count'];
-      if (nested is int) return nested;
-      return int.tryParse(nested?.toString() ?? '') ?? 0;
     }
     if (raw is Map) {
-      final nested = raw['count'];
-      if (nested is int) return nested;
-      return int.tryParse(nested?.toString() ?? '') ?? 0;
+      return _extractCountFromMap(raw);
     }
     return 0;
   }

@@ -5,10 +5,12 @@ class AppConfig {
   static const String _defaultApiUrl = 'https://api.studyshare.in';
   static const String _defaultSupabaseUrl =
       'https://iayuwsvguwfqjgjsvjiy.supabase.co';
-  static const String _defaultSupabaseAnonKey = '';
+  static const String _defaultSupabaseAnonKey = 'YOUR_SUPABASE_ANON_KEY';
   static const String _defaultGiphyApiKey = '';
   static const String _defaultRemoveBgApiKey = '';
   static const String _defaultRecaptchaSiteKey = '';
+  static const String _defaultTenorApiKey = '';
+  static const String _defaultGoogleServerClientId = '';
 
   static const String _supabaseUrlFromEnv = String.fromEnvironment(
     'SUPABASE_URL',
@@ -29,10 +31,16 @@ class AppConfig {
 
   static String get supabaseAnonKey {
     final trimmed = _supabaseAnonKeyFromEnv.trim();
-    if (trimmed.isEmpty || trimmed == 'your-anon-key') {
-      return _defaultSupabaseAnonKey;
+    final effectiveValue = (trimmed.isEmpty || trimmed == 'your-anon-key')
+        ? _defaultSupabaseAnonKey.trim()
+        : trimmed;
+    if (effectiveValue.isEmpty || effectiveValue == 'YOUR_SUPABASE_ANON_KEY') {
+      throw StateError(
+        'AppConfig.supabaseAnonKey is not configured. Set SUPABASE_ANON_KEY '
+        'or update _defaultSupabaseAnonKey in app_config.dart.',
+      );
     }
-    return trimmed;
+    return effectiveValue;
   }
 
   static const String supportEmail = 'support@studyshare.me';
@@ -54,12 +62,12 @@ class AppConfig {
 
   static const String tenorApiKey = String.fromEnvironment(
     'TENOR_API_KEY',
-    defaultValue: '',
+    defaultValue: _defaultTenorApiKey,
   );
 
   static const String googleServerClientId = String.fromEnvironment(
     'GOOGLE_SERVER_CLIENT_ID',
-    defaultValue: '',
+    defaultValue: _defaultGoogleServerClientId,
   );
 
   static const int maxSessionAgeHours = int.fromEnvironment(

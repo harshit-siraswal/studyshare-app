@@ -55,6 +55,24 @@ if (Test-Path "$badgerDir\build.gradle") {
 
 $buildArgs = @("build", "apk", "--release", "--target-platform=android-arm64")
 
+$overrideBuildName = [Environment]::GetEnvironmentVariable("APP_BUILD_NAME")
+if (-not [string]::IsNullOrWhiteSpace($overrideBuildName)) {
+    $buildName = $overrideBuildName.Trim()
+    Write-Host "Using build name override: $buildName" -ForegroundColor Cyan
+    $buildArgs += "--build-name=$buildName"
+}
+
+$overrideBuildNumber = [Environment]::GetEnvironmentVariable("APP_BUILD_NUMBER")
+if (-not [string]::IsNullOrWhiteSpace($overrideBuildNumber)) {
+    $buildNumber = $overrideBuildNumber.Trim()
+    if ($buildNumber -notmatch '^[0-9]+$') {
+        Write-Host "Error: APP_BUILD_NUMBER must be a positive integer." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "Using build number override: $buildNumber" -ForegroundColor Cyan
+    $buildArgs += "--build-number=$buildNumber"
+}
+
 $envFile = Join-Path $PSScriptRoot ".env"
 $envFileContent = $null
 if (Test-Path $envFile) {
@@ -136,6 +154,21 @@ if (-not $env:RECAPTCHA_SITE_KEY -and -not (Test-EnvKeyPresent -Content $envFile
 
 if (-not $env:TENOR_API_KEY -and -not (Test-EnvKeyPresent -Content $envFileContent -Key "TENOR_API_KEY")) {
     Write-Host "TENOR_API_KEY not supplied. Tenor features will be disabled." -ForegroundColor Yellow
+}
+
+$firebaseKeys = @(
+    "FIREBASE_API_KEY",
+    "FIREBASE_APP_ID",
+    "FIREBASE_MESSAGING_SENDER_ID",
+    "FIREBASE_PROJECT_ID",
+    "FIREBASE_AUTH_DOMAIN",
+    "FIREBASE_STORAGE_BUCKET"
+)
+
+foreach ($firebaseKey in $firebaseKeys) {
+    if (-not [Environment]::GetEnvironmentVariable($firebaseKey) -and -not (Test-EnvKeyPresent -Content $envFileContent -Key $firebaseKey)) {
+        Write-Host "$firebaseKey not supplied. Firebase features may fail at runtime." -ForegroundColor Yellow
+    }
 }
 
 # Build APK

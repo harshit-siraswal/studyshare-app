@@ -5,9 +5,12 @@ class SecurityValidators {
   static final RegExp _containsUppercase = RegExp(r'[A-Z]');
   static final RegExp _containsLowercase = RegExp(r'[a-z]');
   static final RegExp _containsDigit = RegExp(r'\d');
+  static final RegExp _horizontalWhitespace = RegExp(r'[ \t]+');
+  static final RegExp _anyWhitespace = RegExp(r'\s+');
   static final RegExp _unsafeControlChars = RegExp(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]');
   static final RegExp _unsafeIdentifierChars = RegExp(r'[^A-Za-z0-9_.:@/\- ]');
   static final RegExp _unsafeFilenameChars = RegExp(r'[^A-Za-z0-9._-]');
+  static const int kMaxPasswordLength = 256;
   static const Set<String> defaultUploadExtensions = <String>{
     '.jpg',
     '.jpeg',
@@ -37,6 +40,9 @@ class SecurityValidators {
     final value = password ?? '';
     if (value.isEmpty) {
       return 'Please enter your password';
+    }
+    if (value.length > kMaxPasswordLength) {
+      return 'Password must be between 12 and 256 characters and include upper-case, lower-case, and a number.';
     }
     if (value.length < 12 ||
         !_containsUppercase.hasMatch(value) ||
@@ -71,8 +77,8 @@ class SecurityValidators {
   }) {
     var normalized = value.replaceAll(_unsafeControlChars, '');
     normalized = allowNewlines
-        ? normalized.replaceAll(RegExp(r'[ \t]+'), ' ')
-        : normalized.replaceAll(RegExp(r'\s+'), ' ');
+      ? normalized.replaceAll(_horizontalWhitespace, ' ')
+      : normalized.replaceAll(_anyWhitespace, ' ');
     normalized = normalized.trim();
     if (normalized.isEmpty) {
       throw ArgumentError('$fieldName is required.');
@@ -105,6 +111,7 @@ class SecurityValidators {
     String value, {
     required String fieldName,
     bool requireHttps = true,
+    Set<String> allowedSchemes = const <String>{'http', 'https'},
   }) {
     final normalized = value.trim();
     if (normalized.isEmpty) {
@@ -114,8 +121,14 @@ class SecurityValidators {
     if (uri == null || !uri.hasScheme || uri.host.trim().isEmpty) {
       throw ArgumentError('$fieldName is not a valid URL.');
     }
-    if (requireHttps && uri.scheme != 'https') {
+    final scheme = uri.scheme.toLowerCase();
+    if (requireHttps && scheme != 'https') {
       throw ArgumentError('$fieldName must use HTTPS.');
+    }
+    if (!requireHttps && !allowedSchemes.contains(scheme)) {
+      throw ArgumentError(
+        '$fieldName uses an unsupported URL scheme in sanitizeUrl.',
+      );
     }
     return normalized;
   }
@@ -133,9 +146,7 @@ class SecurityValidators {
       throw ArgumentError('Filename is too long.');
     }
     if (_unsafeFilenameChars.hasMatch(normalized) ||
-        normalized.contains('..') ||
-        normalized.contains('/') ||
-        normalized.contains('\\')) {
+        normalized.contains('..')) {
       throw ArgumentError('Filename contains invalid characters.');
     }
     final lastDot = normalized.lastIndexOf('.');

@@ -777,6 +777,12 @@ class _StudyScreenState extends State<StudyScreen>
           resources.isEmpty &&
           !_hasActiveFilters) {
         _didRetryInitialEmptyLoad = true;
+        
+        // CRITICAL FIX: Actually unset the relevancy filter so the retry queries all resources
+        setState(() {
+          _resourcesRelevantOnly = false;
+        });
+
         _retryTimer?.cancel();
         _retryTimer = Timer(const Duration(milliseconds: 900), () {
           _retryTimer = null;
@@ -799,6 +805,9 @@ class _StudyScreenState extends State<StudyScreen>
 
       if (!_didRetryInitialEmptyLoad && !refresh && !_hasActiveFilters) {
         _didRetryInitialEmptyLoad = true;
+        setState(() {
+          _resourcesRelevantOnly = false;
+        });
         _retryTimer?.cancel();
         _retryTimer = Timer(const Duration(milliseconds: 900), () {
           _retryTimer = null;
