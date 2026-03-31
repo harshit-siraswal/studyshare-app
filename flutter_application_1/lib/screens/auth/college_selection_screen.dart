@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../../config/app_config.dart';
 import '../../config/theme.dart';
 import '../../models/college.dart';
 import '../../services/supabase_service.dart';
@@ -15,6 +17,66 @@ class CollegeSelectionScreen extends StatefulWidget {
 }
 
 class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
+  static const String _collegeRequestEmail = 'siraswalharshit@gmail.com';
+  static const Duration _collegeFetchTimeout = Duration(seconds: 8);
+  static const List<Map<String, String>> _starterCollegeDirectory = [
+    {
+      'id': 'kiet',
+      'name': 'Krishna Institute of Engineering and Technology',
+      'domain': 'kiet.edu',
+    },
+    {'id': 'iiitbh', 'name': 'IIIT Bhagalpur', 'domain': 'iiitbh.ac.in'},
+    {
+      'id': 'iiitsonepat',
+      'name': 'IIIT Sonepat',
+      'domain': 'iiitsonepat.ac.in',
+    },
+    {'id': 'abes', 'name': 'ABES Engineering College', 'domain': 'abes.ac.in'},
+    {'id': 'du', 'name': 'Delhi University', 'domain': 'du.ac.in'},
+    {
+      'id': 'iitd',
+      'name': 'Indian Institute of Technology Delhi',
+      'domain': 'iitd.ac.in',
+    },
+    {
+      'id': 'iitb',
+      'name': 'Indian Institute of Technology Bombay',
+      'domain': 'iitb.ac.in',
+    },
+    {
+      'id': 'iitm',
+      'name': 'Indian Institute of Technology Madras',
+      'domain': 'smail.iitm.ac.in',
+    },
+    {
+      'id': 'bitspilani',
+      'name': 'Birla Institute of Technology and Science, Pilani',
+      'domain': 'bits-pilani.ac.in',
+    },
+    {
+      'id': 'vit',
+      'name': 'Vellore Institute of Technology',
+      'domain': 'vit.ac.in',
+    },
+    {
+      'id': 'nittrichy',
+      'name': 'National Institute of Technology Tiruchirappalli',
+      'domain': 'nitt.edu',
+    },
+    {'id': 'anna', 'name': 'Anna University', 'domain': 'student.annauniv.edu'},
+    {'id': 'amity', 'name': 'Amity University', 'domain': 'amity.edu'},
+    {
+      'id': 'srm',
+      'name': 'SRM Institute of Science and Technology',
+      'domain': 'srmist.edu.in',
+    },
+    {
+      'id': 'manipal',
+      'name': 'Manipal Institute of Technology',
+      'domain': 'learner.manipal.edu',
+    },
+  ];
+
   final SupabaseService _supabaseService = SupabaseService();
   final TextEditingController _searchController = TextEditingController();
 
@@ -26,6 +88,10 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
   @override
   void initState() {
     super.initState();
+    final starterDirectory = _buildStarterCollegeDirectory();
+    _colleges = starterDirectory;
+    _filteredColleges = starterDirectory;
+    _isLoading = starterDirectory.isEmpty;
     _loadColleges();
     _searchController.addListener(_filterColleges);
   }
@@ -36,23 +102,58 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
     super.dispose();
   }
 
+  List<College> _buildStarterCollegeDirectory() {
+    return _starterCollegeDirectory
+        .map(
+          (entry) => College(
+            id: entry['id'] ?? '',
+            name: entry['name'] ?? '',
+            domain: entry['domain'] ?? '',
+          ),
+        )
+        .where(
+          (college) =>
+              college.id.isNotEmpty &&
+              college.name.isNotEmpty &&
+              college.domain.isNotEmpty,
+        )
+        .toList(growable: false);
+  }
+
   Future<void> _loadColleges() async {
+    final starterDirectory = _buildStarterCollegeDirectory();
+
     try {
-      final colleges = await _supabaseService.getColleges();
+      final colleges = await _supabaseService.getColleges().timeout(
+        _collegeFetchTimeout,
+      );
+      final effectiveColleges = colleges.isNotEmpty
+          ? colleges
+          : starterDirectory;
+
       if (mounted) {
         setState(() {
-          _colleges = colleges;
-          _filteredColleges = colleges;
+          _colleges = effectiveColleges;
+          _filteredColleges = effectiveColleges;
           _isLoading = false;
-          _error = colleges.isEmpty
-              ? 'No colleges are available right now. You can still continue with manual setup.'
+          _error = effectiveColleges.isEmpty
+              ? 'No colleges are available right now. Please request your college via email.'
               : '';
         });
       }
     } catch (e) {
+      debugPrint(
+        'College list fetch failed. Falling back to starter directory: $e',
+      );
       if (mounted) {
         setState(() {
-          _error = 'Failed to load colleges. Please retry or use manual setup.';
+          if (_colleges.isEmpty) {
+            _colleges = starterDirectory;
+            _filteredColleges = starterDirectory;
+          }
+          _error = starterDirectory.isEmpty
+              ? 'Failed to load colleges. Please retry or request your college via email.'
+              : '';
           _isLoading = false;
         });
       }
@@ -131,7 +232,9 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                     style: GoogleFonts.inter(
                       fontSize: 28,
                       fontWeight: FontWeight.bold,
-                      color: isDark ? AppTheme.textOnDark : AppTheme.textPrimary,
+                      color: isDark
+                          ? AppTheme.textOnDark
+                          : AppTheme.textPrimary,
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -191,29 +294,15 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   TextButton.icon(
-                    onPressed: () => _showManualCollegeDialog(isDark),
-                    icon: const Icon(
-                      Icons.edit_rounded,
-                      color: AppTheme.primary,
-                    ),
-                    label: Text(
-                      'Use manual college setup',
-                      style: GoogleFonts.inter(
-                        color: AppTheme.primary,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                  TextButton.icon(
                     onPressed: () {
-                      _showRequestCollegeDialog(isDark);
+                      _openCollegeRequestEmail();
                     },
                     icon: const Icon(
                       Icons.add_circle_outline_rounded,
                       color: AppTheme.primary,
                     ),
                     label: Text(
-                      "Can't find your college? Request to add it",
+                      "Can't find your college? Request to add it by email",
                       style: GoogleFonts.inter(
                         color: AppTheme.primary,
                         fontWeight: FontWeight.w500,
@@ -263,8 +352,8 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
             ),
             const SizedBox(height: 10),
             OutlinedButton(
-              onPressed: () => _showManualCollegeDialog(isDark),
-              child: const Text('Use manual setup'),
+              onPressed: _openCollegeRequestEmail,
+              child: const Text('Request your college via email'),
             ),
           ],
         ),
@@ -295,8 +384,8 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
             ),
             const SizedBox(height: 12),
             OutlinedButton(
-              onPressed: () => _showManualCollegeDialog(isDark),
-              child: const Text('Use manual setup'),
+              onPressed: _openCollegeRequestEmail,
+              child: const Text('Request your college via email'),
             ),
           ],
         ),
@@ -441,256 +530,49 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
     );
   }
 
-  Future<void> _showRequestCollegeDialog(bool isDark) async {
-    final parentContext = context;
-    final scaffoldMessenger = ScaffoldMessenger.of(parentContext);
-    final nameController = TextEditingController();
-    final domainController = TextEditingController();
-
-    await showModalBottomSheet(
-      context: context,
-      backgroundColor: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
-      isScrollControlled: true, // Better for keyboards
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return Padding(
-          padding: EdgeInsets.only(
-            left: 24,
-            right: 24,
-            top: 24,
-            bottom:
-                MediaQuery.of(context).viewInsets.bottom +
-                24, // Handle keyboard
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Request New College',
-                style: GoogleFonts.inter(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: isDark ? AppTheme.textOnDark : AppTheme.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'If your college is not listed, you can request to add it.',
-                style: GoogleFonts.inter(color: AppTheme.textMuted),
-              ),
-              const SizedBox(height: 24),
-              _buildStyledTextField(
-                controller: nameController,
-                hintText: 'College Name',
-                isDark: isDark,
-              ),
-              const SizedBox(height: 16),
-              _buildStyledTextField(
-                controller: domainController,
-                hintText: 'College Email Domain (e.g., college.edu)',
-                isDark: isDark,
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () {
-                    final name = nameController.text.trim();
-                    final domain = domainController.text.trim().toLowerCase();
-                    if (name.isEmpty || domain.isEmpty) {
-                      scaffoldMessenger.showSnackBar(
-                        const SnackBar(
-                          content: Text('Please enter college name and domain'),
-                        ),
-                      );
-                      return;
-                    }
-                    if (!_isValidDomain(domain)) {
-                      scaffoldMessenger.showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Please enter a valid college domain (e.g., kiet.edu)',
-                          ),
-                        ),
-                      );
-                      return;
-                    }
-
-                    scaffoldMessenger.showSnackBar(
-                      const SnackBar(
-                        content: Text(
-                          'College request submission is coming soon. Please contact support for now.',
-                        ),
-                      ),
-                    );
-                    Navigator.pop(context);
-                  },
-                  child: Text(
-                    'Request Coming Soon',
-                    style: GoogleFonts.inter(fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
+  Future<void> _openCollegeRequestEmail() async {
+    final requestedName = _searchController.text.trim();
+    final Uri emailUri = Uri(
+      scheme: 'mailto',
+      path: _collegeRequestEmail,
+      queryParameters: {
+        'subject': 'StudyShare College Add Request',
+        'body': [
+          'Hi,',
+          '',
+          'Please add my college to StudyShare.',
+          if (requestedName.isNotEmpty)
+            'Requested college name: $requestedName',
+          'App version: ${AppConfig.appVersion}',
+          '',
+          'Thanks.',
+        ].join('\n'),
       },
     );
 
-    // Dispose controllers after sheet is closed
-    nameController.dispose();
-    domainController.dispose();
-  }
-
-  Future<void> _showManualCollegeDialog(bool isDark) async {
-    final parentContext = context;
-    final scaffoldMessenger = ScaffoldMessenger.of(parentContext);
-    final nameController = TextEditingController();
-    final domainController = TextEditingController();
-
-    await showModalBottomSheet(
-      context: context,
-      backgroundColor: isDark ? AppTheme.darkSurface : AppTheme.lightCard,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return Padding(
-          padding: EdgeInsets.only(
-            left: 24,
-            right: 24,
-            top: 24,
-            bottom: MediaQuery.of(context).viewInsets.bottom + 24,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Manual College Setup',
-                style: GoogleFonts.inter(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: isDark ? AppTheme.textOnDark : AppTheme.textPrimary,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Enter your college details to continue if listing is unavailable.',
-                style: GoogleFonts.inter(color: AppTheme.textMuted),
-              ),
-              const SizedBox(height: 18),
-              _buildStyledTextField(
-                controller: nameController,
-                hintText: 'College Name',
-                isDark: isDark,
-              ),
-              const SizedBox(height: 14),
-              _buildStyledTextField(
-                controller: domainController,
-                hintText: 'College Domain (e.g., kiet.edu)',
-                isDark: isDark,
-              ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () {
-                    final name = nameController.text.trim();
-                    final domain = domainController.text
-                        .trim()
-                        .toLowerCase()
-                        .replaceAll('@', '');
-                    if (name.isEmpty || domain.isEmpty) {
-                      scaffoldMessenger.showSnackBar(
-                        const SnackBar(
-                          content: Text('Please enter college name and domain'),
-                        ),
-                      );
-                      return;
-                    }
-                    if (!_isValidDomain(domain)) {
-                      scaffoldMessenger.showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Please enter a valid college domain (e.g., kiet.edu)',
-                          ),
-                        ),
-                      );
-                      return;
-                    }
-
-                    final generatedId =
-                        'local-${domain.replaceAll('.', '-')}-${DateTime.now().millisecondsSinceEpoch}';
-                    Navigator.pop(context);
-                    _selectCollege(
-                      College(
-                        id: generatedId,
-                        name: name,
-                        domain: domain,
-                        isActive: true,
-                      ),
-                    );
-                  },
-                  child: Text(
-                    'Continue',
-                    style: GoogleFonts.inter(fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ),
-            ],
+    try {
+      final launched = await launchUrl(
+        emailUri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not open email app. Please email siraswalharshit@gmail.com manually.',
+            ),
           ),
         );
-      },
-    );
-
-    nameController.dispose();
-    domainController.dispose();
-  }
-
-  Widget _buildStyledTextField({
-    required TextEditingController controller,
-    required String hintText,
-    required bool isDark,
-  }) {
-    return TextField(
-      controller: controller,
-      style: GoogleFonts.inter(
-        color: isDark ? AppTheme.textOnDark : AppTheme.textPrimary,
-      ),
-      decoration: InputDecoration(
-        hintText: hintText,
-        hintStyle: GoogleFonts.inter(color: AppTheme.textMuted),
-        filled: true,
-        fillColor: isDark ? AppTheme.darkCard : AppTheme.lightSurface,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(
-            color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not open email app. Please email siraswalharshit@gmail.com manually.',
           ),
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(
-            color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
-          ),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppTheme.primary, width: 1.4),
-        ),
-      ),
-    );
-  }
-
-  bool _isValidDomain(String domain) {
-    final pattern = RegExp(
-      r'^(?!\.)(?!.*\.\.)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$',
-    );
-    return pattern.hasMatch(domain);
+      );
+    }
   }
 }

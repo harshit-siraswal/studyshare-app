@@ -108,8 +108,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
 
     _loadWriterRole();
     _loadRoomData();
-    _subscribeToPosts();
-    _subscribeToPresence();
+    if (_supabaseService.hasConfiguredSupabaseAnonKey) {
+      _subscribeToPosts();
+      _subscribeToPresence();
+    } else {
+      debugPrint(
+        'Supabase anon key missing; room realtime subscriptions disabled.',
+      );
+    }
   }
 
   @override
@@ -144,11 +150,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
 
       if (requestId != _loadRequestId || !mounted) return;
 
-      final posts = (results[0] as List<Map<String, dynamic>>)
-          .map(_normalizePostMetrics)
-          .toList();
-      final info = results[1] as Map<String, dynamic>?;
-      final isAdmin = results[2] as bool;
+      final posts = _coerceMapList(
+        results[0],
+      ).map(_normalizePostMetrics).toList();
+      final info = _coerceMapOrNull(results[1]);
+      final isAdmin = results[2] is bool ? results[2] as bool : false;
 
       // Handle User Room IDs (List -> Set)
       final rawUserRoomIds = results[3];
@@ -166,7 +172,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
           ? rawSavedPostIds.map((e) => e.toString()).toSet()
           : <String>{};
 
-      final userVotes = results[5] as Map<String, int>;
+      final userVotes = _coerceStringIntMap(results[5]);
 
       // Update saved status from batch
       for (var post in posts) {
@@ -184,8 +190,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         setState(() {
           _posts = posts;
           _roomInfo = info;
-          _isAdmin = isAdmin;
-          _isMember = memberCheckIds.contains(widget.roomId);
+          _isAdmin = isAdmin || (info?['isAdmin'] == true);
+          _isMember =
+              memberCheckIds.contains(widget.roomId) ||
+              (info?['isMember'] == true);
           _isLoading = false;
         });
 
@@ -246,6 +254,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   }
 
   void _subscribeToPosts() {
+    if (!_supabaseService.hasConfiguredSupabaseAnonKey) {
+      return;
+    }
+
     // Config debounce duration
     const debounceDuration = Duration(milliseconds: 300);
 
@@ -300,6 +312,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   }
 
   void _subscribeToPresence() {
+    if (!_supabaseService.hasConfiguredSupabaseAnonKey) {
+      return;
+    }
+
     _presenceRetryCount++;
     final anonymizedUserId = _getAnonymizedUserId();
 
@@ -504,6 +520,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   Widget build(BuildContext context) {
     // Respect system theme/settings
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    assert(() {
+      _showRoomInfo;
+      return true;
+    }());
 
     return Scaffold(
       backgroundColor: isDark
@@ -586,21 +606,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
             PopupMenuButton<String>(
               tooltip: 'Room options',
               padding: EdgeInsets.zero,
-              child: Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? Colors.white10
-                      : Colors.black.withValues(alpha: 0.06),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(
-                  Icons.more_vert,
-                  color: isDark ? Colors.white70 : Colors.black54,
-                  size: 18,
-                ),
-              ),
               color: isDark ? const Color(0xFF111827) : Colors.white,
               elevation: 8,
               offset: const Offset(0, 12),
@@ -773,6 +778,21 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                   ),
                 ],
               ],
+              child: Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? Colors.white10
+                      : Colors.black.withValues(alpha: 0.06),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.more_vert,
+                  color: isDark ? Colors.white70 : Colors.black54,
+                  size: 18,
+                ),
+              ),
             ),
         ],
       ),
@@ -811,7 +831,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
               right: 16,
               bottom: 32,
               child: Hero(
-                tag: 'fab_main',
+                tag: 'room_fab_main',
                 child: Container(
                   width: 56,
                   height: 56,
@@ -994,8 +1014,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
     ].join('\n');
 
     final authorName = post['author_name'] ?? 'User';
-    final authorEmail =
-        (post['author_email'] ?? post['user_email'] ?? '').toString();
+    final authorEmail = (post['author_email'] ?? post['user_email'] ?? '')
+        .toString();
     final isAuthor =
         authorEmail.isNotEmpty &&
         authorEmail.toLowerCase() == widget.userEmail.toLowerCase();
@@ -1050,8 +1070,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                 ]);
                 final resolvedPhoto =
                     (cachedPhoto != null && cachedPhoto.isNotEmpty)
-                        ? cachedPhoto
-                        : photoUrl;
+                    ? cachedPhoto
+                    : photoUrl;
                 if (resolvedPhoto.isEmpty && normalizedEmail.isNotEmpty) {
                   _ensureProfilePhotoCached(normalizedEmail);
                 }
@@ -1189,7 +1209,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                                     const SizedBox(width: 10),
                                     Text(
                                       'Edit Post',
-                                      style: GoogleFonts.inter(color: textColor),
+                                      style: GoogleFonts.inter(
+                                        color: textColor,
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -1971,9 +1993,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                               }
                               setModalState(() => isSaving = true);
                               final updatedContent = title.isNotEmpty
-                                  ? (body.isNotEmpty
-                                        ? '$title\n$body'
-                                        : title)
+                                  ? (body.isNotEmpty ? '$title\n$body' : title)
                                   : body;
                               try {
                                 await _supabaseService.updatePost(
@@ -2004,9 +2024,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                                 }
                                 if (!mounted) return;
                                 ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                    content: Text('Post updated'),
-                                  ),
+                                  const SnackBar(content: Text('Post updated')),
                                 );
                               } catch (e) {
                                 if (sheetCtx.mounted) {
@@ -2110,10 +2128,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(
-              'Delete',
-              style: TextStyle(color: Colors.red),
-            ),
+            child: const Text('Delete', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -2128,14 +2143,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         _posts.removeWhere((entry) => entry['id']?.toString() == postId);
         _savedPosts.remove(postId);
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Post deleted')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Post deleted')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to delete: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to delete: $e')));
     }
   }
 
@@ -2162,6 +2177,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
     Navigator.pop(context);
   }
 
+  // ignore: unused_element
   void _showRoomInfo() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
@@ -2177,431 +2193,446 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.roomName,
-                          style: GoogleFonts.inter(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: isDark ? Colors.white : Colors.black,
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.roomName,
+                            style: GoogleFonts.inter(
+                              fontSize: 22,
+                              fontWeight: FontWeight.bold,
+                              color: isDark ? Colors.white : Colors.black,
+                            ),
                           ),
+                          if (widget.description.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                widget.description,
+                                style: GoogleFonts.inter(
+                                  fontSize: 14,
+                                  color: AppTheme.textMuted,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(dialogCtx),
+                      color: AppTheme.textMuted,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                _buildInfoRow(
+                  Icons.people_outline,
+                  'Total Members',
+                  '${_roomInfo?['member_count'] ?? 0}',
+                  isDark,
+                  onTap: _isAdmin
+                      ? () {
+                          Navigator.pop(dialogCtx);
+                          _showManageMembersSheet();
+                        }
+                      : null,
+                ),
+                const SizedBox(height: 16),
+                _buildInfoRow(
+                  Icons.admin_panel_settings_outlined,
+                  'Created By',
+                  '${_roomInfo?['created_by'] ?? "Unknown"}',
+                  isDark,
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Admins & Members',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? Colors.white70 : Colors.black54,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                FutureBuilder<List<Map<String, dynamic>>>(
+                  future: _supabaseService.getRoomMembers(widget.roomId),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        child: Center(child: CircularProgressIndicator()),
+                      );
+                    }
+
+                    if (snapshot.hasError) {
+                      return Text(
+                        'Could not load members right now',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: AppTheme.textMuted,
                         ),
-                        if (widget.description.isNotEmpty)
+                      );
+                    }
+
+                    final members = snapshot.data ?? const [];
+                    if (members.isEmpty) {
+                      return Text(
+                        'No members found',
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          color: AppTheme.textMuted,
+                        ),
+                      );
+                    }
+
+                    final admins = members
+                        .where(
+                          (m) =>
+                              (m['role'] ?? 'member')
+                                  .toString()
+                                  .toLowerCase() ==
+                              'admin',
+                        )
+                        .toList();
+                    final nonAdmins = members
+                        .where(
+                          (m) =>
+                              (m['role'] ?? 'member')
+                                  .toString()
+                                  .toLowerCase() !=
+                              'admin',
+                        )
+                        .toList();
+                    final preview = [...admins, ...nonAdmins].take(6).toList();
+
+                    return Column(
+                      children: [
+                        ...preview.map((member) {
+                          final email = (member['user_email'] ?? '')
+                              .toString()
+                              .trim();
+                          final role = (member['role'] ?? 'member')
+                              .toString()
+                              .toLowerCase();
+                          final photoUrl = _resolvePhotoUrl(member, const [
+                            'profile_photo_url',
+                            'photo_url',
+                            'avatar_url',
+                          ]);
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Row(
+                              children: [
+                                UserAvatar(
+                                  radius: 14,
+                                  displayName: _memberDisplayName(member),
+                                  photoUrl: photoUrl.isNotEmpty
+                                      ? photoUrl
+                                      : null,
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    _memberDisplayName(member),
+                                    style: GoogleFonts.inter(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: isDark
+                                          ? Colors.white
+                                          : const Color(0xFF1E293B),
+                                    ),
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 4,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: role == 'admin'
+                                        ? AppTheme.primary.withValues(
+                                            alpha: 0.14,
+                                          )
+                                        : Colors.grey.withValues(alpha: 0.16),
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                  child: Text(
+                                    role == 'admin' ? 'Admin' : 'Member',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: role == 'admin'
+                                          ? AppTheme.primary
+                                          : AppTheme.textMuted,
+                                    ),
+                                  ),
+                                ),
+                                if (email.toLowerCase() ==
+                                    widget.userEmail.toLowerCase())
+                                  Padding(
+                                    padding: const EdgeInsets.only(left: 6),
+                                    child: Text(
+                                      'You',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 11,
+                                        color: AppTheme.textMuted,
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          );
+                        }),
+                        if (members.length > preview.length)
                           Padding(
                             padding: const EdgeInsets.only(top: 4),
                             child: Text(
-                              widget.description,
+                              '+${members.length - preview.length} more',
                               style: GoogleFonts.inter(
-                                fontSize: 14,
+                                fontSize: 12,
                                 color: AppTheme.textMuted,
                               ),
                             ),
                           ),
                       ],
-                    ),
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.close),
-                    onPressed: () => Navigator.pop(dialogCtx),
-                    color: AppTheme.textMuted,
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              _buildInfoRow(
-                Icons.people_outline,
-                'Total Members',
-                '${_roomInfo?['member_count'] ?? 0}',
-                isDark,
-                onTap: _isAdmin
-                    ? () {
+                    );
+                  },
+                ),
+
+                if (_isAdmin) ...[
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
                         Navigator.pop(dialogCtx);
                         _showManageMembersSheet();
-                      }
-                    : null,
-              ),
-              const SizedBox(height: 16),
-              _buildInfoRow(
-                Icons.admin_panel_settings_outlined,
-                'Created By',
-                '${_roomInfo?['created_by'] ?? "Unknown"}',
-                isDark,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Admins & Members',
-                style: GoogleFonts.inter(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: isDark ? Colors.white70 : Colors.black54,
-                ),
-              ),
-              const SizedBox(height: 8),
-              FutureBuilder<List<Map<String, dynamic>>>(
-                future: _supabaseService.getRoomMembers(widget.roomId),
-                builder: (context, snapshot) {
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Center(child: CircularProgressIndicator()),
-                    );
-                  }
-
-                  if (snapshot.hasError) {
-                    return Text(
-                      'Could not load members right now',
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        color: AppTheme.textMuted,
+                      },
+                      icon: const Icon(Icons.group_outlined),
+                      label: const Text('Manage Members / Make Admin'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTheme.primary,
+                        side: BorderSide(
+                          color: AppTheme.primary.withValues(alpha: 0.4),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
-                    );
-                  }
+                    ),
+                  ),
+                ],
 
-                  final members = snapshot.data ?? const [];
-                  if (members.isEmpty) {
-                    return Text(
-                      'No members found',
-                      style: GoogleFonts.inter(
-                        fontSize: 12,
-                        color: AppTheme.textMuted,
+                if (_isAdmin && _roomInfo?['is_private'] == true) ...[
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: AppTheme.primary.withValues(alpha: 0.3),
                       ),
-                    );
-                  }
-
-                  final admins = members
-                      .where(
-                        (m) =>
-                            (m['role'] ?? 'member').toString().toLowerCase() ==
-                            'admin',
-                      )
-                      .toList();
-                  final nonAdmins = members
-                      .where(
-                        (m) =>
-                            (m['role'] ?? 'member').toString().toLowerCase() !=
-                            'admin',
-                      )
-                      .toList();
-                  final preview = [...admins, ...nonAdmins].take(6).toList();
-
-                  return Column(
-                    children: [
-                      ...preview.map((member) {
-                        final email =
-                            (member['user_email'] ?? '').toString().trim();
-                        final role =
-                            (member['role'] ?? 'member').toString().toLowerCase();
-                        final photoUrl = _resolvePhotoUrl(member, const [
-                          'profile_photo_url',
-                          'photo_url',
-                          'avatar_url',
-                        ]);
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Row(
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.vpn_key_outlined, color: AppTheme.primary),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              UserAvatar(
-                                radius: 14,
-                                displayName: _memberDisplayName(member),
-                                photoUrl: photoUrl.isNotEmpty ? photoUrl : null,
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  _memberDisplayName(member),
-                                  style: GoogleFonts.inter(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: isDark
-                                        ? Colors.white
-                                        : const Color(0xFF1E293B),
-                                  ),
+                              Text(
+                                'Room Code',
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  color: AppTheme.primary,
                                 ),
                               ),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 4,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: role == 'admin'
-                                      ? AppTheme.primary.withValues(alpha: 0.14)
-                                      : Colors.grey.withValues(alpha: 0.16),
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                                child: Text(
-                                  role == 'admin' ? 'Admin' : 'Member',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w600,
-                                    color: role == 'admin'
-                                        ? AppTheme.primary
-                                        : AppTheme.textMuted,
-                                  ),
+                              Text(
+                                _roomInfo?['code'] ?? 'N/A',
+                                style: GoogleFonts.inter(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppTheme.primary,
+                                  letterSpacing: 2,
                                 ),
                               ),
-                              if (email.toLowerCase() ==
-                                  widget.userEmail.toLowerCase())
-                                Padding(
-                                  padding: const EdgeInsets.only(left: 6),
-                                  child: Text(
-                                    'You',
-                                    style: GoogleFonts.inter(
-                                      fontSize: 11,
-                                      color: AppTheme.textMuted,
-                                    ),
-                                  ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: Icon(
+                            Icons.copy_rounded,
+                            color: AppTheme.primary,
+                          ),
+                          onPressed: () {
+                            Clipboard.setData(
+                              ClipboardData(text: _roomInfo?['code'] ?? ''),
+                            );
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Code copied!')),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+
+                if (_isMember) ...[
+                  const SizedBox(height: 32),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        final confirm = await showDialog<bool>(
+                          context: dialogCtx,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('Leave Room?'),
+                            content: const Text(
+                              'Are you sure you want to leave this room?',
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx, false),
+                                child: const Text('Cancel'),
+                              ),
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx, true),
+                                child: const Text(
+                                  'Leave',
+                                  style: TextStyle(color: Colors.red),
                                 ),
+                              ),
                             ],
                           ),
                         );
-                      }),
-                      if (members.length > preview.length)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Text(
-                            '+${members.length - preview.length} more',
-                            style: GoogleFonts.inter(
-                              fontSize: 12,
-                              color: AppTheme.textMuted,
-                            ),
-                          ),
-                        ),
-                    ],
-                  );
-                },
-              ),
 
-              if (_isAdmin) ...[
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () {
-                      Navigator.pop(dialogCtx);
-                      _showManageMembersSheet();
-                    },
-                    icon: const Icon(Icons.group_outlined),
-                    label: const Text('Manage Members / Make Admin'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppTheme.primary,
-                      side: BorderSide(
-                        color: AppTheme.primary.withValues(alpha: 0.4),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-
-              if (_isAdmin && _roomInfo?['is_private'] == true) ...[
-                const SizedBox(height: 16),
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: AppTheme.primary.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: AppTheme.primary.withValues(alpha: 0.3),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.vpn_key_outlined, color: AppTheme.primary),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Room Code',
-                              style: GoogleFonts.inter(
-                                fontSize: 12,
-                                color: AppTheme.primary,
-                              ),
-                            ),
-                            Text(
-                              _roomInfo?['code'] ?? 'N/A',
-                              style: GoogleFonts.inter(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: AppTheme.primary,
-                                letterSpacing: 2,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        icon: Icon(Icons.copy_rounded, color: AppTheme.primary),
-                        onPressed: () {
-                          Clipboard.setData(
-                            ClipboardData(text: _roomInfo?['code'] ?? ''),
-                          );
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Code copied!')),
-                          );
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-
-              if (_isMember) ...[
-                const SizedBox(height: 32),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () async {
-                      final confirm = await showDialog<bool>(
-                        context: dialogCtx,
-                        builder: (ctx) => AlertDialog(
-                          title: const Text('Leave Room?'),
-                          content: const Text(
-                            'Are you sure you want to leave this room?',
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(ctx, false),
-                              child: const Text('Cancel'),
-                            ),
-                            TextButton(
-                              onPressed: () => Navigator.pop(ctx, true),
-                              child: const Text(
-                                'Leave',
-                                style: TextStyle(color: Colors.red),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-
-                      if (confirm == true) {
-                        if (!dialogCtx.mounted) return;
-                        if (!mounted) return;
-                        final roomNavigator = Navigator.of(context);
-                        final dialogNavigator = Navigator.of(dialogCtx);
-                        final messenger = ScaffoldMessenger.of(context);
-                        try {
-                          await _backendApiService.leaveChatRoom(
-                            roomId: widget.roomId,
-                            context: dialogCtx,
-                          );
-                          if (!dialogCtx.mounted || !mounted) return;
-                          dialogNavigator.pop(); // Close dialog
-                          roomNavigator.pop(); // Close room screen
-                          messenger.showSnackBar(
-                            const SnackBar(
-                              content: Text('Left room successfully'),
-                            ),
-                          );
-                        } catch (e) {
+                        if (confirm == true) {
+                          if (!dialogCtx.mounted) return;
                           if (!mounted) return;
-                          messenger.showSnackBar(
-                            SnackBar(content: Text('Failed to leave room: $e')),
-                          );
+                          final roomNavigator = Navigator.of(context);
+                          final dialogNavigator = Navigator.of(dialogCtx);
+                          final messenger = ScaffoldMessenger.of(context);
+                          try {
+                            await _backendApiService.leaveChatRoom(
+                              roomId: widget.roomId,
+                              context: dialogCtx,
+                            );
+                            if (!dialogCtx.mounted || !mounted) return;
+                            dialogNavigator.pop(); // Close dialog
+                            roomNavigator.pop(); // Close room screen
+                            messenger.showSnackBar(
+                              const SnackBar(
+                                content: Text('Left room successfully'),
+                              ),
+                            );
+                          } catch (e) {
+                            if (!mounted) return;
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text('Failed to leave room: $e'),
+                              ),
+                            );
+                          }
                         }
-                      }
-                    },
-                    icon: const Icon(
-                      Icons.exit_to_app_rounded,
-                      color: Colors.white,
-                    ),
-                    label: const Text('Leave Room'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.redAccent,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                      },
+                      icon: const Icon(
+                        Icons.exit_to_app_rounded,
+                        color: Colors.white,
+                      ),
+                      label: const Text('Leave Room'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.redAccent,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
 
-              // Delete Room (Admin only)
-              if (_isAdmin) ...[
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () async {
-                      final confirm = await showDialog<bool>(
-                        context: dialogCtx,
-                        builder: (ctx) => AlertDialog(
-                          title: const Text('Delete Room?'),
-                          content: const Text(
-                            'This will permanently delete the room and all its posts. This action cannot be undone.',
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(ctx, false),
-                              child: const Text('Cancel'),
+                // Delete Room (Admin only)
+                if (_isAdmin) ...[
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: () async {
+                        final confirm = await showDialog<bool>(
+                          context: dialogCtx,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('Delete Room?'),
+                            content: const Text(
+                              'This will permanently delete the room and all its posts. This action cannot be undone.',
                             ),
-                            TextButton(
-                              onPressed: () => Navigator.pop(ctx, true),
-                              child: const Text(
-                                'Delete',
-                                style: TextStyle(
-                                  color: Colors.red,
-                                  fontWeight: FontWeight.bold,
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx, false),
+                                child: const Text('Cancel'),
+                              ),
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx, true),
+                                child: const Text(
+                                  'Delete',
+                                  style: TextStyle(
+                                    color: Colors.red,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                               ),
-                            ),
-                          ],
-                        ),
-                      );
+                            ],
+                          ),
+                        );
 
-                      if (confirm == true) {
-                        if (!dialogCtx.mounted) return;
-                        if (!mounted) return;
-                        final roomNavigator = Navigator.of(context);
-                        final dialogNavigator = Navigator.of(dialogCtx);
-                        final messenger = ScaffoldMessenger.of(context);
-                        try {
-                          await _supabaseService.deleteRoom(widget.roomId);
-                          if (!dialogCtx.mounted || !mounted) return;
-                          dialogNavigator.pop(); // Close dialog
-                          roomNavigator.pop(); // Close room screen
-                          messenger.showSnackBar(
-                            const SnackBar(
-                              content: Text('Room deleted successfully'),
-                            ),
-                          );
-                        } catch (e) {
+                        if (confirm == true) {
+                          if (!dialogCtx.mounted) return;
                           if (!mounted) return;
-                          messenger.showSnackBar(
-                            SnackBar(
-                              content: Text('Failed to delete room: $e'),
-                            ),
-                          );
+                          final roomNavigator = Navigator.of(context);
+                          final dialogNavigator = Navigator.of(dialogCtx);
+                          final messenger = ScaffoldMessenger.of(context);
+                          try {
+                            await _supabaseService.deleteRoom(widget.roomId);
+                            if (!dialogCtx.mounted || !mounted) return;
+                            dialogNavigator.pop(); // Close dialog
+                            roomNavigator.pop(); // Close room screen
+                            messenger.showSnackBar(
+                              const SnackBar(
+                                content: Text('Room deleted successfully'),
+                              ),
+                            );
+                          } catch (e) {
+                            if (!mounted) return;
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text('Failed to delete room: $e'),
+                              ),
+                            );
+                          }
                         }
-                      }
-                    },
-                    icon: const Icon(
-                      Icons.delete_forever_rounded,
-                      color: Colors.white,
-                    ),
-                    label: const Text('Delete Room (Admin)'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red.shade900,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                      },
+                      icon: const Icon(
+                        Icons.delete_forever_rounded,
+                        color: Colors.white,
+                      ),
+                      label: const Text('Delete Room (Admin)'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red.shade900,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
               ],
             ),
           ),
@@ -3027,6 +3058,30 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
     return 0;
   }
 
+  List<Map<String, dynamic>> _coerceMapList(dynamic value) {
+    if (value is! List) return const <Map<String, dynamic>>[];
+    return value
+        .whereType<Map>()
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .toList();
+  }
+
+  Map<String, dynamic>? _coerceMapOrNull(dynamic value) {
+    if (value is! Map) return null;
+    return Map<String, dynamic>.from(value);
+  }
+
+  Map<String, int> _coerceStringIntMap(dynamic value) {
+    if (value is! Map) return const <String, int>{};
+    final normalized = <String, int>{};
+    value.forEach((key, val) {
+      final textKey = key.toString().trim();
+      if (textKey.isEmpty) return;
+      normalized[textKey] = _asSafeInt(val);
+    });
+    return normalized;
+  }
+
   Map<String, dynamic> _normalizePostMetrics(Map<String, dynamic> post) {
     final normalized = Map<String, dynamic>.from(post);
     normalized['upvotes'] = _asSafeInt(normalized['upvotes']);
@@ -3040,7 +3095,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   void _primePhotoCacheFromPosts(List<Map<String, dynamic>> posts) {
     for (final post in posts) {
       final email = _normalizeEmail(
-        post['author_email']?.toString() ?? post['user_email']?.toString() ?? '',
+        post['author_email']?.toString() ??
+            post['user_email']?.toString() ??
+            '',
       );
       if (email.isEmpty || _profilePhotoCache.containsKey(email)) continue;
       final resolved = _resolvePhotoUrl(post, const [

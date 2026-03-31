@@ -145,6 +145,7 @@ flutter:
   # Assets for the application
   assets:
     - assets/images/
+    - assets/icon/
     - assets/sounds/
     - assets/videos/
     - assets/animations/

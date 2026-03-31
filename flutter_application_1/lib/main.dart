@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart'
     show debugPrint, debugPrintStack, kIsWeb;
 import 'dart:ui' show PlatformDispatcher;
+import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -115,21 +116,22 @@ Future<bool> _requestPermissions() async {
   if (kIsWeb) return true; // Skip on web
 
   if (Platform.isAndroid) {
-    // Do not block app startup on broad media/storage permissions.
-    // Those are requested at the exact feature entry points (picker/share).
-    // Only notifications are requested here and failures are non-blocking.
+    // Do not show runtime permission dialogs during bootstrap. Requesting
+    // notifications while the splash is still transitioning can trigger
+    // focus-loss ANRs on some Android builds.
     try {
       final androidInfo = await DeviceInfoPlugin().androidInfo;
       if (androidInfo.version.sdkInt >= 33) {
-        await Permission.notification.request();
+        final status = await Permission.notification.status;
+        debugPrint('Notification permission preflight status: $status');
       }
     } on PlatformException catch (e) {
       debugPrint(
-        'Notification permission request failed (PlatformException): ${e.message ?? e}',
+        'Notification permission preflight failed (PlatformException): ${e.message ?? e}',
       );
     } on Exception catch (e) {
       debugPrint(
-        'Notification permission request error (${e.runtimeType}): $e',
+        'Notification permission preflight error (${e.runtimeType}): $e',
       );
     }
     return true;
@@ -142,6 +144,7 @@ Future<bool> _requestPermissions() async {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  GoogleFonts.config.allowRuntimeFetching = true;
 
   // Global error handler — works in release mode
   FlutterError.onError = (details) {
@@ -423,11 +426,9 @@ class _AppRootState extends State<AppRoot> {
         return;
       }
 
-      final hasPermissions = await _requestPermissions();
-      if (!hasPermissions) {
-        if (mounted) setState(() => _appState = AppState.permissionError);
-        return;
-      }
+      // Keep startup non-blocking; push initialization handles any runtime
+      // notification prompt after the app is interactive.
+      unawaited(_requestPermissions());
 
       // Initialize heavy services after the splash screen has rendered.
       // DownloadService opens Hive boxes, so Hive must complete first.

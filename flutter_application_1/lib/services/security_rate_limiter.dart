@@ -82,8 +82,8 @@ class SlidingWindowRateLimiter {
     final cutoff = currentTime.subtract(window);
     events.removeWhere((timestamp) => timestamp.isBefore(cutoff));
     if (events.isEmpty) {
-      _removeKey(key);
-      _eventsByKey[key] = <DateTime>[];
+      // Keep both maps in sync and preserve LRU metadata for this active key.
+      events.clear();
     }
 
     if (cost > maxEvents) {
@@ -94,7 +94,7 @@ class SlidingWindowRateLimiter {
       );
     }
 
-    final activeEvents = _eventsByKey.putIfAbsent(key, () => <DateTime>[]);
+    final activeEvents = _eventsByKey[key]!;
 
     if (activeEvents.length + cost > maxEvents) {
       final oldest = activeEvents.isEmpty ? currentTime : activeEvents.first;
@@ -117,10 +117,11 @@ class SlidingWindowRateLimiter {
   }
 
   void clear(String key) {
-    _eventsByKey.remove(key);
+    _removeKey(key);
   }
 
   void clearAll() {
     _eventsByKey.clear();
+    _lastAccessByKey.clear();
   }
 }

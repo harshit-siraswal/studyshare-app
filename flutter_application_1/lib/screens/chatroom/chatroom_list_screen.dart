@@ -148,11 +148,10 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
       });
       await _loadRooms();
     } catch (e, st) {
-      debugPrint('ChatroomListScreen._loadWriterRole failed: $e\\n$st');
+      debugPrint('ChatroomListScreen._loadWriterRole failed: $e\n$st');
       if (!mounted) return;
       setState(() {
         _isTeacherOrAdmin = false;
-        _isLoading = false;
       });
       await _loadRooms();
     }
@@ -325,7 +324,8 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
     );
   }
 
-  Widget _buildCollegeAccessGate(bool isDark) {
+  // ignore: unused_element
+  Widget buildCollegeAccessGate(bool isDark) {
     return ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.fromLTRB(20, 24, 20, _bottomNavSpacing),

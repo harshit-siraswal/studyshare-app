@@ -58,6 +58,11 @@ $buildArgs = @("build", "apk", "--release", "--target-platform=android-arm64")
 $overrideBuildName = [Environment]::GetEnvironmentVariable("APP_BUILD_NAME")
 if (-not [string]::IsNullOrWhiteSpace($overrideBuildName)) {
     $buildName = $overrideBuildName.Trim()
+    $allowedBuildNamePattern = '^[0-9]+(?:\.[0-9]+)*(?:-[0-9A-Za-z]+(?:\.[0-9A-Za-z]+)*)?$'
+    if ($buildName -notmatch $allowedBuildNamePattern) {
+        Write-Host "Error: APP_BUILD_NAME must use semantic-version style characters only (digits, dots, and optional prerelease suffix like -rc.1)." -ForegroundColor Red
+        exit 1
+    }
     Write-Host "Using build name override: $buildName" -ForegroundColor Cyan
     $buildArgs += "--build-name=$buildName"
 }
@@ -65,12 +70,23 @@ if (-not [string]::IsNullOrWhiteSpace($overrideBuildName)) {
 $overrideBuildNumber = [Environment]::GetEnvironmentVariable("APP_BUILD_NUMBER")
 if (-not [string]::IsNullOrWhiteSpace($overrideBuildNumber)) {
     $buildNumber = $overrideBuildNumber.Trim()
-    if ($buildNumber -notmatch '^[0-9]+$') {
-        Write-Host "Error: APP_BUILD_NUMBER must be a positive integer." -ForegroundColor Red
+    if ($buildNumber -notmatch '^[1-9][0-9]*$') {
+        Write-Host "Error: APP_BUILD_NUMBER must be a positive integer without leading zeros and within allowed range." -ForegroundColor Red
         exit 1
     }
-    Write-Host "Using build number override: $buildNumber" -ForegroundColor Cyan
-    $buildArgs += "--build-number=$buildNumber"
+    try {
+        $buildNumberValue = [int64]$buildNumber
+    }
+    catch {
+        Write-Host "Error: APP_BUILD_NUMBER must be a positive integer without leading zeros and within allowed range." -ForegroundColor Red
+        exit 1
+    }
+    if ($buildNumberValue -gt 2147483647) {
+        Write-Host "Error: APP_BUILD_NUMBER must be a positive integer without leading zeros and within allowed range." -ForegroundColor Red
+        exit 1
+    }
+    Write-Host "Using build number override: $buildNumberValue" -ForegroundColor Cyan
+    $buildArgs += "--build-number=$buildNumberValue"
 }
 
 $envFile = Join-Path $PSScriptRoot ".env"
@@ -107,6 +123,15 @@ function Test-EnvKeyPresent {
 }
 
 # Explicit environment variables override values coming from .env.
+$firebaseKeys = @(
+    "FIREBASE_API_KEY",
+    "FIREBASE_APP_ID",
+    "FIREBASE_MESSAGING_SENDER_ID",
+    "FIREBASE_PROJECT_ID",
+    "FIREBASE_AUTH_DOMAIN",
+    "FIREBASE_STORAGE_BUCKET"
+)
+
 $defineKeys = @(
     "API_URL",
     "API_FALLBACK_URLS",
@@ -118,14 +143,8 @@ $defineKeys = @(
     "GOOGLE_SERVER_CLIENT_ID",
     "RECAPTCHA_SITE_KEY",
     "TENOR_API_KEY",
-    "MAX_SESSION_AGE_HOURS",
-    "FIREBASE_API_KEY",
-    "FIREBASE_APP_ID",
-    "FIREBASE_MESSAGING_SENDER_ID",
-    "FIREBASE_PROJECT_ID",
-    "FIREBASE_AUTH_DOMAIN",
-    "FIREBASE_STORAGE_BUCKET"
-)
+    "MAX_SESSION_AGE_HOURS"
+) + $firebaseKeys
 
 foreach ($key in $defineKeys) {
     $value = [Environment]::GetEnvironmentVariable($key)
@@ -155,15 +174,6 @@ if (-not $env:RECAPTCHA_SITE_KEY -and -not (Test-EnvKeyPresent -Content $envFile
 if (-not $env:TENOR_API_KEY -and -not (Test-EnvKeyPresent -Content $envFileContent -Key "TENOR_API_KEY")) {
     Write-Host "TENOR_API_KEY not supplied. Tenor features will be disabled." -ForegroundColor Yellow
 }
-
-$firebaseKeys = @(
-    "FIREBASE_API_KEY",
-    "FIREBASE_APP_ID",
-    "FIREBASE_MESSAGING_SENDER_ID",
-    "FIREBASE_PROJECT_ID",
-    "FIREBASE_AUTH_DOMAIN",
-    "FIREBASE_STORAGE_BUCKET"
-)
 
 foreach ($firebaseKey in $firebaseKeys) {
     if (-not [Environment]::GetEnvironmentVariable($firebaseKey) -and -not (Test-EnvKeyPresent -Content $envFileContent -Key $firebaseKey)) {

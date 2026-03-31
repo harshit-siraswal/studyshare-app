@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 import 'analytics_service.dart';
+import 'attendance_service.dart';
 import 'backend_api_service.dart';
 import 'push_notification_service.dart';
 
@@ -868,6 +869,7 @@ class AuthService {
   Future<void> signOut() async {
     try {
       SharedPreferences? prefs;
+      final attendanceService = AttendanceService();
       if (!kIsWeb) {
         final token =
             _pushService.fcmToken ?? await _pushService.getSavedToken();
@@ -886,6 +888,7 @@ class AuthService {
         await prefs.remove('premium_until');
         await prefs.remove('premium_tier');
         await prefs.remove('premium_email');
+        await attendanceService.clearAllSavedSessions();
       } catch (e) {
         debugPrint('Failed to clear sign-out caches: $e');
       }
@@ -1144,7 +1147,11 @@ class AuthService {
         case 'invalid-email':
           return 'Invalid email address';
         case 'email-not-verified':
-          return 'Please verify your email before signing in. A new verification email has been sent.';
+          final verificationMessage = error.message?.trim();
+          if (verificationMessage != null && verificationMessage.isNotEmpty) {
+            return verificationMessage;
+          }
+          return 'Please verify your email before signing in.';
         case 'too-many-requests':
           return 'Too many attempts. Please try again later.';
         case 'network-request-failed':

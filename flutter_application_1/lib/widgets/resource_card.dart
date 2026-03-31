@@ -1070,7 +1070,6 @@ class ResourceCardState extends State<ResourceCard> {
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
           onLongPressStart: (_) => _showPeekPreview(),
-          onLongPressEnd: (_) => _hidePeekPreview(),
           onLongPressCancel: _hidePeekPreview,
           onLongPressUp: _hidePeekPreview,
           child: Container(

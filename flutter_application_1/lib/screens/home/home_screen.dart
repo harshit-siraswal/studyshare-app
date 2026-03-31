@@ -807,39 +807,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 150),
-              switchInCurve: Curves.easeOutBack,
-              switchOutCurve: Curves.easeInBack,
-              transitionBuilder: (child, animation) {
-                return ScaleTransition(scale: animation, child: child);
-              },
-              child: Icon(
-                isActive ? activeIcon : icon,
-                key: ValueKey<bool>(isActive),
-                color: isActive ? activeColor : inactiveColor,
-                size: 26,
-              ),
+            Icon(
+              isActive ? activeIcon : icon,
+              color: isActive ? activeColor : inactiveColor,
+              size: 26,
             ),
             const SizedBox(height: 4),
-            AnimatedSlide(
-              offset: isActive ? Offset.zero : const Offset(0, 0.2),
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOutCubic,
-              child: AnimatedOpacity(
-                opacity: isActive ? 1.0 : 0.7,
-                duration: const Duration(milliseconds: 200),
-                child: Text(
-                  label,
-                  style: GoogleFonts.inter(
-                    fontSize: 10,
-                    fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
-                    color: isActive ? activeColor : inactiveColor,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+            Text(
+              label,
+              style: GoogleFonts.inter(
+                fontSize: 10,
+                fontWeight: isActive ? FontWeight.w600 : FontWeight.w500,
+                color: isActive ? activeColor : inactiveColor,
               ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
@@ -939,69 +921,35 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         ignoring: _roleLoading || isSyllabusUploadDisabled,
         child: Opacity(
           opacity: (_roleLoading || isSyllabusUploadDisabled) ? 0.6 : 1.0,
-          child: Hero(
-            tag: 'fab_main',
-            createRectTween: (begin, end) =>
-                MaterialRectCenterArcTween(begin: begin, end: end),
-            child: GestureDetector(
-              onTap: () async {
-                HapticFeedback.mediumImpact();
-                await _handleFabTap();
-              },
-              child: Material(
-                color: Colors.transparent,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 260),
-                  curve: Curves.easeOutCubic,
-                  width: fabWidth,
-                  height: fabHeight,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: gradientColors,
-                    ),
-                    boxShadow: <BoxShadow>[
-                      BoxShadow(
-                        color: shadowColor,
-                        blurRadius: 12,
-                        offset: const Offset(0, 4),
-                      ),
-                    ],
+          child: GestureDetector(
+            onTap: () async {
+              HapticFeedback.mediumImpact();
+              await _handleFabTap();
+            },
+            child: Material(
+              color: Colors.transparent,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 260),
+                curve: Curves.easeOutCubic,
+                width: fabWidth,
+                height: fabHeight,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: gradientColors,
                   ),
-                  child: Center(
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 350),
-                      switchInCurve: Curves.easeOutBack,
-                      switchOutCurve: Curves.easeInBack,
-                      transitionBuilder: (child, animation) {
-                        final turns = Tween<double>(begin: 0.04, end: 0.0)
-                            .animate(
-                              CurvedAnimation(
-                                parent: animation,
-                                curve: Curves.easeOutCubic,
-                              ),
-                            );
-                        return FadeTransition(
-                          opacity: animation,
-                          child: ScaleTransition(
-                            scale: animation,
-                            child: RotationTransition(
-                              turns: turns,
-                              child: child,
-                            ),
-                          ),
-                        );
-                      },
-                      child: Icon(
-                        fabIcon,
-                        key: ValueKey<IconData>(fabIcon),
-                        color: Colors.white,
-                        size: 28,
-                      ),
+                  boxShadow: <BoxShadow>[
+                    BoxShadow(
+                      color: shadowColor,
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
                     ),
-                  ),
+                  ],
+                ),
+                child: Center(
+                  child: Icon(fabIcon, color: Colors.white, size: 28),
                 ),
               ),
             ),

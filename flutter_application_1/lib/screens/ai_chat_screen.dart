@@ -20,6 +20,7 @@ import '../services/auth_service.dart';
 import '../services/ai_chat_notification_service.dart';
 import '../services/analytics_service.dart';
 import '../services/backend_api_service.dart';
+import '../services/attendance_service.dart';
 import '../services/cloudinary_service.dart';
 import '../services/ai_chat_local_service.dart';
 import '../services/chat_session_repository.dart';
@@ -88,11 +89,11 @@ class RagSource {
     final inferredType = explicitType?.isNotEmpty == true
         ? explicitType!
         : ((resolvedVideoUrl?.toLowerCase().contains('youtu') ?? false) ||
-                (resolvedFileUrl?.toLowerCase().contains('youtu') ?? false)
-            ? 'youtube'
-            : ((resolvedFileUrl != null && resolvedFileUrl.isNotEmpty)
-                ? (_looksLikePdfSourceUrl(resolvedFileUrl) ? 'pdf' : 'web')
-                : 'pdf'));
+                  (resolvedFileUrl?.toLowerCase().contains('youtu') ?? false)
+              ? 'youtube'
+              : ((resolvedFileUrl != null && resolvedFileUrl.isNotEmpty)
+                    ? (_looksLikePdfSourceUrl(resolvedFileUrl) ? 'pdf' : 'web')
+                    : 'pdf'));
     return RagSource(
       fileId: json['file_id']?.toString() ?? '',
       title: json['title']?.toString() ?? 'Source',
@@ -266,6 +267,7 @@ class _AIChatScreenState extends State<AIChatScreen>
 
   final AnalyticsService _analytics = AnalyticsService.instance;
   final BackendApiService _api = BackendApiService();
+  final AttendanceService _attendanceService = AttendanceService();
   final AuthService _auth = AuthService();
   final SupabaseService _supabase = SupabaseService();
   final AiChatNotificationService _aiNotificationService =
@@ -613,6 +615,34 @@ class _AIChatScreenState extends State<AIChatScreen>
 
     if (history.length <= maxMessages) return history;
     return history.sublist(history.length - maxMessages);
+  }
+
+  bool _shouldInjectLocalAttendanceAnswer(String prompt) {
+    if (_attendanceService.isAttendanceOrSchedulePrompt(prompt)) {
+      return true;
+    }
+
+    var checkedUserTurns = 0;
+    for (final message in _messages.reversed) {
+      if (!message.isUser) continue;
+      final priorPrompt = _extractPromptFromUserVisible(message.content);
+      if (_attendanceService.isAttendanceOrSchedulePrompt(priorPrompt)) {
+        return true;
+      }
+      checkedUserTurns++;
+      if (checkedUserTurns >= 3) break;
+    }
+    return false;
+  }
+
+  Future<String?> _resolveLocalAttendanceAnswer(String prompt) async {
+    if (!_shouldInjectLocalAttendanceAnswer(prompt)) return null;
+    return _attendanceService.buildLocalAiResponse(
+      collegeId: widget.collegeId,
+      collegeName: widget.collegeName,
+      prompt: prompt,
+      userEmail: _storageEmail == 'guest' ? null : _storageEmail,
+    );
   }
 
   String _buildRagPrompt({
@@ -1291,10 +1321,7 @@ class _AIChatScreenState extends State<AIChatScreen>
       _showSourceUrlErrorSnackBar('Web source');
       return;
     }
-    await _openWebSourceInAppOrExternal(
-      uri: uri,
-      sourceTitle: 'Web source',
-    );
+    await _openWebSourceInAppOrExternal(uri: uri, sourceTitle: 'Web source');
   }
 
   Future<void> _openLiveVideoSource(String url, String? timestamp) async {
@@ -1722,6 +1749,25 @@ class _AIChatScreenState extends State<AIChatScreen>
       _activeSessionId = sessionId;
       _sessions = updated;
     });
+  }
+
+  Future<void> _appendImmediateAssistantResponse({
+    required String userVisible,
+    required String answer,
+    bool cached = false,
+  }) async {
+    setState(() {
+      _messages.add(AIChatMessage(isUser: true, content: userVisible));
+      _messages.add(
+        AIChatMessage(isUser: false, content: answer, cached: cached),
+      );
+      _controller.clear();
+      _attachments.clear();
+      _hasText = false;
+      _isLoading = false;
+    });
+    await _persistCurrentSession();
+    await _scrollToBottom();
   }
 
   Future<void> _loadStoredSessions() async {
@@ -3568,6 +3614,27 @@ Return STRICT JSON only (no markdown). Schema:
         )) {
           return;
         }
+        final localAttendanceAnswer = await _resolveLocalAttendanceAnswer(
+          userPrompt,
+        );
+        if (localAttendanceAnswer != null) {
+          await _analytics.logEvent(
+            'ai_chat_local_attendance_answer',
+            parameters: <String, Object?>{
+              ..._baseAnalyticsParameters(),
+              'cached': true,
+            },
+          );
+          final userVisible = turnAttachments.isEmpty
+              ? userPrompt
+              : '$userPrompt\n\n${turnAttachments.length} attachments added.';
+          await _appendImmediateAssistantResponse(
+            userVisible: userVisible,
+            answer: localAttendanceAnswer,
+            cached: true,
+          );
+          return;
+        }
         final searchAllForPrompt = _shouldSearchAllPdfsForPrompt(userPrompt);
         final isPdfOverviewPrompt = _isPdfOverviewPrompt(userPrompt);
         final localContextRequired =
@@ -5391,8 +5458,7 @@ Return STRICT JSON only (no markdown). Schema:
                         final showStandaloneLiveCard =
                             !m.isUser && _shouldShowLiveActivityCard(m);
                         final hideBubble =
-                            showStandaloneLiveCard &&
-                            m.content.trim().isEmpty;
+                            showStandaloneLiveCard && m.content.trim().isEmpty;
 
                         return Align(
                           alignment: m.isUser

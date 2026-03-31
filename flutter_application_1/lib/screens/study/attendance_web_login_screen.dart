@@ -22,11 +22,17 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
   final TextEditingController _manualTokenController = TextEditingController();
   bool _isLoading = true;
   bool _didReturnToken = false;
+  bool _isDisposed = false;
   String? _manualTokenError;
   bool _manualEntryExpanded = false;
+  bool _captchaFallbackSuggested = false;
 
   static const String _loginUrl = 'https://kiet.cybervidya.net/';
   static const String _noTokenMessage = '__NO_TOKEN__';
+  static const int _minTokenLength = 8;
+  static const String _mobileChromeUserAgent =
+      'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
+      '(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36';
 
   bool _isAllowedNavigation(String rawUrl) {
     final uri = Uri.tryParse(rawUrl);
@@ -82,36 +88,49 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
           onPageFinished: (_) async {
             if (mounted) setState(() => _isLoading = false);
             await _installBridge();
+            await _inspectForCaptchaIssue();
             await _tryCaptureToken();
           },
           onWebResourceError: (error) {
-            if (!mounted) return;
             final description = error.description.toLowerCase();
             if (description.contains('err_blocked_by_orb')) {
-              if (!_manualEntryExpanded && mounted) {
-                setState(() => _manualEntryExpanded = true);
-              }
+              _suggestCaptchaFallback(
+                'KIET ERP blocked the embedded login. Open KIET ERP in your '
+                'browser and continue with the token fallback below.',
+              );
               return;
             }
+            if (_looksLikeCaptchaIssue(description)) {
+              _suggestCaptchaFallback(
+                'KIET ERP rejected the embedded login with a low captcha '
+                'score. Open KIET ERP in your browser and continue with the '
+                'token fallback below.',
+              );
+            }
+            if (!mounted) return;
             if (error.isForMainFrame != true) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(error.description)),
-            );
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text(error.description)));
           },
         ),
       )
-      ..loadRequest(Uri.parse(_loginUrl));
+      ..setBackgroundColor(Colors.transparent);
+
+    unawaited(_initializeWebView());
 
     Future.delayed(const Duration(seconds: 2), () {
-      if (!mounted) return;
+      if (!mounted || _isDisposed || _didReturnToken) return;
       _tokenPollTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-        _tryCaptureToken();
+        if (_isDisposed) return;
+        unawaited(_tryCaptureToken());
       });
     });
   }
 
   @override
   void dispose() {
+    _isDisposed = true;
     _tokenPollTimer?.cancel();
     _manualTokenController.dispose();
     super.dispose();
@@ -119,7 +138,10 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
 
   Future<void> _openKietLoginInBrowser() async {
     final uri = Uri.parse(_loginUrl);
-    final didLaunch = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    final didLaunch = await launchUrl(
+      uri,
+      mode: LaunchMode.externalApplication,
+    );
     if (!didLaunch && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Unable to open KIET ERP in browser.')),
@@ -127,17 +149,58 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
     }
   }
 
+  Future<void> _initializeWebView() async {
+    try {
+      await _controller.setUserAgent(_mobileChromeUserAgent);
+    } catch (_) {}
+
+    try {
+      final cookieManager = WebViewCookieManager();
+      await cookieManager.clearCookies();
+    } catch (_) {}
+
+    await _controller.loadRequest(Uri.parse(_loginUrl));
+  }
+
   void _submitManualToken() {
     final token = _manualTokenController.text.trim();
-    if (token.length < 8) {
+    if (token.length < _minTokenLength) {
       setState(
-        () =>
-            _manualTokenError = 'Enter a valid KIET authentication token.',
+        () => _manualTokenError = 'Enter a valid KIET authentication token.',
       );
       return;
     }
     if (!mounted) return;
     Navigator.of(context).pop(token);
+  }
+
+  bool _looksLikeCaptchaIssue(String text) {
+    final normalized = text.toLowerCase();
+    return (normalized.contains('captcha') &&
+            (normalized.contains('low') ||
+                normalized.contains('score') ||
+                normalized.contains('invalid') ||
+                normalized.contains('failed') ||
+                normalized.contains('required'))) ||
+        normalized.contains('recaptcha') ||
+        normalized.contains('g-recaptcha');
+  }
+
+  void _suggestCaptchaFallback(String message) {
+    if (_captchaFallbackSuggested) {
+      if (!_manualEntryExpanded && mounted) {
+        setState(() => _manualEntryExpanded = true);
+      }
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _captchaFallbackSuggested = true;
+      _manualEntryExpanded = true;
+    });
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   Widget _buildManualFallback(bool isDark) {
@@ -166,6 +229,48 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (_captchaFallbackSuggested) ...[
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: isDark ? 0.18 : 0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: Colors.orange.withValues(alpha: 0.35),
+                ),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(top: 1),
+                    child: Icon(
+                      Icons.warning_amber_rounded,
+                      size: 18,
+                      color: Colors.orange,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'KIET ERP may reject embedded sign-in with a low captcha '
+                      'score. If the in-app page keeps failing, open KIET ERP '
+                      'in your browser and paste the '
+                      '`authenticationtoken` here.',
+                      style: GoogleFonts.inter(
+                        fontSize: 11.5,
+                        height: 1.35,
+                        color: textColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           Row(
             children: [
               Icon(Icons.help_outline, size: 18, color: secondary),
@@ -181,8 +286,9 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
                 ),
               ),
               TextButton(
-                onPressed: () =>
-                    setState(() => _manualEntryExpanded = !_manualEntryExpanded),
+                onPressed: () => setState(
+                  () => _manualEntryExpanded = !_manualEntryExpanded,
+                ),
                 child: Text(
                   _manualEntryExpanded ? 'Hide' : 'Use token',
                   style: GoogleFonts.inter(fontWeight: FontWeight.w700),
@@ -340,11 +446,35 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
     } catch (_) {}
   }
 
+  Future<void> _inspectForCaptchaIssue() async {
+    if (_didReturnToken) return;
+    try {
+      final result = await _controller.runJavaScriptReturningResult('''
+        (function() {
+          var bodyText = String(document.body && document.body.innerText || '');
+          var normalized = bodyText.toLowerCase();
+          if (normalized.indexOf('captcha') !== -1 ||
+              normalized.indexOf('recaptcha') !== -1) {
+            return bodyText.slice(0, 400);
+          }
+          return '';
+        })();
+        ''');
+      final text = result.toString().replaceAll('"', '').trim();
+      if (_looksLikeCaptchaIssue(text)) {
+        _suggestCaptchaFallback(
+          'KIET ERP is asking for a captcha verification that WebView may not '
+          'pass reliably. Open KIET ERP in your browser and continue with the '
+          'token fallback below.',
+        );
+      }
+    } catch (_) {}
+  }
+
   Future<void> _tryCaptureToken() async {
     if (_didReturnToken) return;
     try {
-      final result = await _controller.runJavaScriptReturningResult(
-        '''
+      final result = await _controller.runJavaScriptReturningResult('''
         (function() {
           function normalizeToken(rawValue) {
             if (!rawValue) return '';
@@ -394,16 +524,18 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
               candidateFromStorage(window.sessionStorage);
           return token || '';
         })();
-        ''',
-      );
+        ''');
       _handleBridgeMessage(result.toString());
     } catch (_) {}
+    await _inspectForCaptchaIssue();
   }
 
   void _handleBridgeMessage(String rawToken) {
     if (_didReturnToken) return;
     final normalized = rawToken.trim().replaceAll('"', '').replaceAll("'", '');
-    if (normalized.isEmpty || normalized == _noTokenMessage || normalized.length < 8) {
+    if (normalized.isEmpty ||
+        normalized == _noTokenMessage ||
+        normalized.length < _minTokenLength) {
       return;
     }
 
@@ -537,10 +669,7 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
             ),
           Align(
             alignment: Alignment.bottomCenter,
-            child: SafeArea(
-              top: false,
-              child: _buildManualFallback(isDark),
-            ),
+            child: SafeArea(top: false, child: _buildManualFallback(isDark)),
           ),
         ],
       ),

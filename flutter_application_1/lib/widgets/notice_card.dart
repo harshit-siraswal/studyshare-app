@@ -473,7 +473,7 @@ class _NoticeCardState extends State<NoticeCard> {
                                             ],
                                           ),
                                         ),
-                                        if (manageMenu != null) manageMenu,
+                                        ?manageMenu,
                                       ],
                                     ),
                                     const SizedBox(height: 4),

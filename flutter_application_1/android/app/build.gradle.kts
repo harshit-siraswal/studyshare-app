@@ -1,3 +1,5 @@
+import java.util.Locale
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -19,9 +21,17 @@ android {
     namespace = "me.studyshare.android"
     compileSdk = 36
     val disableMinify =
-        project.findProperty("disableMinify")?.toString()?.toBooleanStrictOrNull() == true
+        project.findProperty("disableMinify")
+            ?.toString()
+            ?.trim()
+            ?.lowercase(Locale.ROOT)
+            ?.toBooleanStrictOrNull() == true
     val enableLocalRelease =
-        project.findProperty("enableLocalRelease")?.toString()?.toBooleanStrictOrNull() == true
+        project.findProperty("enableLocalRelease")
+            ?.toString()
+            ?.trim()
+            ?.lowercase(Locale.ROOT)
+            ?.toBooleanStrictOrNull() == true
     val keystorePath = System.getenv("KEYSTORE_PATH")?.trim().orEmpty()
     val keystorePassword = System.getenv("KEYSTORE_PASSWORD")?.trim().orEmpty()
     val keyAlias = System.getenv("KEY_ALIAS")?.trim().orEmpty()
@@ -98,11 +108,6 @@ android {
             create("localRelease") {
                 initWith(getByName("release"))
                 matchingFallbacks += listOf("release")
-                if (hasReleaseSigning) {
-                    signingConfig = signingConfigs.getByName("release")
-                } else {
-                    signingConfig = signingConfigs.getByName("debug")
-                }
                 isMinifyEnabled = false
                 isShrinkResources = false
             }

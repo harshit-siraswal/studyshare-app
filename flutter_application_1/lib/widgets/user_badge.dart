@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/theme.dart';
+import '../services/supabase_service.dart';
 
 class UserBadge extends StatefulWidget {
   final String email;
@@ -13,6 +14,7 @@ class UserBadge extends StatefulWidget {
 
 class _UserBadgeState extends State<UserBadge> {
   static bool? _usersTableHasRoleColumn;
+  final SupabaseService _supabaseService = SupabaseService();
 
   bool _isLoading = true;
   bool _isVerified = false;
@@ -59,7 +61,19 @@ class _UserBadgeState extends State<UserBadge> {
 
     try {
       Map<String, dynamic>? userResponse;
-      if (_usersTableHasRoleColumn == false) {
+      final currentEmail = (_supabaseService.currentUserEmail ?? '')
+          .trim()
+          .toLowerCase();
+      if (!_supabaseService.hasConfiguredSupabaseAnonKey) {
+        if (currentEmail == email) {
+          final profile = await _supabaseService.getCurrentUserProfile(
+            maxAttempts: 1,
+          );
+          if (profile.isNotEmpty) {
+            userResponse = <String, dynamic>{...profile, 'email': email};
+          }
+        }
+      } else if (_usersTableHasRoleColumn == false) {
         userResponse = await Supabase.instance.client
             .from('users')
             .select('subscription_tier, subscription_end_date')
@@ -88,8 +102,11 @@ class _UserBadgeState extends State<UserBadge> {
       }
 
       if (mounted && userResponse != null) {
-        final role = userResponse['role'];
-        if (role == 'COLLEGE_USER' || role == 'MODERATOR' || role == 'ADMIN') {
+        final role = userResponse['role']?.toString().trim().toUpperCase();
+        if (role == 'COLLEGE_USER' ||
+            role == 'MODERATOR' ||
+            role == 'ADMIN' ||
+            role == 'TEACHER') {
           _isVerified = true;
         }
 

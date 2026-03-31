@@ -285,165 +285,169 @@ class _OnboardingScreenState extends State<OnboardingScreen>
         offset: Offset(drift, delta.abs() * 18),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(24, 10, 24, 0),
-          child: Column(
-            children: [
-              SizedBox(
-                height: 370,
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  alignment: Alignment.center,
-                  children: [
-                    Container(
-                      width: 244,
-                      height: 244,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: Colors.white.withValues(
-                            alpha: isDark ? 0.08 : 0.14,
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  height: 370,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    alignment: Alignment.center,
+                    children: [
+                      Container(
+                        width: 244,
+                        height: 244,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: Colors.white.withValues(
+                              alpha: isDark ? 0.08 : 0.14,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                    Container(
-                      width: 212,
-                      height: 212,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(54),
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: page.colors,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: page.colors.first.withValues(alpha: 0.28),
-                            blurRadius: 42,
-                            offset: const Offset(0, 18),
+                      Container(
+                        width: 212,
+                        height: 212,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(54),
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: page.colors,
                           ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      width: 212,
-                      height: 212,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(54),
-                        border: Border.all(
-                          color: Colors.white.withValues(alpha: 0.18),
+                          boxShadow: [
+                            BoxShadow(
+                              color: page.colors.first.withValues(alpha: 0.28),
+                              blurRadius: 42,
+                              offset: const Offset(0, 18),
+                            ),
+                          ],
                         ),
                       ),
-                    ),
-                    page.useBrandMark
-                        ? const AiLogo(size: 104, animate: true)
-                        : Icon(page.icon, size: 88, color: Colors.white),
-                    _badge(page, page.badgeA, wave, delta, isDark),
-                    _badge(page, page.badgeB, -wave, delta, isDark),
-                    Positioned(
-                      left: 18,
-                      right: 18,
-                      bottom: 6,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(24),
-                        child: BackdropFilter(
-                          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-                          child: Container(
-                            padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-                            decoration: BoxDecoration(
-                              color: isDark
-                                  ? Colors.black.withValues(alpha: 0.28)
-                                  : Colors.white.withValues(alpha: 0.84),
-                              borderRadius: BorderRadius.circular(24),
-                              border: Border.all(
+                      Container(
+                        width: 212,
+                        height: 212,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(54),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.18),
+                          ),
+                        ),
+                      ),
+                      page.useBrandMark
+                          ? const AiLogo(size: 104, animate: true)
+                          : Icon(page.icon, size: 88, color: Colors.white),
+                      _badge(page, page.badgeA, wave, delta, isDark),
+                      _badge(page, page.badgeB, -wave, delta, isDark),
+                      Positioned(
+                        left: 18,
+                        right: 18,
+                        bottom: 6,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(24),
+                          child: BackdropFilter(
+                            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                            child: Container(
+                              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                              decoration: BoxDecoration(
                                 color: isDark
-                                    ? Colors.white.withValues(alpha: 0.08)
-                                    : page.colors.first.withValues(alpha: 0.12),
+                                    ? Colors.black.withValues(alpha: 0.28)
+                                    : Colors.white.withValues(alpha: 0.84),
+                                borderRadius: BorderRadius.circular(24),
+                                border: Border.all(
+                                  color: isDark
+                                      ? Colors.white.withValues(alpha: 0.08)
+                                      : page.colors.first.withValues(alpha: 0.12),
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 34,
+                                    height: 34,
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(12),
+                                      color: page.colors.first.withValues(
+                                        alpha: 0.16,
+                                      ),
+                                    ),
+                                    child: Icon(
+                                      page.useBrandMark
+                                          ? Icons.auto_awesome
+                                          : page.icon,
+                                      size: 18,
+                                      color: isDark
+                                          ? Colors.white
+                                          : page.colors.first,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      page.stat,
+                                      style: GoogleFonts.inter(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                        color: isDark
+                                            ? AppTheme.darkTextPrimary
+                                            : AppTheme.lightTextPrimary,
+                                      ),
+                                    ),
+                                  ),
+                                  _tag('Swipe', isDark),
+                                ],
                               ),
                             ),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 34,
-                                  height: 34,
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(12),
-                                    color: page.colors.first.withValues(
-                                      alpha: 0.16,
-                                    ),
-                                  ),
-                                  child: Icon(
-                                    page.useBrandMark
-                                        ? Icons.auto_awesome
-                                        : page.icon,
-                                    size: 18,
-                                    color: isDark
-                                        ? Colors.white
-                                        : page.colors.first,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Text(
-                                    page.stat,
-                                    style: GoogleFonts.inter(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w700,
-                                      color: isDark
-                                          ? AppTheme.darkTextPrimary
-                                          : AppTheme.lightTextPrimary,
-                                    ),
-                                  ),
-                                ),
-                                _tag('Swipe', isDark),
-                              ],
-                            ),
                           ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 18),
-              _tag(page.eyebrow, isDark, dot: true),
-              const SizedBox(height: 18),
-              Text(
-                page.title,
-                textAlign: TextAlign.center,
-                style: GoogleFonts.inter(
-                  fontSize: 34,
-                  fontWeight: FontWeight.w800,
-                  height: 1.05,
-                  letterSpacing: -1.1,
-                  color: isDark
-                      ? AppTheme.darkTextPrimary
-                      : AppTheme.lightTextPrimary,
+                const SizedBox(height: 18),
+                _tag(page.eyebrow, isDark, dot: true),
+                const SizedBox(height: 18),
+                Text(
+                  page.title,
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(
+                    fontSize: 34,
+                    fontWeight: FontWeight.w800,
+                    height: 1.05,
+                    letterSpacing: -1.1,
+                    color: isDark
+                        ? AppTheme.darkTextPrimary
+                        : AppTheme.lightTextPrimary,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                page.description,
-                textAlign: TextAlign.center,
-                style: GoogleFonts.inter(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w500,
-                  height: 1.55,
-                  color: isDark
-                      ? AppTheme.darkTextSecondary
-                      : AppTheme.lightTextSecondary,
+                const SizedBox(height: 16),
+                Text(
+                  page.description,
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.inter(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                    height: 1.55,
+                    color: isDark
+                        ? AppTheme.darkTextSecondary
+                        : AppTheme.lightTextSecondary,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 22),
-              Wrap(
-                alignment: WrapAlignment.center,
-                spacing: 10,
-                runSpacing: 10,
-                children: page.tags
-                    .map((value) => _tag(value, isDark))
-                    .toList(),
-              ),
-              const Spacer(),
-            ],
+                const SizedBox(height: 22),
+                Wrap(
+                  alignment: WrapAlignment.center,
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: page.tags
+                      .map((value) => _tag(value, isDark))
+                      .toList(),
+                ),
+                const SizedBox(height: 12),
+              ],
+            ),
           ),
         ),
       ),

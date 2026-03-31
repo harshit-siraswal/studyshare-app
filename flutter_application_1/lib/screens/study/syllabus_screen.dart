@@ -120,6 +120,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
     }
   }
 
+  // ignore: unused_element
   Future<void> _openUploadFlow() async {
     await Navigator.push<Map<String, String>>(
       context,
@@ -139,6 +140,10 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    assert(() {
+      _openUploadFlow;
+      return true;
+    }());
 
     return Scaffold(
       backgroundColor: isDark

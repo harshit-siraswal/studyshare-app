@@ -793,6 +793,40 @@ class BackendApiService {
     );
   }
 
+  Future<List<Map<String, dynamic>>> listChatRooms({String? collegeId}) async {
+    final normalizedCollegeId = collegeId?.trim() ?? '';
+
+    Future<List<Map<String, dynamic>>> fetchWithQuery(
+      Map<String, String> query,
+    ) async {
+      final uri = Uri(
+        path: '/api/chat/rooms',
+        queryParameters: query.isEmpty ? null : query,
+      );
+      final data = await _requestJson(uri.toString(), method: 'GET');
+      final roomsRaw =
+          data['rooms'] ?? data['items'] ?? data['data'] ?? data['chatRooms'];
+      if (roomsRaw is! List) return const [];
+      return roomsRaw
+          .whereType<Map>()
+          .map((entry) => Map<String, dynamic>.from(entry))
+          .toList();
+    }
+
+    final primaryQuery = <String, String>{};
+    if (normalizedCollegeId.isNotEmpty) {
+      primaryQuery['collegeId'] = normalizedCollegeId;
+    }
+
+    final primaryRooms = await fetchWithQuery(primaryQuery);
+    if (primaryRooms.isNotEmpty || normalizedCollegeId.isEmpty) {
+      return primaryRooms;
+    }
+
+    // Compatibility fallback for backends still using snake_case query params.
+    return fetchWithQuery(<String, String>{'college_id': normalizedCollegeId});
+  }
+
   /// Leave a chat room
   Future<Map<String, dynamic>> leaveChatRoom({
     required String roomId,
@@ -886,6 +920,22 @@ class BackendApiService {
       '/api/chat/rooms/${Uri.encodeComponent(roomId)}/info',
       method: 'GET',
     );
+  }
+
+  Future<List<Map<String, dynamic>>> getChatRoomPosts(
+    String roomId, {
+    int limit = 50,
+    String sortBy = 'recent',
+  }) async {
+    final data = await _requestJson(
+      '/api/chat/rooms/${Uri.encodeComponent(roomId)}/posts'
+      '?limit=$limit&sortBy=${Uri.encodeQueryComponent(sortBy)}',
+      method: 'GET',
+    );
+    final list = (data['posts'] as List?) ?? const [];
+    return list
+        .map((entry) => Map<String, dynamic>.from(entry as Map))
+        .toList();
   }
 
   Future<List<Map<String, dynamic>>> getChatRoomMembers(String roomId) async {
@@ -1189,6 +1239,7 @@ class BackendApiService {
   }
 
   Future<Map<String, dynamic>> listResources({
+    String? collegeId,
     String? branch,
     String? semester,
     String? subject,
@@ -1198,6 +1249,11 @@ class BackendApiService {
     int? limit,
   }) async {
     final query = <String, String>{};
+    if (collegeId != null && collegeId.trim().isNotEmpty) {
+      final normalizedCollegeId = collegeId.trim();
+      query['collegeId'] = normalizedCollegeId;
+      query['college_id'] = normalizedCollegeId;
+    }
     if (branch != null && branch.trim().isNotEmpty && branch != 'all') {
       query['branch'] = branch.trim();
     }
@@ -1559,7 +1615,13 @@ class BackendApiService {
     return _requestJson(
       '/api/chat/join',
       method: 'POST',
-      body: {'code': code, 'userEmail': userEmail, 'collegeId': collegeId},
+      body: {
+        'code': code,
+        'joinCode': code,
+        'userEmail': userEmail,
+        'collegeId': collegeId,
+        'college_id': collegeId,
+      },
     );
   }
 
@@ -1568,6 +1630,19 @@ class BackendApiService {
       '/api/chat/rooms/${Uri.encodeComponent(roomId)}/votes',
       method: 'GET',
     );
+  }
+
+  Future<List<String>> getJoinedRoomIds() async {
+    final data = await _requestJson(
+      '/api/chat/rooms/joined/ids',
+      method: 'GET',
+    );
+    final list =
+        (data['roomIds'] as List?) ?? (data['room_ids'] as List?) ?? const [];
+    return list
+        .map((entry) => entry?.toString() ?? '')
+        .where((entry) => entry.isNotEmpty)
+        .toList();
   }
 
   // Reporting
@@ -2955,11 +3030,18 @@ class BackendApiService {
     );
   }
 
-  Future<Map<String, dynamic>> joinChatRoomById(String roomId) async {
+  Future<Map<String, dynamic>> joinChatRoomById(
+    String roomId, {
+    String? collegeId,
+  }) async {
     return _requestJson(
       '/api/chat/join-room',
       method: 'POST',
-      body: {'roomId': roomId},
+      body: {
+        'roomId': roomId,
+        'collegeId': ?collegeId,
+        'college_id': ?collegeId,
+      },
     );
   }
 

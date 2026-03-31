@@ -110,51 +110,77 @@ class SubscriptionService {
     return isPremium;
   }
 
+  bool _isPremiumTier(String? tier) {
+    final normalized = tier?.trim().toLowerCase() ?? '';
+    return normalized == 'pro' ||
+        normalized == 'max' ||
+        normalized == 'premium';
+  }
+
+  bool _isFutureDate(String? value) {
+    final normalized = value?.trim() ?? '';
+    if (normalized.isEmpty) return false;
+    final parsed = DateTime.tryParse(normalized);
+    if (parsed == null) return false;
+    final parsedUtc = parsed.isUtc ? parsed : parsed.toUtc();
+    return parsedUtc.isAfter(DateTime.now().toUtc());
+  }
+
   Future<bool> _checkPremiumStatus() async {
     try {
       // Use Firebase Auth email instead of Supabase Auth user ID
       final email = _firebaseAuth.currentUser?.email;
       if (email == null) return false;
 
-      final res = await _supabase
-          .from('users')
-          .select('subscription_end_date, subscription_tier')
-          .eq('email', email)
-          .maybeSingle();
-
-      bool isPaidPremium = false;
       String? paidTier;
       String? premiumUntilStr;
+      if (_supabaseService.hasConfiguredSupabaseAnonKey) {
+        final res = await _supabase
+            .from('users')
+            .select('subscription_end_date, subscription_tier')
+            .eq('email', email)
+            .maybeSingle();
 
-      if (res != null) {
-        premiumUntilStr = res['subscription_end_date'];
-        paidTier = res['subscription_tier'] as String?;
-        if (premiumUntilStr != null) {
-          final premiumUntil = DateTime.parse(premiumUntilStr);
-          final now = DateTime.now();
-          final premiumUntilUtc = premiumUntil.isUtc
-              ? premiumUntil
-              : premiumUntil.toUtc();
-          final nowUtc = now.isUtc ? now : now.toUtc();
-          isPaidPremium = premiumUntilUtc.isAfter(nowUtc);
+        if (res != null) {
+          premiumUntilStr = res['subscription_end_date']?.toString();
+          paidTier = res['subscription_tier']?.toString();
         }
+      } else {
+        final profile = await _supabaseService.getCurrentUserProfile(
+          maxAttempts: 1,
+          forceRefresh: true,
+        );
+        premiumUntilStr = profile['subscription_end_date']?.toString();
+        paidTier = profile['subscription_tier']?.toString();
       }
+
+      final isPaidPremium =
+          _isPremiumTier(paidTier) && _isFutureDate(premiumUntilStr);
 
       // Auto-unlock Premium for active contributors (>= 10 approved uploads)
       if (!isPaidPremium) {
         try {
-          final response = await _supabase
-              .from('resources')
-              .select('id')
-              .eq('uploaded_by_email', email)
-              .or(
-                Resource.buildStatusOrFilter(const [
-                  Resource.approvedStatus,
-                ], includeLegacyApprovalFlag: true),
-              )
-              .count(CountOption.exact);
-
-          final uploadCount = response.count;
+          int uploadCount = 0;
+          if (_supabaseService.hasConfiguredSupabaseAnonKey) {
+            final response = await _supabase
+                .from('resources')
+                .select('id')
+                .eq('uploaded_by_email', email)
+                .or(
+                  Resource.buildStatusOrFilter(const [
+                    Resource.approvedStatus,
+                  ], includeLegacyApprovalFlag: true),
+                )
+                .count(CountOption.exact);
+            uploadCount = response.count;
+          } else {
+            uploadCount = (await _supabaseService.getUserResources(
+              email,
+              approvedOnly: true,
+              limit: 500,
+              offset: 0,
+            )).length;
+          }
 
           if (uploadCount >= 10) {
             final prefs = await SharedPreferences.getInstance();
@@ -179,13 +205,15 @@ class SubscriptionService {
 
       // Sync tier to local cache
       final prefs = await SharedPreferences.getInstance();
-      if (paidTier != null) {
-        await prefs.setString('premium_tier', paidTier);
+      if (paidTier != null && paidTier.trim().isNotEmpty) {
+        await prefs.setString('premium_tier', paidTier.trim().toLowerCase());
       }
       await prefs.setString('premium_email', email);
 
       // Sync expiry to local cache
-      await prefs.setString('premium_until', premiumUntilStr!);
+      if (premiumUntilStr != null && premiumUntilStr.trim().isNotEmpty) {
+        await prefs.setString('premium_until', premiumUntilStr);
+      }
       _cachePremiumStatus(email.trim().toLowerCase(), true);
 
       return true;

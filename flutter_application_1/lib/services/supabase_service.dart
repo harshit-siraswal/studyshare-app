@@ -3,6 +3,7 @@ import 'dart:developer' as developer;
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart' as firebase_auth;
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../config/app_config.dart';
 import '../models/college.dart';
 import '../models/resource.dart';
 import '../models/user.dart';
@@ -206,6 +207,31 @@ class SupabaseService {
       collegeId.trim(),
       branch?.trim().toLowerCase() ?? '',
     ].join('|');
+  }
+
+  bool get _hasConfiguredSupabaseAnonKey {
+    final key = AppConfig.supabaseAnonKey.trim();
+    return key.isNotEmpty &&
+        key.toLowerCase() != 'your-anon-key' &&
+        key.toUpperCase() != 'YOUR_SUPABASE_ANON_KEY';
+  }
+
+  bool get hasConfiguredSupabaseAnonKey => _hasConfiguredSupabaseAnonKey;
+
+  List<Map<String, dynamic>> _extractResourceRowsFromBackendPayload(
+    Map<String, dynamic> payload,
+  ) {
+    final rowsRaw =
+        payload['resources'] ??
+        payload['items'] ??
+        payload['data'] ??
+        payload['results'];
+    if (rowsRaw is! List) return const <Map<String, dynamic>>[];
+
+    return rowsRaw
+        .whereType<Map>()
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .toList();
   }
 
   void _pruneResourceListCacheIfNeeded() {
@@ -650,6 +676,9 @@ class SupabaseService {
 
   Future<List<Map<String, dynamic>>> _fetchUsersByIds(List<String> ids) async {
     if (ids.isEmpty) return [];
+    if (!_hasConfiguredSupabaseAnonKey) {
+      return const <Map<String, dynamic>>[];
+    }
 
     try {
       // Run both queries in parallel to fetch users by id or firebase_uid
@@ -726,6 +755,24 @@ class SupabaseService {
         .toSet()
         .toList();
     if (emails.isEmpty) return const {};
+
+    if (!_hasConfiguredSupabaseAnonKey) {
+      final currentEmail = _currentSessionEmail();
+      if (emails.length == 1 && emails.first == currentEmail) {
+        try {
+          final profile = await getCurrentUserProfile(maxAttempts: 1);
+          if (profile.isNotEmpty) {
+            return <String, Map<String, dynamic>>{
+              currentEmail: _normalizeReadableUserRecord(<String, dynamic>{
+                ...profile,
+                'email': currentEmail,
+              }),
+            };
+          }
+        } catch (_) {}
+      }
+      return const {};
+    }
 
     try {
       final filters = emails
@@ -853,8 +900,30 @@ class SupabaseService {
           .eq('is_active', true)
           .order('name');
 
-      return (response as List).map((json) => College.fromJson(json)).toList();
+      return (response as List)
+          .whereType<Map<String, dynamic>>()
+          .map(College.fromJson)
+          .where(
+            (college) =>
+                college.id.isNotEmpty &&
+                college.name.isNotEmpty &&
+                college.domain.isNotEmpty,
+          )
+          .toList();
     } catch (e) {
+      if (_isMissingColumnError(e, 'is_active')) {
+        final response = await _client.from('colleges').select().order('name');
+        return (response as List)
+            .whereType<Map<String, dynamic>>()
+            .map(College.fromJson)
+            .where(
+              (college) =>
+                  college.id.isNotEmpty &&
+                  college.name.isNotEmpty &&
+                  college.domain.isNotEmpty,
+            )
+            .toList();
+      }
       debugPrint('Error fetching colleges: $e');
       rethrow;
     }
@@ -872,14 +941,145 @@ class SupabaseService {
           .order('name')
           .limit(10);
 
-      return (response as List).map((json) => College.fromJson(json)).toList();
+      return (response as List)
+          .whereType<Map<String, dynamic>>()
+          .map(College.fromJson)
+          .where(
+            (college) =>
+                college.id.isNotEmpty &&
+                college.name.isNotEmpty &&
+                college.domain.isNotEmpty,
+          )
+          .toList();
     } catch (e) {
+      if (_isMissingColumnError(e, 'is_active')) {
+        final escapedQuery = _escapeLikePattern(query.trim());
+        final response = await _client
+            .from('colleges')
+            .select()
+            .ilike('name', '%$escapedQuery%')
+            .order('name')
+            .limit(10);
+        return (response as List)
+            .whereType<Map<String, dynamic>>()
+            .map(College.fromJson)
+            .where(
+              (college) =>
+                  college.id.isNotEmpty &&
+                  college.name.isNotEmpty &&
+                  college.domain.isNotEmpty,
+            )
+            .toList();
+      }
       debugPrint('Error searching colleges: $e');
       rethrow;
     }
   }
 
   // ============ RESOURCES ============
+
+  Future<List<Resource>> _fetchResourcesViaBackend({
+    required String collegeId,
+    String? semester,
+    String? branch,
+    String? subject,
+    String? type,
+    String? searchQuery,
+    String? sortBy,
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    try {
+      final page = limit > 0 ? ((offset ~/ limit) + 1) : 1;
+      final payload = await _api.listResources(
+        collegeId: collegeId,
+        branch: branch,
+        semester: semester,
+        subject: subject,
+        type: type,
+        search: searchQuery,
+        page: page,
+        limit: limit,
+      );
+
+      final extractedRows = _extractResourceRowsFromBackendPayload(payload);
+      final rows = extractedRows.where((row) {
+        final rowCollegeId =
+            (row['college_id'] ?? row['collegeId'])?.toString().trim() ?? '';
+        return rowCollegeId.isEmpty || rowCollegeId == collegeId;
+      }).toList();
+      final effectiveRows = rows.isNotEmpty ? rows : extractedRows;
+
+      final enrichedRows = await enrichResourceRowsWithUploaderProfiles(
+        effectiveRows,
+      );
+      final resources = <Resource>[];
+      for (final row in enrichedRows) {
+        try {
+          resources.add(Resource.fromJson(row));
+        } catch (parseError) {
+          debugPrint('Skipping malformed backend resource row: $parseError');
+        }
+      }
+
+      if (sortBy == 'teacher') {
+        resources.sort((a, b) {
+          if (a.isTeacherUpload != b.isTeacherUpload) {
+            return a.isTeacherUpload ? -1 : 1;
+          }
+          return b.createdAt.compareTo(a.createdAt);
+        });
+      } else if (sortBy == 'upvotes') {
+        resources.sort((a, b) => b.upvotes.compareTo(a.upvotes));
+      } else {
+        resources.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      }
+
+      return resources;
+    } catch (e) {
+      debugPrint('Backend resources fallback failed: $e');
+      return const <Resource>[];
+    }
+  }
+
+  Future<List<String>> _getUniqueValuesFromBackend({
+    required String column,
+    required String collegeId,
+    String? branch,
+  }) async {
+    final resources = await _fetchResourcesViaBackend(
+      collegeId: collegeId,
+      branch: branch,
+      limit: 120,
+      offset: 0,
+    );
+
+    Iterable<String> values;
+    switch (column.toLowerCase()) {
+      case 'branch':
+        values = resources.map((resource) => resource.branch ?? '');
+        break;
+      case 'semester':
+        values = resources.map((resource) => resource.semester ?? '');
+        break;
+      case 'subject':
+        values = resources.map((resource) => resource.subject ?? '');
+        break;
+      case 'type':
+        values = resources.map((resource) => resource.type);
+        break;
+      default:
+        values = const <String>[];
+    }
+
+    final normalized = values
+        .map((value) => value.trim())
+        .where((value) => value.isNotEmpty)
+        .toSet()
+        .toList();
+    normalized.sort();
+    return normalized;
+  }
 
   /// Get resources with filters
   Future<List<Resource>> getResources({
@@ -935,6 +1135,33 @@ class SupabaseService {
     }
 
     final fetchFuture = () async {
+      if (!_hasConfiguredSupabaseAnonKey) {
+        debugPrint(
+          'Supabase anon key missing; using backend resources fallback directly.',
+        );
+        final fallbackRows = await _fetchResourcesViaBackend(
+          collegeId: collegeId,
+          semester: normalizedSemester,
+          branch: normalizedBranch,
+          subject: normalizedSubject,
+          type: normalizedType,
+          searchQuery: normalizedSearch,
+          sortBy: sortBy,
+          limit: limit,
+          offset: offset,
+        );
+
+        if (shouldUseCache) {
+          _resourceListCache[cacheKey] = (
+            cachedAt: DateTime.now(),
+            data: List<Resource>.unmodifiable(fallbackRows),
+          );
+          _pruneResourceListCacheIfNeeded();
+        }
+
+        return fallbackRows;
+      }
+
       try {
         debugPrint(
           'SupabaseService.getResources: collegeId=$collegeId, semester=$normalizedSemester, branch=$normalizedBranch, type=$normalizedType',
@@ -1004,8 +1231,31 @@ class SupabaseService {
 
         return rows;
       } catch (e) {
-        debugPrint('Error fetching resources: $e');
-        rethrow;
+        debugPrint('Error fetching resources via Supabase: $e');
+        final fallbackRows = await _fetchResourcesViaBackend(
+          collegeId: collegeId,
+          semester: normalizedSemester,
+          branch: normalizedBranch,
+          subject: normalizedSubject,
+          type: normalizedType,
+          searchQuery: normalizedSearch,
+          sortBy: sortBy,
+          limit: limit,
+          offset: offset,
+        );
+
+        if (fallbackRows.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
+          if (shouldUseCache) {
+            _resourceListCache[cacheKey] = (
+              cachedAt: DateTime.now(),
+              data: List<Resource>.unmodifiable(fallbackRows),
+            );
+            _pruneResourceListCacheIfNeeded();
+          }
+          return fallbackRows;
+        }
+
+        return const <Resource>[];
       }
     }();
 
@@ -2125,15 +2375,11 @@ class SupabaseService {
       final results = await Future.wait<dynamic>([
         getFollowersCount(userEmail),
         getFollowingCount(userEmail),
-        _client
-            .from('resources')
-            .count(CountOption.exact)
-            .eq('uploaded_by_email', userEmail)
-            .eq('status', 'approved'),
+        getUserResources(userEmail, approvedOnly: true, limit: 500, offset: 0),
       ]);
       final followers = (results[0] as num?)?.toInt() ?? 0;
       final following = (results[1] as num?)?.toInt() ?? 0;
-      final contributions = (results[2] as num?)?.toInt() ?? 0;
+      final contributions = (results[2] as List<Resource>).length;
 
       return {
         'followers': followers,
@@ -2270,23 +2516,36 @@ class SupabaseService {
       }
 
       final response = await query;
-
       final values = (response as List)
-          .map((row) => row[column]?.toString())
+          .whereType<Map>()
+          .map((row) => row[column]?.toString().trim())
           .where((v) => v != null && v.isNotEmpty)
+          .cast<String>()
           .toSet()
           .toList();
 
       values.sort();
-      final resolved = values.cast<String>();
       _uniqueValuesCache[cacheKey] = (
         cachedAt: DateTime.now(),
-        data: List<String>.unmodifiable(resolved),
+        data: List<String>.unmodifiable(values),
       );
       _pruneUniqueValuesCacheIfNeeded();
-      return resolved;
+      return values;
     } catch (e) {
       debugPrint('Error fetching unique values for $column: $e');
+      final backendValues = await _getUniqueValuesFromBackend(
+        column: column,
+        collegeId: collegeId,
+        branch: branch,
+      );
+      if (backendValues.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
+        _uniqueValuesCache[cacheKey] = (
+          cachedAt: DateTime.now(),
+          data: List<String>.unmodifiable(backendValues),
+        );
+        _pruneUniqueValuesCacheIfNeeded();
+        return backendValues;
+      }
       return [];
     }
   }
@@ -2643,21 +2902,11 @@ class SupabaseService {
     int limit = 50,
     String sortBy = 'recent',
   }) async {
-    try {
-      final String orderColumn = sortBy == 'top' ? 'upvotes' : 'created_at';
-
-      // select with comment count from 'room_post_comments' (linked to 'room_messages' via message_id)
-      // Note: The foreign key on room_post_comments.message_id points to room_messages.id
-      final response = await _client
-          .from('room_messages')
-          .select('*, comment_count:room_post_comments(count)')
-          .eq('room_id', roomId)
-          .order(orderColumn, ascending: false)
-          .range(0, limit - 1);
-
-      final posts = (response as List).map((e) {
-        final data = Map<String, dynamic>.from(e);
-        // Fix count format
+    Future<List<Map<String, dynamic>>> normalizePosts(
+      List<Map<String, dynamic>> rawPosts,
+    ) async {
+      final posts = rawPosts.map((entry) {
+        final data = Map<String, dynamic>.from(entry);
         data['comment_count'] = _normalizeCount(data['comment_count']);
         data['upvotes'] = _normalizeCount(data['upvotes']);
         data['downvotes'] = _normalizeCount(data['downvotes']);
@@ -2707,8 +2956,47 @@ class SupabaseService {
       }
 
       return posts;
+    }
+
+    try {
+      if (!_hasConfiguredSupabaseAnonKey) {
+        final backendPosts = await _api.getChatRoomPosts(
+          roomId,
+          limit: limit,
+          sortBy: sortBy,
+        );
+        return normalizePosts(backendPosts);
+      }
+
+      final String orderColumn = sortBy == 'top' ? 'upvotes' : 'created_at';
+
+      // select with comment count from 'room_post_comments' (linked to 'room_messages' via message_id)
+      // Note: The foreign key on room_post_comments.message_id points to room_messages.id
+      final response = await _client
+          .from('room_messages')
+          .select('*, comment_count:room_post_comments(count)')
+          .eq('room_id', roomId)
+          .order(orderColumn, ascending: false)
+          .range(0, limit - 1);
+      return normalizePosts(
+        (response as List)
+            .map((entry) => Map<String, dynamic>.from(entry as Map))
+            .toList(),
+      );
     } catch (e) {
       debugPrint('Error fetching room posts: $e');
+      try {
+        final backendPosts = await _api.getChatRoomPosts(
+          roomId,
+          limit: limit,
+          sortBy: sortBy,
+        );
+        if (backendPosts.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
+          return normalizePosts(backendPosts);
+        }
+      } catch (backendError) {
+        debugPrint('Backend getRoomPosts fallback failed: $backendError');
+      }
       return [];
     }
   }
@@ -3660,6 +3948,21 @@ class SupabaseService {
       claimedEmail: userEmail,
       action: 'get_saved_post_ids',
     );
+
+    if (!_hasConfiguredSupabaseAnonKey) {
+      try {
+        final savedPosts = await _getSavedPostsFromBackend();
+        return savedPosts
+            .map((row) => row['id']?.toString())
+            .where((id) => id != null && id.isNotEmpty)
+            .cast<String>()
+            .toSet();
+      } catch (e) {
+        debugPrint('Backend saved post lookup failed: $e');
+        return <String>{};
+      }
+    }
+
     final combinedIds = <String>{};
     var hasAuthoritativeSource = false;
 
@@ -4783,17 +5086,9 @@ class SupabaseService {
     String userEmail,
     String collegeId,
   ) async {
-    try {
-      final response = await _client
-          .from('chat_rooms')
-          .select('*, member_count:room_members(count)')
-          .eq('college_id', collegeId)
-          .order('created_at', ascending: false);
-
-      final rooms = (response as List)
-          .map((e) => _normalizeChatRoomRecord(e))
-          .toList();
-
+    List<Map<String, dynamic>> filterActiveRooms(
+      List<Map<String, dynamic>> rooms,
+    ) {
       final now = DateTime.now().toUtc();
       return rooms.where((room) {
         final isActive = room['is_active'] ?? room['isActive'];
@@ -4806,8 +5101,42 @@ class SupabaseService {
         final expiryUtc = expiry.isUtc ? expiry : expiry.toUtc();
         return expiryUtc.isAfter(now);
       }).toList();
+    }
+
+    try {
+      if (!_hasConfiguredSupabaseAnonKey) {
+        debugPrint(
+          'Supabase anon key missing; using backend room discovery directly.',
+        );
+        final backendRooms = await _api.listChatRooms(collegeId: collegeId);
+        return filterActiveRooms(
+          backendRooms.map((entry) => _normalizeChatRoomRecord(entry)).toList(),
+        );
+      }
+
+      final response = await _client
+          .from('chat_rooms')
+          .select('*, member_count:room_members(count)')
+          .eq('college_id', collegeId)
+          .order('created_at', ascending: false);
+
+      final rooms = (response as List)
+          .map((e) => _normalizeChatRoomRecord(e))
+          .toList();
+      return filterActiveRooms(rooms);
     } catch (e) {
-      debugPrint('Error fetching chat rooms: $e');
+      debugPrint('Error fetching chat rooms via Supabase: $e');
+      try {
+        final backendRooms = await _api.listChatRooms(collegeId: collegeId);
+        final normalized = backendRooms
+            .map((entry) => _normalizeChatRoomRecord(entry))
+            .toList();
+        if (normalized.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
+          return filterActiveRooms(normalized);
+        }
+      } catch (backendError) {
+        debugPrint('Backend chat room fallback failed: $backendError');
+      }
       return [];
     }
   }
@@ -4878,9 +5207,36 @@ class SupabaseService {
     int limit = 80,
     int offset = 0,
   }) async {
+    List<Map<String, dynamic>> normalizeBackendRows(
+      List<Map<String, dynamic>> rawRows,
+    ) {
+      final filtered = includeHidden
+          ? List<Map<String, dynamic>>.from(rawRows)
+          : rawRows.where((notice) => notice['is_active'] != false).toList();
+      filtered.sort((a, b) {
+        final aCreated = DateTime.tryParse(a['created_at']?.toString() ?? '');
+        final bCreated = DateTime.tryParse(b['created_at']?.toString() ?? '');
+        if (aCreated == null && bCreated == null) return 0;
+        if (aCreated == null) return 1;
+        if (bCreated == null) return -1;
+        return bCreated.compareTo(aCreated);
+      });
+      return filtered;
+    }
+
     try {
       final safeLimit = limit < 1 ? 1 : (limit > 500 ? 500 : limit);
       final safeOffset = offset < 0 ? 0 : offset;
+      if (!_hasConfiguredSupabaseAnonKey) {
+        final backendRows = normalizeBackendRows(
+          await _api.getNotices(collegeId),
+        );
+        if (safeOffset >= backendRows.length) {
+          return const <Map<String, dynamic>>[];
+        }
+        final end = (safeOffset + safeLimit).clamp(0, backendRows.length);
+        return backendRows.sublist(safeOffset, end);
+      }
       var query = _client.from('notices').select().eq('college_id', collegeId);
       if (!includeHidden) {
         query = query.eq('is_active', true);
@@ -4891,6 +5247,23 @@ class SupabaseService {
       return List<Map<String, dynamic>>.from(response);
     } catch (e) {
       debugPrint('Error getting notices: $e');
+      try {
+        final safeLimit = limit < 1 ? 1 : (limit > 500 ? 500 : limit);
+        final safeOffset = offset < 0 ? 0 : offset;
+        final backendRows = normalizeBackendRows(
+          await _api.getNotices(collegeId),
+        );
+        if (safeOffset >= backendRows.length) {
+          return const <Map<String, dynamic>>[];
+        }
+        final end = (safeOffset + safeLimit).clamp(0, backendRows.length);
+        final sliced = backendRows.sublist(safeOffset, end);
+        if (sliced.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
+          return sliced;
+        }
+      } catch (backendError) {
+        debugPrint('Backend notices fallback failed: $backendError');
+      }
       return [];
     }
   }
@@ -4982,6 +5355,15 @@ class SupabaseService {
       claimedEmail: userEmail,
       action: 'get_user_room_ids',
     );
+    if (!_hasConfiguredSupabaseAnonKey) {
+      try {
+        return await _api.getJoinedRoomIds();
+      } catch (e) {
+        debugPrint('Backend joined rooms lookup failed: $e');
+        return [];
+      }
+    }
+
     try {
       final res = await _client
           .from('room_members')
@@ -4990,6 +5372,14 @@ class SupabaseService {
       return (res as List).map((e) => e['room_id'] as String).toList();
     } catch (e) {
       debugPrint('Error getting joined rooms: $e');
+      try {
+        final backendIds = await _api.getJoinedRoomIds();
+        if (backendIds.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
+          return backendIds;
+        }
+      } catch (backendError) {
+        debugPrint('Backend joined rooms fallback failed: $backendError');
+      }
       return [];
     }
   }
@@ -5184,6 +5574,30 @@ class SupabaseService {
 
   /// Get resources uploaded by a specific user.
   /// If [approvedOnly] is true (default), only approved resources are returned.
+  Future<List<Resource>> _getCurrentUserResourcesViaBackend({
+    required bool approvedOnly,
+    required int limit,
+    required int offset,
+  }) async {
+    final payload = await _api.getMyResources();
+    final rawRows = payload['resources'];
+    if (rawRows is! List) return const <Resource>[];
+
+    final resources =
+        rawRows
+            .whereType<Map>()
+            .map((row) => Resource.fromJson(Map<String, dynamic>.from(row)))
+            .where((resource) => !approvedOnly || resource.isApprovedStatus)
+            .toList()
+          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+    final safeOffset = offset < 0 ? 0 : offset;
+    if (safeOffset >= resources.length) return const <Resource>[];
+
+    final end = (safeOffset + limit).clamp(0, resources.length);
+    return resources.sublist(safeOffset, end);
+  }
+
   Future<List<Resource>> getUserResources(
     String userEmail, {
     bool approvedOnly = true,
@@ -5194,6 +5608,27 @@ class SupabaseService {
     final normalizedEmail = _normalizeEmail(userEmail);
     if (normalizedEmail.isEmpty) return [];
     if (limit <= 0) return [];
+    final isCurrentUser = normalizedEmail == _currentSessionEmail();
+
+    Future<List<Resource>> backendFallback() async {
+      if (!isCurrentUser) {
+        if (!_hasConfiguredSupabaseAnonKey) {
+          debugPrint(
+            'Supabase anon key missing; skipping non-current user resources lookup.',
+          );
+        }
+        return const <Resource>[];
+      }
+      return _getCurrentUserResourcesViaBackend(
+        approvedOnly: approvedOnly,
+        limit: limit,
+        offset: offset,
+      );
+    }
+
+    if (!_hasConfiguredSupabaseAnonKey) {
+      return backendFallback();
+    }
 
     try {
       var query = _client
@@ -5244,6 +5679,14 @@ class SupabaseService {
           .toList();
     } catch (fallbackError) {
       debugPrint('Error fetching user resources: $fallbackError');
+      try {
+        final backendRows = await backendFallback();
+        if (backendRows.isNotEmpty || isCurrentUser) {
+          return backendRows;
+        }
+      } catch (backendError) {
+        debugPrint('Backend user resources fallback failed: $backendError');
+      }
       return [];
     }
   }

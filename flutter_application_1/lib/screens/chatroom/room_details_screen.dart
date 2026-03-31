@@ -660,7 +660,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                   ),
                   Switch(
                     value: showRoomCode,
-                    activeColor: AppTheme.primary,
+                    activeThumbColor: AppTheme.primary,
                     onChanged: (value) => _updateRoomCodeVisibility(value),
                   ),
                 ],

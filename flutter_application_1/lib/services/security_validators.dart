@@ -114,6 +114,17 @@ class SecurityValidators {
     Set<String> allowedSchemes = const <String>{'http', 'https'},
   }) {
     final normalized = value.trim();
+    final normalizedAllowedSchemes = allowedSchemes
+        .map((scheme) => scheme.trim().toLowerCase())
+        .where((scheme) => scheme.isNotEmpty)
+        .toSet();
+    if (requireHttps && !normalizedAllowedSchemes.contains('https')) {
+      throw ArgumentError.value(
+        allowedSchemes,
+        'allowedSchemes',
+        'requireHttps=true requires allowedSchemes to include "https".',
+      );
+    }
     if (normalized.isEmpty) {
       throw ArgumentError('$fieldName is required.');
     }
@@ -125,10 +136,8 @@ class SecurityValidators {
     if (requireHttps && scheme != 'https') {
       throw ArgumentError('$fieldName must use HTTPS.');
     }
-    if (!requireHttps && !allowedSchemes.contains(scheme)) {
-      throw ArgumentError(
-        '$fieldName uses an unsupported URL scheme in sanitizeUrl.',
-      );
+    if (!requireHttps && !normalizedAllowedSchemes.contains(scheme)) {
+      throw ArgumentError('$fieldName uses an unsupported URL scheme.');
     }
     return normalized;
   }

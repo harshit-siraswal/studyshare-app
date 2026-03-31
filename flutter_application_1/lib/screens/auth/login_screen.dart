@@ -901,7 +901,6 @@ class _LoginScreenState extends State<LoginScreen> {
                 onPressed: _isChangingEmail
                     ? null
                     : () async {
-                        if (_isChangingEmail) return;
                         if (mounted) {
                           setState(() => _isChangingEmail = true);
                         }

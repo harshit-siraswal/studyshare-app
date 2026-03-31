@@ -7,6 +7,7 @@ import '../data/academic_subjects_data.dart';
 import '../models/attendance_models.dart';
 import '../models/notice.dart';
 import 'attendance_service.dart';
+import 'auth_service.dart';
 
 class HomeWidgetService {
   static const String _defaultAndroidWidgetPackage = 'me.studyshare.android';
@@ -14,6 +15,7 @@ class HomeWidgetService {
   static const int _maxScheduleCards = 5;
 
   final AttendanceService _attendanceService = AttendanceService();
+  final AuthService _authService = AuthService();
 
   String _groupId = 'group.com.studyshare.app';
   String _noticesWidgetName = 'NoticesWidgetProvider';
@@ -517,7 +519,11 @@ class HomeWidgetService {
         semester: semester,
         branch: branch,
         snapshot:
-            snapshot ?? await _attendanceService.loadCachedSnapshot(collegeId),
+            snapshot ??
+            await _attendanceService.loadCachedSnapshot(
+              collegeId,
+              userEmail: _authService.userEmail?.trim().toLowerCase(),
+            ),
       );
 
       await HomeWidget.saveWidgetData<String>('schedule_badge', payload.badge);

@@ -344,6 +344,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final textColor = AppTheme.getTextColor(context);
     final subTextColor = AppTheme.getTextColor(context, isPrimary: false);
     final bottomPadding = MediaQuery.of(context).padding.bottom + _bottomNavBarAllowance;
+    assert(() {
+      _buildContributionBadgeCard;
+      return true;
+    }());
 
     return Scaffold(
       backgroundColor: isDark ? Colors.black : AppTheme.lightBackground,
@@ -1167,6 +1171,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  // ignore: unused_element
   Widget _buildContributionBadgeCard(
     Color textColor,
     Color subTextColor,

@@ -60,15 +60,50 @@ class AppConfig {
     defaultValue: _defaultRecaptchaSiteKey,
   );
 
-  static const String tenorApiKey = String.fromEnvironment(
+  static const String _tenorApiKeyFromEnv = String.fromEnvironment(
     'TENOR_API_KEY',
     defaultValue: _defaultTenorApiKey,
   );
 
-  static const String googleServerClientId = String.fromEnvironment(
+  static const String _googleServerClientIdFromEnv = String.fromEnvironment(
     'GOOGLE_SERVER_CLIENT_ID',
     defaultValue: _defaultGoogleServerClientId,
   );
+
+  static String get tenorApiKey {
+    final trimmed = _tenorApiKeyFromEnv.trim();
+    final effectiveValue = trimmed.isEmpty
+        ? _defaultTenorApiKey.trim()
+        : trimmed;
+    if (effectiveValue.isEmpty) {
+      throw StateError(
+        'AppConfig.tenorApiKey is not configured. Set TENOR_API_KEY or '
+        'update _defaultTenorApiKey in app_config.dart.',
+      );
+    }
+    return effectiveValue;
+  }
+
+  static String get googleServerClientId {
+    final trimmed = _googleServerClientIdFromEnv.trim();
+    final effectiveValue = trimmed.isEmpty
+        ? _defaultGoogleServerClientId.trim()
+        : trimmed;
+    if (effectiveValue.isEmpty) {
+      throw StateError(
+        'AppConfig.googleServerClientId is not configured. Set '
+        'GOOGLE_SERVER_CLIENT_ID or update _defaultGoogleServerClientId '
+        'in app_config.dart.',
+      );
+    }
+    return effectiveValue;
+  }
+
+  static void validateRequiredConfig() {
+    // Accessors enforce required runtime configuration.
+    tenorApiKey;
+    googleServerClientId;
+  }
 
   static const int maxSessionAgeHours = int.fromEnvironment(
     'MAX_SESSION_AGE_HOURS',
