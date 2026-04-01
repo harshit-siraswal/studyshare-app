@@ -53,7 +53,13 @@ if (Test-Path "$badgerDir\build.gradle") {
     Write-Host "flutter_app_badger patched successfully." -ForegroundColor Green
 }
 
-$buildArgs = @("build", "apk", "--release", "--target-platform=android-arm64")
+$buildArgs = @("build", "apk", "--release")
+
+$targetPlatforms = [Environment]::GetEnvironmentVariable("APP_TARGET_PLATFORMS")
+if (-not [string]::IsNullOrWhiteSpace($targetPlatforms)) {
+    Write-Host "Using target platforms: $targetPlatforms" -ForegroundColor Cyan
+    $buildArgs += "--target-platform=$targetPlatforms"
+}
 
 $overrideBuildName = [Environment]::GetEnvironmentVariable("APP_BUILD_NAME")
 if (-not [string]::IsNullOrWhiteSpace($overrideBuildName)) {
