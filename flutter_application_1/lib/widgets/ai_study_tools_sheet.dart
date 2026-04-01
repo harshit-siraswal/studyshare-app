@@ -133,6 +133,11 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
   bool _isFullscreen = false;
 
+  // Multi-PDF question paper selection
+  final Set<String> _extraPdfIds = {};
+  bool _isMultiQuizLoading = false;
+  String? _multiQuizError;
+
   bool get _supportsOcr => widget.resourceType != 'video';
 
   Map<String, Object?> _baseAnalyticsParameters() {
@@ -926,6 +931,228 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         });
       }
     }
+  }
+
+  /// Generate a question paper from the current resource plus any user-selected
+  /// extra PDFs. Uses the /api/ai/multi-quiz endpoint.
+  Future<void> _generateMultiQuiz() async {
+    if (_isMultiQuizLoading) return;
+    final allIds = [widget.resourceId, ..._extraPdfIds]
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+    if (allIds.isEmpty) return;
+
+    setState(() {
+      _isMultiQuizLoading = true;
+      _multiQuizError = null;
+    });
+    try {
+      final response = await _api.getAiMultiQuiz(
+        fileIds: allIds,
+        useOcr: _supportsOcr && (_useOcr || _forceOcr),
+        forceOcr: _supportsOcr && _forceOcr,
+      );
+      final parsed = _parseQuizPayload(response);
+      if (parsed.isEmpty) {
+        throw Exception(
+          'Could not create valid questions from the selected PDFs. '
+          'Please try different resources.',
+        );
+      }
+      setState(() {
+        _quiz = parsed;
+        _selectedAnswers.clear();
+        _showAnswers = false;
+        _cachedMap['quiz'] = false;
+        _savedLocallyMap['quiz'] = false;
+        _tabController.animateTo(1);
+      });
+    } catch (e) {
+      final msg = e.toString().replaceFirst('Exception: ', '');
+      setState(() => _multiQuizError = msg);
+    } finally {
+      if (mounted) setState(() => _isMultiQuizLoading = false);
+    }
+  }
+
+  Future<void> _showMultiPdfPicker(bool isDark) async {
+    final collegeId = widget.collegeId;
+    if (collegeId == null || collegeId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('College scope required for multi-PDF quiz.')),
+      );
+      return;
+    }
+    // Fetch up to 30 recently approved PDFs from this college.
+    List<Map<String, dynamic>> candidates = [];
+    try {
+      final payload = await _api.listResources(
+        collegeId: collegeId,
+        type: 'notes',
+        limit: 30,
+      );
+      final raw = payload['resources'] ?? payload['data'] ?? <dynamic>[];
+      if (raw is List) {
+        candidates = raw
+            .whereType<Map>()
+            .map((m) => Map<String, dynamic>.from(m))
+            .where((m) {
+              final id = m['id']?.toString().trim() ?? '';
+              return id.isNotEmpty && id != widget.resourceId;
+            })
+            .toList();
+      }
+    } catch (e) {
+      debugPrint('[MultiPDF] Failed to fetch candidates: $e');
+    }
+
+    if (!mounted) return;
+    if (candidates.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No other PDFs found in your college.')),
+      );
+      return;
+    }
+
+    // Show a bottom sheet with a checkbox list.
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: isDark ? const Color(0xFF111827) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            final selected = Set<String>.from(_extraPdfIds);
+            return DraggableScrollableSheet(
+              expand: false,
+              initialChildSize: 0.6,
+              maxChildSize: 0.9,
+              builder: (_, scrollCtrl) => Column(
+                children: [
+                  const SizedBox(height: 8),
+                  Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.withValues(alpha: 0.4),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Add PDFs to Question Paper',
+                            style: GoogleFonts.inter(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 15,
+                              color: isDark ? Colors.white : const Color(0xFF0F172A),
+                            ),
+                          ),
+                        ),
+                        Text(
+                          '${selected.length}/4 selected',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: AppTheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: ListView.builder(
+                      controller: scrollCtrl,
+                      itemCount: candidates.length,
+                      itemBuilder: (_, i) {
+                        final item = candidates[i];
+                        final id = item['id']?.toString() ?? '';
+                        final title = item['title']?.toString() ?? 'Untitled';
+                        final isSelected = selected.contains(id);
+                        return CheckboxListTile(
+                          value: isSelected,
+                          onChanged: (val) {
+                            if (val == true && selected.length >= 4) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Maximum 4 extra PDFs allowed.'),
+                                ),
+                              );
+                              return;
+                            }
+                            setModalState(() {
+                              if (val == true) {
+                                selected.add(id);
+                              } else {
+                                selected.remove(id);
+                              }
+                            });
+                          },
+                          title: Text(
+                            title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                              color: isDark ? Colors.white : const Color(0xFF1E293B),
+                            ),
+                          ),
+                          controlAffinity: ListTileControlAffinity.leading,
+                          activeColor: AppTheme.primary,
+                        );
+                      },
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          setState(() {
+                            _extraPdfIds
+                              ..clear()
+                              ..addAll(selected);
+                          });
+                          Navigator.of(ctx).pop();
+                          _generateMultiQuiz();
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primary,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
+                        child: Text(
+                          'Generate Question Paper (${selected.length + 1} PDF${selected.isEmpty ? '' : 's'})',
+                          style: GoogleFonts.inter(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   bool _looksLikeTokenLimitError(String message, {String? errorCode}) {
@@ -1892,11 +2119,108 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     }
 
     if (_quiz == null || _quiz!.isEmpty) {
-      return _buildEmptyState(
-        isDark: isDark,
-        icon: Icons.quiz_outlined,
-        title: 'No quiz yet',
-        subtitle: 'Generate MCQs for revision practice.',
+      return SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        child: Column(
+          children: [
+            _buildEmptyState(
+              isDark: isDark,
+              icon: Icons.quiz_outlined,
+              title: 'No quiz yet',
+              subtitle: 'Generate MCQs for revision practice.',
+            ),
+            const SizedBox(height: 12),
+            // Multi-PDF question paper CTA
+            if (_isMultiQuizLoading)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: BrandedLoader(
+                    compact: true,
+                    showQuotes: false,
+                    message: 'Building multi-PDF question paper...',
+                  ),
+                ),
+              )
+            else
+              InkWell(
+                onTap: () => _showMultiPdfPicker(isDark),
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0xFF0A1628)
+                        : const Color(0xFFF0F7FF),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: isDark
+                          ? const Color(0xFF1E3A5F)
+                          : const Color(0xFFBDD7FF),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: AppTheme.primary.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(
+                          Icons.file_copy_outlined,
+                          color: AppTheme.primary,
+                          size: 18,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Multi-PDF Question Paper',
+                              style: GoogleFonts.inter(
+                                fontSize: 13.5,
+                                fontWeight: FontWeight.w700,
+                                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Combine up to 5 PDFs for a comprehensive exam prep paper.',
+                              style: GoogleFonts.inter(
+                                fontSize: 11.5,
+                                color: isDark ? Colors.white60 : const Color(0xFF475569),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        color: isDark ? Colors.white38 : const Color(0xFF94A3B8),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            if (_multiQuizError != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: Text(
+                  _multiQuizError!,
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    color: AppTheme.error,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+          ],
+        ),
       );
     }
 

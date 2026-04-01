@@ -2318,6 +2318,33 @@ class BackendApiService {
     );
   }
 
+  /// Generate a question paper from multiple PDFs (up to 5).
+  /// Uses the dedicated /api/ai/multi-quiz endpoint with its own
+  /// question_paper rate-limit bucket.
+  Future<Map<String, dynamic>> getAiMultiQuiz({
+    required List<String> fileIds,
+    bool? useOcr,
+    bool? forceOcr,
+    bool? includeSource,
+  }) async {
+    if (fileIds.isEmpty) throw ArgumentError('fileIds must not be empty');
+    if (fileIds.length > 5) throw ArgumentError('Maximum 5 PDFs allowed');
+    return _requestJson(
+      '/api/ai/multi-quiz',
+      method: 'POST',
+      timeout: _aiRequestTimeout,
+      body: <String, dynamic>{
+        'file_ids': fileIds
+            .map((id) => id.trim())
+            .where((id) => id.isNotEmpty)
+            .toList(),
+        'use_ocr': ?useOcr,
+        'force_ocr': ?forceOcr,
+        'include_source': ?includeSource,
+      },
+    );
+  }
+
   Future<Map<String, dynamic>> getAiFlashcards({
     required String fileId,
     String? collegeId,

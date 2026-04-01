@@ -1294,6 +1294,11 @@ class SupabaseService {
         .toList();
     if (normalizedEmails.isEmpty) return const <Resource>[];
 
+    debugPrint(
+      '[FollowingFeed] Fetching resources for ${normalizedEmails.length} '
+      'followed users via backend.',
+    );
+
     final fetchPerUser = (limit + offset).clamp(20, 120);
     final results = await Future.wait(
       normalizedEmails.map((email) async {
@@ -1305,13 +1310,25 @@ class SupabaseService {
             offset: 0,
           );
           final resourcesRaw = payload['resources'];
-          if (resourcesRaw is! List) return const <Resource>[];
-          return resourcesRaw
+          if (resourcesRaw is! List) {
+            debugPrint(
+              '[FollowingFeed] No resources list in payload for $email '
+              '(keys: ${payload.keys.toList()})',
+            );
+            return const <Resource>[];
+          }
+          final parsed = resourcesRaw
               .whereType<Map>()
               .map((row) => Resource.fromJson(Map<String, dynamic>.from(row)))
               .toList();
+          debugPrint(
+            '[FollowingFeed] Got ${parsed.length} resources for $email.',
+          );
+          return parsed;
         } catch (e) {
-          debugPrint('Backend following resource lookup failed for $email: $e');
+          debugPrint(
+            '[FollowingFeed] Backend lookup failed for $email: $e',
+          );
           return const <Resource>[];
         }
       }),
@@ -1332,6 +1349,9 @@ class SupabaseService {
 
     final merged = mergedById.values.toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    debugPrint(
+      '[FollowingFeed] Merged total: ${merged.length} unique resources.',
+    );
     final safeOffset = offset < 0 ? 0 : offset;
     if (safeOffset >= merged.length) return const <Resource>[];
     final end = (safeOffset + limit).clamp(0, merged.length);
@@ -2546,11 +2566,24 @@ class SupabaseService {
       final results = await Future.wait<dynamic>([
         getFollowersCount(userEmail),
         getFollowingCount(userEmail),
-        getUserResources(userEmail, approvedOnly: true, limit: 500, offset: 0),
+        // Fetch resources via backend — we use the payload's `total`/`count`
+        // field so the contributions number is correct even when the backend
+        // paginates and only returns a slice.
+        _api.getPublicUserResources(
+          email: _normalizeEmail(userEmail),
+          approvedOnly: true,
+          limit: 1,  // We only need the count metadata, not every resource.
+          offset: 0,
+        ),
       ]);
       final followers = (results[0] as num?)?.toInt() ?? 0;
       final following = (results[1] as num?)?.toInt() ?? 0;
-      final contributions = (results[2] as List<Resource>).length;
+
+      // Prefer the authoritative total count from the backend response.
+      final payload = results[2] as Map<String, dynamic>;
+      final contributions = _normalizeCount(
+        payload['total'] ?? payload['count'] ?? (payload['resources'] as List?)?.length ?? 0,
+      );
 
       return {
         'followers': followers,
@@ -5900,7 +5933,8 @@ class SupabaseService {
       if (first is Map && first.containsKey('count')) {
         return _normalizeCount(first['count']);
       }
-      return 0;
+      // Many endpoints return full item arrays instead of an explicit count.
+      return countVal.length;
     }
     if (countVal is Map && countVal.containsKey('count')) {
       return _normalizeCount(countVal['count']);
