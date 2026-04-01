@@ -1527,8 +1527,21 @@ class BackendApiService {
   Future<List<Map<String, dynamic>>> discoverUsers({
     String? query,
     int limit = 50,
+    String? collegeId,
+    String? college,
   }) async {
+    final normalizedCollegeId = collegeId?.trim() ?? '';
+    final normalizedCollege = college?.trim() ?? '';
+    if (normalizedCollegeId.isEmpty && normalizedCollege.isEmpty) {
+      return const <Map<String, dynamic>>[];
+    }
     final queryParameters = <String, String>{'limit': limit.toString()};
+    if (normalizedCollegeId.isNotEmpty) {
+      queryParameters['college_id'] = normalizedCollegeId;
+    }
+    if (normalizedCollege.isNotEmpty) {
+      queryParameters['college'] = normalizedCollege;
+    }
     if (query != null && query.trim().isNotEmpty) {
       queryParameters['query'] = query.trim();
     }
@@ -2456,6 +2469,7 @@ class BackendApiService {
       'primary_source',
       'primary_source_file_id',
       'no_local',
+      'insufficient_grounding',
       'retrieval_score',
       'llm_confidence_score',
       'combined_confidence',
@@ -2550,6 +2564,7 @@ class BackendApiService {
     String? notebookId,
     String? title,
     String? sourceScope,
+    String? subject,
   }) async {
     _enforceAbuseProtection('/api/notebooks/sources/upload', 'POST');
     final token = await _getIdToken();
@@ -2568,6 +2583,9 @@ class BackendApiService {
     }
     if (sourceScope != null && sourceScope.trim().isNotEmpty) {
       request.fields['source_scope'] = sourceScope.trim();
+    }
+    if (subject != null && subject.trim().isNotEmpty) {
+      request.fields['subject'] = subject.trim();
     }
     request.headers['Authorization'] = 'Bearer $token';
 
@@ -2751,6 +2769,9 @@ class BackendApiService {
     final answerOrigin =
         response['answer_origin'] ??
         (data is Map ? data['answer_origin'] : null);
+    final insufficientGrounding =
+      response['insufficient_grounding'] == true ||
+      (data is Map && data['insufficient_grounding'] == true);
     final strictNotesMode =
         response['strict_notes_mode'] ??
         (data is Map ? data['strict_notes_mode'] : null);
@@ -2760,6 +2781,7 @@ class BackendApiService {
         (ocrErrors is List && ocrErrors.isNotEmpty);
     if (normalizedSources.isNotEmpty ||
         noLocal ||
+        insufficientGrounding ||
         answerOrigin != null ||
         hasOcrDiagnostics) {
       yield jsonEncode({
@@ -2778,6 +2800,7 @@ class BackendApiService {
           'tone_profile_used': ?toneProfileUsed,
           'answer_origin': ?answerOrigin,
           'strict_notes_mode': ?strictNotesMode,
+          'insufficient_grounding': insufficientGrounding,
           'ocr_failure_affects_retrieval': ?ocrFailureAffectsRetrieval,
           'ocr_errors': ?ocrErrors,
         },

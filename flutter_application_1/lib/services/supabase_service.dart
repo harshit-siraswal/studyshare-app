@@ -132,6 +132,41 @@ class SupabaseService {
         .replaceAll('_', r'\_');
   }
 
+  String _normalizeCollegeScopeValue(String? value) {
+    return value?.trim().toLowerCase() ?? '';
+  }
+
+  bool _matchesCollegeScope(
+    Map<String, dynamic> user, {
+    required String collegeId,
+    required String college,
+  }) {
+    final normalizedCollegeId = _normalizeCollegeScopeValue(collegeId);
+    final normalizedCollege = _normalizeCollegeScopeValue(college);
+    if (normalizedCollegeId.isEmpty && normalizedCollege.isEmpty) {
+      return false;
+    }
+
+    final userCollegeId = _normalizeCollegeScopeValue(
+      user['college_id']?.toString(),
+    );
+    final userCollege = _normalizeCollegeScopeValue(user['college']?.toString());
+
+    if (normalizedCollegeId.isNotEmpty &&
+        userCollegeId.isNotEmpty &&
+        userCollegeId == normalizedCollegeId) {
+      return true;
+    }
+
+    if (normalizedCollege.isNotEmpty &&
+        userCollege.isNotEmpty &&
+        userCollege == normalizedCollege) {
+      return true;
+    }
+
+    return false;
+  }
+
   String _resourceStateKey(String resourceId, {String? userEmail}) {
     final normalizedInputEmail = _normalizeEmail(userEmail);
     final scopedEmail = normalizedInputEmail.isNotEmpty
@@ -2250,12 +2285,34 @@ class SupabaseService {
   Future<List<Map<String, dynamic>>> discoverUsers({
     String? query,
     int limit = 50,
+    String? collegeId,
+    String? college,
   }) async {
+    final normalizedCollegeId = collegeId?.trim() ?? '';
+    final normalizedCollege = college?.trim() ?? '';
+    if (normalizedCollegeId.isEmpty && normalizedCollege.isEmpty) {
+      return const <Map<String, dynamic>>[];
+    }
+
     try {
-      final users = await _api.discoverUsers(query: query, limit: limit);
-      final normalizedUsers = users.map(_normalizeReadableUserRecord).toList();
-      if (normalizedUsers.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
-        return normalizedUsers;
+      final users = await _api.discoverUsers(
+        query: query,
+        limit: limit,
+        collegeId: normalizedCollegeId,
+        college: normalizedCollege,
+      );
+      final scopedUsers = users
+          .map(_normalizeReadableUserRecord)
+          .where(
+            (user) => _matchesCollegeScope(
+              user,
+              collegeId: normalizedCollegeId,
+              college: normalizedCollege,
+            ),
+          )
+          .toList();
+      if (scopedUsers.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
+        return scopedUsers;
       }
     } catch (e) {
       debugPrint('Error discovering users via backend: $e');
@@ -2284,10 +2341,22 @@ class SupabaseService {
         }
       }
 
+      if (normalizedCollegeId.isNotEmpty) {
+        dbQuery = dbQuery.eq('college_id', normalizedCollegeId);
+      } else if (normalizedCollege.isNotEmpty) {
+        dbQuery = dbQuery.ilike('college', normalizedCollege);
+      }
+
       final response = await dbQuery.limit(limit.clamp(1, 100));
       return List<Map<String, dynamic>>.from(
         response,
-      ).map(_normalizeReadableUserRecord).toList();
+      ).map(_normalizeReadableUserRecord).where((user) {
+        return _matchesCollegeScope(
+          user,
+          collegeId: normalizedCollegeId,
+          college: normalizedCollege,
+        );
+      }).toList();
     } catch (e) {
       debugPrint('Error discovering users: $e');
       return const <Map<String, dynamic>>[];

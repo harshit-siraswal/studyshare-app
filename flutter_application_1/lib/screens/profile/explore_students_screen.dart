@@ -40,9 +40,14 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
   Future<void> _loadStudents() async {
     setState(() => _isLoading = true);
     try {
+      final profile = await _supabaseService.getCurrentUserProfile(
+        maxAttempts: 1,
+      );
       final students = await _supabaseService.discoverUsers(
         query: _searchQuery,
         limit: 50,
+        collegeId: profile['college_id']?.toString().trim() ?? '',
+        college: profile['college']?.toString().trim() ?? '',
       );
 
       final currentUserEmail = widget.userEmail.trim().toLowerCase();

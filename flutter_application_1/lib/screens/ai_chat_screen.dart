@@ -1763,6 +1763,7 @@ class _AIChatScreenState extends State<AIChatScreen>
         notebookId: _activeSessionId,
         title: file.name,
         sourceScope: 'ai_chat_reupload',
+        subject: source.subject?.toString() ?? widget.resourceContext?.subject,
       );
       final replacementFileId = upload['replacement_file_id']?.toString() ?? '';
       if (replacementFileId.isEmpty) {
@@ -2332,9 +2333,32 @@ class _AIChatScreenState extends State<AIChatScreen>
   }
 
   bool _responseIndicatesNoLocal(Map<String, dynamic> response) {
-    if (response['no_local'] == true) return true;
+    if (response['no_local'] == true || response['insufficient_grounding'] == true) {
+      return true;
+    }
     final data = response['data'];
-    if (data is Map && data['no_local'] == true) return true;
+    if (data is Map &&
+        (data['no_local'] == true || data['insufficient_grounding'] == true)) {
+      return true;
+    }
+    return false;
+  }
+
+  bool _responseIndicatesInsufficientGrounding(Map<String, dynamic> response) {
+    if (response['insufficient_grounding'] == true) return true;
+    final answerOrigin = response['answer_origin']?.toString().toLowerCase();
+    if (answerOrigin == 'insufficient_notes' || answerOrigin == 'insufficientnotes') {
+      return true;
+    }
+    final data = response['data'];
+    if (data is Map) {
+      if (data['insufficient_grounding'] == true) return true;
+      final nestedAnswerOrigin = data['answer_origin']?.toString().toLowerCase();
+      if (nestedAnswerOrigin == 'insufficient_notes' ||
+          nestedAnswerOrigin == 'insufficientnotes') {
+        return true;
+      }
+    }
     return false;
   }
 
@@ -2766,16 +2790,17 @@ class _AIChatScreenState extends State<AIChatScreen>
         semesterOnly: true,
       );
       final normalizedBranch = _normalizeAcademicFilterValue(branch);
-      List<dynamic> scoped = <dynamic>[];
-      if (subject.isNotEmpty) {
-        scoped = await _supabase.getResources(
-          collegeId: widget.collegeId,
-          semester: normalizedSemester,
-          branch: normalizedBranch,
-          subject: subject,
-          limit: 8,
-        );
+      if (subject.isEmpty) {
+        return const [];
       }
+      List<dynamic> scoped = <dynamic>[];
+      scoped = await _supabase.getResources(
+        collegeId: widget.collegeId,
+        semester: normalizedSemester,
+        branch: normalizedBranch,
+        subject: subject,
+        limit: 8,
+      );
 
       if (scoped.isEmpty && subject.isNotEmpty && normalizedSemester != null) {
         scoped = await _supabase.getResources(
@@ -2800,15 +2825,6 @@ class _AIChatScreenState extends State<AIChatScreen>
           semester: normalizedSemester,
           branch: normalizedBranch,
           searchQuery: subject,
-          limit: 8,
-        );
-      }
-
-      if (scoped.isEmpty) {
-        scoped = await _supabase.getResources(
-          collegeId: widget.collegeId,
-          semester: normalizedSemester,
-          branch: normalizedBranch,
           limit: 8,
         );
       }
@@ -2854,6 +2870,10 @@ Additional quality gate (must pass):
 - Do not use placeholder values such as "Question text", "A option", or "Subject Name".
 - Return at least 10 unique subject-relevant questions.
 - Ensure options are distinct and answers match one of the options.
+  - Your last response was not valid JSON.
+  - Respond ONLY with a single raw JSON object that starts with '{' and matches the schema exactly.
+  - Return only a single valid JSON object and nothing else.
+  - Do not wrap the result in markdown fences or add commentary.
 '''
         : '';
     return '''
@@ -3113,9 +3133,9 @@ Return STRICT JSON only (no markdown). Schema:
         (item) => item['type']?.toString().toLowerCase() == 'image',
       );
       final noteSources = _activitySourcesFromAttachmentMaps(mergedAttachments);
-      final notesDescription = totalAttachmentCount > 0
-          ? 'Using $totalAttachmentCount note source'
-                '${totalAttachmentCount == 1 ? '' : 's'} for grounding.'
+      final notesDescription = noteSources.isNotEmpty
+          ? 'Using ${noteSources.length} note source'
+                '${noteSources.length == 1 ? '' : 's'} for grounding.'
           : 'No related notes were found for this paper yet.';
       if (mounted) {
         setState(() {
@@ -3147,12 +3167,44 @@ Return STRICT JSON only (no markdown). Schema:
           );
         });
       }
+      if (noteSources.isEmpty) {
+        if (mounted) {
+          setState(() {
+            aiMessage.content =
+                'No related notes were found for this paper yet. Upload matching study material and try again.';
+            aiMessage.showLiveExport = false;
+            aiMessage.liveSteps = _updateLiveStepList(
+              aiMessage.liveSteps,
+              'qp_generate',
+              status: AiLiveActivityStatus.failed,
+              description:
+                  'Question paper generation was skipped because no relevant notes were found.',
+            );
+            aiMessage.liveSteps = _updateLiveStepList(
+              aiMessage.liveSteps,
+              'qp_validate',
+              status: AiLiveActivityStatus.failed,
+              description:
+                  'A paper cannot be validated without relevant notes.',
+            );
+            aiMessage.liveSteps = _updateLiveStepList(
+              aiMessage.liveSteps,
+              'qp_ready',
+              status: AiLiveActivityStatus.failed,
+              description:
+                  'Upload subject-specific notes to enable PDF export.',
+            );
+          });
+        }
+        await _persistCurrentSession();
+        return;
+      }
       var lastAnswer = '';
       AiQuestionPaper? paper;
       var forceOcr = false;
       var aiInvoked = false;
       var ocrRetryUsed = false;
-      for (var attempt = 0; attempt < 3 && paper == null; attempt++) {
+      for (var attempt = 0; attempt < 2 && paper == null; attempt++) {
         final strictMode = attempt > 0;
         final attemptId = attempt == 0
             ? 'attempt_1'
@@ -3209,6 +3261,40 @@ Return STRICT JSON only (no markdown). Schema:
           _lastPrimarySourceFileId = primarySourceFileId;
         }
         aiInvoked = true;
+        if (_responseIndicatesInsufficientGrounding(response)) {
+          const noNotesMessage =
+              'No related notes were found for this paper yet. Upload matching study material and try again.';
+          if (mounted) {
+            setState(() {
+              aiMessage.content = noNotesMessage;
+              aiMessage.showLiveExport = false;
+              aiMessage.answerOrigin = AiAnswerOrigin.insufficientNotes;
+              aiMessage.liveSteps = _updateLiveStepList(
+                aiMessage.liveSteps,
+                'qp_generate',
+                status: AiLiveActivityStatus.failed,
+                description:
+                    'Question paper generation stopped because the notes were not grounded enough.',
+              );
+              aiMessage.liveSteps = _updateLiveStepList(
+                aiMessage.liveSteps,
+                'qp_validate',
+                status: AiLiveActivityStatus.failed,
+                description:
+                    'A paper cannot be validated without grounded notes.',
+              );
+              aiMessage.liveSteps = _updateLiveStepList(
+                aiMessage.liveSteps,
+                'qp_ready',
+                status: AiLiveActivityStatus.failed,
+                description:
+                    'Upload matching study material to enable PDF export.',
+              );
+            });
+          }
+          await _persistCurrentSession();
+          return;
+        }
         final answer = _extractRagAnswer(response);
         lastAnswer = answer;
         aiMessage.answerOrigin = AiAnswerOriginX.fromWireValue(
@@ -3901,18 +3987,25 @@ Return STRICT JSON only (no markdown). Schema:
                 final answerOrigin = AiAnswerOriginX.fromWireValue(
                   data['answer_origin']?.toString(),
                 );
+                final insufficientGrounding =
+                    data['insufficient_grounding'] == true ||
+                    answerOrigin == AiAnswerOrigin.insufficientNotes;
+                final effectiveAnswerOrigin = insufficientGrounding
+                    ? AiAnswerOrigin.insufficientNotes
+                    : answerOrigin;
                 final liveSteps = _buildLiveAnswerSteps(
-                  answerOrigin: answerOrigin,
+                  answerOrigin: effectiveAnswerOrigin,
                   sources: orderedSources,
-                  noLocal: data['no_local'] == true,
+                  noLocal: data['no_local'] == true || insufficientGrounding,
                   answerCompleted: false,
                 );
 
                 setState(() {
                   aiMessage.primarySource = primarySource;
                   aiMessage.sources = orderedSources;
-                  aiMessage.noLocal = data['no_local'] == true;
-                  aiMessage.answerOrigin = answerOrigin;
+                  aiMessage.noLocal =
+                      data['no_local'] == true || insufficientGrounding;
+                  aiMessage.answerOrigin = effectiveAnswerOrigin;
                   aiMessage.liveTitle = 'Tracing your answer';
                   aiMessage.liveSteps = liveSteps;
                   aiMessage.retrievalScore = _toNullableDouble(
@@ -3983,18 +4076,26 @@ Return STRICT JSON only (no markdown). Schema:
                       ? primarySourceFileIdRaw
                       : primarySource?.fileId;
                   if (sources.isNotEmpty) {
+                    final chunkAnswerOrigin = AiAnswerOriginX.fromWireValue(
+                      chunk['answer_origin']?.toString(),
+                    );
+                    final insufficientGrounding =
+                        chunk['insufficient_grounding'] == true ||
+                        chunkAnswerOrigin == AiAnswerOrigin.insufficientNotes;
                     setState(() {
                       aiMessage.primarySource = primarySource;
                       aiMessage.sources = orderedSources;
-                      aiMessage.noLocal = chunk['no_local'] == true;
-                      aiMessage.answerOrigin ??= AiAnswerOriginX.fromWireValue(
-                        chunk['answer_origin']?.toString(),
-                      );
+                      aiMessage.noLocal =
+                          chunk['no_local'] == true || insufficientGrounding;
+                      aiMessage.answerOrigin ??= insufficientGrounding
+                          ? AiAnswerOrigin.insufficientNotes
+                          : chunkAnswerOrigin;
                       aiMessage.liveTitle = 'Tracing your answer';
                       aiMessage.liveSteps = _buildLiveAnswerSteps(
                         answerOrigin: aiMessage.answerOrigin,
                         sources: orderedSources,
-                        noLocal: chunk['no_local'] == true,
+                        noLocal:
+                            chunk['no_local'] == true || insufficientGrounding,
                         answerCompleted: false,
                       );
                       aiMessage.retrievalScore = _toNullableDouble(
