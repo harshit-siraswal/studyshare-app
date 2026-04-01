@@ -952,14 +952,6 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     final useOcr = _supportsOcr && (_useOcr || _forceOcr);
     final forceOcr = _supportsOcr && _forceOcr;
 
-    setState(() {
-      _isMultiQuizLoading = true;
-      _multiQuizError = null;
-    });
-
-    final useOcr = _supportsOcr && (_useOcr || _forceOcr);
-    final forceOcr = _supportsOcr && _forceOcr;
-
     try {
       await _analytics.logEvent(
         'ai_studio_generate_start',
@@ -973,9 +965,6 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         },
       );
 
-      final response = await _api.getAiMultiQuiz(
-
-    try {
       final response = await _api.getAiMultiQuiz(
         fileIds: allIds,
         useOcr: useOcr,
