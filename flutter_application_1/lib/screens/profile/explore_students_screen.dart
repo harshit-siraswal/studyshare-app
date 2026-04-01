@@ -7,14 +7,9 @@ import '../../widgets/user_avatar.dart';
 import 'user_profile_screen.dart';
 
 class ExploreStudentsScreen extends StatefulWidget {
-  final String collegeDomain;
   final String userEmail;
 
-  const ExploreStudentsScreen({
-    super.key,
-    required this.collegeDomain,
-    required this.userEmail,
-  });
+  const ExploreStudentsScreen({super.key, required this.userEmail});
 
   @override
   State<ExploreStudentsScreen> createState() => _ExploreStudentsScreenState();
@@ -23,7 +18,7 @@ class ExploreStudentsScreen extends StatefulWidget {
 class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
   final SupabaseService _supabaseService = SupabaseService();
   final TextEditingController _searchController = TextEditingController();
-  
+
   List<Map<String, dynamic>> _students = [];
   bool _isLoading = true;
   String _searchQuery = '';
@@ -41,17 +36,22 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
     _searchDebounce?.cancel();
     super.dispose();
   }
+
   Future<void> _loadStudents() async {
     setState(() => _isLoading = true);
     try {
-      final students = await _supabaseService.getCollegeStudents(
-        widget.collegeDomain,
+      final students = await _supabaseService.discoverUsers(
         query: _searchQuery,
         limit: 50,
       );
-      
-      // Filter out current user
-      final filtered = students.where((s) => s['email'] != widget.userEmail).toList();
+
+      final currentUserEmail = widget.userEmail.trim().toLowerCase();
+      final filtered = students.where((student) {
+        final emailValue = student['email'];
+        if (emailValue is! String) return false;
+        final email = emailValue.trim().toLowerCase();
+        return email.isNotEmpty && email != currentUserEmail;
+      }).toList();
 
       if (mounted) {
         setState(() {
@@ -69,9 +69,10 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
       }
     }
   }
+
   void _onSearchChanged(String query) {
     if (_searchDebounce?.isActive ?? false) _searchDebounce!.cancel();
-    
+
     _searchDebounce = Timer(const Duration(milliseconds: 300), () {
       if (mounted) {
         setState(() => _searchQuery = query);
@@ -84,7 +85,9 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bgColor = isDark ? AppTheme.darkBackground : AppTheme.lightBackground;
-    final textColor = isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
+    final textColor = isDark
+        ? AppTheme.darkTextPrimary
+        : AppTheme.lightTextPrimary;
     final cardColor = isDark ? AppTheme.darkCard : AppTheme.lightSurface;
 
     return Scaffold(
@@ -93,7 +96,10 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
         backgroundColor: bgColor,
         elevation: 0,
         leading: IconButton(
-          icon: Icon(Icons.arrow_back_ios_new_rounded, color: isDark ? Colors.white : Colors.black),
+          icon: Icon(
+            Icons.arrow_back_ios_new_rounded,
+            color: isDark ? Colors.white : Colors.black,
+          ),
           onPressed: () => Navigator.pop(context),
         ),
         title: Text(
@@ -115,15 +121,27 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
               style: GoogleFonts.inter(color: textColor),
               decoration: InputDecoration(
                 hintText: 'Search by name or username...',
-                hintStyle: GoogleFonts.inter(color: isDark ? AppTheme.darkTextMuted : AppTheme.lightTextMuted),
-                prefixIcon: Icon(Icons.search, color: isDark ? AppTheme.darkTextMuted : AppTheme.lightTextMuted),
+                hintStyle: GoogleFonts.inter(
+                  color: isDark
+                      ? AppTheme.darkTextMuted
+                      : AppTheme.lightTextMuted,
+                ),
+                prefixIcon: Icon(
+                  Icons.search,
+                  color: isDark
+                      ? AppTheme.darkTextMuted
+                      : AppTheme.lightTextMuted,
+                ),
                 filled: true,
                 fillColor: cardColor,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
                 ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
               ),
             ),
           ),
@@ -133,21 +151,22 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : _students.isEmpty
-                    ? Center(
-                        child: Text(
-                          'No students found',
-                          style: GoogleFonts.inter(color: Colors.grey),
-                        ),
-                      )
-                    : ListView.separated(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        itemCount: _students.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 12),
-                        itemBuilder: (context, index) {
-                          final student = _students[index];
-                          return _buildStudentCard(student, isDark);
-                        },
-                      ),
+                ? Center(
+                    child: Text(
+                      'No students found',
+                      style: GoogleFonts.inter(color: Colors.grey),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: _students.length,
+                    separatorBuilder: (context, index) =>
+                        const SizedBox(height: 12),
+                    itemBuilder: (context, index) {
+                      final student = _students[index];
+                      return _buildStudentCard(student, isDark);
+                    },
+                  ),
           ),
         ],
       ),
@@ -155,6 +174,10 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
   }
 
   Widget _buildStudentCard(Map<String, dynamic> student, bool isDark) {
+    final photoUrl = student['profile_photo_url'];
+    final hasValidPhoto =
+        photoUrl != null && photoUrl.toString().isNotEmpty;
+
     return InkWell(
       borderRadius: BorderRadius.circular(16),
       onTap: () {
@@ -162,13 +185,13 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
         final userName = student['display_name'] as String?;
         final userPhotoUrl = student['profile_photo_url'] as String?;
 
-        if (email == null || email.isEmpty) return;
-        
+        if (email == null || email.trim().isEmpty) return;
+
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => UserProfileScreen(
-              userEmail: email,
+              userEmail: email.trim(),
               userName: userName,
               userPhotoUrl: userPhotoUrl,
             ),
@@ -191,7 +214,7 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
         child: Row(
           children: [
             UserAvatar(
-              photoUrl: (student['profile_photo_url']?.toString().isNotEmpty == true) ? student['profile_photo_url'] : null,
+              photoUrl: hasValidPhoto ? photoUrl : null,
               radius: 24,
               displayName: student['display_name'] ?? 'User',
             ),
@@ -203,7 +226,9 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
                   Text(
                     student['display_name'] ?? 'Unknown',
                     style: GoogleFonts.inter(
-                      color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                      color: isDark
+                          ? AppTheme.darkTextPrimary
+                          : AppTheme.lightTextPrimary,
                       fontWeight: FontWeight.w600,
                       fontSize: 16,
                     ),
@@ -212,10 +237,14 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
                     Text(
                       '@${student['username']}',
                       style: GoogleFonts.inter(
-                        color: isDark ? AppTheme.darkTextMuted : AppTheme.lightTextMuted,
+                        color: isDark
+                            ? AppTheme.darkTextMuted
+                            : AppTheme.lightTextMuted,
                         fontSize: 14,
                       ),
-                    ),                  if (student['bio'] != null && student['bio'].toString().isNotEmpty)
+                    ),
+                  if (student['bio'] != null &&
+                      student['bio'].toString().isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.only(top: 4.0),
                       child: Text(
@@ -223,7 +252,9 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: GoogleFonts.inter(
-                          color: isDark ? AppTheme.darkTextMuted : AppTheme.lightTextMuted,
+                          color: isDark
+                              ? AppTheme.darkTextMuted
+                              : AppTheme.lightTextMuted,
                           fontSize: 13,
                         ),
                       ),

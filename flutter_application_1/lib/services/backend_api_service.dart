@@ -202,14 +202,6 @@ class BackendApiService {
     return addresses;
   }
 
-  bool _isRecaptchaTransientFailure(Object error) {
-    final lowered = error.toString().toLowerCase();
-    return lowered.contains('security check timed out') ||
-        lowered.contains('security verification') ||
-        lowered.contains('recaptcha') ||
-        lowered.contains('not supported');
-  }
-
   bool _isKietSyncTransientFailure(Object error) {
     if (error is TimeoutException || error is SocketException) {
       return true;
@@ -1146,21 +1138,15 @@ class BackendApiService {
   Future<Map<String, dynamic>> syncKietAttendance({
     required String collegeId,
     required String cybervidyaToken,
-    required BuildContext context,
   }) async {
-    Future<Map<String, dynamic>> performSync({
-      required bool includeRecaptcha,
-    }) async {
-      final maxAttempts = includeRecaptcha ? 2 : 1;
+    Future<Map<String, dynamic>> performSync() async {
+      const maxAttempts = 2;
       for (var attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
           return await _requestJson(
             '/api/attendance/kiet/sync',
             method: 'POST',
             body: {'collegeId': collegeId, 'cybervidyaToken': cybervidyaToken},
-            securityContext: includeRecaptcha ? context : null,
-            includeRecaptchaToken: includeRecaptcha,
-            recaptchaAction: 'attendance_sync',
             requireAuthToken: true,
           );
         } catch (error) {
@@ -1174,15 +1160,7 @@ class BackendApiService {
       throw Exception('Attendance sync failed after retries');
     }
 
-    try {
-      return await performSync(includeRecaptcha: true);
-    } catch (error) {
-      if (!_isRecaptchaTransientFailure(error)) rethrow;
-      debugPrint(
-        'Attendance sync security check failed on mobile; retrying without recaptcha token: $error',
-      );
-      return performSync(includeRecaptcha: false);
-    }
+    return performSync();
   }
 
   Future<Map<String, dynamic>> getKietAttendanceDaywise({
@@ -1283,6 +1261,24 @@ class BackendApiService {
 
   Future<Map<String, dynamic>> getMyResources() async {
     return _requestJson('/api/resources/mine', method: 'GET');
+  }
+
+  Future<Map<String, dynamic>> getPublicUserResources({
+    required String email,
+    bool approvedOnly = true,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final uri = Uri(
+      path: '/api/users/resources',
+      queryParameters: <String, String>{
+        'email': email.trim(),
+        'approvedOnly': approvedOnly.toString(),
+        'limit': limit.toString(),
+        'offset': offset.toString(),
+      },
+    );
+    return _requestJson(uri.toString(), method: 'GET');
   }
 
   Future<Map<String, dynamic>> castVote({
@@ -1518,6 +1514,35 @@ class BackendApiService {
 
   Future<Map<String, dynamic>> getProfile() async {
     return _requestJson('/api/users/profile', method: 'GET');
+  }
+
+  Future<Map<String, dynamic>> getPublicProfile({required String email}) async {
+    final uri = Uri(
+      path: '/api/users/public',
+      queryParameters: <String, String>{'email': email.trim()},
+    );
+    return _requestJson(uri.toString(), method: 'GET');
+  }
+
+  Future<List<Map<String, dynamic>>> discoverUsers({
+    String? query,
+    int limit = 50,
+  }) async {
+    final queryParameters = <String, String>{'limit': limit.toString()};
+    if (query != null && query.trim().isNotEmpty) {
+      queryParameters['query'] = query.trim();
+    }
+    final uri = Uri(
+      path: '/api/users/discover',
+      queryParameters: queryParameters,
+    );
+    final payload = await _requestJson(uri.toString(), method: 'GET');
+    final usersRaw = payload['users'];
+    if (usersRaw is! List) return const <Map<String, dynamic>>[];
+    return usersRaw
+        .whereType<Map>()
+        .map((row) => Map<String, dynamic>.from(row))
+        .toList();
   }
 
   Future<Map<String, dynamic>> updateProfile({
@@ -2357,6 +2382,7 @@ class BackendApiService {
     List<String>? excludeFileIds,
     String? dialectIntensity,
     String? languageHint,
+    String? generationMode,
   }) async {
     final response = await _requestJson(
       '/api/rag/query',
@@ -2383,6 +2409,7 @@ class BackendApiService {
         'exclude_file_ids': ?excludeFileIds,
         'dialect_intensity': ?dialectIntensity,
         'language_hint': ?languageHint,
+        'generation_mode': ?generationMode,
       },
     );
     return _normalizeRagResponse(response);
@@ -2623,6 +2650,7 @@ class BackendApiService {
     List<String>? excludeFileIds,
     String? dialectIntensity,
     String? languageHint,
+    String? generationMode,
   }) async* {
     final response = await queryRag(
       question: question,
@@ -2642,6 +2670,7 @@ class BackendApiService {
       excludeFileIds: excludeFileIds,
       dialectIntensity: dialectIntensity,
       languageHint: languageHint,
+      generationMode: generationMode,
     );
 
     List<dynamic> sourcesRaw = const [];
@@ -2756,6 +2785,7 @@ class BackendApiService {
     List<String>? excludeFileIds,
     String? dialectIntensity,
     String? languageHint,
+    String? generationMode,
   }) async* {
     const path = '/api/rag/query/stream';
     _enforceAbuseProtection(path, 'POST');
@@ -2779,6 +2809,7 @@ class BackendApiService {
         excludeFileIds: excludeFileIds,
         dialectIntensity: dialectIntensity,
         languageHint: languageHint,
+        generationMode: generationMode,
       );
     }
 
@@ -2835,6 +2866,7 @@ class BackendApiService {
       'exclude_file_ids': ?excludeFileIds,
       'dialect_intensity': ?dialectIntensity,
       'language_hint': ?languageHint,
+      'generation_mode': ?generationMode,
     };
 
     http.StreamedResponse? response;
@@ -3049,12 +3081,26 @@ class BackendApiService {
   // Follows & Users (additional)
   // ----------------------------
 
-  Future<Map<String, dynamic>> getFollowers() async {
-    return _requestJson('/api/follow/followers', method: 'GET');
+  Future<Map<String, dynamic>> getFollowers({String? email}) async {
+    final normalizedEmail = email?.trim();
+    final uri = normalizedEmail != null && normalizedEmail.isNotEmpty
+        ? Uri(
+            path: '/api/follow/followers',
+            queryParameters: <String, String>{'email': normalizedEmail},
+          )
+        : Uri(path: '/api/follow/followers');
+    return _requestJson(uri.toString(), method: 'GET');
   }
 
-  Future<Map<String, dynamic>> getFollowing() async {
-    return _requestJson('/api/follow/following', method: 'GET');
+  Future<Map<String, dynamic>> getFollowing({String? email}) async {
+    final normalizedEmail = email?.trim();
+    final uri = normalizedEmail != null && normalizedEmail.isNotEmpty
+        ? Uri(
+            path: '/api/follow/following',
+            queryParameters: <String, String>{'email': normalizedEmail},
+          )
+        : Uri(path: '/api/follow/following');
+    return _requestJson(uri.toString(), method: 'GET');
   }
 
   Future<List<Map<String, dynamic>>> getPendingRequests() async {

@@ -9,7 +9,6 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 import 'analytics_service.dart';
-import 'attendance_service.dart';
 import 'backend_api_service.dart';
 import 'push_notification_service.dart';
 
@@ -657,20 +656,30 @@ class AuthService {
       if (userCredential.user != null &&
           _requiresEmailVerification(userCredential.user!)) {
         var verificationEmailSent = false;
+        String? verificationErrorMessage;
         try {
           await userCredential.user!.sendEmailVerification();
           verificationEmailSent = true;
         } catch (error, stackTrace) {
+          verificationErrorMessage = error is firebase_auth.FirebaseAuthException
+              ? error.message?.trim()
+              : error.toString().trim();
           debugPrint(
             'AuthService.signInWithEmail sendEmailVerification failed: $error\n$stackTrace',
           );
         }
         await _auth.signOut();
+        final contextualMessage = verificationErrorMessage == null ||
+                verificationErrorMessage.isEmpty
+            ? ''
+            : ' $verificationErrorMessage';
         throw firebase_auth.FirebaseAuthException(
           code: 'email-not-verified',
           message: verificationEmailSent
-              ? 'Please verify your email before signing in. A new verification email has been sent.'
-              : 'Please verify your email before signing in. We could not send a new verification email right now.',
+              ? 'Please verify your email before signing in. A new verification email has been sent.$contextualMessage'
+              : verificationErrorMessage == null || verificationErrorMessage.isEmpty
+              ? 'Please verify your email before signing in. We could not send a new verification email right now.'
+              : 'Please verify your email before signing in.$contextualMessage',
         );
       }
 
@@ -869,7 +878,6 @@ class AuthService {
   Future<void> signOut() async {
     try {
       SharedPreferences? prefs;
-      final attendanceService = AttendanceService();
       if (!kIsWeb) {
         final token =
             _pushService.fcmToken ?? await _pushService.getSavedToken();
@@ -888,7 +896,6 @@ class AuthService {
         await prefs.remove('premium_until');
         await prefs.remove('premium_tier');
         await prefs.remove('premium_email');
-        await attendanceService.clearAllSavedSessions();
       } catch (e) {
         debugPrint('Failed to clear sign-out caches: $e');
       }
@@ -1147,11 +1154,9 @@ class AuthService {
         case 'invalid-email':
           return 'Invalid email address';
         case 'email-not-verified':
-          final verificationMessage = error.message?.trim();
-          if (verificationMessage != null && verificationMessage.isNotEmpty) {
-            return verificationMessage;
-          }
-          return 'Please verify your email before signing in.';
+          return error.message?.trim().isNotEmpty == true
+              ? error.message!.trim()
+              : 'Please verify your email before signing in. A new verification email has been sent.';
         case 'too-many-requests':
           return 'Too many attempts. Please try again later.';
         case 'network-request-failed':

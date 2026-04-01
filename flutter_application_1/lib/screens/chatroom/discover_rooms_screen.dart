@@ -61,11 +61,15 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
 
   Future<void> _loadRooms() async {
     try {
-      final rooms = await _supabaseService.getChatRooms(
-        widget.userEmail,
-        widget.collegeId,
-      );
-      final joinedIds = await _supabaseService.getUserRoomIds(widget.userEmail);
+      final results = await Future.wait<Object?>([
+        _supabaseService.getChatRooms(widget.userEmail, widget.collegeId),
+        _supabaseService.getUserRoomIds(widget.userEmail),
+      ]);
+      final rooms = (results[0] as List).cast<Map<String, dynamic>>();
+      final joinedIds = (results[1] as List)
+          .map((id) => id.toString().trim())
+          .where((id) => id.isNotEmpty)
+          .toSet();
 
       // Show only public rooms that the user hasn't joined yet
       final publicRooms = rooms.where((r) {
@@ -73,7 +77,7 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
         final roomId = r['id'];
         return !isPrivate &&
             roomId != null &&
-            !joinedIds.contains(roomId.toString());
+            !joinedIds.contains(roomId.toString().trim());
       }).toList();
 
       if (mounted) {
@@ -128,7 +132,7 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bgColor = isDark ? Colors.black : const Color(0xFFF2F2F7);
-    final isBusy = _isLoading || !_roleLoaded;
+    final isBusy = _isLoading;
     final canWrite = _roleLoaded && !_isReadOnly;
 
     return Scaffold(

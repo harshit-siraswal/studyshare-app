@@ -5,7 +5,7 @@
     android:targetCellWidth="4"
     android:targetCellHeight="3"
     android:updatePeriodMillis="1800000"
-    android:initialLayout="@layout/syllabus_widget_layout"
+    android:initialLayout="@layout/schedule_widget_layout"
     android:resizeMode="horizontal|vertical"
     android:previewImage="@drawable/syllabus_widget_preview"
     android:description="@string/widget_description_syllabus"

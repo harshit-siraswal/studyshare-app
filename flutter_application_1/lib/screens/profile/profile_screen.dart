@@ -82,7 +82,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   ContributionBadge _contributionBadge = ContributionBadgeCatalog.resolve(0);
 
   final TextEditingController _searchController = TextEditingController();
-  final GlobalKey _myPostsSectionKey = GlobalKey(debugLabel: 'my_posts_section');
+  final GlobalKey _myPostsSectionKey = GlobalKey(
+    debugLabel: 'my_posts_section',
+  );
   String _searchQuery = '';
 
   @override
@@ -343,7 +345,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = AppTheme.getTextColor(context);
     final subTextColor = AppTheme.getTextColor(context, isPrimary: false);
-    final bottomPadding = MediaQuery.of(context).padding.bottom + _bottomNavBarAllowance;
+    final bottomPadding =
+        MediaQuery.of(context).padding.bottom + _bottomNavBarAllowance;
     assert(() {
       _buildContributionBadgeCard;
       return true;
@@ -370,10 +373,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => ExploreStudentsScreen(
-                    collegeDomain: widget.collegeDomain,
-                    userEmail: _userEmail,
-                  ),
+                  builder: (_) => ExploreStudentsScreen(userEmail: _userEmail),
                 ),
               );
             },
@@ -835,8 +835,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     bool isDark,
   ) {
     final tiers = ContributionBadgeCatalog.tiers;
-    final currentIndex =
-        tiers.indexWhere((tier) => tier.id == _contributionBadge.id);
+    final currentIndex = tiers.indexWhere(
+      (tier) => tier.id == _contributionBadge.id,
+    );
     final previewBadges = <ContributionBadge>[
       if (currentIndex > 0) tiers[currentIndex - 1],
       _contributionBadge,
@@ -890,10 +891,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   const SizedBox(height: 4),
                   Text(
                     '${_contributionBadge.label} • $_uploadCount contributions',
-                    style: GoogleFonts.inter(
-                      fontSize: 12,
-                      color: subTextColor,
-                    ),
+                    style: GoogleFonts.inter(fontSize: 12, color: subTextColor),
                   ),
                 ],
               ),
@@ -916,19 +914,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ],
                     ),
-                    child: Icon(
-                      badge.icon,
-                      size: 16,
-                      color: Colors.white,
-                    ),
+                    child: Icon(badge.icon, size: 16, color: Colors.white),
                   ),
               ],
             ),
             const SizedBox(width: 8),
-            Icon(
-              Icons.chevron_right_rounded,
-              color: subTextColor,
-            ),
+            Icon(Icons.chevron_right_rounded, color: subTextColor),
           ],
         ),
       ),
@@ -1932,7 +1923,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
           final email = _userEmail;
           if (email.isEmpty) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Please sign in to view your posts.')),
+              const SnackBar(
+                content: Text('Please sign in to view your posts.'),
+              ),
             );
             return;
           }

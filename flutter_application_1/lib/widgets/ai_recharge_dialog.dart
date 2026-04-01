@@ -27,15 +27,9 @@ class _AiRechargeDialogState extends State<AiRechargeDialog> {
   final SupabaseService _supabaseService = SupabaseService();
   bool _isLoading = false;
   int _baseMonthlyTokens = 40160;
-  double _baseBudgetInr = 1;
   int _selectedRechargeRupees = 49;
   final TextEditingController _customRechargeController =
       TextEditingController();
-
-  int get _tokensPerRupee => math.max(
-    1,
-    (_baseMonthlyTokens / math.max(0.01, _baseBudgetInr)).round(),
-  );
 
   @override
   void initState() {
@@ -75,7 +69,7 @@ class _AiRechargeDialogState extends State<AiRechargeDialog> {
   }
 
   int _estimatedRechargeTokens(int rupees) =>
-      math.max(1, rupees * _tokensPerRupee);
+      rawAiTokensForRechargeRupees(rupees);
 
   Future<void> _loadTokenPreviewData() async {
     try {
@@ -89,11 +83,8 @@ class _AiRechargeDialogState extends State<AiRechargeDialog> {
             profile,
             defaultBudget: _baseMonthlyTokens,
           );
-      final budgetInr = _toSafeDouble(profile['ai_budget_inr'], fallback: 1);
-
       setState(() {
         _baseMonthlyTokens = math.max(1, tokenSnapshot.freeBudget);
-        _baseBudgetInr = budgetInr > 0 ? budgetInr : 1;
       });
     } catch (_) {
       // Keep defaults if profile fetch fails.
@@ -182,7 +173,7 @@ class _AiRechargeDialogState extends State<AiRechargeDialog> {
 
     final rechargeRupees = _resolveRechargeRupees();
     final estimatedTokens = _estimatedRechargeTokens(rechargeRupees);
-    final quickPacks = const <int>[19, 29, 49, 99, 149, 199];
+    final quickPacks = const <int>[10, 19, 29, 49, 99, 149, 199];
 
     return Dialog(
       backgroundColor: bg,
@@ -212,11 +203,7 @@ class _AiRechargeDialogState extends State<AiRechargeDialog> {
               ),
 
               // Title
-              Icon(
-                Icons.bolt_rounded,
-                size: 40,
-                color: primaryColor,
-              ),
+              Icon(Icons.bolt_rounded, size: 40, color: primaryColor),
               const SizedBox(height: 8),
               Text(
                 'Recharge AI Tokens',

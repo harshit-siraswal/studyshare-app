@@ -55,6 +55,9 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
+  static const String _uploadReadOnlyMessage =
+      'Read-only accounts can explore and follow, but cannot upload resources.';
+
   final AuthService _authService = AuthService();
   final SupabaseService _supabaseService = SupabaseService();
   final IncomingShareService _incomingShareService =
@@ -64,6 +67,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   int _currentIndex = 0;
   bool _showHelpOverlay = false;
   bool _canPostNotices = false;
+  bool _canUploadResources = false;
   bool _roleLoading = true;
   int _noticesRefreshToken = 0;
   StreamSubscription<IncomingSharePayload>? _shareSubscription;
@@ -81,6 +85,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     if (authEmail.isNotEmpty) return authEmail;
     return (_supabaseService.currentUserEmail ?? '').trim();
   }
+
+  bool get _optimisticCollegeUploaderAccess {
+    final email = _effectiveUserEmail.trim().toLowerCase();
+    final collegeDomain = widget.collegeDomain.trim().toLowerCase().replaceAll(
+      '@',
+      '',
+    );
+    return email.isNotEmpty &&
+        collegeDomain.isNotEmpty &&
+        email.endsWith('@$collegeDomain');
+  }
+
+  bool get _canUploadResourcesNow =>
+      _canUploadResources || (_roleLoading && _optimisticCollegeUploaderAccess);
 
   @override
   void initState() {
@@ -158,10 +176,16 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _loadComposerAccess() async {
+    final fallbackCanUpload = _optimisticCollegeUploaderAccess;
     try {
-      final role = await _supabaseService.getCurrentUserRole();
+      final role = await _supabaseService.getCurrentUserRole().timeout(
+        const Duration(seconds: 4),
+        onTimeout: () =>
+            fallbackCanUpload ? AppRoles.collegeUser : AppRoles.readOnly,
+      );
       if (!mounted) return;
       setState(() {
+        _canUploadResources = role != AppRoles.readOnly;
         _canPostNotices =
             role == AppRoles.teacher ||
             role == AppRoles.admin ||
@@ -172,6 +196,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       debugPrint('Failed to resolve composer access: $e');
       if (!mounted) return;
       setState(() {
+        _canUploadResources = fallbackCanUpload;
         _canPostNotices = false;
         _roleLoading = false;
       });
@@ -179,6 +204,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _showUpload({PlatformFile? prefilledFile}) async {
+    if (!_canUploadResourcesNow) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(_uploadReadOnlyMessage)),
+      );
+      return;
+    }
     await showUploadDialog(
       context,
       widget.collegeId,
@@ -837,7 +869,21 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _handleFabTap() async {
-    if (_roleLoading) return;
+    // When roles are still loading, only keep the FAB active for the home tab
+    // with optimistic uploader access on college-linked accounts.
+    if (_roleLoading &&
+        !(_currentIndex == 0 &&
+            !_isStudySyllabusTab &&
+            _optimisticCollegeUploaderAccess)) {
+      return;
+    }
+    if (_currentIndex == 0 && !_isStudySyllabusTab && !_canUploadResourcesNow) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text(_uploadReadOnlyMessage)),
+      );
+      return;
+    }
     if (_currentIndex == 0 && _isStudySyllabusTab) {
       if (!_canUploadSyllabusFromStudy) {
         if (!mounted) return;
@@ -890,6 +936,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     bool isDark,
     double bottomPadding,
   ) {
+    final isResourceUploadDisabled =
+        _currentIndex == 0 && !_isStudySyllabusTab && !_canUploadResourcesNow;
     final isSyllabusUploadDisabled =
         _currentIndex == 0 &&
         _isStudySyllabusTab &&
@@ -897,7 +945,12 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     const fabWidth = 56.0;
     const fabHeight = 56.0;
 
-    final gradientColors = isSyllabusUploadDisabled
+    final isFabDisabled =
+        (_roleLoading && !_optimisticCollegeUploaderAccess) ||
+        isResourceUploadDisabled ||
+        isSyllabusUploadDisabled;
+    final gradientColors =
+        (isResourceUploadDisabled || isSyllabusUploadDisabled)
         ? <Color>[
             isDark ? const Color(0xFF4B5563) : const Color(0xFF94A3B8),
             isDark ? const Color(0xFF374151) : const Color(0xFF64748B),
@@ -905,9 +958,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         : <Color>[AppTheme.primary, AppTheme.primaryDark];
 
     final shadowColor =
-        (isSyllabusUploadDisabled ? Colors.black : AppTheme.primary).withValues(
-          alpha: 0.35,
-        );
+        ((isResourceUploadDisabled || isSyllabusUploadDisabled)
+                ? Colors.black
+                : AppTheme.primary)
+            .withValues(alpha: 0.35);
 
     final screenWidth = MediaQuery.of(context).size.width;
     final left = (screenWidth - fabWidth) / 2;
@@ -918,9 +972,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       left: left,
       bottom: bottom,
       child: IgnorePointer(
-        ignoring: _roleLoading || isSyllabusUploadDisabled,
+        ignoring: isFabDisabled,
         child: Opacity(
-          opacity: (_roleLoading || isSyllabusUploadDisabled) ? 0.6 : 1.0,
+          opacity: isFabDisabled ? 0.6 : 1.0,
           child: GestureDetector(
             onTap: () async {
               HapticFeedback.mediumImpact();

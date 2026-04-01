@@ -12,6 +12,7 @@ import '../models/resource.dart';
 /// Constraints: must be > 0; changing this value shifts every token count the
 /// user sees, so coordinate with backend quota allocations.
 const int kRawAiTokensPerVisibleToken = 2000;
+const int kVisibleAiRechargeTokensPerRupee = 10;
 const int _contributorPremiumThreshold = 10;
 const Duration _contributorPremiumDuration = Duration(days: 30);
 
@@ -63,6 +64,18 @@ bool isPremiumSubscriptionTier(String? tier) {
 int visibleAiTokensFromRaw(int rawTokenCount) {
   if (rawTokenCount <= 0) return 0;
   return math.max(1, rawTokenCount ~/ kRawAiTokensPerVisibleToken);
+}
+
+/// Converts a recharge amount in rupees into raw AI token units.
+///
+/// The conversion multiplies the user-visible recharge tokens per rupee by
+/// [kVisibleAiRechargeTokensPerRupee] and then expands each visible token into
+/// raw backend tokens via [kRawAiTokensPerVisibleToken].
+int rawAiTokensForRechargeRupees(int rupees) {
+  if (rupees <= 0) return 0;
+  return rupees *
+      kVisibleAiRechargeTokensPerRupee *
+      kRawAiTokensPerVisibleToken;
 }
 
 int visibleAiTokenShortfallFromRaw(
@@ -136,8 +149,7 @@ class AiTokenBudgetSnapshot {
         subscriptionEnd.toUtc().isAfter(DateTime.now().toUtc());
     final isPremiumActive =
         hasActiveSubscriptionWindow && isPremiumSubscriptionTier(tier);
-    final normalizedBudgetMultiplier =
-        isPremiumActive && premiumMultiplier > 1
+    final normalizedBudgetMultiplier = isPremiumActive && premiumMultiplier > 1
         ? math.max(1, (rawBudgetMultiplier / premiumMultiplier).round())
         : rawBudgetMultiplier;
     final inferredFreeBudget = baseBudgetFromApi > 0

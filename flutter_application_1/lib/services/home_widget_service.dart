@@ -7,7 +7,6 @@ import '../data/academic_subjects_data.dart';
 import '../models/attendance_models.dart';
 import '../models/notice.dart';
 import 'attendance_service.dart';
-import 'auth_service.dart';
 
 class HomeWidgetService {
   static const String _defaultAndroidWidgetPackage = 'me.studyshare.android';
@@ -15,11 +14,10 @@ class HomeWidgetService {
   static const int _maxScheduleCards = 5;
 
   final AttendanceService _attendanceService = AttendanceService();
-  final AuthService _authService = AuthService();
 
   String _groupId = 'group.com.studyshare.app';
   String _noticesWidgetName = 'NoticesWidgetProvider';
-  String _syllabusWidgetName = 'SyllabusWidgetProvider';
+  String _scheduleWidgetName = 'ScheduleWidgetProvider';
 
   bool _isInitialized = false;
   Future<bool>? _initializing;
@@ -34,17 +32,17 @@ class HomeWidgetService {
     _initializing = null;
     _groupId = 'group.com.studyshare.app';
     _noticesWidgetName = 'NoticesWidgetProvider';
-    _syllabusWidgetName = 'SyllabusWidgetProvider';
+    _scheduleWidgetName = 'ScheduleWidgetProvider';
   }
 
   Future<void> configure({
     String? groupId,
     String? noticesWidgetName,
-    String? syllabusWidgetName,
+    String? scheduleWidgetName,
   }) async {
     if (groupId != null) _groupId = groupId;
     if (noticesWidgetName != null) _noticesWidgetName = noticesWidgetName;
-    if (syllabusWidgetName != null) _syllabusWidgetName = syllabusWidgetName;
+    if (scheduleWidgetName != null) _scheduleWidgetName = scheduleWidgetName;
 
     if (_isInitialized &&
         groupId != null &&
@@ -519,42 +517,40 @@ class HomeWidgetService {
         semester: semester,
         branch: branch,
         snapshot:
-            snapshot ??
-            await _attendanceService.loadCachedSnapshot(
-              collegeId,
-              userEmail: _authService.userEmail?.trim().toLowerCase(),
-            ),
+            snapshot ?? await _attendanceService.loadCachedSnapshot(collegeId),
       );
 
-      await HomeWidget.saveWidgetData<String>('schedule_badge', payload.badge);
-      await HomeWidget.saveWidgetData<String>(
-        'schedule_location_label',
-        payload.locationLabel,
-      );
-      await HomeWidget.saveWidgetData<String>(
-        'schedule_room_label',
-        payload.roomLabel,
-      );
-      await HomeWidget.saveWidgetData<String>(
-        'schedule_footer_label',
-        payload.footerLabel,
-      );
-      await HomeWidget.saveWidgetData<String>(
-        'schedule_empty_message',
-        payload.emptyMessage,
-      );
-      await HomeWidget.saveWidgetData<bool>('schedule_is_live', payload.isLive);
-      await HomeWidget.saveWidgetData<int>(
-        'schedule_indicator_count',
-        payload.indicatorCount,
-      );
-      await HomeWidget.saveWidgetData<String>(
-        'schedule_cards_json',
-        jsonEncode(
-          payload.cards.map((card) => card.toJson()).toList(growable: false),
+      await Future.wait([
+        HomeWidget.saveWidgetData<String>('schedule_badge', payload.badge),
+        HomeWidget.saveWidgetData<String>(
+          'schedule_location_label',
+          payload.locationLabel,
         ),
-      );
-      await _updateWidget(_syllabusWidgetName);
+        HomeWidget.saveWidgetData<String>(
+          'schedule_room_label',
+          payload.roomLabel,
+        ),
+        HomeWidget.saveWidgetData<String>(
+          'schedule_footer_label',
+          payload.footerLabel,
+        ),
+        HomeWidget.saveWidgetData<String>(
+          'schedule_empty_message',
+          payload.emptyMessage,
+        ),
+        HomeWidget.saveWidgetData<bool>('schedule_is_live', payload.isLive),
+        HomeWidget.saveWidgetData<int>(
+          'schedule_indicator_count',
+          payload.indicatorCount,
+        ),
+        HomeWidget.saveWidgetData<String>(
+          'schedule_cards_json',
+          jsonEncode(
+            payload.cards.map((card) => card.toJson()).toList(growable: false),
+          ),
+        ),
+      ]);
+      await _updateWidget(_scheduleWidgetName);
       return true;
     } catch (e) {
       debugPrint('Error syncing schedule to widget: $e');

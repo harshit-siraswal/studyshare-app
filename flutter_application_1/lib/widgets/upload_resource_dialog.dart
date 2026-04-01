@@ -249,6 +249,21 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
   }
 
   Future<void> _handleSubmit() async {
+    Map<String, dynamic>? fetchedProfile;
+    try {
+      fetchedProfile = await SupabaseService().getCurrentUserProfile(
+        maxAttempts: 1,
+      );
+      if (fetchedProfile.isNotEmpty &&
+          resolveEffectiveProfileRole(fetchedProfile) == appRoleReadOnly) {
+        return _showError(
+          'Read-only accounts can explore and follow, but cannot upload resources.',
+        );
+      }
+    } catch (e) {
+      debugPrint('Failed to resolve upload permissions: $e');
+    }
+
     if (_title.trim().isEmpty) return _showError('Enter a title');
     if (_semester.isEmpty) return _showError('Select semester');
     if (_branch.isEmpty) return _showError('Select branch');
@@ -390,10 +405,8 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
       String uploaderSource = 'student';
       var uploadStatus = Resource.pendingStatus;
       try {
-        final profile = await supabaseService.getCurrentUserProfile(
-          maxAttempts: 1,
-        );
-        if (profile.isNotEmpty && isTeacherOrAdminProfile(profile)) {
+        final profile = fetchedProfile;
+        if (profile != null && profile.isNotEmpty && isTeacherOrAdminProfile(profile)) {
           uploaderSource = 'teacher';
         }
       } catch (e) {

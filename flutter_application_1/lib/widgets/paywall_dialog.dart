@@ -28,7 +28,6 @@ class _PaywallDialogState extends State<PaywallDialog> {
   String? _expandedPlanId = 'quarterly';
   int _baseMonthlyTokens = 40160;
   int _premiumTokenMultiplier = 10;
-  double _baseBudgetInr = 1;
   int _selectedRechargeRupees = 49;
   final TextEditingController _customRechargeController =
       TextEditingController();
@@ -68,11 +67,6 @@ class _PaywallDialogState extends State<PaywallDialog> {
 
   int get _premiumVisibleTokens =>
       _freeVisibleTokens * math.max(1, _premiumTokenMultiplier);
-
-  int get _tokensPerRupee => math.max(
-    1,
-    (_baseMonthlyTokens / math.max(0.01, _baseBudgetInr)).round(),
-  );
 
   @override
   void initState() {
@@ -129,12 +123,9 @@ class _PaywallDialogState extends State<PaywallDialog> {
             profile,
             defaultBudget: _baseMonthlyTokens,
           );
-      final budgetInr = _toSafeDouble(profile['ai_budget_inr'], fallback: 1);
-
       setState(() {
         _baseMonthlyTokens = math.max(1, tokenSnapshot.freeBudget);
         _premiumTokenMultiplier = tokenSnapshot.premiumMultiplier;
-        _baseBudgetInr = budgetInr > 0 ? budgetInr : 1;
       });
     } catch (_) {
       // Keep defaults if profile fetch fails.
@@ -157,7 +148,7 @@ class _PaywallDialogState extends State<PaywallDialog> {
   }
 
   int _estimatedRechargeTokens(int rupees) {
-    return math.max(1, rupees * _tokensPerRupee);
+    return rawAiTokensForRechargeRupees(rupees);
   }
 
   Future<void> _startPayment() async {
@@ -389,7 +380,7 @@ class _PaywallDialogState extends State<PaywallDialog> {
                     const SizedBox(height: 4),
                     Text(
                       'Free plan: $freePlanTokenLabel AI tokens every 30 days.\n'
-                      'Premium: $premiumTokenLabel AI tokens every 30 days. Need more? Use micro top-ups from \u20b919.',
+                      'Premium: $premiumTokenLabel AI tokens every 30 days. Need more? Use micro top-ups from \u20b910.',
                       style: GoogleFonts.inter(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -563,7 +554,7 @@ class _PaywallDialogState extends State<PaywallDialog> {
   }) {
     final rechargeRupees = _resolveRechargeRupees();
     final estimatedTokens = _estimatedRechargeTokens(rechargeRupees);
-    final quickPacks = const <int>[19, 29, 49, 99, 149, 199];
+    final quickPacks = const <int>[10, 19, 29, 49, 99, 149, 199];
 
     return Container(
       width: double.infinity,

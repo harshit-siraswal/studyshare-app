@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -29,33 +30,44 @@ class AttendanceService {
     : _apiService = apiService ?? BackendApiService();
 
   static const int lowAttendanceThreshold = 75;
-  static const int _maxAiLowAttendanceItems = 5;
-  static const int _maxAiUpcomingClasses = 4;
   final BackendApiService _apiService;
 
-  String _legacySnapshotKey(String collegeId) =>
-      'attendance_snapshot_$collegeId';
-  String _legacyTokenKey(String collegeId) => 'attendance_token_$collegeId';
+  String _normalizeKeyPart(String value) => value
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+      .replaceAll(RegExp(r'_+'), '_')
+      .replaceAll(RegExp(r'^_|_$'), '');
 
-  String _normalizeScopeComponent(String? rawValue) {
-    final lowered = rawValue?.trim().toLowerCase() ?? '';
-    if (lowered.isEmpty) return '';
-    return lowered
-        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
-        .replaceAll(RegExp(r'_+'), '_')
-        .replaceAll(RegExp(r'^_+|_+$'), '');
+  String _cacheSuffix({String? userEmail}) {
+    final normalized = _normalizeKeyPart(userEmail ?? '');
+    return normalized.isEmpty ? '' : '_$normalized';
   }
 
-  String _snapshotKey(String collegeId, {String? userEmail}) {
-    final scope = _normalizeScopeComponent(userEmail);
-    final legacyKey = _legacySnapshotKey(collegeId);
-    return scope.isEmpty ? legacyKey : '${legacyKey}_$scope';
+  String _snapshotKey(String collegeId, {String? userEmail}) =>
+      'attendance_snapshot_${_normalizeKeyPart(collegeId)}'
+      '${_cacheSuffix(userEmail: userEmail)}';
+
+  String _tokenKey(String collegeId, {String? userEmail}) =>
+      'attendance_token_${_normalizeKeyPart(collegeId)}'
+      '${_cacheSuffix(userEmail: userEmail)}';
+
+  List<String> _snapshotKeyCandidates(String collegeId, {String? userEmail}) {
+    final keys = <String>[];
+    if (userEmail != null && userEmail.trim().isNotEmpty) {
+      keys.add(_snapshotKey(collegeId, userEmail: userEmail));
+    }
+    keys.add(_snapshotKey(collegeId));
+    return keys;
   }
 
-  String _tokenKey(String collegeId, {String? userEmail}) {
-    final scope = _normalizeScopeComponent(userEmail);
-    final legacyKey = _legacyTokenKey(collegeId);
-    return scope.isEmpty ? legacyKey : '${legacyKey}_$scope';
+  List<String> _tokenKeyCandidates(String collegeId, {String? userEmail}) {
+    final keys = <String>[];
+    if (userEmail != null && userEmail.trim().isNotEmpty) {
+      keys.add(_tokenKey(collegeId, userEmail: userEmail));
+    }
+    keys.add(_tokenKey(collegeId));
+    return keys;
   }
 
   bool isKietCollege({
@@ -76,48 +88,36 @@ class AttendanceService {
     String? userEmail,
   }) async {
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_snapshotKey(collegeId, userEmail: userEmail));
-    if (raw == null || raw.isEmpty) return null;
-    try {
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map) return null;
-      return AttendanceSnapshot.fromJson(Map<String, dynamic>.from(decoded));
-    } catch (_) {
-      return null;
+    for (final key in _snapshotKeyCandidates(collegeId, userEmail: userEmail)) {
+      final raw = prefs.getString(key);
+      if (raw == null || raw.trim().isEmpty) continue;
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is! Map) continue;
+        return AttendanceSnapshot.fromJson(Map<String, dynamic>.from(decoded));
+      } catch (_) {
+        continue;
+      }
     }
+    return null;
   }
 
   Future<String?> loadSavedToken(String collegeId, {String? userEmail}) async {
     final prefs = await SharedPreferences.getInstance();
-    final token = prefs
-        .getString(_tokenKey(collegeId, userEmail: userEmail))
-        ?.trim();
-    if (token == null || token.isEmpty) return null;
-    return token;
+    for (final key in _tokenKeyCandidates(collegeId, userEmail: userEmail)) {
+      final token = prefs.getString(key)?.trim();
+      if (token == null || token.isEmpty) continue;
+      return token;
+    }
+    return null;
   }
 
   Future<void> clearSavedSession(String collegeId, {String? userEmail}) async {
     final prefs = await SharedPreferences.getInstance();
-    final keysToRemove = <String>{
-      _legacyTokenKey(collegeId),
-      _legacySnapshotKey(collegeId),
-      _tokenKey(collegeId, userEmail: userEmail),
-      _snapshotKey(collegeId, userEmail: userEmail),
+    final keys = <String>{
+      ..._tokenKeyCandidates(collegeId, userEmail: userEmail),
+      ..._snapshotKeyCandidates(collegeId, userEmail: userEmail),
     };
-    for (final key in keysToRemove) {
-      await prefs.remove(key);
-    }
-  }
-
-  Future<void> clearAllSavedSessions() async {
-    final prefs = await SharedPreferences.getInstance();
-    final keys = prefs
-        .getKeys()
-        .where((key) {
-          return key.startsWith('attendance_snapshot_') ||
-              key.startsWith('attendance_token_');
-        })
-        .toList(growable: false);
     for (final key in keys) {
       await prefs.remove(key);
     }
@@ -127,14 +127,12 @@ class AttendanceService {
     required String collegeId,
     required String collegeName,
     required String cybervidyaToken,
-    required BuildContext context,
     String? userEmail,
   }) async {
     try {
       final response = await _apiService.syncKietAttendance(
         collegeId: collegeId,
         cybervidyaToken: cybervidyaToken,
-        context: context,
       );
       final snapshotRaw = response['snapshot'];
       if (snapshotRaw is! Map) {
@@ -149,21 +147,32 @@ class AttendanceService {
       );
 
       final prefs = await SharedPreferences.getInstance();
-      final tokenKey = _tokenKey(collegeId, userEmail: userEmail);
-      final snapshotKey = _snapshotKey(collegeId, userEmail: userEmail);
-      await prefs.setString(tokenKey, cybervidyaToken);
-      await prefs.setString(snapshotKey, jsonEncode(snapshot.toJson()));
-      if (tokenKey != _legacyTokenKey(collegeId)) {
-        await prefs.remove(_legacyTokenKey(collegeId));
-      }
-      if (snapshotKey != _legacySnapshotKey(collegeId)) {
-        await prefs.remove(_legacySnapshotKey(collegeId));
+      final snapshotJson = jsonEncode(snapshot.toJson());
+      await prefs.setString(_tokenKey(collegeId), cybervidyaToken);
+      await prefs.setString(_snapshotKey(collegeId), snapshotJson);
+      if (userEmail != null && userEmail.trim().isNotEmpty) {
+        await prefs.setString(
+          _tokenKey(collegeId, userEmail: userEmail),
+          cybervidyaToken,
+        );
+        await prefs.setString(
+          _snapshotKey(collegeId, userEmail: userEmail),
+          snapshotJson,
+        );
       }
 
-      await AttendanceNotificationService.instance.notifyLowAttendance(
-        collegeId: collegeId,
-        collegeName: collegeName,
-        lowAttendance: snapshot.lowAttendance,
+      unawaited(
+        AttendanceNotificationService.instance
+            .notifyLowAttendance(
+              collegeId: collegeId,
+              collegeName: collegeName,
+              lowAttendance: snapshot.lowAttendance,
+            )
+            .catchError((error) {
+              debugPrint(
+                '[AttendanceService] notifyLowAttendance failed: $error',
+              );
+            }),
       );
 
       return snapshot;
@@ -183,10 +192,9 @@ class AttendanceService {
     required String collegeId,
     required AttendanceComponent component,
     required int studentId,
-    String? userEmail,
   }) async {
     try {
-      final token = await loadSavedToken(collegeId, userEmail: userEmail);
+      final token = await loadSavedToken(collegeId);
       if (token == null || token.isEmpty) {
         throw const AttendanceSyncException(
           code: 'session_expired',
@@ -220,6 +228,166 @@ class AttendanceService {
       );
       throw mapped;
     }
+  }
+
+  bool isAttendanceOrSchedulePrompt(String prompt) {
+    final normalized = prompt.trim().toLowerCase();
+    if (normalized.isEmpty) return false;
+
+    const attendanceKeywords = <String>[
+      'attendance',
+      'low attendance',
+      'attendance risk',
+      'attendance percentage',
+      'attendance today',
+      'present classes',
+      'absent',
+    ];
+
+    const scheduleKeywords = <String>[
+      'schedule',
+      'timetable',
+      'time table',
+      'next class',
+      'next lecture',
+      'room number',
+      'room no',
+      'room',
+      'upcoming class',
+      'upcoming classes',
+      'today\'s class',
+      'today\'s classes',
+    ];
+
+    return attendanceKeywords.any(normalized.contains) ||
+        scheduleKeywords.any(normalized.contains);
+  }
+
+  Future<String?> buildLocalAiResponse({
+    required String collegeId,
+    required String collegeName,
+    required String prompt,
+    String? userEmail,
+  }) async {
+    if (!isAttendanceOrSchedulePrompt(prompt)) return null;
+
+    final snapshot = await loadCachedSnapshot(collegeId, userEmail: userEmail);
+    if (snapshot == null) return null;
+
+    return buildLocalAiResponseForSnapshot(
+      snapshot: snapshot,
+      prompt: prompt,
+      now: DateTime.now(),
+      collegeName: collegeName,
+    );
+  }
+
+  String buildLocalAiResponseForSnapshot({
+    required AttendanceSnapshot snapshot,
+    required String prompt,
+    required DateTime now,
+    String collegeName = '',
+  }) {
+    final buffer = StringBuffer()
+      ..writeln('I checked your private KIET ERP cache.')
+      ..writeln('Student: ${snapshot.student.fullName}')
+      ..writeln('Registration number: ${snapshot.student.registrationNumber}');
+
+    if (snapshot.student.studentId != null) {
+      buffer.writeln('Student ID ${snapshot.student.studentId}');
+    }
+
+    if (collegeName.trim().isNotEmpty) {
+      buffer.writeln('College: ${collegeName.trim()}');
+    }
+
+    buffer
+      ..writeln(
+        'Program: ${snapshot.student.degreeName} • '
+        '${snapshot.student.branchShortName} • '
+        '${snapshot.student.semesterName} • '
+        'Section ${snapshot.student.sectionName}',
+      )
+      ..writeln(
+        'Overall attendance: '
+        '${snapshot.overall.percentage.toStringAsFixed(2)}% '
+        '(${snapshot.overall.presentClasses}/${snapshot.overall.totalClasses})',
+      );
+
+    if (snapshot.lowAttendance.isEmpty) {
+      buffer.writeln(
+        'Low attendance summary: No subjects are currently below the threshold.',
+      );
+    } else {
+      buffer.writeln('Low attendance summary:');
+      for (final component in snapshot.lowAttendance) {
+        buffer.writeln(
+          '- ${component.courseName} (${component.componentName}): '
+          '${component.percentage.toStringAsFixed(2)}%, need '
+          '${component.classesNeededForThreshold} more attended classes '
+          'to reach ${component.threshold}%.',
+        );
+      }
+    }
+
+    final scheduleEntries = _upcomingScheduleEntries(snapshot.schedule, now);
+    if (scheduleEntries.isNotEmpty) {
+      buffer.writeln('Upcoming classes:');
+      for (final entry in scheduleEntries) {
+        final dateLabel = formatDateDdMmYyyy(entry.lectureDate);
+        final roomLabel = entry.classRoom.trim().isEmpty
+            ? 'Room unavailable'
+            : 'Room ${entry.classRoom}';
+        buffer.writeln(
+          '- ${entry.courseName} • ${entry.courseComponentName} '
+          'on $dateLabel at ${entry.start}-${entry.end} in $roomLabel',
+        );
+      }
+    } else if (isAttendanceOrSchedulePrompt(prompt)) {
+      buffer.writeln(
+        'Upcoming classes: No upcoming classes are available in the private KIET ERP cache.',
+      );
+    }
+
+    return buffer.toString().trim();
+  }
+
+  List<AttendanceScheduleEntry> _upcomingScheduleEntries(
+    AttendanceSchedule schedule,
+    DateTime now,
+  ) {
+    final entries = schedule.entries.toList(growable: false);
+    if (entries.isEmpty) return entries;
+
+    final upcoming = entries
+        .where((entry) {
+          final scheduled = _scheduleEntryDateTime(entry);
+          if (scheduled == null) return true;
+          return !scheduled.isBefore(now);
+        })
+        .toList(growable: false);
+
+    final sorted = upcoming.isNotEmpty ? upcoming : entries;
+    return sorted.toList()..sort((left, right) {
+      final leftTime = _scheduleEntryDateTime(left);
+      final rightTime = _scheduleEntryDateTime(right);
+      if (leftTime == null && rightTime == null) return 0;
+      if (leftTime == null) return 1;
+      if (rightTime == null) return -1;
+      return leftTime.compareTo(rightTime);
+    });
+  }
+
+  DateTime? _scheduleEntryDateTime(AttendanceScheduleEntry entry) {
+    final date = tryParseDate(entry.lectureDate);
+    if (date == null) return null;
+
+    final parts = entry.start.split(':');
+    if (parts.length < 2) return date;
+
+    final hour = int.tryParse(parts[0]) ?? 0;
+    final minute = int.tryParse(parts[1]) ?? 0;
+    return DateTime(date.year, date.month, date.day, hour, minute);
   }
 
   AttendanceSyncException _mapAttendanceError(
@@ -365,324 +533,32 @@ class AttendanceService {
     return '$day/$month/${parsed.year}';
   }
 
-  bool isAttendanceOrSchedulePrompt(String prompt) {
-    final normalized = prompt.trim().toLowerCase();
-    if (normalized.isEmpty) return false;
+  String buildAiPrompt(AttendanceSnapshot snapshot) {
+    final lowAttendanceLines = snapshot.lowAttendance.isEmpty
+        ? 'No subjects are currently below 75% attendance.'
+        : snapshot.lowAttendance
+              .map((component) {
+                return '- ${component.courseName} (${component.componentName}): '
+                    '${component.percentage.toStringAsFixed(2)}%, '
+                    'need ${component.classesNeededForThreshold} more attended classes '
+                    'to reach ${component.threshold}%';
+              })
+              .join('\n');
 
-    const directKeywords = <String>[
-      'attendance',
-      'attendence',
-      'low attendance',
-      'attendance shortage',
-      'present classes',
-      'total classes',
-      'bunk',
-      'bunk allowance',
-      'classes needed',
-      'student id',
-      'registration number',
-      'recover attendance',
-      '75%',
-    ];
-    if (directKeywords.any(normalized.contains)) {
-      return true;
-    }
-
-    const scheduleKeywords = <String>[
-      'time table',
-      'timetable',
-      'today class',
-      'class today',
-      'today timetable',
-      'today time table',
-      'next class',
-      'upcoming class',
-      'current class',
-      'live class',
-      'class room',
-      'classroom',
-      'room number',
-      'lecture timing',
-      'class timing',
-      'faculty today',
-      'today lecture',
-    ];
-    return scheduleKeywords.any(normalized.contains);
-  }
-
-  Future<String?> buildLocalAiResponse({
-    required String collegeId,
-    required String collegeName,
-    required String prompt,
-    String? userEmail,
-  }) async {
-    if (!isKietCollege(collegeId: collegeId, collegeName: collegeName) ||
-        !isAttendanceOrSchedulePrompt(prompt)) {
-      return null;
-    }
-
-    final snapshot = await loadCachedSnapshot(collegeId, userEmail: userEmail);
-    if (snapshot == null) {
-      return 'I do not have a private KIET attendance cache for this account '
-          'yet. Open the Attendance screen, connect KIET ERP once, and sync '
-          'your data so I can answer from your own offline snapshot only.';
-    }
-
-    return buildLocalAiResponseForSnapshot(snapshot: snapshot, prompt: prompt);
-  }
-
-  String buildLocalAiResponseForSnapshot({
-    required AttendanceSnapshot snapshot,
-    required String prompt,
-    DateTime? now,
-  }) {
-    final normalized = prompt.trim().toLowerCase();
-    final referenceNow = now ?? DateTime.now();
-    final student = snapshot.student;
     final overall = snapshot.overall;
-
-    final wantsStudentIdentity =
-        normalized.contains('student id') ||
-        normalized.contains('registration') ||
-        normalized.contains('who am i');
-    final wantsSchedule =
-        normalized.contains('time table') ||
-        normalized.contains('timetable') ||
-        normalized.contains('today class') ||
-        normalized.contains('class today') ||
-        normalized.contains('next class') ||
-        normalized.contains('upcoming class') ||
-        normalized.contains('current class') ||
-        normalized.contains('live class') ||
-        normalized.contains('class room') ||
-        normalized.contains('classroom') ||
-        normalized.contains('room number') ||
-        normalized.contains('lecture timing') ||
-        normalized.contains('class timing') ||
-        normalized.contains('faculty today');
-    final wantsLowAttendance =
-        normalized.contains('low attendance') ||
-        normalized.contains('shortage') ||
-        normalized.contains('risky') ||
-        normalized.contains('recover') ||
-        normalized.contains('75%') ||
-        normalized.contains('need') ||
-        normalized.contains('bunk');
-    final wantsOverallAttendance =
-        normalized.contains('attendance') ||
-        normalized.contains('present classes') ||
-        normalized.contains('total classes') ||
-        normalized.contains('percentage');
-    final wantsBunkAllowance =
-        normalized.contains('bunk') ||
-        normalized.contains('leave') ||
-        normalized.contains('skip class');
-
-    final hasSpecificIntent =
-        wantsStudentIdentity ||
-        wantsSchedule ||
-        wantsLowAttendance ||
-        wantsOverallAttendance;
-
-    final sections = <String>[
-      'This answer was generated locally from your private KIET ERP cache.',
-      _buildStudentIdentityLine(student, snapshot.syncedAt),
-    ];
-
-    if (wantsStudentIdentity || !hasSpecificIntent) {
-      sections.add(_buildStudentSummary(snapshot));
-    }
-
-    if (wantsOverallAttendance || !hasSpecificIntent) {
-      sections.add(
+          // Avoid sending snapshot.student.fullName to external models; use a
+          // non-identifying reference that still helps the AI describe the report.
+          final studentReference = snapshot.student.studentId != null
+            ? 'Student ID ${snapshot.student.studentId}'
+            : snapshot.student.registrationNumber.trim().isNotEmpty
+            ? 'Registration ${snapshot.student.registrationNumber.trim()}'
+            : 'Anonymous student';
+    return 'I am a KIET student. Analyze my attendance and tell me the most urgent recovery steps, '
+        'which subjects are risky, and how I should plan the next week.\n\n'
         'Overall attendance: ${overall.percentage.toStringAsFixed(2)}% '
-        '(${overall.presentClasses}/${overall.totalClasses} classes).',
-      );
-    }
-
-    if (wantsLowAttendance || wantsBunkAllowance || !hasSpecificIntent) {
-      sections.add(
-        _buildLowAttendanceSummary(
-          snapshot: snapshot,
-          includeBunkAllowance: wantsBunkAllowance || !hasSpecificIntent,
-        ),
-      );
-    }
-
-    if (wantsSchedule || !hasSpecificIntent) {
-      sections.add(
-        _buildScheduleSummary(snapshot: snapshot, now: referenceNow),
-      );
-    }
-
-    if (wantsLowAttendance || !hasSpecificIntent) {
-      sections.add(_buildRecoveryAdvice(snapshot));
-    }
-
-    return sections.where((section) => section.trim().isNotEmpty).join('\n\n');
-  }
-
-  String _buildStudentIdentityLine(
-    AttendanceStudent student,
-    DateTime syncedAt,
-  ) {
-    final identity = <String>[
-      if (student.fullName.trim().isNotEmpty) student.fullName.trim(),
-      if (student.studentId != null) 'Student ID ${student.studentId}',
-      if (student.registrationNumber.trim().isNotEmpty)
-        'Reg ${student.registrationNumber.trim()}',
-    ];
-    final syncLabel = syncedAt.millisecondsSinceEpoch <= 0
-        ? 'Sync time unavailable'
-        : 'Synced ${formatDateDdMmYyyy(syncedAt.toIso8601String())} '
-              'at ${_formatTimeOfDay(syncedAt)}';
-    return '${identity.join(' | ')}\n$syncLabel';
-  }
-
-  String _buildStudentSummary(AttendanceSnapshot snapshot) {
-    final student = snapshot.student;
-    final parts = <String>[
-      if (student.branchShortName.trim().isNotEmpty)
-        student.branchShortName.trim(),
-      if (student.semesterName.trim().isNotEmpty) student.semesterName.trim(),
-      if (student.sectionName.trim().isNotEmpty)
-        'Section ${student.sectionName.trim()}',
-      if (student.degreeName.trim().isNotEmpty) student.degreeName.trim(),
-    ];
-    if (parts.isEmpty) return '';
-    return 'Student profile: ${parts.join(' | ')}.';
-  }
-
-  String _buildLowAttendanceSummary({
-    required AttendanceSnapshot snapshot,
-    required bool includeBunkAllowance,
-  }) {
-    if (snapshot.lowAttendance.isEmpty) {
-      return 'Low attendance: no course component is currently below '
-          '$lowAttendanceThreshold%.';
-    }
-
-    final lines = snapshot.lowAttendance
-        .take(_maxAiLowAttendanceItems)
-        .map((component) {
-          final details = <String>[
-            '${component.percentage.toStringAsFixed(2)}%',
-            'need ${component.classesNeededForThreshold} more attended classes '
-                'to reach ${component.threshold}%',
-            if (includeBunkAllowance)
-              'safe bunk allowance ${component.bunkAllowance}',
-          ];
-          return '- ${component.courseName} (${component.componentName}): '
-              '${details.join(', ')}';
-        })
-        .join('\n');
-    return 'Low attendance summary:\n$lines';
-  }
-
-  String _buildRecoveryAdvice(AttendanceSnapshot snapshot) {
-    if (snapshot.lowAttendance.isEmpty) {
-      return 'Recovery advice: keep your current attendance stable and avoid '
-          'unplanned bunks in subjects with a low remaining allowance.';
-    }
-
-    final topRisk = snapshot.lowAttendance.first;
-    return 'Recovery advice: prioritize ${topRisk.courseName} '
-        '(${topRisk.componentName}) first because it needs '
-        '${topRisk.classesNeededForThreshold} more attended classes to cross '
-        '${topRisk.threshold}%. After that, work down the remaining low '
-        'attendance subjects in the order listed above.';
-  }
-
-  String _buildScheduleSummary({
-    required AttendanceSnapshot snapshot,
-    required DateTime now,
-  }) {
-    if (snapshot.schedule.entries.isEmpty) {
-      return 'Schedule: no cached timetable entries are available right now.';
-    }
-
-    final entries =
-        List<AttendanceScheduleEntry>.from(snapshot.schedule.entries)
-          ..sort((first, second) {
-            final firstStart =
-                _parseScheduleEntryDateTime(first.lectureDate, first.start) ??
-                DateTime.fromMillisecondsSinceEpoch(0);
-            final secondStart =
-                _parseScheduleEntryDateTime(second.lectureDate, second.start) ??
-                DateTime.fromMillisecondsSinceEpoch(0);
-            return firstStart.compareTo(secondStart);
-          });
-
-    AttendanceScheduleEntry? currentEntry;
-    final upcoming = <AttendanceScheduleEntry>[];
-    for (final entry in entries) {
-      final start = _parseScheduleEntryDateTime(entry.lectureDate, entry.start);
-      final end = _parseScheduleEntryDateTime(entry.lectureDate, entry.end);
-      if (start == null) continue;
-      if (end != null && !now.isBefore(start) && now.isBefore(end)) {
-        currentEntry = entry;
-        continue;
-      }
-      if (start.isAfter(now)) {
-        upcoming.add(entry);
-      }
-    }
-
-    final sections = <String>[];
-    if (currentEntry != null) {
-      sections.add('Current class: ${_formatScheduleEntry(currentEntry)}.');
-    }
-    if (upcoming.isNotEmpty) {
-      final lines = upcoming
-          .take(_maxAiUpcomingClasses)
-          .map((entry) => '- ${_formatScheduleEntry(entry)}')
-          .join('\n');
-      sections.add('Upcoming classes:\n$lines');
-    } else if (currentEntry == null) {
-      sections.add('Schedule: no upcoming cached classes were found.');
-    }
-
-    return sections.join('\n\n');
-  }
-
-  DateTime? _parseScheduleEntryDateTime(String rawDate, String rawTime) {
-    final baseDate = tryParseDate(rawDate);
-    if (baseDate == null) return null;
-
-    final match = RegExp(r'(\d{1,2}):(\d{2})').firstMatch(rawTime);
-    if (match == null) return null;
-
-    final hour = int.tryParse(match.group(1) ?? '');
-    final minute = int.tryParse(match.group(2) ?? '');
-    if (hour == null || minute == null) return null;
-
-    return DateTime(baseDate.year, baseDate.month, baseDate.day, hour, minute);
-  }
-
-  String _formatScheduleEntry(AttendanceScheduleEntry entry) {
-    final details = <String>[
-      if (entry.courseName.trim().isNotEmpty) entry.courseName.trim(),
-      if (entry.courseComponentName.trim().isNotEmpty)
-        entry.courseComponentName.trim(),
-      if (entry.lectureDate.trim().isNotEmpty)
-        formatDateDdMmYyyy(entry.lectureDate),
-      if (entry.start.trim().isNotEmpty || entry.end.trim().isNotEmpty)
-        '${entry.start.trim()}-${entry.end.trim()}'.replaceAll(
-          RegExp(r'^-|-$'),
-          '',
-        ),
-      if (entry.classRoom.trim().isNotEmpty) 'Room ${entry.classRoom.trim()}',
-      if (entry.facultyName.trim().isNotEmpty) entry.facultyName.trim(),
-    ];
-    return details.join(' | ');
-  }
-
-  String _formatTimeOfDay(DateTime dateTime) {
-    final hour = dateTime.hour == 0
-        ? 12
-        : (dateTime.hour > 12 ? dateTime.hour - 12 : dateTime.hour);
-    final minute = dateTime.minute.toString().padLeft(2, '0');
-    final period = dateTime.hour >= 12 ? 'PM' : 'AM';
-    return '$hour:$minute $period';
+        '(${overall.presentClasses}/${overall.totalClasses})\n'
+            'Student: $studentReference, ${snapshot.student.branchShortName}, '
+            '${snapshot.student.semesterName}\n\n'
+        'Low attendance summary:\n$lowAttendanceLines';
   }
 }

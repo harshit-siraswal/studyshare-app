@@ -31,10 +31,6 @@ class StudyAiLiveActivityCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final surface = isDark ? const Color(0xFF171717) : Colors.white;
-    final border = isDark
-        ? Colors.white.withValues(alpha: 0.08)
-        : Colors.black.withValues(alpha: 0.08);
     final textPrimary = isDark
         ? AppTheme.darkTextPrimary
         : AppTheme.lightTextPrimary;
@@ -47,13 +43,8 @@ class StudyAiLiveActivityCard extends StatelessWidget {
     final total = steps.isEmpty ? 1 : steps.length;
     final progress = (completed / total).clamp(0.0, 1.0);
 
-    return Container(
-      decoration: BoxDecoration(
-        color: surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: border),
-      ),
-      padding: const EdgeInsets.fromLTRB(14, 13, 14, 13),
+    return Padding(
+      padding: const EdgeInsets.all(2),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -127,11 +118,18 @@ class StudyAiLiveActivityCard extends StatelessWidget {
               onPressed: onExport,
               style: OutlinedButton.styleFrom(
                 minimumSize: const Size.fromHeight(38),
-                side: BorderSide(color: border),
+                side: BorderSide(
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.08)
+                      : Colors.black.withValues(alpha: 0.08),
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
                 ),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
               ),
               icon: Icon(
                 Icons.download_rounded,
@@ -323,7 +321,8 @@ class _LiveStepRowState extends State<_LiveStepRow> {
                         style: GoogleFonts.inter(
                           fontSize: 10,
                           fontWeight: FontWeight.w500,
-                          color: widget.step.status == AiLiveActivityStatus.active
+                          color:
+                              widget.step.status == AiLiveActivityStatus.active
                               ? AppTheme.primary
                               : muted,
                         ),
@@ -522,8 +521,9 @@ class _SourceChip extends StatelessWidget {
         ? AppTheme.darkTextSecondary
         : AppTheme.lightTextSecondary;
     final pageLabel = source.page != null ? ' p.${source.page}' : '';
-    final stampLabel =
-        source.timestamp?.trim().isNotEmpty == true ? ' ${source.timestamp}' : '';
+    final stampLabel = source.timestamp?.trim().isNotEmpty == true
+        ? ' ${source.timestamp}'
+        : '';
 
     return Material(
       color: Colors.transparent,

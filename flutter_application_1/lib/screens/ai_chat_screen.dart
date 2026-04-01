@@ -20,7 +20,6 @@ import '../services/auth_service.dart';
 import '../services/ai_chat_notification_service.dart';
 import '../services/analytics_service.dart';
 import '../services/backend_api_service.dart';
-import '../services/attendance_service.dart';
 import '../services/cloudinary_service.dart';
 import '../services/ai_chat_local_service.dart';
 import '../services/chat_session_repository.dart';
@@ -267,7 +266,6 @@ class _AIChatScreenState extends State<AIChatScreen>
 
   final AnalyticsService _analytics = AnalyticsService.instance;
   final BackendApiService _api = BackendApiService();
-  final AttendanceService _attendanceService = AttendanceService();
   final AuthService _auth = AuthService();
   final SupabaseService _supabase = SupabaseService();
   final AiChatNotificationService _aiNotificationService =
@@ -615,34 +613,6 @@ class _AIChatScreenState extends State<AIChatScreen>
 
     if (history.length <= maxMessages) return history;
     return history.sublist(history.length - maxMessages);
-  }
-
-  bool _shouldInjectLocalAttendanceAnswer(String prompt) {
-    if (_attendanceService.isAttendanceOrSchedulePrompt(prompt)) {
-      return true;
-    }
-
-    var checkedUserTurns = 0;
-    for (final message in _messages.reversed) {
-      if (!message.isUser) continue;
-      final priorPrompt = _extractPromptFromUserVisible(message.content);
-      if (_attendanceService.isAttendanceOrSchedulePrompt(priorPrompt)) {
-        return true;
-      }
-      checkedUserTurns++;
-      if (checkedUserTurns >= 3) break;
-    }
-    return false;
-  }
-
-  Future<String?> _resolveLocalAttendanceAnswer(String prompt) async {
-    if (!_shouldInjectLocalAttendanceAnswer(prompt)) return null;
-    return _attendanceService.buildLocalAiResponse(
-      collegeId: widget.collegeId,
-      collegeName: widget.collegeName,
-      prompt: prompt,
-      userEmail: _storageEmail == 'guest' ? null : _storageEmail,
-    );
   }
 
   String _buildRagPrompt({
@@ -1151,8 +1121,83 @@ class _AIChatScreenState extends State<AIChatScreen>
     );
   }
 
-  bool _shouldShowLiveActivityCard(AIChatMessage message) =>
-      message.liveSteps.isNotEmpty || message.showLiveExport;
+  bool _shouldShowLiveActivityCard(
+    AIChatMessage message,
+    bool isStreamingAssistantMessage,
+  ) =>
+      message.showLiveExport ||
+      (message.liveSteps.isNotEmpty &&
+          (isStreamingAssistantMessage || message.content.trim().isEmpty));
+
+  bool _shouldShowCollapsedLiveTrace(
+    AIChatMessage message,
+    bool isStreamingAssistantMessage,
+  ) =>
+      !message.isUser &&
+      !message.showLiveExport &&
+      message.liveSteps.isNotEmpty &&
+      message.content.trim().isNotEmpty &&
+      !isStreamingAssistantMessage;
+
+  String _buildCollapsedLiveTraceLabel(AIChatMessage message) {
+    final prefix = switch (message.answerOrigin) {
+      AiAnswerOrigin.webOnly => 'Used web results from',
+      AiAnswerOrigin.notesPlusWeb => 'Used notes and web results from',
+      AiAnswerOrigin.insufficientNotes =>
+        'Used the closest matching notes from',
+      AiAnswerOrigin.notesOnly || null => 'Used notes from',
+    };
+    final sourceTitles =
+        _activitySourcesFromRagSources(message.sources, limit: 2)
+            .map((source) => source.title.trim())
+            .where((title) => title.isNotEmpty)
+            .toList();
+    if (sourceTitles.isEmpty) {
+      return prefix.replaceFirst(' from', '');
+    }
+    final extraCount = message.sources.length - sourceTitles.length;
+    final extraLabel = extraCount > 0 ? ' +$extraCount more' : '';
+    return '$prefix ${sourceTitles.join(' + ')}$extraLabel';
+  }
+
+  Widget _buildCollapsedLiveTrace(
+    AIChatMessage message,
+    bool isDark,
+    bool isCompact,
+  ) {
+    final textColor = isDark
+        ? AppTheme.darkTextSecondary
+        : AppTheme.lightTextSecondary;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 7,
+            height: 7,
+            margin: const EdgeInsets.only(top: 5),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: AppTheme.primary.withValues(alpha: 0.9),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _buildCollapsedLiveTraceLabel(message),
+              style: GoogleFonts.inter(
+                fontSize: isCompact ? 10.8 : 11.2,
+                fontWeight: FontWeight.w500,
+                height: 1.35,
+                color: textColor,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   AiLiveSourceKind _sourceKindFromRagSource(RagSource source) {
     final normalized = source.sourceType.trim().toLowerCase();
@@ -1751,25 +1796,6 @@ class _AIChatScreenState extends State<AIChatScreen>
     });
   }
 
-  Future<void> _appendImmediateAssistantResponse({
-    required String userVisible,
-    required String answer,
-    bool cached = false,
-  }) async {
-    setState(() {
-      _messages.add(AIChatMessage(isUser: true, content: userVisible));
-      _messages.add(
-        AIChatMessage(isUser: false, content: answer, cached: cached),
-      );
-      _controller.clear();
-      _attachments.clear();
-      _hasText = false;
-      _isLoading = false;
-    });
-    await _persistCurrentSession();
-    await _scrollToBottom();
-  }
-
   Future<void> _loadStoredSessions() async {
     final loaded = await _sessionRepository.loadSessions(
       userEmail: _storageEmail,
@@ -2156,6 +2182,30 @@ class _AIChatScreenState extends State<AIChatScreen>
         normalized.contains('question paper') ||
         normalized.contains('mock test') ||
         normalized.contains('practice test');
+  }
+
+  bool _hasActiveQuestionPaperResponse() {
+    for (final message in _messages.reversed) {
+      if (message.isUser) return false;
+      if (message.quizActionPaper != null) return true;
+    }
+    return false;
+  }
+
+  bool _isQuestionPaperContinuationIntent(String prompt) {
+    final normalized = prompt
+        .toLowerCase()
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (normalized.isEmpty) return false;
+
+    return RegExp(
+          r'^(continue|next|more|another|proceed|keep going|go on)\b',
+        ).hasMatch(normalized) ||
+        normalized == 'continue quiz' ||
+        normalized == 'continue the quiz' ||
+        normalized == 'continue question paper' ||
+        normalized == 'continue test';
   }
 
   /// Fallback UI for manual question-paper configuration when auto-detection
@@ -2982,7 +3032,7 @@ Return STRICT JSON only (no markdown). Schema:
     required _QuestionPaperRequestConfig config,
   }) async {
     final tracker = _startLongResponseTracker('Question paper generation');
-    final history = _buildStructuredHistory(pendingUserPrompt: userPrompt);
+    final history = _buildStructuredHistory();
     final aiMessage = AIChatMessage(
       isUser: false,
       content: '',
@@ -3121,6 +3171,7 @@ Return STRICT JSON only (no markdown). Schema:
           question: prompt,
           collegeId: widget.collegeId,
           sessionId: _activeSessionId,
+          topK: 6,
           fileId: searchAllForPrompt ? null : widget.resourceContext?.fileId,
           videoUrl: widget.resourceContext?.videoUrl,
           allowWeb: allowWeb,
@@ -3133,6 +3184,7 @@ Return STRICT JSON only (no markdown). Schema:
           excludeFileIds: excludeFileIds,
           dialectIntensity: dialectIntensity,
           languageHint: languageHint,
+          generationMode: 'question_paper',
         );
         final primarySourceFileId = _extractPrimarySourceFileId(response);
         if (primarySourceFileId != null && primarySourceFileId.isNotEmpty) {
@@ -3391,7 +3443,6 @@ Return STRICT JSON only (no markdown). Schema:
     required List<Map<String, dynamic>> attachmentPayload,
   }) async {
     final tracker = _startLongResponseTracker('Summary export');
-    final history = _buildStructuredHistory(pendingUserPrompt: userPrompt);
     setState(() {
       _messages.add(AIChatMessage(isUser: true, content: userVisible));
       _isLoading = true;
@@ -3414,6 +3465,10 @@ Return STRICT JSON only (no markdown). Schema:
       final excludeFileIds = (_lastPrimarySourceFileId ?? '').trim().isNotEmpty
           ? <String>[_lastPrimarySourceFileId!.trim()]
           : null;
+      final hasOcrEligibleAttachments = attachmentPayload.any((item) {
+        final type = item['type']?.toString().toLowerCase();
+        return type == 'pdf' || type == 'image';
+      });
       final prompt = _buildRagPrompt(
         userPrompt:
             '$userPrompt\n\nOutput instruction: generate a structured report-ready summary.',
@@ -3430,14 +3485,15 @@ Return STRICT JSON only (no markdown). Schema:
           final candidate = await _api.queryRag(
             question: prompt,
             collegeId: widget.collegeId,
-            sessionId: _activeSessionId,
+            sessionId: null,
+            topK: 6,
             fileId: searchAllForPrompt ? null : widget.resourceContext?.fileId,
             videoUrl: widget.resourceContext?.videoUrl,
             allowWeb: allowWeb,
-            useOcr: true,
-            forceOcr: true,
+            useOcr: hasOcrEligibleAttachments,
+            forceOcr: hasOcrEligibleAttachments && attempt > 0,
             attachments: attachmentPayload,
-            history: history,
+            history: const <Map<String, String>>[],
             filters: contextFilters,
             sourceSwitchForTurn: sourceSwitchForTurn,
             excludeFileIds: excludeFileIds,
@@ -3614,27 +3670,6 @@ Return STRICT JSON only (no markdown). Schema:
         )) {
           return;
         }
-        final localAttendanceAnswer = await _resolveLocalAttendanceAnswer(
-          userPrompt,
-        );
-        if (localAttendanceAnswer != null) {
-          await _analytics.logEvent(
-            'ai_chat_local_attendance_answer',
-            parameters: <String, Object?>{
-              ..._baseAnalyticsParameters(),
-              'cached': true,
-            },
-          );
-          final userVisible = turnAttachments.isEmpty
-              ? userPrompt
-              : '$userPrompt\n\n${turnAttachments.length} attachments added.';
-          await _appendImmediateAssistantResponse(
-            userVisible: userVisible,
-            answer: localAttendanceAnswer,
-            cached: true,
-          );
-          return;
-        }
         final searchAllForPrompt = _shouldSearchAllPdfsForPrompt(userPrompt);
         final isPdfOverviewPrompt = _isPdfOverviewPrompt(userPrompt);
         final localContextRequired =
@@ -3678,11 +3713,8 @@ Return STRICT JSON only (no markdown). Schema:
         final hasPdfAttachments = attachmentPayload.any(
           (item) => item['type']?.toString().toLowerCase() == 'pdf',
         );
-        final hasPinnedPdfContext =
-            widget.resourceContext != null &&
-            (widget.resourceContext?.videoUrl ?? '').isEmpty;
-        final shouldEnableOcr =
-            attachmentPayload.isNotEmpty || hasPinnedPdfContext;
+        final hasOcrEligibleAttachments =
+            hasImageAttachments || hasPdfAttachments;
         final effectiveAllowWeb = _allowWebMode;
         final effectiveFileId = effectiveAllowWeb
             ? null
@@ -3700,10 +3732,10 @@ Return STRICT JSON only (no markdown). Schema:
         final effectiveExcludeFileIds = effectiveAllowWeb
             ? null
             : excludeFileIds;
-        final effectiveUseOcr = effectiveAllowWeb ? false : shouldEnableOcr;
-        final effectiveForceOcr = effectiveAllowWeb
+        final effectiveUseOcr = effectiveAllowWeb
             ? false
-            : (hasImageAttachments || hasPdfAttachments || hasPinnedPdfContext);
+            : hasOcrEligibleAttachments;
+        final effectiveForceOcr = false;
         final minScore = localContextRequired
             ? (isPdfOverviewPrompt ? 0.16 : 0.08)
             : null;
@@ -3715,6 +3747,12 @@ Return STRICT JSON only (no markdown). Schema:
           prompt: userPrompt,
           hasAttachments: hasAttachments,
         );
+        final isQuestionPaperContinuation =
+            !isQuestionPaperRequest &&
+            _hasActiveQuestionPaperResponse() &&
+            _isQuestionPaperContinuationIntent(userPrompt);
+        final shouldGenerateQuestionPaper =
+            isQuestionPaperRequest || isQuestionPaperContinuation;
         final isSummaryExportRequest = _isSummaryExportIntent(
           prompt: userPrompt,
           hasAttachments: hasAttachments,
@@ -3728,7 +3766,7 @@ Return STRICT JSON only (no markdown). Schema:
           'use_ocr': effectiveUseOcr,
           'force_ocr': effectiveForceOcr,
           'summary_export': isSummaryExportRequest,
-          'question_paper': isQuestionPaperRequest,
+          'question_paper': shouldGenerateQuestionPaper,
         };
 
         await _analytics.logEvent(
@@ -3745,11 +3783,13 @@ Return STRICT JSON only (no markdown). Schema:
           return;
         }
 
-        if (isQuestionPaperRequest) {
+        if (shouldGenerateQuestionPaper) {
           final config = await _resolveQuestionPaperConfig();
           if (config == null) return;
           await _handleQuestionPaperGeneration(
-            userPrompt: userPrompt,
+            userPrompt: isQuestionPaperContinuation
+                ? 'Continue the previous question paper on the same topic. $userPrompt'
+                : userPrompt,
             userVisible: userVisible,
             attachmentPayload: attachmentPayload,
             config: config,
@@ -4366,7 +4406,8 @@ Return STRICT JSON only (no markdown). Schema:
     final isStreamingPlaceholder =
         isStreamingAssistantMessage && msg.content.trim().isEmpty;
     final showLegacyShimmer =
-        isStreamingPlaceholder && !_shouldShowLiveActivityCard(msg);
+        isStreamingPlaceholder &&
+        !_shouldShowLiveActivityCard(msg, isStreamingAssistantMessage);
     final messageTextStyle = GoogleFonts.inter(
       fontSize: isCompact ? 13.5 : 14,
       height: 1.46,
@@ -4459,6 +4500,8 @@ Return STRICT JSON only (no markdown). Schema:
             ],
           ),
         if (!msg.isUser) const SizedBox(height: 8),
+        if (_shouldShowCollapsedLiveTrace(msg, isStreamingAssistantMessage))
+          _buildCollapsedLiveTrace(msg, isDark, isCompact),
         if (showLegacyShimmer)
           Padding(
             padding: const EdgeInsets.only(top: 2, bottom: 2),
@@ -5456,7 +5499,11 @@ Return STRICT JSON only (no markdown). Schema:
                             _isLoading &&
                             index == _messages.length - 1;
                         final showStandaloneLiveCard =
-                            !m.isUser && _shouldShowLiveActivityCard(m);
+                            !m.isUser &&
+                            _shouldShowLiveActivityCard(
+                              m,
+                              isStreamingAssistantMessage,
+                            );
                         final hideBubble =
                             showStandaloneLiveCard && m.content.trim().isEmpty;
 

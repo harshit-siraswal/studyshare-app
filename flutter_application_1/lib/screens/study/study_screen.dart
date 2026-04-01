@@ -777,7 +777,7 @@ class _StudyScreenState extends State<StudyScreen>
           resources.isEmpty &&
           !_hasActiveFilters) {
         _didRetryInitialEmptyLoad = true;
-        
+
         // CRITICAL FIX: Actually unset the relevancy filter so the retry queries all resources
         setState(() {
           _resourcesRelevantOnly = false;
@@ -1688,10 +1688,7 @@ class _StudyScreenState extends State<StudyScreen>
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => ExploreStudentsScreen(
-          collegeDomain: widget.collegeDomain,
-          userEmail: _effectiveUserEmail,
-        ),
+        builder: (_) => ExploreStudentsScreen(userEmail: _effectiveUserEmail),
       ),
     );
   }

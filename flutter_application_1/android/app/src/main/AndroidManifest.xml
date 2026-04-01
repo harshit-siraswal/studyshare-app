@@ -76,13 +76,13 @@
             
         <!-- Home Widget Receivers -->
         <receiver
-            android:name="me.studyshare.android.SyllabusWidgetProvider"
+            android:name="me.studyshare.android.ScheduleWidgetProvider"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider"
-                android:resource="@xml/syllabus_widget_info" />
+                android:resource="@xml/schedule_widget_info" />
         </receiver>
 
         <receiver

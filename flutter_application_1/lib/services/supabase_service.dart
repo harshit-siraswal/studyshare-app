@@ -757,21 +757,30 @@ class SupabaseService {
     if (emails.isEmpty) return const {};
 
     if (!_hasConfiguredSupabaseAnonKey) {
+      final usersByEmail = <String, Map<String, dynamic>>{};
       final currentEmail = _currentSessionEmail();
-      if (emails.length == 1 && emails.first == currentEmail) {
+      for (final email in emails) {
         try {
-          final profile = await getCurrentUserProfile(maxAttempts: 1);
-          if (profile.isNotEmpty) {
-            return <String, Map<String, dynamic>>{
-              currentEmail: _normalizeReadableUserRecord(<String, dynamic>{
-                ...profile,
-                'email': currentEmail,
-              }),
-            };
+          Map<String, dynamic> profile;
+          if (email == currentEmail) {
+            profile = await getCurrentUserProfile(maxAttempts: 1);
+          } else {
+            final payload = await _api.getPublicProfile(email: email);
+            final profilePayload = payload['profile'];
+            profile = profilePayload is Map
+                ? Map<String, dynamic>.from(profilePayload)
+                : Map<String, dynamic>.from(payload);
           }
-        } catch (_) {}
+          if (profile.isNotEmpty) {
+            usersByEmail[email] = _normalizeReadableUserRecord(
+              <String, dynamic>{...profile, 'email': email},
+            );
+          }
+        } catch (e) {
+          debugPrint('Backend user lookup failed for $email: $e');
+        }
       }
-      return const {};
+      return usersByEmail;
     }
 
     try {
@@ -1273,6 +1282,62 @@ class SupabaseService {
   }
 
   /// Get resources from users the current user follows
+  Future<List<Resource>> _fetchApprovedResourcesByUploaderEmailsViaBackend(
+    List<String> uploaderEmails, {
+    int limit = 20,
+    int offset = 0,
+  }) async {
+    final normalizedEmails = uploaderEmails
+        .map(_normalizeEmail)
+        .where((email) => email.isNotEmpty)
+        .toSet()
+        .toList();
+    if (normalizedEmails.isEmpty) return const <Resource>[];
+
+    final fetchPerUser = (limit + offset).clamp(20, 120);
+    final results = await Future.wait(
+      normalizedEmails.map((email) async {
+        try {
+          final payload = await _api.getPublicUserResources(
+            email: email,
+            approvedOnly: true,
+            limit: fetchPerUser,
+            offset: 0,
+          );
+          final resourcesRaw = payload['resources'];
+          if (resourcesRaw is! List) return const <Resource>[];
+          return resourcesRaw
+              .whereType<Map>()
+              .map((row) => Resource.fromJson(Map<String, dynamic>.from(row)))
+              .toList();
+        } catch (e) {
+          debugPrint('Backend following resource lookup failed for $email: $e');
+          return const <Resource>[];
+        }
+      }),
+    );
+
+    final mergedById = <String, Resource>{};
+    for (final bucket in results) {
+      for (final resource in bucket) {
+        final id = resource.id.trim();
+        if (id.isEmpty) continue;
+        final existing = mergedById[id];
+        if (existing == null ||
+            resource.createdAt.isAfter(existing.createdAt)) {
+          mergedById[id] = resource;
+        }
+      }
+    }
+
+    final merged = mergedById.values.toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final safeOffset = offset < 0 ? 0 : offset;
+    if (safeOffset >= merged.length) return const <Resource>[];
+    final end = (safeOffset + limit).clamp(0, merged.length);
+    return merged.sublist(safeOffset, end);
+  }
+
   Future<List<Resource>> _fetchApprovedResourcesByUploaderEmails({
     required String collegeId,
     required List<String> uploaderEmails,
@@ -1375,12 +1440,15 @@ class SupabaseService {
           .toList();
 
       if (followingEmails.isNotEmpty) {
-        return _fetchApprovedResourcesByUploaderEmails(
-          collegeId: collegeId,
-          uploaderEmails: followingEmails,
-          limit: limit,
-          offset: offset,
-        );
+        final backendResources =
+            await _fetchApprovedResourcesByUploaderEmailsViaBackend(
+              followingEmails,
+              limit: limit,
+              offset: offset,
+            );
+        if (backendResources.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
+          return backendResources;
+        }
       }
     } catch (e) {
       debugPrint('Error fetching following feed via backend endpoint: $e');
@@ -1709,13 +1777,45 @@ class SupabaseService {
 
   /// Get user info including profile_photo_url and display_name
   Future<Map<String, dynamic>?> getUserInfo(String email) async {
+    final normalizedEmail = _normalizeEmail(email);
+    if (normalizedEmail.isEmpty) return null;
+
+    final currentEmail = _currentSessionEmail();
+    if (normalizedEmail == currentEmail) {
+      try {
+        final profile = await getCurrentUserProfile(maxAttempts: 1);
+        if (profile.isNotEmpty) {
+          return _normalizeReadableUserRecord(<String, dynamic>{
+            ...profile,
+            'email': normalizedEmail,
+          });
+        }
+      } catch (_) {}
+    }
+
+    try {
+      final payload = await _api.getPublicProfile(email: normalizedEmail);
+      final profilePayload = payload['profile'];
+      final profile = profilePayload is Map
+          ? Map<String, dynamic>.from(profilePayload)
+          : Map<String, dynamic>.from(payload);
+      if (profile.isNotEmpty) {
+        return _normalizeReadableUserRecord(profile);
+      }
+    } catch (e) {
+      debugPrint('Backend public profile lookup failed: $e');
+      if (!_hasConfiguredSupabaseAnonKey) {
+        return null;
+      }
+    }
+
     try {
       final res = await _client
           .from('users')
           .select(
             'id, email, display_name, profile_photo_url, username, bio, semester, branch, subject, role, admin_capabilities, scope_all_colleges, admin_college_id',
           )
-          .eq('email', email)
+          .eq('email', normalizedEmail)
           .maybeSingle();
       return res == null
           ? null
@@ -2127,6 +2227,53 @@ class SupabaseService {
     return getUsersByCollege(domain, searchQuery: query);
   }
 
+  Future<List<Map<String, dynamic>>> discoverUsers({
+    String? query,
+    int limit = 50,
+  }) async {
+    try {
+      final users = await _api.discoverUsers(query: query, limit: limit);
+      final normalizedUsers = users.map(_normalizeReadableUserRecord).toList();
+      if (normalizedUsers.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
+        return normalizedUsers;
+      }
+    } catch (e) {
+      debugPrint('Error discovering users via backend: $e');
+      if (!_hasConfiguredSupabaseAnonKey) {
+        return const <Map<String, dynamic>>[];
+      }
+    }
+
+    try {
+      var dbQuery = _client
+          .from('users')
+          .select(
+            'id, email, display_name, username, profile_photo_url, college, college_id, bio',
+          );
+
+      if (query != null && query.isNotEmpty) {
+        final normalizedQuery = query
+            .replaceAll(RegExp(r'[^a-zA-Z0-9@\s._-]'), ' ')
+            .trim()
+            .replaceAll(RegExp(r'\s+'), ' ');
+        if (normalizedQuery.isNotEmpty) {
+          final safeQuery = _escapeLikePattern(normalizedQuery);
+          dbQuery = dbQuery.or(
+            'display_name.ilike.%$safeQuery%,username.ilike.%$safeQuery%,email.ilike.%$safeQuery%,college.ilike.%$safeQuery%',
+          );
+        }
+      }
+
+      final response = await dbQuery.limit(limit.clamp(1, 100));
+      return List<Map<String, dynamic>>.from(
+        response,
+      ).map(_normalizeReadableUserRecord).toList();
+    } catch (e) {
+      debugPrint('Error discovering users: $e');
+      return const <Map<String, dynamic>>[];
+    }
+  }
+
   /// Get users from the same college domain (for Find Classmates)
   Future<List<Map<String, dynamic>>> getUsersByCollege(
     String domain, {
@@ -2176,12 +2323,24 @@ class SupabaseService {
     final normalizedCurrent = _currentSessionEmail();
 
     try {
-      if (normalizedTarget.isNotEmpty &&
-          normalizedTarget == normalizedCurrent) {
-        final res = await _api.getFollowers();
-        return _normalizeSocialUsers(res['followers']);
+      final res = await _api.getFollowers(
+        email:
+            normalizedTarget.isNotEmpty && normalizedTarget != normalizedCurrent
+            ? normalizedTarget
+            : null,
+      );
+      final normalized = _normalizeSocialUsers(res['followers']);
+      if (normalized.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
+        return normalized;
       }
+    } catch (e) {
+      debugPrint('Backend followers lookup failed: $e');
+      if (!_hasConfiguredSupabaseAnonKey) {
+        return [];
+      }
+    }
 
+    try {
       final identifiers = await _resolveUserIdentifiers(normalizedTarget);
       if (identifiers.isNotEmpty) {
         List<String> followerIds = [];
@@ -2245,12 +2404,24 @@ class SupabaseService {
     final normalizedCurrent = _currentSessionEmail();
 
     try {
-      if (normalizedTarget.isNotEmpty &&
-          normalizedTarget == normalizedCurrent) {
-        final res = await _api.getFollowing();
-        return _normalizeSocialUsers(res['following']);
+      final res = await _api.getFollowing(
+        email:
+            normalizedTarget.isNotEmpty && normalizedTarget != normalizedCurrent
+            ? normalizedTarget
+            : null,
+      );
+      final normalized = _normalizeSocialUsers(res['following']);
+      if (normalized.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
+        return normalized;
       }
+    } catch (e) {
+      debugPrint('Backend following lookup failed: $e');
+      if (!_hasConfiguredSupabaseAnonKey) {
+        return [];
+      }
+    }
 
+    try {
       final identifiers = await _resolveUserIdentifiers(normalizedTarget);
       if (identifiers.isNotEmpty) {
         List<String> followingIds = [];
@@ -2396,10 +2567,27 @@ class SupabaseService {
   /// Get followers count
   Future<int> getFollowersCount(String userEmail) async {
     try {
-      if (_normalizeEmail(userEmail) == _currentSessionEmail()) {
-        final res = await _api.getFollowers();
-        final list = List<Map<String, dynamic>>.from(res['followers'] ?? []);
-        return list.length;
+      final normalizedTarget = _normalizeEmail(userEmail);
+      final normalizedCurrent = _currentSessionEmail();
+      try {
+        final res = await _api.getFollowers(
+          email:
+              normalizedTarget.isNotEmpty &&
+                  normalizedTarget != normalizedCurrent
+              ? normalizedTarget
+              : null,
+        );
+        final count = _normalizeCount(res['count'] ?? res['followers']);
+        if (res.containsKey('count') ||
+            count > 0 ||
+            !_hasConfiguredSupabaseAnonKey) {
+          return count;
+        }
+      } catch (e) {
+        debugPrint('Backend followers count lookup failed: $e');
+        if (!_hasConfiguredSupabaseAnonKey) {
+          return 0;
+        }
       }
 
       final identifiers = await _resolveUserIdentifiers(userEmail);
@@ -2443,10 +2631,27 @@ class SupabaseService {
   /// Get following count
   Future<int> getFollowingCount(String userEmail) async {
     try {
-      if (_normalizeEmail(userEmail) == _currentSessionEmail()) {
-        final res = await _api.getFollowing();
-        final list = List<Map<String, dynamic>>.from(res['following'] ?? []);
-        return list.length;
+      final normalizedTarget = _normalizeEmail(userEmail);
+      final normalizedCurrent = _currentSessionEmail();
+      try {
+        final res = await _api.getFollowing(
+          email:
+              normalizedTarget.isNotEmpty &&
+                  normalizedTarget != normalizedCurrent
+              ? normalizedTarget
+              : null,
+        );
+        final count = _normalizeCount(res['count'] ?? res['following']);
+        if (res.containsKey('count') ||
+            count > 0 ||
+            !_hasConfiguredSupabaseAnonKey) {
+          return count;
+        }
+      } catch (e) {
+        debugPrint('Backend following count lookup failed: $e');
+        if (!_hasConfiguredSupabaseAnonKey) {
+          return 0;
+        }
       }
 
       final identifiers = await _resolveUserIdentifiers(userEmail);
@@ -5574,12 +5779,22 @@ class SupabaseService {
 
   /// Get resources uploaded by a specific user.
   /// If [approvedOnly] is true (default), only approved resources are returned.
-  Future<List<Resource>> _getCurrentUserResourcesViaBackend({
+  Future<List<Resource>> _getUserResourcesViaBackend({
+    required String userEmail,
     required bool approvedOnly,
     required int limit,
     required int offset,
   }) async {
-    final payload = await _api.getMyResources();
+    final normalizedEmail = _normalizeEmail(userEmail);
+    final isCurrentUser = normalizedEmail == _currentSessionEmail();
+    final payload = isCurrentUser
+        ? await _api.getMyResources()
+        : await _api.getPublicUserResources(
+            email: normalizedEmail,
+            approvedOnly: approvedOnly,
+            limit: limit,
+            offset: offset,
+          );
     final rawRows = payload['resources'];
     if (rawRows is! List) return const <Resource>[];
 
@@ -5590,6 +5805,10 @@ class SupabaseService {
             .where((resource) => !approvedOnly || resource.isApprovedStatus)
             .toList()
           ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+    if (!isCurrentUser) {
+      return resources;
+    }
 
     final safeOffset = offset < 0 ? 0 : offset;
     if (safeOffset >= resources.length) return const <Resource>[];
@@ -5608,26 +5827,18 @@ class SupabaseService {
     final normalizedEmail = _normalizeEmail(userEmail);
     if (normalizedEmail.isEmpty) return [];
     if (limit <= 0) return [];
-    final isCurrentUser = normalizedEmail == _currentSessionEmail();
-
-    Future<List<Resource>> backendFallback() async {
-      if (!isCurrentUser) {
-        if (!_hasConfiguredSupabaseAnonKey) {
-          debugPrint(
-            'Supabase anon key missing; skipping non-current user resources lookup.',
-          );
-        }
-        return const <Resource>[];
-      }
-      return _getCurrentUserResourcesViaBackend(
+    try {
+      return await _getUserResourcesViaBackend(
+        userEmail: normalizedEmail,
         approvedOnly: approvedOnly,
         limit: limit,
         offset: offset,
       );
-    }
-
-    if (!_hasConfiguredSupabaseAnonKey) {
-      return backendFallback();
+    } catch (e) {
+      debugPrint('Backend user resources lookup failed: $e');
+      if (!_hasConfiguredSupabaseAnonKey) {
+        return const <Resource>[];
+      }
     }
 
     try {
@@ -5679,14 +5890,6 @@ class SupabaseService {
           .toList();
     } catch (fallbackError) {
       debugPrint('Error fetching user resources: $fallbackError');
-      try {
-        final backendRows = await backendFallback();
-        if (backendRows.isNotEmpty || isCurrentUser) {
-          return backendRows;
-        }
-      } catch (backendError) {
-        debugPrint('Backend user resources fallback failed: $backendError');
-      }
       return [];
     }
   }

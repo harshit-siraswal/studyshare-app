@@ -44,11 +44,16 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
 
   bool get _isReadOnly {
     if (_isTeacherOrAdmin) return false;
+    if (_hasCollegeEmailAccess) return false;
+    return true;
+  }
+
+  bool get _hasCollegeEmailAccess {
     final email = widget.userEmail.trim().toLowerCase();
     final domain = widget.collegeDomain.trim().toLowerCase();
-    if (email.isEmpty || domain.isEmpty) return true;
+    if (email.isEmpty || domain.isEmpty) return false;
     final normalizedDomain = domain.startsWith('@') ? domain : '@$domain';
-    return !email.endsWith(normalizedDomain);
+    return email.endsWith(normalizedDomain);
   }
 
   @override
@@ -57,10 +62,13 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _supabaseService.attachContext(context);
-        _loadWriterRole();
       }
     });
     _searchFocusNode.addListener(_onSearchFocusChange);
+    if (_hasCollegeEmailAccess) {
+      _loadRooms();
+    }
+    _loadWriterRole(loadRoomsWhenFinished: !_hasCollegeEmailAccess);
   }
 
   void _onSearchFocusChange() {
@@ -95,23 +103,22 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
       setState(() => _isLoading = true);
     }
     try {
-      final rooms = await _supabaseService.getChatRooms(
-        widget.userEmail,
-        widget.collegeId,
-      );
-      final joinedIds = await _supabaseService.getUserRoomIds(widget.userEmail);
+      final results = await Future.wait<Object?>([
+        _supabaseService.getChatRooms(widget.userEmail, widget.collegeId),
+        _supabaseService.getUserRoomIds(widget.userEmail),
+      ]);
+      final rooms = (results[0] as List).cast<Map<String, dynamic>>();
+      final joinedIds = results[1] as List;
       final joinedIdSet = joinedIds
           .map((id) => id.toString().trim())
           .where((id) => id.isNotEmpty)
           .toSet();
 
       // Filter to show only joined rooms
-      final joinedRooms = rooms
-          .where((r) {
-            final roomId = r['id']?.toString().trim() ?? '';
-            return roomId.isNotEmpty && joinedIdSet.contains(roomId);
-          })
-          .toList();
+      final joinedRooms = rooms.where((r) {
+        final roomId = r['id']?.toString().trim() ?? '';
+        return roomId.isNotEmpty && joinedIdSet.contains(roomId);
+      }).toList();
 
       if (mounted) {
         setState(() {
@@ -136,7 +143,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
     });
   }
 
-  Future<void> _loadWriterRole() async {
+  Future<void> _loadWriterRole({bool loadRoomsWhenFinished = false}) async {
     try {
       final profile = await _supabaseService.getCurrentUserProfile(
         maxAttempts: 1,
@@ -146,14 +153,18 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
         _isTeacherOrAdmin =
             profile.isNotEmpty && isTeacherOrAdminProfile(profile);
       });
-      await _loadRooms();
+      if (loadRoomsWhenFinished) {
+        await _loadRooms();
+      }
     } catch (e, st) {
       debugPrint('ChatroomListScreen._loadWriterRole failed: $e\n$st');
       if (!mounted) return;
       setState(() {
         _isTeacherOrAdmin = false;
       });
-      await _loadRooms();
+      if (loadRoomsWhenFinished) {
+        await _loadRooms();
+      }
     }
   }
 
@@ -185,16 +196,16 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                   const SizedBox(height: 24),
                   Expanded(
                     child: RefreshIndicator(
-                onRefresh: _loadRooms,
-                color: Colors.white,
-                backgroundColor: const Color(0xFF1C1C1E),
-                child: _isLoading
-                    ? _buildLoadingSkeleton(isDark)
-                    : _filteredRooms.isEmpty
-                        ? _buildEmptyState(isDark)
-                        : _buildRoomList(isDark, cardColor),
-              ),
-            ),
+                      onRefresh: _loadRooms,
+                      color: Colors.white,
+                      backgroundColor: const Color(0xFF1C1C1E),
+                      child: _isLoading
+                          ? _buildLoadingSkeleton(isDark)
+                          : _filteredRooms.isEmpty
+                          ? _buildEmptyState(isDark)
+                          : _buildRoomList(isDark, cardColor),
+                    ),
+                  ),
                 ],
               ),
       ),
@@ -335,9 +346,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
           decoration: BoxDecoration(
             color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
             borderRadius: BorderRadius.circular(22),
-            border: Border.all(
-              color: isDark ? Colors.white10 : Colors.black12,
-            ),
+            border: Border.all(color: isDark ? Colors.white10 : Colors.black12),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
