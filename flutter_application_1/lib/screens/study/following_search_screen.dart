@@ -61,12 +61,12 @@ class _FollowingSearchScreenState extends State<FollowingSearchScreen> {
       _selectedSubject != null;
 
   int get _activeFilterCount => [
-        _selectedType != 'All',
-        _selectedSort != 'Recent',
-        _selectedSemester != null,
-        _selectedBranch != null,
-        _selectedSubject != null,
-      ].where((value) => value).length;
+    _selectedType != 'All',
+    _selectedSort != 'Recent',
+    _selectedSemester != null,
+    _selectedBranch != null,
+    _selectedSubject != null,
+  ].where((value) => value).length;
 
   @override
   void initState() {
@@ -127,7 +127,8 @@ class _FollowingSearchScreenState extends State<FollowingSearchScreen> {
           return false;
         }
       }
-      if (type != null && resource.type.trim().toLowerCase() != type) return false;
+      if (type != null && resource.type.trim().toLowerCase() != type)
+        return false;
       if (semester != null &&
           (resource.semester ?? '').trim().toLowerCase() != semester) {
         return false;
@@ -147,8 +148,12 @@ class _FollowingSearchScreenState extends State<FollowingSearchScreen> {
       results.sort((a, b) => b.upvotes.compareTo(a.upvotes));
     } else if (_selectedSort == 'Teacher') {
       results.sort((a, b) {
-        if (a.isTeacherUpload == b.isTeacherUpload) return 0;
-        return a.isTeacherUpload ? -1 : 1;
+        if (a.isTeacherUpload != b.isTeacherUpload) {
+          return a.isTeacherUpload ? -1 : 1;
+        }
+        final createdAtComparison = b.createdAt.compareTo(a.createdAt);
+        if (createdAtComparison != 0) return createdAtComparison;
+        return a.title.toLowerCase().compareTo(b.title.toLowerCase());
       });
     } else {
       results.sort((a, b) => b.createdAt.compareTo(a.createdAt));
@@ -264,12 +269,16 @@ class _FollowingSearchScreenState extends State<FollowingSearchScreen> {
       builder: (sheetContext) => StatefulBuilder(
         builder: (context, setModalState) {
           final isDark = Theme.of(context).brightness == Brightness.dark;
-          final dividerColor = isDark ? Colors.white10 : const Color(0xFFE5E7EB);
+          final dividerColor = isDark
+              ? Colors.white10
+              : const Color(0xFFE5E7EB);
           return Container(
             height: MediaQuery.of(context).size.height * 0.74,
             decoration: BoxDecoration(
               color: isDark ? const Color(0xFF0F1116) : Colors.white,
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(26),
+              ),
             ),
             child: Column(
               children: [
@@ -294,7 +303,9 @@ class _FollowingSearchScreenState extends State<FollowingSearchScreen> {
                           style: GoogleFonts.inter(
                             fontSize: 20,
                             fontWeight: FontWeight.w700,
-                            color: isDark ? Colors.white : const Color(0xFF111827),
+                            color: isDark
+                                ? Colors.white
+                                : const Color(0xFF111827),
                           ),
                         ),
                       ),
@@ -313,7 +324,9 @@ class _FollowingSearchScreenState extends State<FollowingSearchScreen> {
                         child: Text(
                           'Clear',
                           style: GoogleFonts.inter(
-                            color: isDark ? Colors.white : const Color(0xFF111827),
+                            color: isDark
+                                ? Colors.white
+                                : const Color(0xFF111827),
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
                           ),
@@ -353,64 +366,91 @@ class _FollowingSearchScreenState extends State<FollowingSearchScreen> {
                         );
                       }),
                       Divider(height: 1, color: dividerColor),
-                      _buildSelectionRow('Semester', _selectedSemester ?? 'All', isDark, () {
-                        _showPicker(
-                          title: 'Semester',
-                          items: ['All', ..._semesters],
-                          selectedValue: _selectedSemester ?? 'All',
-                          isDark: isDark,
-                          onSelected: (value) {
-                            setState(() => _selectedSemester = value == 'All' ? null : value);
-                            setModalState(() {});
-                          },
-                        );
-                      }),
-                      Divider(height: 1, color: dividerColor),
-                      _buildSelectionRow('Branch', _selectedBranch ?? 'All', isDark, () {
-                        _showPicker(
-                          title: 'Branch',
-                          items: _branches.isEmpty ? ['All'] : ['All', ..._branches],
-                          selectedValue: _selectedBranch ?? 'All',
-                          isDark: isDark,
-                          onSelected: (value) async {
-                            setState(() {
-                              _selectedBranch = value == 'All' ? null : value;
-                              _selectedSubject = null;
-                              _subjectFetchId++;
-                            });
-                            setModalState(() {});
-                            final fetchId = _subjectFetchId;
-                            if (_selectedBranch == null) {
-                              setState(() => _subjects = []);
+                      _buildSelectionRow(
+                        'Semester',
+                        _selectedSemester ?? 'All',
+                        isDark,
+                        () {
+                          _showPicker(
+                            title: 'Semester',
+                            items: ['All', ..._semesters],
+                            selectedValue: _selectedSemester ?? 'All',
+                            isDark: isDark,
+                            onSelected: (value) {
+                              setState(
+                                () => _selectedSemester = value == 'All'
+                                    ? null
+                                    : value,
+                              );
                               setModalState(() {});
-                              return;
-                            }
-                            final subjects = await _supabaseService.getUniqueValues(
-                              'subject',
-                              widget.collegeId,
-                              branch: _selectedBranch,
-                            );
-                            if (!mounted || fetchId != _subjectFetchId) return;
-                            setState(() => _subjects = subjects);
-                            setModalState(() {});
-                          },
-                        );
-                      }),
+                            },
+                          );
+                        },
+                      ),
+                      Divider(height: 1, color: dividerColor),
+                      _buildSelectionRow(
+                        'Branch',
+                        _selectedBranch ?? 'All',
+                        isDark,
+                        () {
+                          _showPicker(
+                            title: 'Branch',
+                            items: _branches.isEmpty
+                                ? ['All']
+                                : ['All', ..._branches],
+                            selectedValue: _selectedBranch ?? 'All',
+                            isDark: isDark,
+                            onSelected: (value) async {
+                              setState(() {
+                                _selectedBranch = value == 'All' ? null : value;
+                                _selectedSubject = null;
+                                _subjectFetchId++;
+                              });
+                              setModalState(() {});
+                              final fetchId = _subjectFetchId;
+                              if (_selectedBranch == null) {
+                                setState(() => _subjects = []);
+                                setModalState(() {});
+                                return;
+                              }
+                              final subjects = await _supabaseService
+                                  .getUniqueValues(
+                                    'subject',
+                                    widget.collegeId,
+                                    branch: _selectedBranch,
+                                  );
+                              if (!mounted || fetchId != _subjectFetchId)
+                                return;
+                              setState(() => _subjects = subjects);
+                              setModalState(() {});
+                            },
+                          );
+                        },
+                      ),
                       Divider(height: 1, color: dividerColor),
                       _buildSelectionRow(
                         'Subject',
-                        _selectedSubject ?? (_selectedBranch == null ? 'Select branch first' : 'All'),
+                        _selectedSubject ??
+                            (_selectedBranch == null
+                                ? 'Select branch first'
+                                : 'All'),
                         isDark,
                         _selectedBranch == null
                             ? null
                             : () {
                                 _showPicker(
                                   title: 'Subject',
-                                  items: _subjects.isEmpty ? ['All'] : ['All', ..._subjects],
+                                  items: _subjects.isEmpty
+                                      ? ['All']
+                                      : ['All', ..._subjects],
                                   selectedValue: _selectedSubject ?? 'All',
                                   isDark: isDark,
                                   onSelected: (value) {
-                                    setState(() => _selectedSubject = value == 'All' ? null : value);
+                                    setState(
+                                      () => _selectedSubject = value == 'All'
+                                          ? null
+                                          : value,
+                                    );
                                     setModalState(() {});
                                   },
                                 );
@@ -560,7 +600,10 @@ class _FollowingSearchScreenState extends State<FollowingSearchScreen> {
                           color: Colors.transparent,
                           child: Container(
                             height: 56,
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 7,
+                            ),
                             decoration: BoxDecoration(
                               color: searchSurfaceColor,
                               borderRadius: BorderRadius.circular(18),
@@ -570,7 +613,9 @@ class _FollowingSearchScreenState extends State<FollowingSearchScreen> {
                               ),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withValues(alpha: isDark ? 0.22 : 0.07),
+                                  color: Colors.black.withValues(
+                                    alpha: isDark ? 0.22 : 0.07,
+                                  ),
                                   blurRadius: 12,
                                   offset: const Offset(0, 6),
                                 ),
@@ -590,7 +635,9 @@ class _FollowingSearchScreenState extends State<FollowingSearchScreen> {
                                   child: Icon(
                                     Icons.search_rounded,
                                     size: 18,
-                                    color: isDark ? Colors.white70 : const Color(0xFF19212E),
+                                    color: isDark
+                                        ? Colors.white70
+                                        : const Color(0xFF19212E),
                                   ),
                                 ),
                                 const SizedBox(width: 8),
@@ -601,14 +648,18 @@ class _FollowingSearchScreenState extends State<FollowingSearchScreen> {
                                     onChanged: (_) => setState(() {}),
                                     onSubmitted: (_) => _performSearch(),
                                     style: TextStyle(
-                                      color: isDark ? Colors.white : const Color(0xFF111827),
+                                      color: isDark
+                                          ? Colors.white
+                                          : const Color(0xFF111827),
                                       fontSize: 15,
                                       fontWeight: FontWeight.w500,
                                     ),
                                     decoration: InputDecoration(
                                       hintText: widget.searchHint,
                                       hintStyle: TextStyle(
-                                        color: isDark ? Colors.grey[400] : const Color(0xFF6B7280),
+                                        color: isDark
+                                            ? Colors.grey[400]
+                                            : const Color(0xFF6B7280),
                                       ),
                                       border: InputBorder.none,
                                       isDense: true,
@@ -621,14 +672,20 @@ class _FollowingSearchScreenState extends State<FollowingSearchScreen> {
                                     visualDensity: VisualDensity.compact,
                                     icon: Icon(
                                       Icons.clear_rounded,
-                                      color: isDark ? Colors.grey[400] : const Color(0xFF6B7280),
+                                      color: isDark
+                                          ? Colors.grey[400]
+                                          : const Color(0xFF6B7280),
                                     ),
                                     onPressed: () {
                                       _searchController.clear();
                                       setState(() => _results = []);
                                     },
                                   ),
-                                Container(width: 1, height: 28, color: dividerColor),
+                                Container(
+                                  width: 1,
+                                  height: 28,
+                                  color: dividerColor,
+                                ),
                                 const SizedBox(width: 8),
                                 Material(
                                   color: Colors.transparent,
@@ -644,10 +701,14 @@ class _FollowingSearchScreenState extends State<FollowingSearchScreen> {
                                           alignment: Alignment.center,
                                           decoration: BoxDecoration(
                                             color: filterBackground,
-                                            borderRadius: BorderRadius.circular(11),
+                                            borderRadius: BorderRadius.circular(
+                                              11,
+                                            ),
                                             border: Border.all(
                                               color: _hasFilters
-                                                  ? AppTheme.primary.withValues(alpha: 0.4)
+                                                  ? AppTheme.primary.withValues(
+                                                      alpha: 0.4,
+                                                    )
                                                   : dividerColor,
                                             ),
                                           ),
@@ -757,12 +818,12 @@ class _FollowingSearchScreenState extends State<FollowingSearchScreen> {
                                             Resource.rejectedStatus,
                                           )
                                         : (widget.canManageAdminResources &&
-                                              isRejected
-                                          ? () => _applyModeration(
-                                              resource,
-                                              Resource.pendingStatus,
-                                            )
-                                          : null),
+                                                  isRejected
+                                              ? () => _applyModeration(
+                                                  resource,
+                                                  Resource.pendingStatus,
+                                                )
+                                              : null),
                                     onDelete: widget.canManageAdminResources
                                         ? () => _removeResource(resource)
                                         : null,

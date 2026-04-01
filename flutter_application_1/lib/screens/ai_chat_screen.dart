@@ -51,6 +51,7 @@ bool _looksLikePdfSourceUrl(String value) {
 class RagSource {
   final String fileId;
   final String title;
+  final String? subject;
   final String sourceType;
   final int? startPage;
   final int? endPage;
@@ -63,6 +64,7 @@ class RagSource {
   RagSource({
     required this.fileId,
     required this.title,
+    this.subject,
     this.sourceType = 'pdf',
     this.startPage,
     this.endPage,
@@ -77,6 +79,7 @@ class RagSource {
     final pages = json['pages'] as Map<String, dynamic>?;
     final start = pages?['start'];
     final end = pages?['end'];
+    final resolvedSubject = json['subject']?.toString().trim();
     final resolvedFileUrl =
         json['file_url']?.toString() ??
         json['source_url']?.toString() ??
@@ -96,6 +99,9 @@ class RagSource {
     return RagSource(
       fileId: json['file_id']?.toString() ?? '',
       title: json['title']?.toString() ?? 'Source',
+      subject: resolvedSubject != null && resolvedSubject.isNotEmpty
+          ? resolvedSubject
+          : null,
       sourceType: inferredType,
       startPage: start is int ? start : int.tryParse(start?.toString() ?? ''),
       endPage: end is int ? end : int.tryParse(end?.toString() ?? ''),
@@ -106,6 +112,12 @@ class RagSource {
       isPrimary: json['is_primary'] == true,
     );
   }
+}
+
+enum _QuestionPaperRetryReason {
+  invalidJson,
+  placeholderContent,
+  groundingFailure,
 }
 
 class OcrErrorInfo {
@@ -1763,7 +1775,7 @@ class _AIChatScreenState extends State<AIChatScreen>
         notebookId: _activeSessionId,
         title: file.name,
         sourceScope: 'ai_chat_reupload',
-        subject: source.subject?.toString() ?? widget.resourceContext?.subject,
+        subject: source.subject ?? widget.resourceContext?.subject,
       );
       final replacementFileId = upload['replacement_file_id']?.toString() ?? '';
       if (replacementFileId.isEmpty) {
@@ -1948,7 +1960,8 @@ class _AIChatScreenState extends State<AIChatScreen>
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (sheetCtx) {
-        final isDark = Theme.of(sheetCtx).brightness == Brightness.dark;        return SafeArea(
+        final isDark = Theme.of(sheetCtx).brightness == Brightness.dark;
+        return SafeArea(
           child: Container(
             height: MediaQuery.of(sheetCtx).size.height * 0.78,
             decoration: BoxDecoration(
@@ -2333,7 +2346,8 @@ class _AIChatScreenState extends State<AIChatScreen>
   }
 
   bool _responseIndicatesNoLocal(Map<String, dynamic> response) {
-    if (response['no_local'] == true || response['insufficient_grounding'] == true) {
+    if (response['no_local'] == true ||
+        response['insufficient_grounding'] == true) {
       return true;
     }
     final data = response['data'];
@@ -2347,13 +2361,16 @@ class _AIChatScreenState extends State<AIChatScreen>
   bool _responseIndicatesInsufficientGrounding(Map<String, dynamic> response) {
     if (response['insufficient_grounding'] == true) return true;
     final answerOrigin = response['answer_origin']?.toString().toLowerCase();
-    if (answerOrigin == 'insufficient_notes' || answerOrigin == 'insufficientnotes') {
+    if (answerOrigin == 'insufficient_notes' ||
+        answerOrigin == 'insufficientnotes') {
       return true;
     }
     final data = response['data'];
     if (data is Map) {
       if (data['insufficient_grounding'] == true) return true;
-      final nestedAnswerOrigin = data['answer_origin']?.toString().toLowerCase();
+      final nestedAnswerOrigin = data['answer_origin']
+          ?.toString()
+          .toLowerCase();
       if (nestedAnswerOrigin == 'insufficient_notes' ||
           nestedAnswerOrigin == 'insufficientnotes') {
         return true;
@@ -2853,6 +2870,20 @@ class _AIChatScreenState extends State<AIChatScreen>
     }
   }
 
+  String _buildQuestionPaperStrictRetryMessage(
+    _QuestionPaperRetryReason? retryReason,
+  ) {
+    switch (retryReason) {
+      case _QuestionPaperRetryReason.placeholderContent:
+        return 'Your last response contained low-quality or placeholder content.';
+      case _QuestionPaperRetryReason.groundingFailure:
+        return 'Your last response did not use the attached notes well enough.';
+      case _QuestionPaperRetryReason.invalidJson:
+      case null:
+        return 'Your last response was not valid JSON.';
+    }
+  }
+
   String _buildQuestionPaperPrompt({
     required String userPrompt,
     required String semester,
@@ -2860,17 +2891,21 @@ class _AIChatScreenState extends State<AIChatScreen>
     required String inferredSubject,
     required int contextResourcesCount,
     bool strictAntiPlaceholder = false,
+    _QuestionPaperRetryReason? strictRetryReason,
   }) {
     final subjectLine = inferredSubject.trim().isEmpty
         ? 'Infer from attached notes and PYQs'
         : inferredSubject.trim();
+    final strictRetryMessage = _buildQuestionPaperStrictRetryMessage(
+      strictRetryReason,
+    );
     final qualityGate = strictAntiPlaceholder
         ? '''
 Additional quality gate (must pass):
 - Do not use placeholder values such as "Question text", "A option", or "Subject Name".
 - Return at least 10 unique subject-relevant questions.
 - Ensure options are distinct and answers match one of the options.
-  - Your last response was not valid JSON.
+  - $strictRetryMessage
   - Respond ONLY with a single raw JSON object that starts with '{' and matches the schema exactly.
   - Return only a single valid JSON object and nothing else.
   - Do not wrap the result in markdown fences or add commentary.
@@ -3204,6 +3239,7 @@ Return STRICT JSON only (no markdown). Schema:
       var forceOcr = false;
       var aiInvoked = false;
       var ocrRetryUsed = false;
+      _QuestionPaperRetryReason? strictRetryReason;
       for (var attempt = 0; attempt < 2 && paper == null; attempt++) {
         final strictMode = attempt > 0;
         final attemptId = attempt == 0
@@ -3235,6 +3271,7 @@ Return STRICT JSON only (no markdown). Schema:
           inferredSubject: inferredSubject,
           contextResourcesCount: totalAttachmentCount,
           strictAntiPlaceholder: strictMode,
+          strictRetryReason: strictRetryReason,
         );
         final allowWeb = _allowWebMode;
         final response = await _api.queryRag(
@@ -3320,6 +3357,7 @@ Return STRICT JSON only (no markdown). Schema:
           'answerLen=${answer.length}',
         );
         if (noLocal && hasPdfAttachments && !forceOcr) {
+          strictRetryReason = _QuestionPaperRetryReason.groundingFailure;
           if (mounted) {
             setState(() {
               aiMessage.liveSteps = _upsertLiveEventList(
@@ -3351,6 +3389,7 @@ Return STRICT JSON only (no markdown). Schema:
             'QuizGen parse failed attempt=${attempt + 1}. '
             'Preview=${answer.replaceAll('\n', ' ').substring(0, answer.length > 240 ? 240 : answer.length)}',
           );
+          strictRetryReason = _QuestionPaperRetryReason.invalidJson;
           if (mounted) {
             setState(() {
               aiMessage.liveSteps = _upsertLiveEventList(
@@ -3374,6 +3413,7 @@ Return STRICT JSON only (no markdown). Schema:
             'Discarded low-quality question paper response '
             '(attempt=${attempt + 1}).',
           );
+          strictRetryReason = _QuestionPaperRetryReason.placeholderContent;
           if (mounted) {
             setState(() {
               aiMessage.liveSteps = _upsertLiveEventList(

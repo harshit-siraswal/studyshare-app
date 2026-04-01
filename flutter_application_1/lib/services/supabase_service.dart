@@ -150,7 +150,9 @@ class SupabaseService {
     final userCollegeId = _normalizeCollegeScopeValue(
       user['college_id']?.toString(),
     );
-    final userCollege = _normalizeCollegeScopeValue(user['college']?.toString());
+    final userCollege = _normalizeCollegeScopeValue(
+      user['college']?.toString(),
+    );
 
     if (normalizedCollegeId.isNotEmpty &&
         userCollegeId.isNotEmpty &&
@@ -1361,9 +1363,7 @@ class SupabaseService {
           );
           return parsed;
         } catch (e) {
-          debugPrint(
-            '[FollowingFeed] Backend lookup failed for $email: $e',
-          );
+          debugPrint('[FollowingFeed] Backend lookup failed for $email: $e');
           return const <Resource>[];
         }
       }),
@@ -2344,7 +2344,8 @@ class SupabaseService {
       if (normalizedCollegeId.isNotEmpty) {
         dbQuery = dbQuery.eq('college_id', normalizedCollegeId);
       } else if (normalizedCollege.isNotEmpty) {
-        dbQuery = dbQuery.ilike('college', normalizedCollege);
+        final safeCollegePattern = '%${_escapeLikePattern(normalizedCollege)}%';
+        dbQuery = dbQuery.ilike('college', safeCollegePattern);
       }
 
       final response = await dbQuery.limit(limit.clamp(1, 100));
@@ -2641,7 +2642,7 @@ class SupabaseService {
         _api.getPublicUserResources(
           email: _normalizeEmail(userEmail),
           approvedOnly: true,
-          limit: 1,  // We only need the count metadata, not every resource.
+          limit: 1, // We only need the count metadata, not every resource.
           offset: 0,
         ),
       ]);
@@ -2659,7 +2660,7 @@ class SupabaseService {
         final resources = payload['resources'];
         final isList = resources is List;
         final listLength = isList ? resources.length : 0;
-        
+
         if (listLength <= 1) {
           try {
             final retryPayload = await _api.getPublicUserResources(
