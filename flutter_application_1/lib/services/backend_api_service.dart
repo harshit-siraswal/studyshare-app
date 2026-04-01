@@ -2327,17 +2327,18 @@ class BackendApiService {
     bool? forceOcr,
     bool? includeSource,
   }) async {
-    if (fileIds.isEmpty) throw ArgumentError('fileIds must not be empty');
-    if (fileIds.length > 5) throw ArgumentError('Maximum 5 PDFs allowed');
+    final sanitizedFileIds = fileIds
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toList();
+    if (sanitizedFileIds.isEmpty) throw ArgumentError('fileIds must not be empty');
+    if (sanitizedFileIds.length > 5) throw ArgumentError('Maximum 5 PDFs allowed');
     return _requestJson(
       '/api/ai/multi-quiz',
       method: 'POST',
       timeout: _aiRequestTimeout,
       body: <String, dynamic>{
-        'file_ids': fileIds
-            .map((id) => id.trim())
-            .where((id) => id.isNotEmpty)
-            .toList(),
+        'file_ids': sanitizedFileIds,
         'use_ocr': ?useOcr,
         'force_ocr': ?forceOcr,
         'include_source': ?includeSource,

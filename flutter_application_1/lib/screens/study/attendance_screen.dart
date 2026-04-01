@@ -35,6 +35,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   String? _lastSyncErrorMessage;
   String? _lastSyncErrorCode;
 
+  /// Periodic timer that calls [setState] during an ongoing class so the
+  /// [LinearProgressIndicator] in each schedule card updates in real time.
+  Timer? _scheduleProgressTimer;
+
   bool get _isKietCollege => _attendanceService.isKietCollege(
     collegeId: widget.collegeId,
     collegeName: widget.collegeName,
@@ -63,6 +67,67 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     _loadCachedSnapshot();
   }
 
+  @override
+  void dispose() {
+    _scheduleProgressTimer?.cancel();
+    super.dispose();
+  }
+
+  /// Starts a 30-second periodic timer that re-renders schedule cards while a
+  /// class is currently in progress. Cancels automatically once no class is
+  /// ongoing: no-op if the timer is already running.
+  void _startScheduleProgressTimerIfNeeded() {
+    if (_scheduleProgressTimer?.isActive == true) return;
+    _scheduleProgressTimer?.cancel();
+    _scheduleProgressTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) {
+        if (!mounted) {
+          _scheduleProgressTimer?.cancel();
+          return;
+        }
+        if (!_hasOngoingClass()) {
+          _scheduleProgressTimer?.cancel();
+          return;
+        }
+        setState(() {});
+      },
+    );
+  }
+
+  /// Returns true when the current snapshot contains at least one class that
+  /// is actively in session right now (used to gate the progress timer).
+  bool _hasOngoingClass() {
+    final snapshot = _snapshot;
+    if (snapshot == null) return false;
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    for (final entry in snapshot.schedule.entries) {
+      final entryDate = _attendanceService.tryParseDate(entry.lectureDate);
+      if (entryDate == null) continue;
+      if (DateTime(entryDate.year, entryDate.month, entryDate.day) != today) {
+        continue;
+      }
+      if (entry.start.isEmpty || entry.end.isEmpty) continue;
+      final sParts = entry.start.split(':');
+      final eParts = entry.end.split(':');
+      if (sParts.length < 2 || eParts.length < 2) continue;
+      final sH = int.tryParse(sParts[0]);
+      final sM = int.tryParse(sParts[1]);
+      final eH = int.tryParse(eParts[0]);
+      final eM = int.tryParse(eParts[1]);
+      if (sH == null || sM == null || eH == null || eM == null) continue;
+      final start = DateTime(
+        entryDate.year, entryDate.month, entryDate.day, sH, sM,
+      );
+      final end = DateTime(
+        entryDate.year, entryDate.month, entryDate.day, eH, eM,
+      );
+      if (!now.isBefore(start) && now.isBefore(end)) return true;
+    }
+    return false;
+  }
+
   Future<void> _loadCachedSnapshot() async {
     if (!_isKietCollege) {
       setState(() => _isLoading = false);
@@ -80,6 +145,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       _hasSavedSession = token != null && token.trim().isNotEmpty;
       _isLoading = false;
     });
+    _startScheduleProgressTimerIfNeeded();
     unawaited(_syncScheduleWidget(snapshot));
   }
 
@@ -1243,106 +1309,202 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   }
 
   Widget _buildScheduleEntryCard(AttendanceScheduleEntry entry, bool isDark) {
+    final now = DateTime.now();
+    final entryDate = _attendanceService.tryParseDate(entry.lectureDate);
+    final today = DateTime(now.year, now.month, now.day);
+    final isToday = entryDate != null &&
+        DateTime(entryDate.year, entryDate.month, entryDate.day) == today;
+
+    DateTime? classStart;
+    DateTime? classEnd;
+    if (entryDate != null && entry.start.isNotEmpty && entry.end.isNotEmpty) {
+      final sParts = entry.start.split(':');
+      final eParts = entry.end.split(':');
+      if (sParts.length >= 2 && eParts.length >= 2) {
+        final sHour = int.tryParse(sParts[0]);
+        final sMin = int.tryParse(sParts[1]);
+        final eHour = int.tryParse(eParts[0]);
+        final eMin = int.tryParse(eParts[1]);
+        if (sHour != null && sMin != null && eHour != null && eMin != null) {
+          classStart = DateTime(
+            entryDate.year, entryDate.month, entryDate.day, sHour, sMin,
+          );
+          classEnd = DateTime(
+            entryDate.year, entryDate.month, entryDate.day, eHour, eMin,
+          );
+        }
+      }
+    }
+
+    final isOngoing = isToday &&
+        classStart != null &&
+        classEnd != null &&
+        !now.isBefore(classStart) &&
+        now.isBefore(classEnd);
+    final isPast = classEnd != null && now.isAfter(classEnd);
+    double progress = 0.0;
+    if (isOngoing) {
+      final totalSecs = classEnd.difference(classStart).inSeconds.toDouble();
+      final elapsedSecs = now.difference(classStart).inSeconds.toDouble();
+      progress =
+          (totalSecs > 0 ? elapsedSecs / totalSecs : 0.0).clamp(0.0, 1.0);
+    }
+
+    final accentColor = isOngoing ? Colors.green : AppTheme.primary;
     final title = entry.courseName.isEmpty
         ? (entry.title.isEmpty ? 'Class' : entry.title)
         : entry.courseName;
-    final location = entry.classRoom.isEmpty
-        ? 'Classroom TBA'
-        : entry.classRoom;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkCard : Colors.white,
+    final location =
+        entry.classRoom.isEmpty ? 'Classroom TBA' : entry.classRoom;
+
+    return Opacity(
+      opacity: isPast ? 0.55 : 1.0,
+      child: ClipRRect(
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: isDark ? Colors.white10 : Colors.black12),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 82,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-            decoration: BoxDecoration(
-              color: AppTheme.primary.withValues(alpha: isDark ? 0.16 : 0.1),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  entry.start,
-                  style: GoogleFonts.inter(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: AppTheme.primary,
+        child: Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: isDark ? AppTheme.darkCard : Colors.white,
+            borderRadius: BorderRadius.circular(18),
+            border: isOngoing
+                ? Border.all(
+                    color: Colors.green.withValues(alpha: 0.5),
+                    width: 1.5,
+                  )
+                : Border.all(
+                    color: isDark ? Colors.white10 : Colors.black12,
                   ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  entry.end,
-                  style: GoogleFonts.inter(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.primary.withValues(alpha: 0.8),
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  _formatDate(entry.lectureDate),
-                  style: GoogleFonts.inter(
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w600,
-                    color: isDark
-                        ? AppTheme.darkTextSecondary
-                        : AppTheme.lightTextSecondary,
-                  ),
-                ),
-              ],
-            ),
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: GoogleFonts.inter(
-                    fontSize: 14.5,
-                    fontWeight: FontWeight.w700,
-                    color: isDark
-                        ? AppTheme.darkTextPrimary
-                        : AppTheme.lightTextPrimary,
-                  ),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 82,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: accentColor.withValues(
+                          alpha: isDark ? 0.16 : 0.1,
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            entry.start,
+                            style: GoogleFonts.inter(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              color: accentColor,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            entry.end,
+                            style: GoogleFonts.inter(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: accentColor.withValues(alpha: 0.8),
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            _formatDate(entry.lectureDate),
+                            style: GoogleFonts.inter(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w600,
+                              color: isDark
+                                  ? AppTheme.darkTextSecondary
+                                  : AppTheme.lightTextSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (isOngoing) ...[
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.green.withValues(alpha: 0.14),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                'In Progress',
+                                style: GoogleFonts.inter(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.green,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                          ],
+                          Text(
+                            title,
+                            style: GoogleFonts.inter(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w700,
+                              color: isDark
+                                  ? AppTheme.darkTextPrimary
+                                  : AppTheme.lightTextPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            entry.courseComponentName,
+                            style: GoogleFonts.inter(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.primary,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            location,
+                            style: GoogleFonts.inter(
+                              fontSize: 12.5,
+                              height: 1.4,
+                              color: isDark
+                                  ? AppTheme.darkTextSecondary
+                                  : AppTheme.lightTextSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 5),
-                Text(
-                  entry.courseComponentName,
-                  style: GoogleFonts.inter(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.primary,
-                  ),
+              ),
+              // Green progress bar shown at the bottom only for ongoing classes.
+              if (isOngoing)
+                LinearProgressIndicator(
+                  value: progress,
+                  backgroundColor: Colors.green.withValues(alpha: 0.12),
+                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.green),
+                  minHeight: 4,
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  location,
-                  style: GoogleFonts.inter(
-                    fontSize: 12.5,
-                    height: 1.4,
-                    color: isDark
-                        ? AppTheme.darkTextSecondary
-                        : AppTheme.lightTextSecondary,
-                  ),
-                ),
-              ],
-            ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
+
 
   Widget _buildSyncStatusBanner(bool isDark) {
     final isRateLimited = _lastSyncErrorCode == 'rate_limited';
@@ -1387,7 +1549,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final difference = now.difference(syncedAt);
     if (difference.inMinutes < 1) return 'just now';
     if (difference.inHours < 1) return '${difference.inMinutes} min ago';
-    if (difference.inDays < 1) return '${difference.inHours} hr ago';
-    return '${difference.inDays} day ago';
-  }
+    if (difference.inDays < 1) {
+      return '${difference.inHours} hr${difference.inHours == 1 ? '' : 's'} ago';
+    }
+    return '${difference.inDays} day${difference.inDays == 1 ? '' : 's'} ago';  }
 }

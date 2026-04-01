@@ -948,11 +948,38 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
       _isMultiQuizLoading = true;
       _multiQuizError = null;
     });
+
+    final useOcr = _supportsOcr && (_useOcr || _forceOcr);
+    final forceOcr = _supportsOcr && _forceOcr;
+
+    setState(() {
+      _isMultiQuizLoading = true;
+      _multiQuizError = null;
+    });
+
+    final useOcr = _supportsOcr && (_useOcr || _forceOcr);
+    final forceOcr = _supportsOcr && _forceOcr;
+
+    try {
+      await _analytics.logEvent(
+        'ai_studio_generate_start',
+        parameters: <String, Object?>{
+          ..._baseAnalyticsParameters(),
+          'content_type': 'multi_quiz',
+          'regenerate': false,
+          'use_ocr': useOcr,
+          'force_ocr': forceOcr,
+          'pdfs_count': allIds.length,
+        },
+      );
+
+      final response = await _api.getAiMultiQuiz(
+
     try {
       final response = await _api.getAiMultiQuiz(
         fileIds: allIds,
-        useOcr: _supportsOcr && (_useOcr || _forceOcr),
-        forceOcr: _supportsOcr && _forceOcr,
+        useOcr: useOcr,
+        forceOcr: forceOcr,
       );
       final parsed = _parseQuizPayload(response);
       if (parsed.isEmpty) {
@@ -961,17 +988,56 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
           'Please try different resources.',
         );
       }
-      setState(() {
-        _quiz = parsed;
-        _selectedAnswers.clear();
-        _showAnswers = false;
-        _cachedMap['quiz'] = false;
-        _savedLocallyMap['quiz'] = false;
-        _tabController.animateTo(1);
-      });
+
+      await _analytics.logEvent(
+        'ai_studio_generate_success',
+        parameters: <String, Object?>{
+          ..._baseAnalyticsParameters(),
+          'content_type': 'multi_quiz',
+          'regenerate': false,
+          'use_ocr': useOcr,
+          'force_ocr': forceOcr,
+          'cached': response['cached'] == true,
+          'output_size': parsed.length,
+          'pdfs_count': allIds.length,
+        },
+      );
+
+      _supabaseService.markAiTokenBalanceStale();
+
+      if (mounted) {
+        setState(() {
+          _quiz = parsed;
+          _selectedAnswers.clear();
+          _showAnswers = false;
+          _cachedMap['quiz'] = false;
+          _savedLocallyMap['quiz'] = false;
+          _tabController.animateTo(1);
+        });
+      }
     } catch (e) {
-      final msg = e.toString().replaceFirst('Exception: ', '');
-      setState(() => _multiQuizError = msg);
+      final message = e.toString().replaceFirst('Exception: ', '');
+
+      await _analytics.logEvent(
+        'ai_studio_generate_error',
+        parameters: <String, Object?>{
+          ..._baseAnalyticsParameters(),
+          'content_type': 'multi_quiz',
+          'regenerate': false,
+          'use_ocr': useOcr,
+          'force_ocr': forceOcr,
+          'reason': _classifyGenerationError(message),
+          'pdfs_count': allIds.length,
+        },
+      );
+
+      if (mounted) {
+        setState(() {
+          _multiQuizError = _looksLikeTokenLimitError(message)
+              ? 'Your AI tokens are exhausted for this cycle. Buy more AI tokens to continue.'
+              : message;
+        });
+      }
     } finally {
       if (mounted) setState(() => _isMultiQuizLoading = false);
     }

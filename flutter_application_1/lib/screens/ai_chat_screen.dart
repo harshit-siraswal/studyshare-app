@@ -1338,7 +1338,26 @@ class _AIChatScreenState extends State<AIChatScreen>
     int? page,
   ) async {
     final source = _findSourceForLiveOpen(message, fileId);
-    final target = _normalizeExternalUrl(source?.fileUrl ?? '');
+    final rawUrl = (source?.fileUrl ?? '').trim();
+
+    // If the source has no URL the chunk was stored without one —
+    // show a clear message rather than the generic "invalid URL" text.
+    if (rawUrl.isEmpty) {
+      if (!mounted) return;
+      final title = source?.title ?? 'this source';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'PDF link unavailable for "$title". '
+            'Try re-uploading the file to restore access.',
+          ),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
+    final target = _normalizeExternalUrl(rawUrl);
     final uri = _buildExternalLaunchUri(target);
     if (uri == null) {
       _showSourceUrlErrorSnackBar(source?.title ?? 'PDF source');
@@ -1928,10 +1947,9 @@ class _AIChatScreenState extends State<AIChatScreen>
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (sheetCtx) {
-        final isDark = Theme.of(context).brightness == Brightness.dark;
-        return SafeArea(
+        final isDark = Theme.of(sheetCtx).brightness == Brightness.dark;        return SafeArea(
           child: Container(
-            height: MediaQuery.of(context).size.height * 0.78,
+            height: MediaQuery.of(sheetCtx).size.height * 0.78,
             decoration: BoxDecoration(
               color: isDark ? const Color(0xFF0F172A) : Colors.white,
               borderRadius: const BorderRadius.vertical(
@@ -2485,7 +2503,7 @@ class _AIChatScreenState extends State<AIChatScreen>
         _aiTokenStatusLoaded = true;
         _aiTokenBudgetTokens = budget;
         _aiTokenRemainingTokens = remaining
-            .clamp(0, math.max(0, math.max(remaining, budget)))
+            .clamp(0, math.max(0, budget))
             .toInt();
         _aiTokenLowThreshold = threshold;
         _showAiTokenLowBanner =
@@ -3480,7 +3498,8 @@ Return STRICT JSON only (no markdown). Schema:
       Object? lastError;
 
       for (var attempt = 0; attempt < 2; attempt++) {
-        final allowWeb = _allowWebMode;
+        // First attempt uses local-only; second attempt enables web fallback.
+        final allowWeb = attempt > 0 && _allowWebMode;
         try {
           final candidate = await _api.queryRag(
             question: prompt,

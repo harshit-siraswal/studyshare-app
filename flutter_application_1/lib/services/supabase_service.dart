@@ -2581,9 +2581,41 @@ class SupabaseService {
 
       // Prefer the authoritative total count from the backend response.
       final payload = results[2] as Map<String, dynamic>;
-      final contributions = _normalizeCount(
-        payload['total'] ?? payload['count'] ?? (payload['resources'] as List?)?.length ?? 0,
-      );
+      int fetchedTotal = 0;
+      if (_normalizeCount(payload['total']) > 0) {
+        fetchedTotal = _normalizeCount(payload['total']);
+      } else if (_normalizeCount(payload['count']) > 0) {
+        fetchedTotal = _normalizeCount(payload['count']);
+      } else {
+        final resources = payload['resources'];
+        final isList = resources is List;
+        final listLength = isList ? resources.length : 0;
+        
+        if (listLength <= 1) {
+          try {
+            final retryPayload = await _api.getPublicUserResources(
+              email: _normalizeEmail(userEmail),
+              approvedOnly: true,
+              limit: 50,
+              offset: 0,
+            );
+            if (_normalizeCount(retryPayload['total']) > 0) {
+              fetchedTotal = _normalizeCount(retryPayload['total']);
+            } else if (_normalizeCount(retryPayload['count']) > 0) {
+              fetchedTotal = _normalizeCount(retryPayload['count']);
+            } else {
+              final retryResources = retryPayload['resources'];
+              fetchedTotal = retryResources is List ? retryResources.length : 0;
+            }
+          } catch (_) {
+            fetchedTotal = listLength;
+          }
+        } else {
+          fetchedTotal = listLength;
+        }
+      }
+
+      final contributions = _normalizeCount(fetchedTotal);
 
       return {
         'followers': followers,
