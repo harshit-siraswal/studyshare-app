@@ -144,7 +144,7 @@ class SupabaseService {
     final normalizedCollegeId = _normalizeCollegeScopeValue(collegeId);
     final normalizedCollege = _normalizeCollegeScopeValue(college);
     if (normalizedCollegeId.isEmpty && normalizedCollege.isEmpty) {
-      return false;
+      return true;
     }
 
     final userCollegeId = _normalizeCollegeScopeValue(
@@ -162,7 +162,9 @@ class SupabaseService {
 
     if (normalizedCollege.isNotEmpty &&
         userCollege.isNotEmpty &&
-        userCollege == normalizedCollege) {
+        (userCollege == normalizedCollege ||
+            userCollege.contains(normalizedCollege) ||
+            normalizedCollege.contains(userCollege))) {
       return true;
     }
 
@@ -1407,12 +1409,15 @@ class SupabaseService {
     if (normalizedEmails.isEmpty) return [];
 
     try {
-      final response = await _client
+      var query = _client
           .from('resources')
           .select()
-          .eq('college_id', collegeId)
           .eq('status', 'approved')
-          .inFilter('uploaded_by_email', normalizedEmails)
+          .inFilter('uploaded_by_email', normalizedEmails);
+      if (collegeId.trim().isNotEmpty) {
+        query = query.eq('college_id', collegeId.trim());
+      }
+      final response = await query
           .order('created_at', ascending: false)
           .range(offset, offset + limit - 1);
 
@@ -1435,11 +1440,11 @@ class SupabaseService {
     // Fallback for schemas/data with mixed-case email values.
     try {
       final fetchWindow = (limit * 8).clamp(80, 240).toInt();
-      final raw = await _client
-          .from('resources')
-          .select()
-          .eq('college_id', collegeId)
-          .eq('status', 'approved')
+      var query = _client.from('resources').select().eq('status', 'approved');
+      if (collegeId.trim().isNotEmpty) {
+        query = query.eq('college_id', collegeId.trim());
+      }
+      final raw = await query
           .order('created_at', ascending: false)
           .range(0, offset + fetchWindow - 1);
       final emailSet = normalizedEmails.toSet();
@@ -1478,7 +1483,7 @@ class SupabaseService {
 
     // Primary path: backend endpoint already handles follow schema variants.
     try {
-      final followingPayload = await _api.getFollowing();
+      final followingPayload = await _api.getFollowing(email: activeUserEmail);
       final followingRows = List<Map<String, dynamic>>.from(
         followingPayload['following'] ?? const [],
       );
@@ -2290,9 +2295,6 @@ class SupabaseService {
   }) async {
     final normalizedCollegeId = collegeId?.trim() ?? '';
     final normalizedCollege = college?.trim() ?? '';
-    if (normalizedCollegeId.isEmpty && normalizedCollege.isEmpty) {
-      return const <Map<String, dynamic>>[];
-    }
 
     try {
       final users = await _api.discoverUsers(

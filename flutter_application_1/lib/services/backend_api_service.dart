@@ -1532,9 +1532,6 @@ class BackendApiService {
   }) async {
     final normalizedCollegeId = collegeId?.trim() ?? '';
     final normalizedCollege = college?.trim() ?? '';
-    if (normalizedCollegeId.isEmpty && normalizedCollege.isEmpty) {
-      return const <Map<String, dynamic>>[];
-    }
     final queryParameters = <String, String>{'limit': limit.toString()};
     if (normalizedCollegeId.isNotEmpty) {
       queryParameters['college_id'] = normalizedCollegeId;
