@@ -8,8 +8,17 @@ import 'user_profile_screen.dart';
 
 class ExploreStudentsScreen extends StatefulWidget {
   final String userEmail;
+  final String? collegeId;
+  final String? collegeName;
+  final String? collegeDomain;
 
-  const ExploreStudentsScreen({super.key, required this.userEmail});
+  const ExploreStudentsScreen({
+    super.key,
+    required this.userEmail,
+    this.collegeId,
+    this.collegeName,
+    this.collegeDomain,
+  });
 
   @override
   State<ExploreStudentsScreen> createState() => _ExploreStudentsScreenState();
@@ -40,15 +49,38 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
   Future<void> _loadStudents() async {
     setState(() => _isLoading = true);
     try {
-      final profile = await _supabaseService.getCurrentUserProfile(
-        maxAttempts: 1,
-      );
-      final students = await _supabaseService.discoverUsers(
-        query: _searchQuery,
-        limit: 50,
-        collegeId: profile['college_id']?.toString().trim() ?? '',
-        college: profile['college']?.toString().trim() ?? '',
-      );
+      Map<String, dynamic> profile = const <String, dynamic>{};
+      try {
+        profile = await _supabaseService.getCurrentUserProfile(
+          maxAttempts: 1,
+        );
+      } catch (e) {
+        debugPrint(
+          'Failed to resolve current profile for student discovery: $e',
+        );
+      }
+
+      final resolvedCollegeId = (widget.collegeId?.trim().isNotEmpty ?? false)
+          ? widget.collegeId!.trim()
+          : profile['college_id']?.toString().trim() ?? '';
+      final resolvedCollege = (widget.collegeName?.trim().isNotEmpty ?? false)
+          ? widget.collegeName!.trim()
+          : profile['college']?.toString().trim() ?? '';
+      final students = resolvedCollegeId.isNotEmpty || resolvedCollege.isNotEmpty
+          ? await _supabaseService.discoverUsers(
+              query: _searchQuery,
+              limit: 50,
+              collegeId: resolvedCollegeId,
+              college: resolvedCollege,
+            )
+          : await _supabaseService.getUsersByCollege(
+              (widget.collegeDomain?.trim().isNotEmpty ?? false)
+                  ? widget.collegeDomain!.trim()
+                  : (widget.userEmail.contains('@')
+                        ? widget.userEmail.split('@').last.trim()
+                        : ''),
+              searchQuery: _searchQuery,
+            );
 
       final currentUserEmail = widget.userEmail.trim().toLowerCase();
       final filtered = students.where((student) {

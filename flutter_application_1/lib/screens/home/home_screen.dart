@@ -632,6 +632,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       ),
       ProfileScreen(
         key: const ValueKey<String>('profile'),
+        collegeId: widget.collegeId,
         collegeName: widget.collegeName,
         collegeDomain: widget.collegeDomain,
         onLogout: _handleLogout,

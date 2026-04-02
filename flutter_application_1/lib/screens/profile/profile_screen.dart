@@ -28,6 +28,7 @@ import '../../utils/ai_token_budget_utils.dart';
 import '../../utils/admin_access.dart';
 
 class ProfileScreen extends StatefulWidget {
+  final String? collegeId;
   final String collegeName;
   final String collegeDomain;
   final VoidCallback onLogout;
@@ -36,7 +37,7 @@ class ProfileScreen extends StatefulWidget {
 
   const ProfileScreen({
     super.key,
-
+    this.collegeId,
     required this.collegeName,
     required this.collegeDomain,
     required this.onLogout,
@@ -373,7 +374,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) => ExploreStudentsScreen(userEmail: _userEmail),
+                  builder: (_) => ExploreStudentsScreen(
+                    userEmail: _userEmail,
+                    collegeId: widget.collegeId,
+                    collegeName: widget.collegeName,
+                    collegeDomain: widget.collegeDomain,
+                  ),
                 ),
               );
             },

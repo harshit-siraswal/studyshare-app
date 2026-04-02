@@ -1688,7 +1688,12 @@ class _StudyScreenState extends State<StudyScreen>
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => ExploreStudentsScreen(userEmail: _effectiveUserEmail),
+        builder: (_) => ExploreStudentsScreen(
+          userEmail: _effectiveUserEmail,
+          collegeId: widget.collegeId,
+          collegeName: widget.collegeName,
+          collegeDomain: widget.collegeDomain,
+        ),
       ),
     );
   }

@@ -3171,7 +3171,7 @@ Return STRICT JSON only (no markdown). Schema:
       final notesDescription = noteSources.isNotEmpty
           ? 'Using ${noteSources.length} note source'
                 '${noteSources.length == 1 ? '' : 's'} for grounding.'
-          : 'No related notes were found for this paper yet.';
+          : 'Searching the available study material for this paper.';
       if (mounted) {
         setState(() {
           aiMessage.liveTitle = _buildQuestionPaperLiveTitle(
@@ -3201,38 +3201,6 @@ Return STRICT JSON only (no markdown). Schema:
             status: AiLiveActivityStatus.active,
           );
         });
-      }
-      if (noteSources.isEmpty) {
-        if (mounted) {
-          setState(() {
-            aiMessage.content =
-                'No related notes were found for this paper yet. Upload matching study material and try again.';
-            aiMessage.showLiveExport = false;
-            aiMessage.liveSteps = _updateLiveStepList(
-              aiMessage.liveSteps,
-              'qp_generate',
-              status: AiLiveActivityStatus.failed,
-              description:
-                  'Question paper generation was skipped because no relevant notes were found.',
-            );
-            aiMessage.liveSteps = _updateLiveStepList(
-              aiMessage.liveSteps,
-              'qp_validate',
-              status: AiLiveActivityStatus.failed,
-              description:
-                  'A paper cannot be validated without relevant notes.',
-            );
-            aiMessage.liveSteps = _updateLiveStepList(
-              aiMessage.liveSteps,
-              'qp_ready',
-              status: AiLiveActivityStatus.failed,
-              description:
-                  'Upload subject-specific notes to enable PDF export.',
-            );
-          });
-        }
-        await _persistCurrentSession();
-        return;
       }
       var lastAnswer = '';
       AiQuestionPaper? paper;
