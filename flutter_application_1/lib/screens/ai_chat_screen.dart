@@ -785,10 +785,13 @@ class _AIChatScreenState extends State<AIChatScreen>
 
     if (_cachedProfileFilters != null && _cachedProfileFilters!.isNotEmpty) {
       final normalized = Map<String, dynamic>.from(_cachedProfileFilters!);
+      // Profile subject is often stale/noisy for open-ended chat prompts.
+      // Keep semester/branch as soft scope, but let the prompt subject win.
+      normalized.remove('subject');
       if (ignoreSubject) {
         normalized.remove('subject');
       }
-      return normalized;
+      return normalized.isEmpty ? null : normalized;
     }
 
     final email = _auth.userEmail?.trim().toLowerCase();
@@ -802,11 +805,9 @@ class _AIChatScreenState extends State<AIChatScreen>
       final semester = info['semester']?.toString().trim() ?? '';
       final branch =
           (info['branch'] ?? info['department'])?.toString().trim() ?? '';
-      final subject = info['subject']?.toString().trim() ?? '';
 
       if (semester.isNotEmpty) filters['semester'] = semester;
       if (branch.isNotEmpty) filters['branch'] = branch;
-      if (subject.isNotEmpty) filters['subject'] = subject;
 
       _cachedProfileFilters = filters.isEmpty ? null : filters;
       return _cachedProfileFilters == null
