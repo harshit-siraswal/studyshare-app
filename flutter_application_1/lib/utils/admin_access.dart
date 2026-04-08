@@ -133,6 +133,9 @@ bool hasAnyAdminCapability(
 
 String resolveEffectiveProfileRole(Map<String, dynamic> profile) {
   final normalizedRole = normalizeProfileRoleValue(profile['role']?.toString());
+  final hasCollegeContext =
+      (profile['college_id']?.toString().trim().isNotEmpty ?? false) ||
+      (profile['college']?.toString().trim().isNotEmpty ?? false);
   final hasElevatedAccess =
       hasAdminContext(profile) &&
       (hasAnyAdminCapability(profile) ||
@@ -149,7 +152,8 @@ String resolveEffectiveProfileRole(Map<String, dynamic> profile) {
     case appRoleCollegeUser:
       return hasElevatedAccess ? appRoleTeacher : appRoleCollegeUser;
     case appRoleReadOnly:
-      return hasElevatedAccess ? appRoleTeacher : appRoleReadOnly;
+      if (hasElevatedAccess) return appRoleTeacher;
+      return hasCollegeContext ? appRoleCollegeUser : appRoleReadOnly;
     default:
       return hasElevatedAccess ? appRoleTeacher : appRoleCollegeUser;
   }

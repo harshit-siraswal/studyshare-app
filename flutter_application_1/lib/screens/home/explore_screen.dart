@@ -9,9 +9,16 @@ import '../../config/theme.dart';
 import '../profile/user_profile_screen.dart';
 
 class ExploreScreen extends StatefulWidget {
+  final String? collegeId;
+  final String? collegeName;
   final String collegeDomain;
 
-  const ExploreScreen({super.key, required this.collegeDomain});
+  const ExploreScreen({
+    super.key,
+    this.collegeId,
+    this.collegeName,
+    required this.collegeDomain,
+  });
 
   @override
   State<ExploreScreen> createState() => _ExploreScreenState();
@@ -37,14 +44,50 @@ class _ExploreScreenState extends State<ExploreScreen> {
   Future<void> _fetchUsers() async {
     setState(() => _isLoading = true);
     try {
-      final users = await _supabase.getUsersByCollege(
-        widget.collegeDomain, 
-        searchQuery: _searchQuery
+      Map<String, dynamic> profile = const <String, dynamic>{};
+      try {
+        profile = await _supabase.getCurrentUserProfile(maxAttempts: 1);
+      } catch (e) {
+        debugPrint('Failed to resolve current profile for classmates discovery: $e');
+      }
+
+      final resolvedCollegeId = (widget.collegeId?.trim().isNotEmpty ?? false)
+          ? widget.collegeId!.trim()
+          : profile['college_id']?.toString().trim() ?? '';
+      final fallbackCollegeHint = widget.collegeDomain.trim();
+      final profileCollege = profile['college']?.toString().trim() ?? '';
+      final resolvedCollege = (widget.collegeName?.trim().isNotEmpty ?? false)
+          ? widget.collegeName!.trim()
+          : profileCollege.isNotEmpty
+          ? profileCollege
+          : fallbackCollegeHint;
+
+      final users = await _supabase.discoverUsers(
+        query: _searchQuery,
+        limit: 50,
+        collegeId: resolvedCollegeId.isNotEmpty ? resolvedCollegeId : null,
+        college: resolvedCollege.isNotEmpty ? resolvedCollege : null,
       );
       
       // Filter out current user
-      final currentEmail = _auth.userEmail;
-      final filtered = users.where((u) => u['email'] != currentEmail).toList();
+      final currentEmail = (_auth.userEmail ?? '').trim().toLowerCase();
+      final fallbackDomain = currentEmail.contains('@')
+          ? currentEmail.split('@').last.trim()
+          : '';
+      final allowedDomain = (widget.collegeDomain.trim().isNotEmpty
+              ? widget.collegeDomain.trim()
+              : fallbackDomain)
+          .toLowerCase()
+          .replaceAll('@', '');
+      final filtered = users.where((u) {
+        final email = (u['email']?.toString() ?? '').trim().toLowerCase();
+        if (email.isEmpty) return false;
+        if (currentEmail.isNotEmpty && email == currentEmail) return false;
+        if (allowedDomain.isNotEmpty && !email.endsWith('@$allowedDomain')) {
+          return false;
+        }
+        return true;
+      }).toList();
       
       if (mounted) {
         setState(() {

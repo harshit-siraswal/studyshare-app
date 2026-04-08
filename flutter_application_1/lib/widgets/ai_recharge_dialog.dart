@@ -26,7 +26,7 @@ class _AiRechargeDialogState extends State<AiRechargeDialog> {
   final AuthService _auth = AuthService();
   final SupabaseService _supabaseService = SupabaseService();
   bool _isLoading = false;
-  int _baseMonthlyTokens = 40160;
+  int _baseMonthlyTokens = 40000;
   int _selectedRechargeRupees = 49;
   final TextEditingController _customRechargeController =
       TextEditingController();
@@ -50,11 +50,6 @@ class _AiRechargeDialogState extends State<AiRechargeDialog> {
     if (value is int) return value;
     if (value is num) return value.round();
     return int.tryParse(value?.toString() ?? '') ?? 0;
-  }
-
-  double _toSafeDouble(dynamic value, {double fallback = 1}) {
-    if (value is num) return value.toDouble();
-    return double.tryParse(value?.toString() ?? '') ?? fallback;
   }
 
   String _formatTokenCount(int value) {
@@ -224,6 +219,16 @@ class _AiRechargeDialogState extends State<AiRechargeDialog> {
                 ),
               ),
               const SizedBox(height: 20),
+              Text(
+                'Recharge rate: \u20b91 = $kVisibleAiRechargeTokensPerRupee AI tokens',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: primaryColor,
+                ),
+              ),
+              const SizedBox(height: 12),
 
               // Quick packs
               Wrap(

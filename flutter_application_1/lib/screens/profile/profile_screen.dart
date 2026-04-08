@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../config/theme.dart';
 import '../../services/auth_service.dart';
+import '../../services/resource_state_repository.dart';
 import '../../services/supabase_service.dart';
 import '../../providers/theme_provider.dart';
 import '../../models/resource.dart';
@@ -52,6 +53,8 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   final AuthService _authService = AuthService();
   final SupabaseService _supabaseService = SupabaseService();
+  final ResourceStateRepository _resourceStateRepository =
+      ResourceStateRepository();
   final SubscriptionService _subscriptionService = SubscriptionService();
 
   bool _profileLoading = true;
@@ -65,7 +68,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   int _aiTokenBudget = 0;
   int _aiTokenUsed = 0;
   int _aiTokenRemaining = 0;
-  int _aiTokenBaseBudget = 40160;
+  int _aiTokenBaseBudget = 40000;
   int _aiTokenBudgetMultiplier = 1;
   int _aiTokenPremiumMultiplier = 10;
   int _aiTokenCycleDays = 30;
@@ -121,10 +124,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _contributionsFuture = Future.value(const <Resource>[]);
       return;
     }
-    _contributionsFuture = _supabaseService.getUserResources(
+    _contributionsFuture = _loadContributionResources(email);
+  }
+
+  Future<List<Resource>> _loadContributionResources(String email) async {
+    final resources = await _supabaseService.getUserResources(
       email,
       approvedOnly: false,
     );
+    if (resources.isEmpty) {
+      return resources;
+    }
+
+    try {
+      await _resourceStateRepository.prefetchResourceStateForResources(
+        userEmail: email,
+        resources: resources,
+      );
+    } catch (e, stackTrace) {
+      debugPrint('Contribution state prefetch failed: $e\n$stackTrace');
+    }
+
+    return resources;
   }
 
   Future<void> _loadProfile({bool forceRefresh = false}) async {
@@ -1091,7 +1112,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 _buildAiTokenMetric(
                   'Total',
-                  _formatCreditCompact(budget > 0 ? budget : 40160),
+                  _formatCreditCompact(budget > 0 ? budget : 40000),
                   textColor,
                   subTextColor,
                 ),
@@ -1864,10 +1885,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildContributionsList() {
     return FutureBuilder<List<Resource>>(
-      future: _contributionsFuture ??= _supabaseService.getUserResources(
-        _userEmail,
-        approvedOnly: false,
-      ),
+      future: _contributionsFuture ??= _loadContributionResources(_userEmail),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Center(child: CircularProgressIndicator());
@@ -1908,6 +1926,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             return ResourceCard(
               resource: resource,
               userEmail: _userEmail,
+              deferRemoteStateHydration: true,
               showStatusBadge: true,
               onDelete: () => _deleteContribution(resource),
               onVoteChanged: () {

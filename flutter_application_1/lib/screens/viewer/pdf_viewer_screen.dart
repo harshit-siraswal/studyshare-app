@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -43,6 +44,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   late PdfViewerController _pdfViewerController;
   late PdfTextSearchResult _searchResult;
   WebViewController? _webViewController;
+  File? _cachedPdfFile;
 
   bool _isLoading = true;
   bool _hasError = false;
@@ -59,6 +61,8 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   String? _ocrSearchError;
 
   bool _isNightMode = false;
+  bool _isWarmingPdfCache = false;
+  bool _isPdfCacheLookupComplete = true;
 
   String get _urlPath => Uri.tryParse(widget.pdfUrl)?.path.toLowerCase() ?? '';
 
@@ -98,6 +102,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       _isLoading = false;
       _hasError = true;
       _errorMessage = 'Local files not supported on web.';
+    } else if (_isPdf && _isNetwork && !kIsWeb) {
+      _isPdfCacheLookupComplete = false;
+      unawaited(_restoreCachedPdfIfAvailable());
     }
   }
 
@@ -413,6 +420,52 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     await _performDownloadOrLaunch();
   }
 
+  Future<void> _restoreCachedPdfIfAvailable() async {
+    File? restoredFile;
+    try {
+      final cached = await DefaultCacheManager().getFileFromCache(widget.pdfUrl);
+      if (cached != null && await cached.file.exists()) {
+        restoredFile = cached.file;
+      }
+    } catch (e) {
+      debugPrint('Failed to restore cached PDF: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _cachedPdfFile = restoredFile;
+          _isPdfCacheLookupComplete = true;
+        });
+      }
+    }
+  }
+
+  Future<void> _warmPdfCache() async {
+    if (_isWarmingPdfCache || !_isPdf || !_isNetwork || kIsWeb) return;
+    _isWarmingPdfCache = true;
+    try {
+      final cached = await DefaultCacheManager().getFileFromCache(widget.pdfUrl);
+      if (cached != null && await cached.file.exists()) {
+        if (!mounted) return;
+        setState(() {
+          _cachedPdfFile = cached.file;
+        });
+        return;
+      }
+
+      final downloaded = await DefaultCacheManager().downloadFile(widget.pdfUrl);
+      if (!mounted) return;
+      if (await downloaded.file.exists()) {
+        setState(() {
+          _cachedPdfFile = downloaded.file;
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to warm PDF cache: $e');
+    } finally {
+      _isWarmingPdfCache = false;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
@@ -672,6 +725,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
 
   Widget _buildSfPdfViewer() {
     void onLoaded(PdfDocumentLoadedDetails details) {
+      if (_isNetwork && _cachedPdfFile == null && !kIsWeb) {
+        unawaited(_warmPdfCache());
+      }
       if (mounted) {
         setState(() {
           _isLoading = false;
@@ -691,6 +747,24 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     }
 
     if (_isNetwork) {
+      if (!kIsWeb && !_isPdfCacheLookupComplete) {
+        return const SizedBox.shrink();
+      }
+
+      if (!kIsWeb && _cachedPdfFile != null && _cachedPdfFile!.existsSync()) {
+        return _buildColorFilteredSfPdfViewer(
+          SfPdfViewer.file(
+            _cachedPdfFile!,
+            key: _pdfViewerKey,
+            controller: _pdfViewerController,
+            initialPageNumber: _initialPageNumber,
+            onDocumentLoaded: onLoaded,
+            onDocumentLoadFailed: onFailed,
+            enableDoubleTapZooming: true,
+          ),
+        );
+      }
+
       return _buildColorFilteredSfPdfViewer(
         SfPdfViewer.network(
           widget.pdfUrl,

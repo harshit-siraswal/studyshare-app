@@ -12,7 +12,7 @@ import '../models/resource.dart';
 /// Constraints: must be > 0; changing this value shifts every token count the
 /// user sees, so coordinate with backend quota allocations.
 const int kRawAiTokensPerVisibleToken = 2000;
-const int kVisibleAiRechargeTokensPerRupee = 10;
+const int kVisibleAiRechargeTokensPerRupee = 20;
 const int _contributorPremiumThreshold = 10;
 const Duration _contributorPremiumDuration = Duration(days: 30);
 
@@ -124,7 +124,7 @@ class AiTokenBudgetSnapshot {
   /// Builds a resilient token snapshot from a backend profile payload.
   factory AiTokenBudgetSnapshot.fromProfile(
     Map<String, dynamic> profile, {
-    int defaultBudget = 40160,
+    int defaultBudget = 40000,
   }) {
     final budgetFromApi = _toSafeInt(profile['ai_token_budget']);
     final baseBudgetFromApi = _toSafeInt(profile['ai_token_base_budget']);
@@ -208,7 +208,7 @@ class AiTokenBudgetSnapshot {
   /// purchase state when the backend profile has not caught up yet.
   static Future<AiTokenBudgetSnapshot> fromProfileWithLocalPremium(
     Map<String, dynamic> profile, {
-    int defaultBudget = 40160,
+    int defaultBudget = 40000,
   }) async {
     final serverSnapshot = AiTokenBudgetSnapshot.fromProfile(
       profile,

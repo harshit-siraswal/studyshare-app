@@ -1,5 +1,10 @@
 
+import 'dart:async';
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import '../../config/theme.dart';
@@ -23,6 +28,9 @@ class PDFViewerScreen extends StatefulWidget {
 class _PDFViewerScreenState extends State<PDFViewerScreen> {
   late PdfViewerController _pdfViewerController;
   final GlobalKey<SfPdfViewerState> _pdfViewerKey = GlobalKey();
+  File? _cachedPdfFile;
+  bool _isWarmingPdfCache = false;
+  bool _isPdfCacheLookupComplete = true;
   
   // Search state
   PdfTextSearchResult _searchResult = PdfTextSearchResult();
@@ -33,6 +41,10 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   @override
   void initState() {
     _pdfViewerController = PdfViewerController();
+    if (!kIsWeb && widget.url.startsWith('http')) {
+      _isPdfCacheLookupComplete = false;
+      unawaited(_restoreCachedPdfIfAvailable());
+    }
     super.initState();
   }
 
@@ -69,6 +81,51 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       _searchController.clear();
       _searchResult.clear();
     });
+  }
+
+  Future<void> _restoreCachedPdfIfAvailable() async {
+    File? restoredFile;
+    try {
+      final cached = await DefaultCacheManager().getFileFromCache(widget.url);
+      if (cached != null && await cached.file.exists()) {
+        restoredFile = cached.file;
+      }
+    } catch (e) {
+      debugPrint('Failed to restore cached study PDF: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _cachedPdfFile = restoredFile;
+          _isPdfCacheLookupComplete = true;
+        });
+      }
+    }
+  }
+
+  Future<void> _warmPdfCache() async {
+    if (_isWarmingPdfCache || kIsWeb || !widget.url.startsWith('http')) return;
+    _isWarmingPdfCache = true;
+    try {
+      final cached = await DefaultCacheManager().getFileFromCache(widget.url);
+      if (cached != null && await cached.file.exists()) {
+        if (!mounted) return;
+        setState(() {
+          _cachedPdfFile = cached.file;
+        });
+        return;
+      }
+      final downloaded = await DefaultCacheManager().downloadFile(widget.url);
+      if (!mounted) return;
+      if (await downloaded.file.exists()) {
+        setState(() {
+          _cachedPdfFile = downloaded.file;
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to warm study PDF cache: $e');
+    } finally {
+      _isWarmingPdfCache = false;
+    }
   }
 
   @override
@@ -141,7 +198,13 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
         children: [
           Hero(
             tag: widget.resourceId != null ? 'resource_card_${widget.resourceId}' : 'pdf_viewer_${widget.url}',
-            flightShuttleBuilder: (flightContext, _, __, ___, ____) {
+            flightShuttleBuilder: (
+              flightContext,
+              animation,
+              flightDirection,
+              fromHeroContext,
+              toHeroContext,
+            ) {
               return Material(
                 color: Theme.of(flightContext).scaffoldBackgroundColor,
                 borderRadius: BorderRadius.circular(12),
@@ -156,20 +219,49 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
             },
             child: const SizedBox.expand(),
           ),
-          SfPdfViewer.network(
-            widget.url,
-            key: _pdfViewerKey,
-            controller: _pdfViewerController,
-            onDocumentLoaded: (PdfDocumentLoadedDetails details) {
-              debugPrint('PDF Loaded: ${details.document.pages.count} pages');
-            },
-            onDocumentLoadFailed: (PdfDocumentLoadFailedDetails details) {
-              debugPrint('PDF Load Failed: ${details.error}');
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Failed to load PDF: ${details.description}')),
-              );
-            },
-          ),
+          if (!kIsWeb &&
+              widget.url.startsWith('http') &&
+              !_isPdfCacheLookupComplete)
+            const Center(
+              child: SizedBox(
+                width: 28,
+                height: 28,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
+          else if (!kIsWeb &&
+              _cachedPdfFile != null &&
+              _cachedPdfFile!.existsSync())
+            SfPdfViewer.file(
+              _cachedPdfFile!,
+              key: _pdfViewerKey,
+              controller: _pdfViewerController,
+              onDocumentLoaded: (PdfDocumentLoadedDetails details) {
+                debugPrint('PDF Loaded from cache: ${details.document.pages.count} pages');
+              },
+              onDocumentLoadFailed: (PdfDocumentLoadFailedDetails details) {
+                debugPrint('Cached PDF Load Failed: ${details.error}');
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Failed to load PDF: ${details.description}')),
+                );
+              },
+            )
+          else
+            SfPdfViewer.network(
+              widget.url,
+              key: _pdfViewerKey,
+              controller: _pdfViewerController,
+              onDocumentLoaded: (PdfDocumentLoadedDetails details) {
+                debugPrint('PDF Loaded: ${details.document.pages.count} pages');
+                unawaited(_warmPdfCache());
+              },
+              onDocumentLoadFailed: (PdfDocumentLoadFailedDetails details) {
+                debugPrint('PDF Load Failed: ${details.error}');
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Failed to load PDF: ${details.description}')),
+                );
+              },
+            ),
         ],
       ),
     );

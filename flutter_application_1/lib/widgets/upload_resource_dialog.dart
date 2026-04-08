@@ -253,11 +253,13 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     try {
       fetchedProfile = await SupabaseService().getCurrentUserProfile(
         maxAttempts: 1,
+        forceRefresh: true,
       );
       if (fetchedProfile.isNotEmpty &&
-          resolveEffectiveProfileRole(fetchedProfile) == appRoleReadOnly) {
-        return _showError(
-          'Read-only accounts can explore and follow, but cannot upload resources.',
+          resolveEffectiveProfileRole(fetchedProfile) == appRoleReadOnly &&
+          !canManageAdminResourcesProfile(fetchedProfile)) {
+        debugPrint(
+          'Upload pre-check resolved as read-only; deferring final authorization to backend.',
         );
       }
     } catch (e) {

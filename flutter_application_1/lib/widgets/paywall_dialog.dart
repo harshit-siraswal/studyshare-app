@@ -26,7 +26,7 @@ class _PaywallDialogState extends State<PaywallDialog> {
   bool _isRechargeLoading = false;
   String _selectedPlan = 'quarterly';
   String? _expandedPlanId = 'quarterly';
-  int _baseMonthlyTokens = 40160;
+  int _baseMonthlyTokens = 40000;
   int _premiumTokenMultiplier = 10;
   int _selectedRechargeRupees = 49;
   final TextEditingController _customRechargeController =
@@ -101,11 +101,6 @@ class _PaywallDialogState extends State<PaywallDialog> {
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
-  double _toSafeDouble(dynamic value, {double fallback = 1}) {
-    if (value is num) return value.toDouble();
-    return double.tryParse(value?.toString() ?? '') ?? fallback;
-  }
-
   String _formatTokenCount(int value) {
     if (value <= 0) return '0';
     return math.max(1, visibleAiTokensFromRaw(value)).toString();
@@ -136,7 +131,9 @@ class _PaywallDialogState extends State<PaywallDialog> {
     final tokenLine =
         '${_formatTokenCount(_premiumMonthlyTokens)} AI tokens every 30 days '
         '(${_premiumTokenMultiplier}x the free plan)';
-    return <String>[tokenLine, ...plan.benefits];
+    final rechargeLine =
+        'Recharge rate: \u20b91 = $kVisibleAiRechargeTokensPerRupee AI tokens';
+    return <String>[tokenLine, rechargeLine, ...plan.benefits];
   }
 
   int _resolveRechargeRupees() {

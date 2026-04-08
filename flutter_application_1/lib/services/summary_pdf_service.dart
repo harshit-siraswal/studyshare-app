@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:developer' as developer;
 import 'dart:io';
 import 'dart:typed_data';
@@ -10,6 +11,18 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../models/ai_question_paper.dart';
+
+class _QuestionPaperFigureNote {
+  const _QuestionPaperFigureNote({
+    required this.plainNote,
+    this.caption,
+    this.imageBytes,
+  });
+
+  final String plainNote;
+  final String? caption;
+  final Uint8List? imageBytes;
+}
 
 class FlashcardPdfEntry {
   const FlashcardPdfEntry({required this.term, required this.definition});
@@ -116,6 +129,13 @@ class SummaryPdfService {
     final palette = _PdfPalette.quiz();
     final doc = pw.Document();
     final subject = paper.subject.trim();
+    final figureNotes = paper.questions
+        .map((question) => _parseQuestionPaperFigureNote(question.source.note))
+        .toList(growable: false);
+    final questionCount = paper.questions.length;
+    final suggestedMinutes = questionCount <= 6
+        ? 10
+        : ((questionCount * 3) / 2).round();
     final displayTitle = _safeTitle(
       paper.title,
       subject.isEmpty ? 'Practice Quiz' : '$subject Practice Quiz',
@@ -131,16 +151,54 @@ class SummaryPdfService {
             _buildHero(
               title: displayTitle,
               metaLine:
-                  '${paper.questions.length} questions - Multiple choice - Correct answers highlighted - Explanations included',
+                  '$questionCount multiple-choice questions - Suggested time: $suggestedMinutes minutes',
               palette: palette,
             ),
           ),
+          _pad(
+            _buildQuestionPaperOverview(
+              paper: paper,
+              suggestedMinutes: suggestedMinutes,
+              palette: palette,
+            ),
+          ),
+          if (paper.instructions.isNotEmpty)
+            _pad(
+              _buildQuestionPaperInstructions(
+                instructions: paper.instructions,
+                palette: palette,
+              ),
+            ),
+          _pad(
+            _buildSectionTitle(
+              'Section A - Multiple Choice Questions',
+              palette,
+            ),
+          ),
           ...paper.questions.asMap().entries.map(
-            (entry) =>
-                _pad(_buildQuizCard(entry.key + 1, entry.value, palette)),
+            (entry) => _pad(
+              _buildQuizCard(
+                entry.key + 1,
+                entry.value,
+                palette,
+                figureNotes[entry.key],
+              ),
+            ),
           ),
           _pad(pw.SizedBox(height: 8)),
-          _pad(_buildScoreStrip(palette)),
+          _pad(_buildScoreStrip(palette, questionCount)),
+          pw.NewPage(),
+          _pad(_buildSectionTitle('Answer Key & Explanations', palette)),
+          ...paper.questions.asMap().entries.map(
+            (entry) => _pad(
+              _buildQuizAnswerKeyCard(
+                entry.key + 1,
+                entry.value,
+                palette,
+                figureNotes[entry.key],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -197,6 +255,14 @@ class SummaryPdfService {
       ..writeln('Branch: ${paper.branch}')
       ..writeln('');
 
+    if (paper.instructions.isNotEmpty) {
+      buffer.writeln('Instructions:');
+      for (final instruction in paper.instructions) {
+        buffer.writeln('- ${_pdfSafeText(instruction)}');
+      }
+      buffer.writeln('');
+    }
+
     for (final entry in paper.questions.asMap().entries) {
       final question = entry.value;
       buffer.writeln('Q${entry.key + 1}. ${_pdfSafeText(question.question)}');
@@ -205,7 +271,16 @@ class SummaryPdfService {
           '${_optionLabel(option.key)}. ${_pdfSafeText(option.value)}',
         );
       }
-      buffer.writeln('Answer: ${_optionLabel(question.correctIndex)}');
+      buffer.writeln('');
+    }
+
+    buffer.writeln('Answer Key');
+    buffer.writeln('');
+    for (final entry in paper.questions.asMap().entries) {
+      final question = entry.value;
+      buffer.writeln(
+        'Q${entry.key + 1}: ${_optionLabel(question.correctIndex)}',
+      );
       if (question.explanation.trim().isNotEmpty) {
         buffer.writeln('Explanation: ${_pdfSafeText(question.explanation)}');
       }
@@ -463,13 +538,8 @@ class SummaryPdfService {
     int number,
     AiQuestionPaperQuestion question,
     _PdfPalette palette,
+    _QuestionPaperFigureNote figureNote,
   ) {
-    final sourceParts = <String>[
-      question.source.title.trim(),
-      question.source.section.trim(),
-      question.source.pages.trim(),
-    ].where((value) => value.isNotEmpty).toList(growable: false);
-
     return pw.Container(
       margin: const pw.EdgeInsets.only(bottom: 16),
       child: pw.Column(
@@ -511,8 +581,35 @@ class SummaryPdfService {
               ),
             ],
           ),
+          if (figureNote.imageBytes != null) ...[
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.all(10),
+              color: PdfColors.white,
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Image(
+                    pw.MemoryImage(figureNote.imageBytes!),
+                    fit: pw.BoxFit.contain,
+                    height: 180,
+                  ),
+                  if ((figureNote.caption ?? '').trim().isNotEmpty) ...[
+                    pw.SizedBox(height: 8),
+                    pw.Text(
+                      'Figure: ${_pdfSafeText((figureNote.caption ?? '').trim())}',
+                      style: pw.TextStyle(
+                        fontSize: 9,
+                        color: palette.mutedText,
+                        fontStyle: pw.FontStyle.italic,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
           ...question.options.asMap().entries.map((option) {
-            final isCorrect = option.key == question.correctIndex;
             return pw.Container(
               width: double.infinity,
               padding: const pw.EdgeInsets.symmetric(
@@ -520,48 +617,116 @@ class SummaryPdfService {
                 vertical: 9,
               ),
               decoration: pw.BoxDecoration(
-                color: isCorrect ? palette.successSoft : PdfColors.white,
+                color: PdfColors.white,
                 border: pw.Border(
                   bottom: pw.BorderSide(color: palette.line, width: 0.8),
                 ),
               ),
               child: pw.Text(
-                '${isCorrect ? 'Correct: ' : ''}${_optionLabel(option.key)}. ${_pdfSafeText(option.value)}',
-                style: pw.TextStyle(
-                  fontSize: 10.5,
-                  color: isCorrect ? palette.successText : palette.body,
-                  fontWeight: isCorrect
-                      ? pw.FontWeight.bold
-                      : pw.FontWeight.normal,
-                ),
+                '${_optionLabel(option.key)}. ${_pdfSafeText(option.value)}',
+                style: pw.TextStyle(fontSize: 10.5, color: palette.body),
               ),
             );
           }),
-          if (question.explanation.trim().isNotEmpty)
-            pw.Container(
-              width: double.infinity,
-              margin: const pw.EdgeInsets.only(top: 9),
-              padding: const pw.EdgeInsets.all(10),
-              color: palette.infoSoft,
-              child: pw.Text(
-                'Explanation: ${_pdfSafeText(question.explanation.trim())}',
-                style: const pw.TextStyle(fontSize: 9.5, lineSpacing: 2),
-              ),
-            ),
-          if (sourceParts.isNotEmpty)
-            pw.Padding(
-              padding: const pw.EdgeInsets.only(top: 6),
-              child: pw.Text(
-                'Source: ${_pdfSafeText(sourceParts.join(' | '))}',
-                style: pw.TextStyle(fontSize: 8.5, color: palette.mutedText),
-              ),
-            ),
         ],
       ),
     );
   }
 
-  pw.Widget _buildScoreStrip(_PdfPalette palette) {
+  pw.Widget _buildQuizAnswerKeyCard(
+    int number,
+    AiQuestionPaperQuestion question,
+    _PdfPalette palette,
+    _QuestionPaperFigureNote figureNote,
+  ) {
+    final sourceParts = <String>[
+      question.source.title.trim(),
+      question.source.section.trim(),
+      question.source.pages.trim(),
+    ].where((value) => value.isNotEmpty).toList(growable: false);
+
+    return pw.Container(
+      width: double.infinity,
+      margin: const pw.EdgeInsets.only(bottom: 12),
+      padding: const pw.EdgeInsets.all(12),
+      decoration: pw.BoxDecoration(
+        color: palette.surface,
+        border: pw.Border.all(color: palette.line, width: 0.8),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Container(
+                width: 48,
+                padding: const pw.EdgeInsets.symmetric(vertical: 6),
+                alignment: pw.Alignment.center,
+                color: palette.primary,
+                child: pw.Text(
+                  'Q${number.toString().padLeft(2, '0')}',
+                  style: pw.TextStyle(
+                    color: PdfColors.white,
+                    fontSize: 9,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+              ),
+              pw.SizedBox(width: 10),
+              pw.Expanded(
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text(
+                      'Answer: ${_optionLabel(question.correctIndex)}',
+                      style: pw.TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: pw.FontWeight.bold,
+                        color: palette.successText,
+                      ),
+                    ),
+                    pw.SizedBox(height: 4),
+                    pw.Text(
+                      _pdfSafeText(question.question),
+                      style: pw.TextStyle(
+                        fontSize: 10,
+                        color: palette.heading,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (question.explanation.trim().isNotEmpty) ...[
+            pw.SizedBox(height: 10),
+            pw.Text(
+              'Explanation: ${_pdfSafeText(question.explanation.trim())}',
+              style: const pw.TextStyle(fontSize: 9.5, lineSpacing: 2),
+            ),
+          ],
+          if ((figureNote.caption ?? '').trim().isNotEmpty) ...[
+            pw.SizedBox(height: 8),
+            pw.Text(
+              'Figure context: ${_pdfSafeText((figureNote.caption ?? '').trim())}',
+              style: pw.TextStyle(fontSize: 8.8, color: palette.mutedText),
+            ),
+          ],
+          if (sourceParts.isNotEmpty) ...[
+            pw.SizedBox(height: 8),
+            pw.Text(
+              'Source: ${_pdfSafeText(sourceParts.join(' | '))}',
+              style: pw.TextStyle(fontSize: 8.5, color: palette.mutedText),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  pw.Widget _buildScoreStrip(_PdfPalette palette, int questionCount) {
     return pw.Container(
       decoration: pw.BoxDecoration(border: pw.Border.all(color: palette.line)),
       child: pw.Row(
@@ -573,7 +738,7 @@ class SummaryPdfService {
                 vertical: 13,
               ),
               child: pw.Text(
-                'Score: ____ / 10',
+                'Score: ____ / $questionCount',
                 style: pw.TextStyle(
                   fontSize: 12,
                   fontWeight: pw.FontWeight.bold,
@@ -598,6 +763,135 @@ class SummaryPdfService {
         ],
       ),
     );
+  }
+
+  pw.Widget _buildQuestionPaperOverview({
+    required AiQuestionPaper paper,
+    required int suggestedMinutes,
+    required _PdfPalette palette,
+  }) {
+    final metaItems = <MapEntry<String, String>>[
+      MapEntry('Subject', _pdfSafeText(paper.subject)),
+      MapEntry('Semester', _pdfSafeText(paper.semester)),
+      MapEntry('Branch', _pdfSafeText(paper.branch)),
+      MapEntry('Questions', paper.questions.length.toString()),
+      MapEntry('Marks', '${paper.questions.length}'),
+      MapEntry('Suggested Time', '$suggestedMinutes min'),
+    ].where((entry) => entry.value.trim().isNotEmpty).toList(growable: false);
+
+    return pw.Container(
+      width: double.infinity,
+      padding: const pw.EdgeInsets.all(14),
+      decoration: pw.BoxDecoration(
+        color: palette.surface,
+        border: pw.Border.all(color: palette.line, width: 0.8),
+      ),
+      child: pw.Wrap(
+        spacing: 16,
+        runSpacing: 10,
+        children: metaItems
+            .map(
+              (entry) => pw.SizedBox(
+                width: 140,
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text(
+                      entry.key.toUpperCase(),
+                      style: pw.TextStyle(
+                        fontSize: 8,
+                        color: palette.mutedText,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                    pw.SizedBox(height: 3),
+                    pw.Text(
+                      entry.value,
+                      style: pw.TextStyle(
+                        fontSize: 10.5,
+                        color: palette.heading,
+                        fontWeight: pw.FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+            .toList(growable: false),
+      ),
+    );
+  }
+
+  pw.Widget _buildQuestionPaperInstructions({
+    required List<String> instructions,
+    required _PdfPalette palette,
+  }) {
+    return pw.Container(
+      width: double.infinity,
+      padding: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: pw.BoxDecoration(
+        color: palette.warningSoft,
+        border: pw.Border.all(color: palette.line, width: 0.6),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(
+            'Instructions',
+            style: pw.TextStyle(
+              fontSize: 11,
+              fontWeight: pw.FontWeight.bold,
+              color: palette.heading,
+            ),
+          ),
+          pw.SizedBox(height: 8),
+          ...instructions.asMap().entries.map(
+            (entry) => pw.Padding(
+              padding: const pw.EdgeInsets.only(bottom: 4),
+              child: pw.Text(
+                '${entry.key + 1}. ${_pdfSafeText(entry.value)}',
+                style: const pw.TextStyle(fontSize: 9.5, lineSpacing: 2),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  _QuestionPaperFigureNote _parseQuestionPaperFigureNote(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty || !trimmed.startsWith('{')) {
+      return _QuestionPaperFigureNote(plainNote: trimmed);
+    }
+
+    try {
+      final decoded = jsonDecode(trimmed);
+      if (decoded is! Map) {
+        return _QuestionPaperFigureNote(plainNote: trimmed);
+      }
+      final map = Map<String, dynamic>.from(decoded);
+      final imageDataUrl = map['imageDataUrl']?.toString() ?? '';
+      return _QuestionPaperFigureNote(
+        plainNote: map['plainNote']?.toString() ?? '',
+        caption: map['caption']?.toString(),
+        imageBytes: _decodeDataUrlBytes(imageDataUrl),
+      );
+    } catch (_) {
+      return _QuestionPaperFigureNote(plainNote: trimmed);
+    }
+  }
+
+  Uint8List? _decodeDataUrlBytes(String value) {
+    final trimmed = value.trim();
+    if (!trimmed.startsWith('data:')) return null;
+    final commaIndex = trimmed.indexOf(',');
+    if (commaIndex <= 0 || commaIndex >= trimmed.length - 1) return null;
+    try {
+      return base64Decode(trimmed.substring(commaIndex + 1));
+    } catch (_) {
+      return null;
+    }
   }
 
   pw.Widget _instructionBanner(String text, _PdfPalette palette) {

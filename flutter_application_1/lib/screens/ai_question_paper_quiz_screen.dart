@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:share_plus/share_plus.dart';
@@ -5,6 +8,18 @@ import 'package:share_plus/share_plus.dart';
 import '../config/theme.dart';
 import '../models/ai_question_paper.dart';
 import '../services/summary_pdf_service.dart';
+
+class _QuestionFigureNote {
+  const _QuestionFigureNote({
+    required this.plainNote,
+    this.caption,
+    this.imageBytes,
+  });
+
+  final String plainNote;
+  final String? caption;
+  final Uint8List? imageBytes;
+}
 
 class AiQuestionPaperQuizScreen extends StatefulWidget {
   final AiQuestionPaper paper;
@@ -89,11 +104,13 @@ class _AiQuestionPaperQuizScreenState extends State<AiQuestionPaperQuizScreen> {
 
   void _showTheory(int questionIndex) {
     final source = widget.paper.questions[questionIndex].source;
+    final figureNote = _parseQuestionFigureNote(source.note);
     final hasSource =
         source.title.trim().isNotEmpty ||
         source.section.trim().isNotEmpty ||
         source.pages.trim().isNotEmpty ||
-        source.note.trim().isNotEmpty;
+        figureNote.plainNote.trim().isNotEmpty ||
+        figureNote.imageBytes != null;
 
     showModalBottomSheet<void>(
       context: context,
@@ -140,6 +157,29 @@ class _AiQuestionPaperQuizScreenState extends State<AiQuestionPaperQuizScreen> {
                     ),
                   )
                 else ...[
+                  if (figureNote.imageBytes != null) ...[
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: Image.memory(
+                        figureNote.imageBytes!,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                    if ((figureNote.caption ?? '').trim().isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        figureNote.caption!.trim(),
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          fontStyle: FontStyle.italic,
+                          color: isDark
+                              ? Colors.white70
+                              : const Color(0xFF475569),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                  ],
                   _buildSourceLine(
                     label: 'Document',
                     value: source.title,
@@ -157,7 +197,7 @@ class _AiQuestionPaperQuizScreenState extends State<AiQuestionPaperQuizScreen> {
                   ),
                   _buildSourceLine(
                     label: 'Note',
-                    value: source.note,
+                    value: figureNote.plainNote,
                     isDark: isDark,
                   ),
                 ],
@@ -305,6 +345,7 @@ class _AiQuestionPaperQuizScreenState extends State<AiQuestionPaperQuizScreen> {
 
   Widget _buildQuestionCard(int index, bool isDark) {
     final question = widget.paper.questions[index];
+    final figureNote = _parseQuestionFigureNote(question.source.note);
     final selected = _selectedOptions[index];
 
     return SingleChildScrollView(
@@ -339,6 +380,27 @@ class _AiQuestionPaperQuizScreenState extends State<AiQuestionPaperQuizScreen> {
               ),
             ),
             const SizedBox(height: 14),
+            if (figureNote.imageBytes != null) ...[
+              ClipRRect(
+                borderRadius: BorderRadius.circular(14),
+                child: Image.memory(
+                  figureNote.imageBytes!,
+                  fit: BoxFit.contain,
+                ),
+              ),
+              if ((figureNote.caption ?? '').trim().isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(
+                  figureNote.caption!.trim(),
+                  style: GoogleFonts.inter(
+                    fontSize: 12,
+                    fontStyle: FontStyle.italic,
+                    color: isDark ? Colors.white70 : const Color(0xFF475569),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 14),
+            ],
             ...question.options.asMap().entries.map((entry) {
               final optionIndex = entry.key;
               final label = _indexToLetter(optionIndex);
@@ -649,5 +711,39 @@ class _AiQuestionPaperQuizScreenState extends State<AiQuestionPaperQuizScreen> {
         ),
       ),
     );
+  }
+
+  _QuestionFigureNote _parseQuestionFigureNote(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty || !trimmed.startsWith('{')) {
+      return _QuestionFigureNote(plainNote: trimmed);
+    }
+
+    try {
+      final decoded = jsonDecode(trimmed);
+      if (decoded is! Map) {
+        return _QuestionFigureNote(plainNote: trimmed);
+      }
+      final map = Map<String, dynamic>.from(decoded);
+      return _QuestionFigureNote(
+        plainNote: map['plainNote']?.toString() ?? '',
+        caption: map['caption']?.toString(),
+        imageBytes: _decodeDataUrlBytes(map['imageDataUrl']?.toString() ?? ''),
+      );
+    } catch (_) {
+      return _QuestionFigureNote(plainNote: trimmed);
+    }
+  }
+
+  Uint8List? _decodeDataUrlBytes(String value) {
+    final trimmed = value.trim();
+    if (!trimmed.startsWith('data:')) return null;
+    final commaIndex = trimmed.indexOf(',');
+    if (commaIndex <= 0 || commaIndex >= trimmed.length - 1) return null;
+    try {
+      return base64Decode(trimmed.substring(commaIndex + 1));
+    } catch (_) {
+      return null;
+    }
   }
 }

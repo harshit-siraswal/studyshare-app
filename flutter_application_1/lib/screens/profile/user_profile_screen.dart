@@ -6,6 +6,7 @@ import '../../services/auth_service.dart';
 import '../../services/supabase_service.dart';
 import '../../services/backend_api_service.dart';
 import '../../services/download_service.dart';
+import '../../services/resource_state_repository.dart';
 import '../../widgets/resource_card.dart';
 import '../../models/resource.dart';
 import '../../models/user.dart';
@@ -37,6 +38,8 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   final AuthService _authService = AuthService();
   final BackendApiService _backendApiService = BackendApiService();
   final DownloadService _downloadService = DownloadService();
+  final ResourceStateRepository _resourceStateRepository =
+      ResourceStateRepository();
   final TextEditingController _contributionSearchController =
       TextEditingController();
 
@@ -118,6 +121,21 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       final uploads =
           ((stats['uploads'] ?? stats['contributions']) as num?)?.toInt() ?? 0;
 
+      if (currentUserEmail != null &&
+          currentUserEmail.trim().isNotEmpty &&
+          resources.isNotEmpty) {
+        try {
+          await _resourceStateRepository.prefetchResourceStateForResources(
+            userEmail: currentUserEmail,
+            resources: resources,
+          );
+        } catch (e, stackTrace) {
+          debugPrint(
+            'User-profile resource-state prefetch failed: $e\n$stackTrace',
+          );
+        }
+      }
+
       final viewerCollegeId = currentProfile['college_id']?.toString().trim();
       final profileCollegeId =
           userInfo?['college_id']?.toString().trim() ??
@@ -163,6 +181,17 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         widget.userEmail,
         approvedOnly: !_isSelfProfile,
       );
+      final viewerEmail = _authService.userEmail?.trim() ?? '';
+      if (viewerEmail.isNotEmpty && resources.isNotEmpty) {
+        try {
+          await _resourceStateRepository.prefetchResourceStateForResources(
+            userEmail: viewerEmail,
+            resources: resources,
+          );
+        } catch (e, stackTrace) {
+          debugPrint('User-profile refresh prefetch failed: $e\n$stackTrace');
+        }
+      }
       if (mounted) {
         setState(() {
           _userResources = resources;
@@ -745,6 +774,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                           child: ResourceCard(
                                             resource: resource,
                                             userEmail: _viewerEmail,
+                                            deferRemoteStateHydration: true,
                                             showStatusBadge: _isSelfProfile,
                                             onDelete: _isSelfProfile
                                                 ? () => _deleteContribution(

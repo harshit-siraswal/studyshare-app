@@ -29,16 +29,16 @@ void main() {
         final snapshot = AiTokenBudgetSnapshot.fromProfile({
           'subscription_tier': 'monthly',
           'subscription_end_date': futurePremiumDate,
-          'ai_token_budget': 40160,
-          'ai_token_base_budget': 40160,
+          'ai_token_budget': 40000,
+          'ai_token_base_budget': 40000,
           'ai_token_budget_multiplier': 1,
           'ai_token_premium_multiplier': 10,
         });
 
         expect(snapshot.isPremiumActive, isTrue);
-        expect(snapshot.freeBudget, 40160);
-        expect(snapshot.premiumBudget, 401600);
-        expect(snapshot.currentBudget, 401600);
+        expect(snapshot.freeBudget, 40000);
+        expect(snapshot.premiumBudget, 400000);
+        expect(snapshot.currentBudget, 400000);
       },
     );
 
@@ -48,16 +48,16 @@ void main() {
         final snapshot = AiTokenBudgetSnapshot.fromProfile({
           'subscription_tier': 'quarterly',
           'subscription_end_date': futurePremiumDate,
-          'ai_token_budget': 401600,
-          'ai_token_base_budget': 40160,
+          'ai_token_budget': 400000,
+          'ai_token_base_budget': 40000,
           'ai_token_budget_multiplier': 10,
           'ai_token_premium_multiplier': 10,
         });
 
         expect(snapshot.isPremiumActive, isTrue);
-        expect(snapshot.freeBudget, 40160);
-        expect(snapshot.premiumBudget, 401600);
-        expect(snapshot.currentBudget, 401600);
+        expect(snapshot.freeBudget, 40000);
+        expect(snapshot.premiumBudget, 400000);
+        expect(snapshot.currentBudget, 400000);
         expect(visibleAiTokensFromRaw(snapshot.currentBudget), 200);
       },
     );
@@ -68,16 +68,16 @@ void main() {
         final snapshot = AiTokenBudgetSnapshot.fromProfile({
           'subscription_tier': 'pro',
           'subscription_end_date': futurePremiumDate,
-          'ai_token_budget': 411600,
-          'ai_token_base_budget': 40160,
+          'ai_token_budget': 410000,
+          'ai_token_base_budget': 40000,
           'ai_token_budget_multiplier': 10,
           'ai_token_premium_multiplier': 10,
         });
 
         expect(snapshot.isPremiumActive, isTrue);
-        expect(snapshot.freeBudget, 41160);
-        expect(snapshot.premiumBudget, 411600);
-        expect(snapshot.currentBudget, 411600);
+        expect(snapshot.freeBudget, 41000);
+        expect(snapshot.premiumBudget, 410000);
+        expect(snapshot.currentBudget, 410000);
         expect(visibleAiTokensFromRaw(snapshot.currentBudget), 205);
       },
     );
@@ -86,15 +86,15 @@ void main() {
       final snapshot = AiTokenBudgetSnapshot.fromProfile({
         'subscription_tier': 'free',
         'subscription_end_date': futurePremiumDate,
-        'ai_token_budget': 40160,
-        'ai_token_base_budget': 40160,
+        'ai_token_budget': 40000,
+        'ai_token_base_budget': 40000,
         'ai_token_budget_multiplier': 1,
         'ai_token_premium_multiplier': 10,
       });
 
       expect(snapshot.isPremiumActive, isFalse);
-      expect(snapshot.freeBudget, 40160);
-      expect(snapshot.currentBudget, 40160);
+      expect(snapshot.freeBudget, 40000);
+      expect(snapshot.currentBudget, 40000);
     });
   });
 }

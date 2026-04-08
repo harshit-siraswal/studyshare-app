@@ -15,6 +15,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../config/app_config.dart';
 import '../config/theme.dart';
 import '../models/ai_question_paper.dart';
+import '../models/resource.dart';
 import '../models/study_ai_live_activity.dart';
 import '../services/auth_service.dart';
 import '../services/ai_chat_notification_service.dart';
@@ -139,7 +140,7 @@ class OcrErrorInfo {
     return OcrErrorInfo(
       name: json['name']?.toString() ?? 'Attachment',
       url: json['url']?.toString() ?? '',
-      provider: json['provider']?.toString() ?? 'google',
+      provider: json['provider']?.toString() ?? 'ocr',
       code: json['code']?.toString() ?? 'ocr_failed',
       message: json['message']?.toString() ?? '',
     );
@@ -198,11 +199,21 @@ class _ChatAttachment {
   final String name;
   final String url;
   final bool isPdf;
+  final String? fileId;
+  final String? resourceId;
+  final String? subject;
+  final String? semester;
+  final String? branch;
 
   const _ChatAttachment({
     required this.name,
     required this.url,
     required this.isPdf,
+    this.fileId,
+    this.resourceId,
+    this.subject,
+    this.semester,
+    this.branch,
   });
 }
 
@@ -213,6 +224,36 @@ class _QuestionPaperRequestConfig {
   const _QuestionPaperRequestConfig({
     required this.semester,
     required this.branch,
+  });
+}
+
+class _PendingQuestionPaperRequest {
+  final String originalPrompt;
+  final String? subject;
+  final String? semester;
+
+  const _PendingQuestionPaperRequest({
+    required this.originalPrompt,
+    this.subject,
+    this.semester,
+  });
+}
+
+class _ResolvedQuestionPaperRequest {
+  final String generationPrompt;
+  final String userVisible;
+  final String subject;
+  final _QuestionPaperRequestConfig config;
+  final bool pinnedScopeOnly;
+  final bool preferTopicOnlyScope;
+
+  const _ResolvedQuestionPaperRequest({
+    required this.generationPrompt,
+    required this.userVisible,
+    required this.subject,
+    required this.config,
+    required this.pinnedScopeOnly,
+    required this.preferTopicOnlyScope,
   });
 }
 
@@ -331,6 +372,7 @@ class _AIChatScreenState extends State<AIChatScreen>
   int _aiTokenBudgetTokens = 0;
   int _aiTokenLowThreshold = _minLowTokenThreshold;
   _QuestionPaperRequestConfig? _cachedQuestionPaperConfig;
+  _PendingQuestionPaperRequest? _pendingQuestionPaperRequest;
   Map<String, dynamic>? _cachedProfileFilters;
   bool _didQueueInitialPrompt = false;
 
@@ -733,6 +775,61 @@ class _AIChatScreenState extends State<AIChatScreen>
     return _searchAllPdfs || _promptRequestsAllPdfs(prompt);
   }
 
+  String _extractAcademicTopicHint(String prompt) {
+    final normalized = prompt.trim();
+    if (normalized.isEmpty) return '';
+
+    final extractedQuizTopic = _extractTopicFromPrompt(normalized);
+    if (extractedQuizTopic.isNotEmpty) {
+      return extractedQuizTopic;
+    }
+
+    final patterns = <RegExp>[
+      RegExp(
+        r'^(?:what\s+is|define|explain|describe|briefly\s+explain|brief\s+note\s+on|short\s+note\s+on|tell\s+me(?:\s+in\s+brief)?\s+about|give\s+me(?:\s+a)?\s+brief\s+(?:on|about)|overview\s+of|introduction\s+to)\s+(.+)$',
+        caseSensitive: false,
+      ),
+      RegExp(r'(?:about|on|of)\s+(.+)$', caseSensitive: false),
+    ];
+
+    for (final pattern in patterns) {
+      final match = pattern.firstMatch(normalized);
+      if (match == null) continue;
+      final candidate = _normalizeQuestionPaperSubjectHint(
+        match.group(1)?.trim() ?? '',
+      );
+      if (candidate.isNotEmpty) {
+        return candidate;
+      }
+    }
+
+    return '';
+  }
+
+  bool _shouldRelaxProfileAcademicScope(String prompt) {
+    final normalized = prompt.trim();
+    if (normalized.isEmpty) return false;
+    if (_extractSemesterFromPrompt(normalized) != null) return false;
+    if (_shouldSearchAllPdfsForPrompt(normalized)) return false;
+    if (_referencesCurrentStudyMaterial(normalized)) return false;
+    if ((widget.resourceContext?.fileId ?? '').trim().isNotEmpty) return false;
+    if ((widget.resourceContext?.videoUrl ?? '').trim().isNotEmpty) return false;
+
+    final topicHint = _extractAcademicTopicHint(normalized);
+    if (topicHint.isEmpty) return false;
+    if (topicHint.split(' ').where((part) => part.isNotEmpty).length > 6) {
+      return false;
+    }
+
+    final loweredTopic = topicHint.toLowerCase();
+    if (RegExp(r'\b(this|that|these|those|my|current|attached|uploaded)\b')
+        .hasMatch(loweredTopic)) {
+      return false;
+    }
+
+    return true;
+  }
+
   bool _shouldForceEnglish(String prompt) {
     final normalized = prompt.toLowerCase();
     return normalized.contains('reply in english') ||
@@ -772,6 +869,7 @@ class _AIChatScreenState extends State<AIChatScreen>
 
   Future<Map<String, dynamic>?> _buildContextFiltersForRequest({
     bool ignoreSubject = false,
+    String? prompt,
   }) async {
     final contextFilters = _buildContextFilters();
     if (contextFilters != null && contextFilters.isNotEmpty) {
@@ -783,7 +881,14 @@ class _AIChatScreenState extends State<AIChatScreen>
       return contextFilters;
     }
 
+    final shouldRelaxProfileScope =
+        (prompt ?? '').trim().isNotEmpty &&
+        _shouldRelaxProfileAcademicScope(prompt!);
+
     if (_cachedProfileFilters != null && _cachedProfileFilters!.isNotEmpty) {
+      if (shouldRelaxProfileScope) {
+        return null;
+      }
       final normalized = Map<String, dynamic>.from(_cachedProfileFilters!);
       // Profile subject is often stale/noisy for open-ended chat prompts.
       // Keep semester/branch as soft scope, but let the prompt subject win.
@@ -810,6 +915,9 @@ class _AIChatScreenState extends State<AIChatScreen>
       if (branch.isNotEmpty) filters['branch'] = branch;
 
       _cachedProfileFilters = filters.isEmpty ? null : filters;
+      if (shouldRelaxProfileScope) {
+        return null;
+      }
       return _cachedProfileFilters == null
           ? null
           : Map<String, dynamic>.from(_cachedProfileFilters!);
@@ -841,28 +949,314 @@ class _AIChatScreenState extends State<AIChatScreen>
     final normalized = prompt.trim();
     final matches = [
       RegExp(
-        r'(?:quiz|mcq|question paper|test)\s+(?:on|for|about|from)\s+(.+)$',
+        r'(?:quiz|mcq|question paper|test)\s+(?:on|for|about|from|of)\s+(.+)$',
         caseSensitive: false,
       ),
-      RegExp(r'(?:on|for|about)\s+(.+)$', caseSensitive: false),
+      RegExp(r'(?:on|for|about|of)\s+(.+)$', caseSensitive: false),
     ];
     for (final pattern in matches) {
       final match = pattern.firstMatch(normalized);
       if (match == null) continue;
       final captured = match.group(1)?.trim() ?? '';
-      if (captured.isNotEmpty) {
-        return captured
-            .replaceAll(RegExp(r'[.?!]+$'), '')
-            .replaceAll(RegExp(r'\s+'), ' ')
-            .trim();
+      final normalizedSubject = _normalizeQuestionPaperSubjectHint(captured);
+      if (normalizedSubject.isNotEmpty) {
+        return normalizedSubject;
       }
     }
     return '';
   }
 
-  Future<_QuestionPaperRequestConfig?> _resolveQuestionPaperConfig() async {
+  String _normalizeQuestionPaperSubjectHint(String raw) {
+    final trimmed = raw
+        .replaceAll(RegExp(r'[.?!]+$'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (trimmed.isEmpty) return '';
+    final lowered = trimmed.toLowerCase();
+    if (RegExp(
+      r'^(this|that|these|those|same|current)\s+(pdf|file|notes?|material|document)s?$',
+    ).hasMatch(lowered)) {
+      return '';
+    }
+
+    final withoutQualifiers = trimmed
+        .replaceAll(
+          RegExp(r'^(?:of|for|about|on|from)\s+', caseSensitive: false),
+          '',
+        )
+        .replaceAll(
+          RegExp(
+            r'\b(?:from|using|with)\s+(?:this|that|these|those|my|the|same|current)\s+(?:pdf|file|notes?|material|document)s?\b',
+            caseSensitive: false,
+          ),
+          '',
+        )
+        .replaceAll(
+          RegExp(
+            r'\b(?:semester|sem)\s*[1-8]\b|\b[1-8](?:st|nd|rd|th)?\s*semester\b',
+            caseSensitive: false,
+          ),
+          '',
+        )
+        .replaceAll(
+          RegExp(
+            r'\b(?:cse|ece|eee|civil|mechanical|chemical|it|aiml|ai-ml|ai/ml)\b',
+            caseSensitive: false,
+          ),
+          '',
+        )
+        .replaceAll(
+          RegExp(
+            r'\b(?:pdf|file|notes?|material|document|uploaded|attached|current|same)\b',
+            caseSensitive: false,
+          ),
+          '',
+        )
+        .replaceAll(RegExp(r'\bsubject\b', caseSensitive: false), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+
+    final cleaned = withoutQualifiers
+        .replaceAll(RegExp(r'^[,;:\-]+|[,;:\-]+$'), '')
+        .trim();
+    if (cleaned.isEmpty) return '';
+    if (cleaned.split(' ').length > 6) return '';
+    return cleaned;
+  }
+
+  String? _extractSemesterFromPrompt(String prompt) {
+    final match = RegExp(
+      r'\b([1-8])(?:st|nd|rd|th)?\s*semester\b|\bsemester\s*([1-8])\b|\bsem\s*([1-8])\b',
+      caseSensitive: false,
+    ).firstMatch(prompt);
+    final value = match?.group(1) ?? match?.group(2) ?? match?.group(3);
+    return value?.trim().isNotEmpty == true ? value!.trim() : null;
+  }
+
+  bool _referencesCurrentStudyMaterial(String prompt) {
+    final normalized = prompt
+        .toLowerCase()
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (normalized.isEmpty) return false;
+    return RegExp(
+      r'\b(this|that|these|those|same|current|attached|uploaded|my)\s+(pdf|file|notes?|material|document)s?\b',
+    ).hasMatch(normalized);
+  }
+
+  bool _looksLikeQuestionPaperClarificationReply(String prompt) {
+    final normalized = prompt.trim().toLowerCase();
+    if (normalized.isEmpty) return false;
+    if (RegExp(
+      r'^(cancel|skip|leave it|never mind|ignore)$',
+    ).hasMatch(normalized)) {
+      return false;
+    }
+    return _extractSemesterFromPrompt(prompt) != null ||
+        _referencesCurrentStudyMaterial(prompt) ||
+        _normalizeQuestionPaperSubjectHint(prompt).isNotEmpty;
+  }
+
+  String _buildQuestionPaperClarificationMessage({
+    required bool needsSubject,
+    required bool needsSemester,
+    String? subject,
+  }) {
+    if (needsSubject && needsSemester) {
+      return 'I can generate that test, but I need the topic or subject and the semester first. Reply like "Polymers, semester 1".';
+    }
+    if (needsSubject) {
+      return 'I can generate that test once you tell me the topic, subject, or exact PDF to use. Reply like "Polymers" or open the PDF and ask again.';
+    }
+    final resolvedSubject = (subject ?? '').trim();
+    if (resolvedSubject.isNotEmpty) {
+      return 'I found the topic as $resolvedSubject. Which semester should I use for the test? Reply like "semester 1".';
+    }
+    return 'Which semester should I use for this test? Reply like "semester 1".';
+  }
+
+  Future<void> _queueQuestionPaperClarification({
+    required String userVisible,
+    required String originalPrompt,
+    required String clarificationMessage,
+    required List<_ChatAttachment> turnAttachments,
+    String? subject,
+    String? semester,
+  }) async {
+    final userMessage = AIChatMessage(isUser: true, content: userVisible);
+    final assistantMessage = AIChatMessage(
+      isUser: false,
+      content: clarificationMessage,
+    );
+
+    if (mounted) {
+      setState(() {
+        _messages.add(userMessage);
+        _messages.add(assistantMessage);
+        _pendingQuestionPaperRequest = _PendingQuestionPaperRequest(
+          originalPrompt: originalPrompt,
+          subject: subject,
+          semester: semester,
+        );
+        _rememberAttachmentsForContext(turnAttachments);
+        _controller.clear();
+        _attachments.clear();
+        _isLoading = false;
+      });
+    }
+
+    await _persistCurrentSession();
+    await _scrollToBottom();
+  }
+
+  Future<_ResolvedQuestionPaperRequest?> _resolveQuestionPaperRequest({
+    required String userPrompt,
+    required String userVisible,
+    required List<_ChatAttachment> effectiveAttachments,
+    required List<_ChatAttachment> turnAttachments,
+    required bool isFreshQuestionPaperRequest,
+  }) async {
+    final hasPinnedScope =
+        !_shouldSearchAllPdfsForPrompt(userPrompt) &&
+        (widget.resourceContext != null ||
+            effectiveAttachments.isNotEmpty ||
+            _referencesCurrentStudyMaterial(userPrompt));
+    final pending = !isFreshQuestionPaperRequest
+        ? _pendingQuestionPaperRequest
+        : null;
+    final basePrompt = pending?.originalPrompt ?? userPrompt;
+
+    var resolvedSubject = _normalizeQuestionPaperSubjectHint(
+      _extractTopicFromPrompt(userPrompt),
+    );
+    var resolvedSemester = _extractSemesterFromPrompt(userPrompt) ?? '';
+
+    if (resolvedSubject.isEmpty && (pending?.subject ?? '').trim().isNotEmpty) {
+      resolvedSubject = pending!.subject!.trim();
+    }
+    if (resolvedSemester.isEmpty &&
+        (pending?.semester ?? '').trim().isNotEmpty) {
+      resolvedSemester = pending!.semester!.trim();
+    }
+
+    if (resolvedSubject.isEmpty &&
+        pending != null &&
+        !RegExp(r'[?]').hasMatch(userPrompt)) {
+      resolvedSubject = _normalizeQuestionPaperSubjectHint(userPrompt);
+    }
+
+    if (resolvedSubject.isEmpty &&
+        (widget.resourceContext?.subject ?? '').trim().isNotEmpty) {
+      resolvedSubject = widget.resourceContext!.subject!.trim();
+    }
+
+    if (resolvedSubject.isEmpty && effectiveAttachments.isNotEmpty) {
+      final attachmentPayload = effectiveAttachments
+          .map(
+            (item) => <String, dynamic>{
+              'name': item.name,
+              'url': item.url,
+              'type': item.isPdf ? 'pdf' : 'image',
+              if ((item.fileId ?? '').trim().isNotEmpty) 'file_id': item.fileId,
+              if ((item.resourceId ?? '').trim().isNotEmpty)
+                'resource_id': item.resourceId,
+              if ((item.subject ?? '').trim().isNotEmpty) 'subject': item.subject,
+              if ((item.semester ?? '').trim().isNotEmpty)
+                'semester': item.semester,
+              if ((item.branch ?? '').trim().isNotEmpty) 'branch': item.branch,
+            },
+          )
+          .toList(growable: false);
+      final inferred = await _inferSubjectFromAttachments(
+        attachments: attachmentPayload,
+      );
+      final normalized = _normalizeQuestionPaperSubjectHint(inferred);
+      if (normalized.isNotEmpty) {
+        resolvedSubject = normalized;
+      }
+    }
+
+    final config = await _resolveQuestionPaperConfig(
+      allowFallback: hasPinnedScope,
+    );
+    final hasExplicitSemester = resolvedSemester.trim().isNotEmpty;
+
+    final needsSubject = !hasPinnedScope && resolvedSubject.isEmpty;
+    final needsSemester = false;
+
+    if (needsSubject || needsSemester) {
+      await _queueQuestionPaperClarification(
+        userVisible: userVisible,
+        originalPrompt: basePrompt,
+        clarificationMessage: _buildQuestionPaperClarificationMessage(
+          needsSubject: needsSubject,
+          needsSemester: needsSemester,
+          subject: resolvedSubject,
+        ),
+        turnAttachments: turnAttachments,
+        subject: resolvedSubject,
+        semester: resolvedSemester,
+      );
+      return null;
+    }
+
+    final preferTopicOnlyScope =
+        resolvedSubject.trim().isNotEmpty &&
+        !hasPinnedScope &&
+        !hasExplicitSemester;
+    final effectiveSemester = preferTopicOnlyScope
+        ? ''
+        : (_normalizeAcademicFilterValue(
+                resolvedSemester.isNotEmpty
+                    ? resolvedSemester
+                    : (config?.semester ?? ''),
+                semesterOnly: true,
+              ) ??
+              config?.semester ??
+              widget.resourceContext?.semester?.trim() ??
+              '');
+    final effectiveBranch = preferTopicOnlyScope
+        ? ''
+        : (_normalizeAcademicFilterValue(
+                config?.branch ?? widget.resourceContext?.branch?.trim() ?? '',
+              ) ??
+              widget.resourceContext?.branch?.trim() ??
+              '');
+
+    _pendingQuestionPaperRequest = null;
+    final scopeParts = <String>[
+      if (resolvedSubject.trim().isNotEmpty) 'Topic ${resolvedSubject.trim()}',
+      if (effectiveSemester.trim().isNotEmpty) 'semester $effectiveSemester',
+      if (effectiveBranch.trim().isNotEmpty) 'branch $effectiveBranch',
+    ];
+    final resolvedScopePrompt =
+        '$basePrompt\n\nResolved scope: ${scopeParts.isNotEmpty ? scopeParts.join(', ') : 'current attached study material'}.';
+
+    return _ResolvedQuestionPaperRequest(
+      generationPrompt: resolvedScopePrompt,
+      userVisible: userVisible,
+      subject: resolvedSubject.trim(),
+      config: _QuestionPaperRequestConfig(
+        semester: effectiveSemester,
+        branch: effectiveBranch,
+      ),
+      pinnedScopeOnly: hasPinnedScope,
+      preferTopicOnlyScope: preferTopicOnlyScope,
+    );
+  }
+
+  Future<_QuestionPaperRequestConfig?> _resolveQuestionPaperConfig({
+    bool allowFallback = true,
+  }) async {
     final cached = _cachedQuestionPaperConfig;
-    if (cached != null) return cached;
+    if (cached != null) {
+      final looksLikeGenericFallback =
+          cached.semester.trim() == '1' &&
+          cached.branch.trim().toLowerCase() == 'general';
+      if (allowFallback || !looksLikeGenericFallback) {
+        return cached;
+      }
+    }
 
     final fromContextSemester = widget.resourceContext?.semester?.trim() ?? '';
     final fromContextBranch = widget.resourceContext?.branch?.trim() ?? '';
@@ -893,6 +1287,10 @@ class _AIChatScreenState extends State<AIChatScreen>
       } catch (e) {
         debugPrint('Question-paper profile lookup failed, using defaults: $e');
       }
+    }
+
+    if (!allowFallback) {
+      return null;
     }
 
     const fallback = _QuestionPaperRequestConfig(
@@ -1442,13 +1840,19 @@ class _AIChatScreenState extends State<AIChatScreen>
   }) {
     final seen = <String>{};
     final activitySources = <AiLiveActivitySource>[];
-    for (final attachment in attachments) {
-      final title = attachment['name']?.toString().trim() ?? 'Study material';
-      final rawUrl = attachment['url']?.toString().trim() ?? '';
-      final normalizedType = attachment['type']?.toString().toLowerCase() ?? '';
-      final kind =
-          rawUrl.toLowerCase().contains('youtu') ||
-              normalizedType == 'youtube' ||
+      for (final attachment in attachments) {
+        final title = attachment['name']?.toString().trim() ?? 'Study material';
+        final rawUrl = attachment['url']?.toString().trim() ?? '';
+        final fileId =
+            attachment['file_id']?.toString().trim().isNotEmpty == true
+            ? attachment['file_id']!.toString().trim()
+            : (attachment['resource_id']?.toString().trim().isNotEmpty == true
+                  ? attachment['resource_id']!.toString().trim()
+                  : null);
+        final normalizedType = attachment['type']?.toString().toLowerCase() ?? '';
+        final kind =
+            rawUrl.toLowerCase().contains('youtu') ||
+                normalizedType == 'youtube' ||
               normalizedType == 'video'
           ? AiLiveSourceKind.video
           : (normalizedType == 'web'
@@ -1457,13 +1861,14 @@ class _AIChatScreenState extends State<AIChatScreen>
       final key = '$title|${kind.wireValue}|$rawUrl';
       if (seen.contains(key)) continue;
       seen.add(key);
-      activitySources.add(
-        AiLiveActivitySource(
-          title: title,
-          kind: kind,
-          url: rawUrl.isEmpty ? null : rawUrl,
-        ),
-      );
+        activitySources.add(
+          AiLiveActivitySource(
+            title: title,
+            kind: kind,
+            url: rawUrl.isEmpty ? null : rawUrl,
+            fileId: fileId,
+          ),
+        );
       if (activitySources.length >= limit) break;
     }
     return activitySources;
@@ -1477,7 +1882,14 @@ class _AIChatScreenState extends State<AIChatScreen>
     if (subject.isNotEmpty) {
       return 'Generating a $subject paper';
     }
-    return 'Generating Sem ${config.semester} ${config.branch.toUpperCase()} paper';
+    if (config.semester.trim().isNotEmpty || config.branch.trim().isNotEmpty) {
+      final parts = <String>[
+        if (config.semester.trim().isNotEmpty) 'Sem ${config.semester.trim()}',
+        if (config.branch.trim().isNotEmpty) config.branch.trim().toUpperCase(),
+      ];
+      return 'Generating ${parts.join(' ')} paper';
+    }
+    return 'Generating your question paper';
   }
 
   List<AiLiveActivityStep> _buildQuestionPaperLiveSteps({
@@ -1851,6 +2263,7 @@ class _AIChatScreenState extends State<AIChatScreen>
       } else {
         _activeSessionId = _newSessionId();
         _stickyAttachments.clear();
+        _pendingQuestionPaperRequest = null;
       }
     });
 
@@ -1860,6 +2273,7 @@ class _AIChatScreenState extends State<AIChatScreen>
       _activeSessionId = _newSessionId();
       _messages.clear();
       _clearStickyContext();
+      _pendingQuestionPaperRequest = null;
       _injectResourceGreeting();
     } else if (_messages.isEmpty && mounted) {
       _splashAnimationController.forward().then((_) {
@@ -1897,6 +2311,7 @@ class _AIChatScreenState extends State<AIChatScreen>
       _messages.clear();
       _attachments.clear();
       _clearStickyContext();
+      _pendingQuestionPaperRequest = null;
       _controller.clear();
     });
 
@@ -1925,6 +2340,7 @@ class _AIChatScreenState extends State<AIChatScreen>
       _stickyAttachments
         ..clear()
         ..addAll(_deserializeStickyAttachments(session.contextAttachments));
+      _pendingQuestionPaperRequest = null;
       _controller.clear();
     });
     await _scrollToBottom();
@@ -1945,6 +2361,7 @@ class _AIChatScreenState extends State<AIChatScreen>
         _activeSessionId = _newSessionId();
         _messages.clear();
         _clearStickyContext();
+        _pendingQuestionPaperRequest = null;
       }
     });
 
@@ -2416,6 +2833,7 @@ class _AIChatScreenState extends State<AIChatScreen>
     if (attachments.isEmpty) return widget.resourceContext?.subject ?? '';
     final contextFilters = await _buildContextFiltersForRequest(
       ignoreSubject: true,
+      prompt: 'identify subject from attached study material',
     );
     try {
       final response = await _api.queryRag(
@@ -2454,6 +2872,205 @@ class _AIChatScreenState extends State<AIChatScreen>
       return 'image';
     }
     return 'pdf';
+  }
+
+  String _normalizeQuestionPaperLookupText(String raw) {
+    return raw
+        .toLowerCase()
+        .replaceAll(RegExp(r'\.[a-z0-9]{2,5}$'), '')
+        .replaceAll(RegExp(r'[^a-z0-9+#]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  List<String> _tokenizeQuestionPaperLookupWords(String raw) {
+    const ignored = <String>{
+      'a',
+      'an',
+      'the',
+      'and',
+      'or',
+      'from',
+      'for',
+      'of',
+      'on',
+      'about',
+      'with',
+      'using',
+      'quiz',
+      'test',
+      'paper',
+      'question',
+      'questions',
+      'notes',
+      'note',
+      'pdf',
+      'file',
+      'document',
+      'material',
+      'subject',
+      'semester',
+      'branch',
+      'generate',
+    };
+    return _normalizeQuestionPaperLookupText(raw)
+        .split(' ')
+        .where((token) => token.length > 1 && !ignored.contains(token))
+        .toList(growable: false);
+  }
+
+  double _scoreQuestionPaperResource(
+    Resource resource, {
+    required String query,
+    String? preferredSemester,
+    String? preferredBranch,
+  }) {
+    final normalizedQuery = _normalizeQuestionPaperLookupText(query);
+    final titleText = _normalizeQuestionPaperLookupText(resource.title);
+    final subjectText = _normalizeQuestionPaperLookupText(
+      resource.subject ?? '',
+    );
+    final semesterText = _normalizeQuestionPaperLookupText(
+      resource.semester ?? '',
+    );
+    final branchText = _normalizeQuestionPaperLookupText(resource.branch ?? '');
+    final chapterText = _normalizeQuestionPaperLookupText(
+      resource.chapter ?? '',
+    );
+    final topicText = _normalizeQuestionPaperLookupText(resource.topic ?? '');
+    final searchable = [
+      titleText,
+      subjectText,
+      semesterText,
+      branchText,
+      chapterText,
+      topicText,
+    ].where((part) => part.isNotEmpty).join(' ');
+    final queryTokens = _tokenizeQuestionPaperLookupWords(query);
+
+    var score = 0.0;
+    if (normalizedQuery.isNotEmpty) {
+      if (titleText == normalizedQuery) score += 9;
+      if (subjectText == normalizedQuery) score += 7;
+      if (titleText.contains(normalizedQuery)) score += 5;
+      if (subjectText.contains(normalizedQuery)) score += 4;
+      if (searchable.contains(normalizedQuery)) score += 2;
+      if (RegExp(
+        '\\b${RegExp.escape(normalizedQuery)}\\b',
+      ).hasMatch(titleText)) {
+        score += 2.5;
+      }
+    }
+
+    if (queryTokens.isNotEmpty) {
+      final titleHits = queryTokens
+          .where((token) => titleText.contains(token))
+          .length;
+      final subjectHits = queryTokens
+          .where((token) => subjectText.contains(token))
+          .length;
+      final searchableHits = queryTokens
+          .where((token) => searchable.contains(token))
+          .length;
+      score += (titleHits / queryTokens.length) * 4.2;
+      score += (subjectHits / queryTokens.length) * 2.5;
+      score += (searchableHits / queryTokens.length) * 1.6;
+    }
+
+    final normalizedPreferredSemester =
+        _normalizeAcademicFilterValue(
+          preferredSemester ?? '',
+          semesterOnly: true,
+        ) ??
+        '';
+    final normalizedPreferredBranch =
+        _normalizeAcademicFilterValue(preferredBranch ?? '') ?? '';
+    if (normalizedPreferredSemester.isNotEmpty &&
+        semesterText.contains(normalizedPreferredSemester.toLowerCase())) {
+      score += 0.9;
+    }
+    if (normalizedPreferredBranch.isNotEmpty &&
+        branchText.contains(normalizedPreferredBranch.toLowerCase())) {
+      score += 0.6;
+    }
+
+    if (resource.fileUrl.trim().toLowerCase().contains('.pdf')) {
+      score += 0.2;
+    }
+
+    return score;
+  }
+
+  List<Resource> _pickQuestionPaperResources(
+    List<Resource> resources, {
+    required String query,
+    String? preferredSemester,
+    String? preferredBranch,
+    int limit = 6,
+  }) {
+    if (resources.isEmpty) return const [];
+    final scored = resources
+        .map(
+          (resource) => (
+            resource: resource,
+            score: _scoreQuestionPaperResource(
+              resource,
+              query: query,
+              preferredSemester: preferredSemester,
+              preferredBranch: preferredBranch,
+            ),
+            subjectKey: _normalizeQuestionPaperLookupText(
+              resource.subject ?? '',
+            ),
+          ),
+        )
+        .where((entry) => entry.score > 0)
+        .toList();
+    if (scored.isEmpty) {
+      return resources.take(limit).toList(growable: false);
+    }
+
+    scored.sort((a, b) => b.score.compareTo(a.score));
+    final subjectGroups =
+        <
+          String,
+          List<({Resource resource, double score, String subjectKey})>
+        >{};
+    for (final entry in scored) {
+      final groupKey = entry.subjectKey.isNotEmpty
+          ? entry.subjectKey
+          : _normalizeQuestionPaperLookupText(entry.resource.title);
+      subjectGroups
+          .putIfAbsent(
+            groupKey,
+            () => <({Resource resource, double score, String subjectKey})>[],
+          )
+          .add(entry);
+    }
+
+    final rankedGroups = subjectGroups.entries.map((entry) {
+      final ordered = [...entry.value]
+        ..sort((a, b) => b.score.compareTo(a.score));
+      final aggregate =
+          ordered.take(3).fold<double>(0, (sum, item) => sum + item.score) +
+          (ordered.length * 0.35);
+      return (key: entry.key, aggregate: aggregate, items: ordered);
+    }).toList()..sort((a, b) => b.aggregate.compareTo(a.aggregate));
+
+    final topGroup = rankedGroups.first;
+    final shouldPreferGroupedSelection =
+        rankedGroups.length == 1 ||
+        topGroup.items.length >= 2 ||
+        topGroup.aggregate >=
+            (rankedGroups.length > 1 ? rankedGroups[1].aggregate + 1.5 : 0);
+    final selected = shouldPreferGroupedSelection
+        ? topGroup.items.map((entry) => entry.resource)
+        : scored.map((entry) => entry.resource);
+
+    return selected
+        .where((resource) => resource.fileUrl.trim().isNotEmpty)
+        .take(limit)
+        .toList(growable: false);
   }
 
   String _normalizeExternalUrl(String rawUrl) {
@@ -2745,6 +3362,11 @@ class _AIChatScreenState extends State<AIChatScreen>
             'name': attachment.name,
             'url': attachment.url,
             'is_pdf': attachment.isPdf,
+            'file_id': attachment.fileId,
+            'resource_id': attachment.resourceId,
+            'subject': attachment.subject,
+            'semester': attachment.semester,
+            'branch': attachment.branch,
           },
         )
         .toList();
@@ -2761,6 +3383,21 @@ class _AIChatScreenState extends State<AIChatScreen>
                 : 'Attachment',
             url: item['url']?.toString().trim() ?? '',
             isPdf: item['is_pdf'] == true,
+            fileId: item['file_id']?.toString().trim().isNotEmpty == true
+                ? item['file_id']!.toString().trim()
+                : null,
+            resourceId: item['resource_id']?.toString().trim().isNotEmpty == true
+                ? item['resource_id']!.toString().trim()
+                : null,
+            subject: item['subject']?.toString().trim().isNotEmpty == true
+                ? item['subject']!.toString().trim()
+                : null,
+            semester: item['semester']?.toString().trim().isNotEmpty == true
+                ? item['semester']!.toString().trim()
+                : null,
+            branch: item['branch']?.toString().trim().isNotEmpty == true
+                ? item['branch']!.toString().trim()
+                : null,
           ),
         )
         .where((attachment) => attachment.url.isNotEmpty)
@@ -2811,7 +3448,7 @@ class _AIChatScreenState extends State<AIChatScreen>
       if (subject.isEmpty) {
         return const [];
       }
-      List<dynamic> scoped = <dynamic>[];
+      List<Resource> scoped = <Resource>[];
       scoped = await _supabase.getResources(
         collegeId: widget.collegeId,
         semester: normalizedSemester,
@@ -2855,13 +3492,25 @@ class _AIChatScreenState extends State<AIChatScreen>
         );
       }
 
-      return scoped
+      final ranked = _pickQuestionPaperResources(
+        scoped,
+        query: subject,
+        preferredSemester: normalizedSemester,
+        preferredBranch: normalizedBranch,
+        limit: 8,
+      );
+
+      return ranked
           .where((resource) => resource.fileUrl.trim().isNotEmpty)
           .map(
             (resource) => <String, dynamic>{
               'name': resource.title,
               'url': resource.fileUrl,
               'type': _attachmentTypeFromUrl(resource.fileUrl),
+              'resource_id': resource.id,
+              'subject': resource.subject,
+              'semester': resource.semester,
+              'branch': resource.branch,
             },
           )
           .toList();
@@ -2890,60 +3539,26 @@ class _AIChatScreenState extends State<AIChatScreen>
     required String semester,
     required String branch,
     required String inferredSubject,
-    required int contextResourcesCount,
     bool strictAntiPlaceholder = false,
     _QuestionPaperRetryReason? strictRetryReason,
   }) {
-    final subjectLine = inferredSubject.trim().isEmpty
-        ? 'Infer from attached notes and PYQs'
-        : inferredSubject.trim();
-    final strictRetryMessage = _buildQuestionPaperStrictRetryMessage(
-      strictRetryReason,
-    );
-    final qualityGate = strictAntiPlaceholder
-        ? '''
-Additional quality gate (must pass):
-- Do not use placeholder values such as "Question text", "A option", or "Subject Name".
-- Return at least 10 unique subject-relevant questions.
-- Ensure options are distinct and answers match one of the options.
-  - $strictRetryMessage
-  - Respond ONLY with a single raw JSON object that starts with '{' and matches the schema exactly.
-  - Return only a single valid JSON object and nothing else.
-  - Do not wrap the result in markdown fences or add commentary.
-'''
+    final scopeHints = <String>[
+      if (inferredSubject.trim().isNotEmpty) 'topic=${inferredSubject.trim()}',
+      if (semester.trim().isNotEmpty) 'semester=$semester',
+      if (branch.trim().isNotEmpty) 'branch=$branch',
+    ];
+    final strictRetryMessage = strictAntiPlaceholder
+        ? _buildQuestionPaperStrictRetryMessage(strictRetryReason)
         : '';
-    return '''
-Generate a university-style question paper quiz.
-User request: "$userPrompt"
-Semester: $semester
-Branch: $branch
-Subject: $subjectLine
-Attached study documents available: $contextResourcesCount
 
-Requirements:
-1) Analyze available notes/resources to match exam pattern and difficulty.
-2) Generate exactly 10 MCQs.
-3) 4 options per question.
-4) Include one correct answer.
-5) Include concise explanation (one sentence, max 20 words).
-6) Do NOT add any sources or citations if they are not explicitly present in the notes.
-$qualityGate
-
-Return STRICT JSON only (no markdown). Schema:
-{
-  "title": "<specific paper title>",
-  "subject": "<exact subject name>",
-  "instructions": ["<instruction 1>", "<instruction 2>"],
-  "questions": [
-    {
-      "question": "<question statement>",
-      "options": ["<option A>", "<option B>", "<option C>", "<option D>"],
-      "answer": "<A|B|C|D>",
-      "explanation": "<short reason>"
-    }
-  ]
-}
-''';
+    return [
+      userPrompt.trim(),
+      if (scopeHints.isNotEmpty) 'Scope hints: ${scopeHints.join(', ')}.',
+      if (strictAntiPlaceholder)
+        'Retry guidance: return a clean, exam-like MCQ paper grounded only in the selected PDF. '
+            'Use complete question stems, 4 complete options, and valid JSON only. '
+            '$strictRetryMessage',
+    ].join('\n\n');
   }
 
   String _normalizeTemplateToken(String value) {
@@ -2998,6 +3613,35 @@ Return STRICT JSON only (no markdown). Schema:
     return templateOptionCount >= 2;
   }
 
+  bool _looksLikeGenericQuestionStem(String question) {
+    final normalized = question.trim().toLowerCase();
+    final match = RegExp(
+      r'(?:what is true about|which statement best describes|what is the most accurate description of|select the most accurate statement about|which description correctly matches)\s+(.+?)\??$',
+    ).firstMatch(normalized);
+    if (match == null) return false;
+    final concept = (match.group(1) ?? '')
+        .replaceAll(RegExp(r'[^a-z\s-]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    const genericConcepts = <String>{
+      'method',
+      'methods',
+      'process',
+      'processes',
+      'system',
+      'systems',
+      'technique',
+      'techniques',
+      'approach',
+      'approaches',
+      'concept',
+      'term',
+      'property',
+      'properties',
+    };
+    return genericConcepts.contains(concept);
+  }
+
   bool _isLowQualityQuestionPaper(AiQuestionPaper paper) {
     if (paper.questions.length < 5) return true;
     if (_isTemplateToken(paper.subject) || _isTemplateToken(paper.title)) {
@@ -3005,15 +3649,56 @@ Return STRICT JSON only (no markdown). Schema:
     }
 
     var placeholderCount = 0;
+    var sentenceCompletionCount = 0;
+    var noisyOptionCount = 0;
+    var pronounOptionCount = 0;
+    var genericStemCount = 0;
+    var genericOptionCount = 0;
     final normalizedQuestions = <String>{};
     for (final q in paper.questions) {
       if (_isPlaceholderQuestion(question: q.question, options: q.options)) {
         placeholderCount++;
       }
+      if (_looksLikeGenericQuestionStem(q.question)) {
+        genericStemCount++;
+      }
+      if (q.question.toLowerCase().startsWith(
+        'which term best completes this statement from your notes?',
+      )) {
+        sentenceCompletionCount++;
+      }
+      for (final option in q.options) {
+        final normalizedOption = option.trim().toLowerCase();
+        if (RegExp(
+          r'^(nextct|kittu|syllabus|complete|page|date)$',
+        ).hasMatch(normalizedOption)) {
+          noisyOptionCount++;
+        }
+        if (normalizedOption.contains('[figure')) {
+          noisyOptionCount++;
+        }
+        if (RegExp(
+          r'^(they|it|this|these|those|there|here)$',
+        ).hasMatch(normalizedOption)) {
+          pronounOptionCount++;
+        }
+        if (RegExp(
+          r'^(method|methods|process|processes|system|systems|technique|techniques|approach|approaches)$',
+        ).hasMatch(normalizedOption)) {
+          genericOptionCount++;
+        }
+      }
       normalizedQuestions.add(_normalizeTemplateToken(q.question));
     }
 
     if (placeholderCount > 0) return true;
+    if (sentenceCompletionCount >= (paper.questions.length / 2).ceil()) {
+      return true;
+    }
+    if (genericStemCount > 0) return true;
+    if (noisyOptionCount > 0) return true;
+    if (pronounOptionCount > 0) return true;
+    if (genericOptionCount > 0) return true;
     final duplicateRatio =
         1 -
         (normalizedQuestions.length / paper.questions.length.clamp(1, 9999));
@@ -3104,6 +3789,9 @@ Return STRICT JSON only (no markdown). Schema:
     required String userVisible,
     required List<Map<String, dynamic>> attachmentPayload,
     required _QuestionPaperRequestConfig config,
+    required String resolvedSubject,
+    required bool pinnedScopeOnly,
+    required bool preferTopicOnlyScope,
   }) async {
     final tracker = _startLongResponseTracker('Question paper generation');
     final history = _buildStructuredHistory();
@@ -3135,6 +3823,7 @@ Return STRICT JSON only (no markdown). Schema:
       final searchAllForPrompt = _shouldSearchAllPdfsForPrompt(userPrompt);
       final contextFilters = await _buildContextFiltersForRequest(
         ignoreSubject: searchAllForPrompt,
+        prompt: userPrompt,
       );
       final sourceSwitchForTurn = _promptRequestsAllPdfs(userPrompt);
       final languageHint = _shouldForceEnglish(userPrompt) ? 'en' : 'auto';
@@ -3144,19 +3833,30 @@ Return STRICT JSON only (no markdown). Schema:
       final excludeFileIds = (_lastPrimarySourceFileId ?? '').trim().isNotEmpty
           ? <String>[_lastPrimarySourceFileId!.trim()]
           : null;
-      final inferredFromPrompt = _extractTopicFromPrompt(userPrompt);
-      final inferredFromAttachments = await _inferSubjectFromAttachments(
-        attachments: attachmentPayload,
-      );
-      final inferredSubject = inferredFromPrompt.isNotEmpty
-          ? inferredFromPrompt
-          : inferredFromAttachments;
+      final inferredSubject = resolvedSubject.trim();
+      final effectiveQuestionPaperFilters = <String, dynamic>{
+        ...?contextFilters,
+      };
+      if (preferTopicOnlyScope) {
+        effectiveQuestionPaperFilters.remove('semester');
+        effectiveQuestionPaperFilters.remove('branch');
+      }
+      if (!preferTopicOnlyScope && config.semester.trim().isNotEmpty) {
+        effectiveQuestionPaperFilters['semester'] = config.semester.trim();
+      }
+      if (!preferTopicOnlyScope &&
+          config.branch.trim().isNotEmpty &&
+          config.branch.trim().toLowerCase() != 'general') {
+        effectiveQuestionPaperFilters['branch'] = config.branch.trim();
+      }
 
-      final contextAttachments = await _loadSubjectAttachments(
-        semester: config.semester,
-        branch: config.branch,
-        inferredSubject: inferredSubject,
-      );
+      final contextAttachments = pinnedScopeOnly || inferredSubject.isEmpty
+          ? const <Map<String, dynamic>>[]
+          : await _loadSubjectAttachments(
+              semester: preferTopicOnlyScope ? '' : config.semester,
+              branch: preferTopicOnlyScope ? '' : config.branch,
+              inferredSubject: inferredSubject,
+            );
       final mergedAttachments = <Map<String, dynamic>>[
         ...attachmentPayload,
         ...contextAttachments,
@@ -3184,8 +3884,11 @@ Return STRICT JSON only (no markdown). Schema:
             'qp_context',
             status: AiLiveActivityStatus.completed,
             description: inferredSubject.trim().isNotEmpty
-                ? 'Resolved subject: $inferredSubject'
-                : 'Using Sem ${config.semester} • ${config.branch.toUpperCase()} context.',
+                ? 'Resolved topic: $inferredSubject'
+                : ((config.semester.trim().isNotEmpty ||
+                          config.branch.trim().isNotEmpty)
+                      ? 'Using ${[if (config.semester.trim().isNotEmpty) 'Sem ${config.semester.trim()}', if (config.branch.trim().isNotEmpty) config.branch.trim().toUpperCase()].join(' • ')} context.'
+                      : 'Searching the available study material for the right topic.'),
           );
           aiMessage.liveSteps = _updateLiveStepList(
             aiMessage.liveSteps,
@@ -3238,7 +3941,6 @@ Return STRICT JSON only (no markdown). Schema:
           semester: config.semester,
           branch: config.branch,
           inferredSubject: inferredSubject,
-          contextResourcesCount: totalAttachmentCount,
           strictAntiPlaceholder: strictMode,
           strictRetryReason: strictRetryReason,
         );
@@ -3255,7 +3957,7 @@ Return STRICT JSON only (no markdown). Schema:
           forceOcr: forceOcr,
           attachments: mergedAttachments,
           history: history,
-          filters: contextFilters,
+          filters: effectiveQuestionPaperFilters,
           sourceSwitchForTurn: sourceSwitchForTurn,
           excludeFileIds: excludeFileIds,
           dialectIntensity: dialectIntensity,
@@ -3267,7 +3969,23 @@ Return STRICT JSON only (no markdown). Schema:
           _lastPrimarySourceFileId = primarySourceFileId;
         }
         aiInvoked = true;
-        if (_responseIndicatesInsufficientGrounding(response)) {
+        final answer = _extractRagAnswer(response);
+        lastAnswer = answer;
+        final groundingLooksInsufficient =
+            _responseIndicatesInsufficientGrounding(response);
+        AiQuestionPaper? preParsedGroundedCandidate;
+        if (groundingLooksInsufficient) {
+          preParsedGroundedCandidate = _parseQuestionPaper(
+            rawResponse: answer,
+            semester: config.semester,
+            branch: config.branch,
+            fallbackSubject: inferredSubject,
+            contextResourceCount: totalAttachmentCount,
+          );
+        }
+        if (groundingLooksInsufficient &&
+            (preParsedGroundedCandidate == null ||
+                _isLowQualityQuestionPaper(preParsedGroundedCandidate))) {
           const noNotesMessage =
               'No related notes were found for this paper yet. Upload matching study material and try again.';
           if (mounted) {
@@ -3301,8 +4019,6 @@ Return STRICT JSON only (no markdown). Schema:
           await _persistCurrentSession();
           return;
         }
-        final answer = _extractRagAnswer(response);
-        lastAnswer = answer;
         aiMessage.answerOrigin = AiAnswerOriginX.fromWireValue(
           response['answer_origin']?.toString(),
         );
@@ -3346,13 +4062,15 @@ Return STRICT JSON only (no markdown). Schema:
           forceOcr = true;
           continue;
         }
-        final candidate = _parseQuestionPaper(
-          rawResponse: answer,
-          semester: config.semester,
-          branch: config.branch,
-          fallbackSubject: inferredSubject,
-          contextResourceCount: totalAttachmentCount,
-        );
+        final candidate =
+            preParsedGroundedCandidate ??
+            _parseQuestionPaper(
+              rawResponse: answer,
+              semester: config.semester,
+              branch: config.branch,
+              fallbackSubject: inferredSubject,
+              contextResourceCount: totalAttachmentCount,
+            );
         if (candidate == null) {
           debugPrint(
             'QuizGen parse failed attempt=${attempt + 1}. '
@@ -3569,6 +4287,7 @@ Return STRICT JSON only (no markdown). Schema:
       final searchAllForPrompt = _shouldSearchAllPdfsForPrompt(userPrompt);
       final contextFilters = await _buildContextFiltersForRequest(
         ignoreSubject: searchAllForPrompt,
+        prompt: userPrompt,
       );
       final sourceSwitchForTurn = _promptRequestsAllPdfs(userPrompt);
       final languageHint = _shouldForceEnglish(userPrompt) ? 'en' : 'auto';
@@ -3808,6 +4527,15 @@ Return STRICT JSON only (no markdown). Schema:
                 'name': item.name,
                 'url': item.url,
                 'type': item.isPdf ? 'pdf' : 'image',
+                if ((item.fileId ?? '').trim().isNotEmpty) 'file_id': item.fileId,
+                if ((item.resourceId ?? '').trim().isNotEmpty)
+                  'resource_id': item.resourceId,
+                if ((item.subject ?? '').trim().isNotEmpty)
+                  'subject': item.subject,
+                if ((item.semester ?? '').trim().isNotEmpty)
+                  'semester': item.semester,
+                if ((item.branch ?? '').trim().isNotEmpty)
+                  'branch': item.branch,
               },
             )
             .toList();
@@ -3820,6 +4548,7 @@ Return STRICT JSON only (no markdown). Schema:
         final history = _buildStructuredHistory(pendingUserPrompt: userPrompt);
         final contextFilters = await _buildContextFiltersForRequest(
           ignoreSubject: searchAllForPrompt,
+          prompt: userPrompt,
         );
         final hasImageAttachments = attachmentPayload.any(
           (item) => item['type']?.toString().toLowerCase() == 'image',
@@ -3865,8 +4594,15 @@ Return STRICT JSON only (no markdown). Schema:
             !isQuestionPaperRequest &&
             _hasActiveQuestionPaperResponse() &&
             _isQuestionPaperContinuationIntent(userPrompt);
+        final isQuestionPaperClarificationReply =
+            !isQuestionPaperRequest &&
+            !isQuestionPaperContinuation &&
+            _pendingQuestionPaperRequest != null &&
+            _looksLikeQuestionPaperClarificationReply(userPrompt);
         final shouldGenerateQuestionPaper =
-            isQuestionPaperRequest || isQuestionPaperContinuation;
+            isQuestionPaperRequest ||
+            isQuestionPaperContinuation ||
+            isQuestionPaperClarificationReply;
         final isSummaryExportRequest = _isSummaryExportIntent(
           prompt: userPrompt,
           hasAttachments: hasAttachments,
@@ -3898,18 +4634,30 @@ Return STRICT JSON only (no markdown). Schema:
         }
 
         if (shouldGenerateQuestionPaper) {
-          final config = await _resolveQuestionPaperConfig();
-          if (config == null) return;
-          await _handleQuestionPaperGeneration(
+          final resolvedQuestionPaperRequest = await _resolveQuestionPaperRequest(
             userPrompt: isQuestionPaperContinuation
                 ? 'Continue the previous question paper on the same topic. $userPrompt'
                 : userPrompt,
             userVisible: userVisible,
+            effectiveAttachments: effectiveAttachments,
+            turnAttachments: turnAttachments,
+            isFreshQuestionPaperRequest: isQuestionPaperRequest,
+          );
+          if (resolvedQuestionPaperRequest == null) return;
+          await _handleQuestionPaperGeneration(
+            userPrompt: resolvedQuestionPaperRequest.generationPrompt,
+            userVisible: resolvedQuestionPaperRequest.userVisible,
             attachmentPayload: attachmentPayload,
-            config: config,
+            config: resolvedQuestionPaperRequest.config,
+            resolvedSubject: resolvedQuestionPaperRequest.subject,
+            pinnedScopeOnly: resolvedQuestionPaperRequest.pinnedScopeOnly,
+            preferTopicOnlyScope:
+                resolvedQuestionPaperRequest.preferTopicOnlyScope,
           );
           return;
         }
+
+        _pendingQuestionPaperRequest = null;
 
         final tracker = _startLongResponseTracker('AI response generation');
         final aiMessage = AIChatMessage(isUser: false, content: '');

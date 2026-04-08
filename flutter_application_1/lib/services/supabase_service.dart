@@ -136,6 +136,12 @@ class SupabaseService {
     return value?.trim().toLowerCase() ?? '';
   }
 
+  bool _looksLikeDomainScope(String value) {
+    final normalized = value.trim().toLowerCase().replaceAll('@', '');
+    if (normalized.isEmpty) return false;
+    return normalized.contains('.') && !normalized.contains(' ');
+  }
+
   bool _matchesCollegeScope(
     Map<String, dynamic> user, {
     required String collegeId,
@@ -153,6 +159,12 @@ class SupabaseService {
     final userCollege = _normalizeCollegeScopeValue(
       user['college']?.toString(),
     );
+    final userEmail = _normalizeEmail(user['email']?.toString());
+
+    if (normalizedCollegeId.isEmpty && _looksLikeDomainScope(normalizedCollege)) {
+      final scopeDomain = normalizedCollege.replaceAll('@', '');
+      return userEmail.isNotEmpty && userEmail.endsWith('@$scopeDomain');
+    }
 
     if (normalizedCollegeId.isNotEmpty &&
         userCollegeId.isNotEmpty &&
@@ -2293,23 +2305,48 @@ class SupabaseService {
     String? collegeId,
     String? college,
   }) async {
-    final normalizedCollegeId = collegeId?.trim() ?? '';
-    final normalizedCollege = college?.trim() ?? '';
+    var effectiveCollegeId = collegeId?.trim() ?? '';
+    var effectiveCollege = college?.trim() ?? '';
+
+    if (effectiveCollegeId.isEmpty && effectiveCollege.isEmpty) {
+      try {
+        final profile = await getCurrentUserProfile(maxAttempts: 1);
+        effectiveCollegeId = profile['college_id']?.toString().trim() ?? '';
+        effectiveCollege = profile['college']?.toString().trim() ?? '';
+      } catch (e) {
+        debugPrint('Error deriving discover scope from profile: $e');
+      }
+    }
+
+    if (effectiveCollegeId.isEmpty && effectiveCollege.isEmpty) {
+      final sessionEmail = _currentSessionEmail();
+      if (sessionEmail.contains('@')) {
+        effectiveCollege = sessionEmail.split('@').last.trim();
+      }
+    }
+
+    if (effectiveCollegeId.isEmpty && effectiveCollege.isEmpty) {
+      debugPrint('Skipping discoverUsers due to missing college scope.');
+      return const <Map<String, dynamic>>[];
+    }
+
+    final normalizedScopeCollege = _normalizeCollegeScopeValue(effectiveCollege);
+    final scopeLooksLikeDomain = _looksLikeDomainScope(normalizedScopeCollege);
 
     try {
       final users = await _api.discoverUsers(
         query: query,
         limit: limit,
-        collegeId: normalizedCollegeId,
-        college: normalizedCollege,
+        collegeId: effectiveCollegeId,
+        college: effectiveCollege,
       );
       final scopedUsers = users
           .map(_normalizeReadableUserRecord)
           .where(
             (user) => _matchesCollegeScope(
               user,
-              collegeId: normalizedCollegeId,
-              college: normalizedCollege,
+              collegeId: effectiveCollegeId,
+              college: effectiveCollege,
             ),
           )
           .toList();
@@ -2343,11 +2380,20 @@ class SupabaseService {
         }
       }
 
-      if (normalizedCollegeId.isNotEmpty) {
-        dbQuery = dbQuery.eq('college_id', normalizedCollegeId);
-      } else if (normalizedCollege.isNotEmpty) {
-        final safeCollegePattern = '%${_escapeLikePattern(normalizedCollege)}%';
-        dbQuery = dbQuery.ilike('college', safeCollegePattern);
+      if (effectiveCollegeId.isNotEmpty) {
+        dbQuery = dbQuery.eq('college_id', effectiveCollegeId);
+      } else if (effectiveCollege.isNotEmpty) {
+        if (scopeLooksLikeDomain) {
+          final safeDomain = normalizedScopeCollege
+              .replaceAll(RegExp(r'[%*,]'), '')
+              .replaceAll('_', r'\_')
+              .replaceAll('@', '');
+          dbQuery = dbQuery.ilike('email', '%@$safeDomain');
+        } else {
+          final safeCollegePattern =
+              '%${_escapeLikePattern(effectiveCollege)}%';
+          dbQuery = dbQuery.ilike('college', safeCollegePattern);
+        }
       }
 
       final response = await dbQuery.limit(limit.clamp(1, 100));
@@ -2356,8 +2402,8 @@ class SupabaseService {
       ).map(_normalizeReadableUserRecord).where((user) {
         return _matchesCollegeScope(
           user,
-          collegeId: normalizedCollegeId,
-          college: normalizedCollege,
+          collegeId: effectiveCollegeId,
+          college: effectiveCollege,
         );
       }).toList();
     } catch (e) {

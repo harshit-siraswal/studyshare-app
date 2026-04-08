@@ -159,7 +159,7 @@ AiQuestionPaperQuestion? _parseQuestionItem(dynamic raw) {
   if (decoded is! Map) return null;
 
   final item = _stringKeyedMap(decoded);
-  final question = _firstNonEmptyString([
+  final questionRaw = _firstNonEmptyString([
     item['question'],
     item['question_text'],
     item['text'],
@@ -167,7 +167,10 @@ AiQuestionPaperQuestion? _parseQuestionItem(dynamic raw) {
     item['query'],
     item['title'],
   ]);
-  if (question == null) return null;
+  final question = questionRaw == null
+      ? null
+      : _sanitizeQuestionPaperText(questionRaw);
+  if (question == null || question.isEmpty) return null;
 
   final options = _extractOptionList(
     item['options'] ??
@@ -178,25 +181,31 @@ AiQuestionPaperQuestion? _parseQuestionItem(dynamic raw) {
   );
   if (options.length < 2) return null;
 
-  final correctIndex = _resolveAnswerIndex(
-    answer:
-        item['answer'] ??
-        item['correct'] ??
-        item['correct_answer'] ??
-        item['correctOption'] ??
-        item['correct_option'] ??
-        item['correctIndex'] ??
-        item['correct_index'] ??
-        item['solution'],
-    options: options,
+  final explicitCorrectIndex = _resolveExplicitCorrectIndex(
+    item: item,
+    optionsLength: options.length,
   );
+  final correctIndex =
+      explicitCorrectIndex ??
+      _resolveAnswerIndex(
+        answer:
+            item['answer'] ??
+            item['correct'] ??
+            item['correct_answer'] ??
+            item['correctOption'] ??
+            item['correct_option'] ??
+            item['solution'],
+        options: options,
+      );
 
   final source = _parseQuestionSource(item['source']);
   return AiQuestionPaperQuestion(
     question: question,
     options: options,
     correctIndex: correctIndex,
-    explanation: item['explanation']?.toString().trim() ?? '',
+    explanation: _sanitizeQuestionPaperText(
+      item['explanation']?.toString() ?? '',
+    ),
     source: source,
   );
 }
@@ -206,9 +215,9 @@ AiQuestionPaperSource _parseQuestionSource(dynamic raw) {
   if (decoded is Map) {
     final item = _stringKeyedMap(decoded);
     return AiQuestionPaperSource(
-      title: item['title']?.toString() ?? '',
-      section: item['section']?.toString() ?? '',
-      pages: item['pages']?.toString() ?? '',
+      title: _sanitizeQuestionPaperText(item['title']?.toString() ?? ''),
+      section: _sanitizeQuestionPaperText(item['section']?.toString() ?? ''),
+      pages: _sanitizeQuestionPaperText(item['pages']?.toString() ?? ''),
       note: item['note']?.toString() ?? '',
     );
   }
@@ -237,7 +246,7 @@ String? _extractInstructionText(dynamic raw) {
     ]);
   }
   if (decoded == null) return null;
-  final value = decoded.toString().trim();
+  final value = _sanitizeQuestionPaperText(decoded.toString());
   return value.isEmpty ? null : value;
 }
 
@@ -311,16 +320,26 @@ String? _extractOptionText(dynamic raw) {
 }
 
 String? _normalizeOptionText(String raw) {
-  final trimmed = raw.trim();
+  final trimmed = _sanitizeQuestionPaperText(raw);
   if (trimmed.isEmpty) return null;
 
   final cleaned = trimmed
       .replaceFirst(RegExp(r'^[A-Za-z][\)\.\:\-]\s*'), '')
       .replaceFirst(RegExp(r'^\d+[\)\.\:\-]\s*'), '')
-      .replaceFirst(RegExp(r'^[-*]\s*'), '')
+      .replaceFirst(RegExp(r'^[-*•]\s*'), '')
       .trim();
 
   return cleaned.isEmpty ? null : cleaned;
+}
+
+String _sanitizeQuestionPaperText(String raw) {
+  return raw
+      .replaceAll(RegExp(r'[\u200B-\u200D\uFEFF]'), ' ')
+      .replaceAll(RegExp(r'[①-⑳⓪❶-❿⓵-⓾]'), ' ')
+      .replaceAll(RegExp(r'[\r\n\t]+'), ' ')
+      .replaceAll(RegExp(r'\s*[|]+\s*'), ' ')
+      .replaceAll(RegExp(r'\s{2,}'), ' ')
+      .trim();
 }
 
 String? _firstNonEmptyString(List<dynamic> candidates) {
@@ -332,6 +351,18 @@ String? _firstNonEmptyString(List<dynamic> candidates) {
     }
   }
   return null;
+}
+
+int? _resolveExplicitCorrectIndex({
+  required Map<String, dynamic> item,
+  required int optionsLength,
+}) {
+  if (optionsLength <= 0) return 0;
+  final raw = item['correctIndex'] ?? item['correct_index'];
+  if (raw == null) return null;
+  final parsed = int.tryParse(raw.toString().trim());
+  if (parsed == null) return null;
+  return parsed.clamp(0, optionsLength - 1);
 }
 
 int _resolveAnswerIndex({

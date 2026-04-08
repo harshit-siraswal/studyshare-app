@@ -2539,8 +2539,8 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
                         final frontStart = const Color(0xFF60A5FA);
                         final frontEnd = _studioBlueDark;
-                        final backStart = const Color(0xFF34D399);
-                        final backEnd = const Color(0xFF047857);
+                        final backStart = const Color(0xFFF97316);
+                        final backEnd = const Color(0xFF7C3AED);
                         final faceBlend =
                             (progress < 0.5
                                     ? progress * 2
@@ -2607,9 +2607,10 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                                           vertical: 5,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: Colors.white.withValues(
-                                            alpha: 0.2,
-                                          ),
+                                          color: (isBackFace
+                                                  ? const Color(0xFF2E1065)
+                                                  : Colors.white)
+                                              .withValues(alpha: 0.22),
                                           borderRadius: BorderRadius.circular(
                                             14,
                                           ),

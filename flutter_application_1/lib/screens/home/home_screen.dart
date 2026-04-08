@@ -24,10 +24,12 @@ import '../../services/supabase_service.dart';
 import '../../services/incoming_share_service.dart';
 import '../../services/sticker_service.dart';
 import '../../services/subscription_service.dart';
+import '../../services/backend_api_service.dart';
 import '../../widgets/success_overlay.dart';
 import '../../widgets/post_notice_dialog.dart';
 import '../../widgets/paywall_dialog.dart';
 import '../../models/user.dart';
+import '../../utils/admin_access.dart';
 import '../../data/departments_data.dart';
 import '../../data/academic_subjects_data.dart';
 import '../study/syllabus_upload_screen.dart';
@@ -177,30 +179,66 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   Future<void> _loadComposerAccess() async {
     final fallbackCanUpload = _optimisticCollegeUploaderAccess;
+    var canUpload = fallbackCanUpload;
+    var canPost = false;
+
     try {
-      final role = await _supabaseService.getCurrentUserRole().timeout(
-        const Duration(seconds: 4),
-        onTimeout: () =>
-            fallbackCanUpload ? AppRoles.collegeUser : AppRoles.readOnly,
-      );
-      if (!mounted) return;
-      setState(() {
-        _canUploadResources = role != AppRoles.readOnly;
-        _canPostNotices =
-            role == AppRoles.teacher ||
-            role == AppRoles.admin ||
-            role == AppRoles.moderator;
-        _roleLoading = false;
-      });
+      final profile = await _supabaseService
+          .getCurrentUserProfile(maxAttempts: 2, forceRefresh: true)
+          .timeout(
+            const Duration(seconds: 5),
+            onTimeout: () => <String, dynamic>{},
+          );
+
+      if (profile.isNotEmpty) {
+        final resolvedRole = resolveEffectiveProfileRole(profile);
+        canUpload =
+            resolvedRole != AppRoles.readOnly ||
+            canManageAdminResourcesProfile(profile);
+        canPost =
+            resolvedRole == AppRoles.teacher ||
+            resolvedRole == AppRoles.admin ||
+            resolvedRole == AppRoles.moderator ||
+            hasAdminCapability(profile, 'upload_notice');
+      }
     } catch (e) {
-      debugPrint('Failed to resolve composer access: $e');
-      if (!mounted) return;
-      setState(() {
-        _canUploadResources = fallbackCanUpload;
-        _canPostNotices = false;
-        _roleLoading = false;
-      });
+      debugPrint('Failed to resolve composer profile access: $e');
     }
+
+    if (!canUpload) {
+      final email = _effectiveUserEmail.trim();
+      if (email.isNotEmpty) {
+        try {
+          final payload = await BackendApiService().getPublicProfile(
+            email: email,
+          );
+          final publicProfile =
+              (payload['profile'] as Map?)?.cast<String, dynamic>() ??
+              payload.cast<String, dynamic>();
+          if (publicProfile.isNotEmpty) {
+            final resolvedRole = resolveEffectiveProfileRole(publicProfile);
+            canUpload =
+                resolvedRole != AppRoles.readOnly ||
+                canManageAdminResourcesProfile(publicProfile);
+            canPost =
+                canPost ||
+                resolvedRole == AppRoles.teacher ||
+                resolvedRole == AppRoles.admin ||
+                resolvedRole == AppRoles.moderator ||
+                hasAdminCapability(publicProfile, 'upload_notice');
+          }
+        } catch (e) {
+          debugPrint('Failed to resolve public access context: $e');
+        }
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _canUploadResources = canUpload;
+      _canPostNotices = canPost;
+      _roleLoading = false;
+    });
   }
 
   Future<void> _showUpload({PlatformFile? prefilledFile}) async {
@@ -209,7 +247,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text(_uploadReadOnlyMessage)),
       );
-      return;
     }
     await showUploadDialog(
       context,
@@ -883,7 +920,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text(_uploadReadOnlyMessage)),
       );
-      return;
     }
     if (_currentIndex == 0 && _isStudySyllabusTab) {
       if (!_canUploadSyllabusFromStudy) {

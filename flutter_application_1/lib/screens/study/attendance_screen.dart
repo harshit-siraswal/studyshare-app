@@ -79,20 +79,17 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   void _startScheduleProgressTimerIfNeeded() {
     if (_scheduleProgressTimer?.isActive == true) return;
     _scheduleProgressTimer?.cancel();
-    _scheduleProgressTimer = Timer.periodic(
-      const Duration(seconds: 30),
-      (_) {
-        if (!mounted) {
-          _scheduleProgressTimer?.cancel();
-          return;
-        }
-        if (!_hasOngoingClass()) {
-          _scheduleProgressTimer?.cancel();
-          return;
-        }
-        setState(() {});
-      },
-    );
+    _scheduleProgressTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!mounted) {
+        _scheduleProgressTimer?.cancel();
+        return;
+      }
+      if (!_hasOngoingClass()) {
+        _scheduleProgressTimer?.cancel();
+        return;
+      }
+      setState(() {});
+    });
   }
 
   /// Returns true when the current snapshot contains at least one class that
@@ -118,10 +115,18 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       final eM = int.tryParse(eParts[1]);
       if (sH == null || sM == null || eH == null || eM == null) continue;
       final start = DateTime(
-        entryDate.year, entryDate.month, entryDate.day, sH, sM,
+        entryDate.year,
+        entryDate.month,
+        entryDate.day,
+        sH,
+        sM,
       );
       final end = DateTime(
-        entryDate.year, entryDate.month, entryDate.day, eH, eM,
+        entryDate.year,
+        entryDate.month,
+        entryDate.day,
+        eH,
+        eM,
       );
       if (!now.isBefore(start) && now.isBefore(end)) return true;
     }
@@ -1312,7 +1317,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final now = DateTime.now();
     final entryDate = _attendanceService.tryParseDate(entry.lectureDate);
     final today = DateTime(now.year, now.month, now.day);
-    final isToday = entryDate != null &&
+    final isToday =
+        entryDate != null &&
         DateTime(entryDate.year, entryDate.month, entryDate.day) == today;
 
     DateTime? classStart;
@@ -1327,16 +1333,25 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         final eMin = int.tryParse(eParts[1]);
         if (sHour != null && sMin != null && eHour != null && eMin != null) {
           classStart = DateTime(
-            entryDate.year, entryDate.month, entryDate.day, sHour, sMin,
+            entryDate.year,
+            entryDate.month,
+            entryDate.day,
+            sHour,
+            sMin,
           );
           classEnd = DateTime(
-            entryDate.year, entryDate.month, entryDate.day, eHour, eMin,
+            entryDate.year,
+            entryDate.month,
+            entryDate.day,
+            eHour,
+            eMin,
           );
         }
       }
     }
 
-    final isOngoing = isToday &&
+    final isOngoing =
+        isToday &&
         classStart != null &&
         classEnd != null &&
         !now.isBefore(classStart) &&
@@ -1346,165 +1361,277 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     if (isOngoing) {
       final totalSecs = classEnd.difference(classStart).inSeconds.toDouble();
       final elapsedSecs = now.difference(classStart).inSeconds.toDouble();
-      progress =
-          (totalSecs > 0 ? elapsedSecs / totalSecs : 0.0).clamp(0.0, 1.0);
+      progress = (totalSecs > 0 ? elapsedSecs / totalSecs : 0.0).clamp(
+        0.0,
+        1.0,
+      );
     }
 
     final accentColor = isOngoing ? Colors.green : AppTheme.primary;
     final title = entry.courseName.isEmpty
         ? (entry.title.isEmpty ? 'Class' : entry.title)
         : entry.courseName;
-    final location =
-        entry.classRoom.isEmpty ? 'Classroom TBA' : entry.classRoom;
+    final location = entry.classRoom.isEmpty
+        ? 'Classroom TBA'
+        : entry.classRoom;
+    final surfaceColor = isDark
+        ? const Color(0xFF111827)
+        : const Color(0xFFF1F5F9);
+    final shellTopColor = isDark ? const Color(0xFF182334) : Colors.white;
+    final shellBottomColor = isDark
+        ? const Color(0xFF0B1422)
+        : const Color(0xFFE2E8F0);
+    final softBorderColor = isOngoing
+        ? accentColor.withValues(alpha: isDark ? 0.30 : 0.22)
+        : (isDark
+              ? Colors.white.withValues(alpha: 0.06)
+              : Colors.white.withValues(alpha: 0.85));
+    final cardShadows = isDark
+        ? <BoxShadow>[
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.45),
+              offset: const Offset(10, 10),
+              blurRadius: 24,
+              spreadRadius: -10,
+            ),
+            BoxShadow(
+              color: Colors.white.withValues(alpha: 0.05),
+              offset: const Offset(-8, -8),
+              blurRadius: 22,
+              spreadRadius: -12,
+            ),
+          ]
+        : <BoxShadow>[
+            BoxShadow(
+              color: const Color(0xFFD6DEE8).withValues(alpha: 0.95),
+              offset: const Offset(10, 10),
+              blurRadius: 22,
+              spreadRadius: -10,
+            ),
+            BoxShadow(
+              color: Colors.white.withValues(alpha: 0.98),
+              offset: const Offset(-8, -8),
+              blurRadius: 20,
+              spreadRadius: -10,
+            ),
+          ];
+    final innerSurfaceColor = Color.alphaBlend(
+      isDark
+          ? Colors.white.withValues(alpha: 0.03)
+          : Colors.white.withValues(alpha: 0.78),
+      surfaceColor,
+    );
+    final timeTileColor = Color.alphaBlend(
+      accentColor.withValues(alpha: isDark ? 0.14 : 0.10),
+      innerSurfaceColor,
+    );
+    final insetShadows = isDark
+        ? <BoxShadow>[
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.28),
+              offset: const Offset(6, 6),
+              blurRadius: 14,
+              spreadRadius: -8,
+            ),
+            BoxShadow(
+              color: Colors.white.withValues(alpha: 0.04),
+              offset: const Offset(-4, -4),
+              blurRadius: 12,
+              spreadRadius: -8,
+            ),
+          ]
+        : <BoxShadow>[
+            BoxShadow(
+              color: const Color(0xFFD9E1EA).withValues(alpha: 0.9),
+              offset: const Offset(5, 5),
+              blurRadius: 12,
+              spreadRadius: -8,
+            ),
+            BoxShadow(
+              color: Colors.white.withValues(alpha: 0.95),
+              offset: const Offset(-4, -4),
+              blurRadius: 12,
+              spreadRadius: -8,
+            ),
+          ];
 
     return Opacity(
       opacity: isPast ? 0.55 : 1.0,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(18),
-        child: Container(
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: isDark ? AppTheme.darkCard : Colors.white,
-            borderRadius: BorderRadius.circular(18),
-            border: isOngoing
-                ? Border.all(
-                    color: Colors.green.withValues(alpha: 0.5),
-                    width: 1.5,
-                  )
-                : Border.all(
-                    color: isDark ? Colors.white10 : Colors.black12,
-                  ),
-          ),
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(14),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: 82,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 12,
-                      ),
-                      decoration: BoxDecoration(
-                        color: accentColor.withValues(
-                          alpha: isDark ? 0.16 : 0.1,
+      child: Container(
+        width: double.infinity,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(22),
+          boxShadow: cardShadows,
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(22),
+          child: Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [shellTopColor, shellBottomColor],
+              ),
+              color: surfaceColor,
+              borderRadius: BorderRadius.circular(22),
+              border: Border.all(
+                color: softBorderColor,
+                width: isOngoing ? 1.4 : 1,
+              ),
+            ),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 82,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 12,
                         ),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            entry.start,
-                            style: GoogleFonts.inter(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w800,
-                              color: accentColor,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            entry.end,
-                            style: GoogleFonts.inter(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w600,
-                              color: accentColor.withValues(alpha: 0.8),
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            _formatDate(entry.lectureDate),
-                            style: GoogleFonts.inter(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w600,
-                              color: isDark
-                                  ? AppTheme.darkTextSecondary
-                                  : AppTheme.lightTextSecondary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (isOngoing) ...[
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Colors.green.withValues(alpha: 0.14),
-                                borderRadius: BorderRadius.circular(999),
-                              ),
-                              child: Text(
-                                'In Progress',
-                                style: GoogleFonts.inter(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.green,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              Color.alphaBlend(
+                                accentColor.withValues(
+                                  alpha: isDark ? 0.16 : 0.12,
                                 ),
+                                timeTileColor,
+                              ),
+                              timeTileColor,
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(
+                            color: accentColor.withValues(
+                              alpha: isDark ? 0.22 : 0.15,
+                            ),
+                          ),
+                          boxShadow: insetShadows,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              entry.start,
+                              style: GoogleFonts.inter(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: accentColor,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              entry.end,
+                              style: GoogleFonts.inter(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: accentColor.withValues(alpha: 0.8),
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              _formatDate(entry.lectureDate),
+                              style: GoogleFonts.inter(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w600,
+                                color: isDark
+                                    ? AppTheme.darkTextSecondary
+                                    : AppTheme.lightTextSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (isOngoing) ...[
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withValues(alpha: 0.14),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  'In Progress',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.green,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 5),
+                            ],
+                            Text(
+                              title,
+                              style: GoogleFonts.inter(
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w700,
+                                color: isDark
+                                    ? AppTheme.darkTextPrimary
+                                    : AppTheme.lightTextPrimary,
                               ),
                             ),
                             const SizedBox(height: 5),
+                            Text(
+                              entry.courseComponentName,
+                              style: GoogleFonts.inter(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.primary,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              location,
+                              style: GoogleFonts.inter(
+                                fontSize: 12.5,
+                                height: 1.4,
+                                color: isDark
+                                    ? AppTheme.darkTextSecondary
+                                    : AppTheme.lightTextSecondary,
+                              ),
+                            ),
                           ],
-                          Text(
-                            title,
-                            style: GoogleFonts.inter(
-                              fontSize: 14.5,
-                              fontWeight: FontWeight.w700,
-                              color: isDark
-                                  ? AppTheme.darkTextPrimary
-                                  : AppTheme.lightTextPrimary,
-                            ),
-                          ),
-                          const SizedBox(height: 5),
-                          Text(
-                            entry.courseComponentName,
-                            style: GoogleFonts.inter(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w600,
-                              color: AppTheme.primary,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            location,
-                            style: GoogleFonts.inter(
-                              fontSize: 12.5,
-                              height: 1.4,
-                              color: isDark
-                                  ? AppTheme.darkTextSecondary
-                                  : AppTheme.lightTextSecondary,
-                            ),
-                          ),
-                        ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (isOngoing)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(999),
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        backgroundColor: Colors.green.withValues(alpha: 0.12),
+                        valueColor: const AlwaysStoppedAnimation<Color>(
+                          Colors.green,
+                        ),
+                        minHeight: 6,
                       ),
                     ),
-                  ],
-                ),
-              ),
-              // Green progress bar shown at the bottom only for ongoing classes.
-              if (isOngoing)
-                LinearProgressIndicator(
-                  value: progress,
-                  backgroundColor: Colors.green.withValues(alpha: 0.12),
-                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.green),
-                  minHeight: 4,
-                ),
-            ],
+                  ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
-
 
   Widget _buildSyncStatusBanner(bool isDark) {
     final isRateLimited = _lastSyncErrorCode == 'rate_limited';
@@ -1552,5 +1679,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     if (difference.inDays < 1) {
       return '${difference.inHours} hr${difference.inHours == 1 ? '' : 's'} ago';
     }
-    return '${difference.inDays} day${difference.inDays == 1 ? '' : 's'} ago';  }
+    return '${difference.inDays} day${difference.inDays == 1 ? '' : 's'} ago';
+  }
 }

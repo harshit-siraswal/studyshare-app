@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../config/theme.dart';
+import '../../utils/ai_token_budget_utils.dart';
 import '../../widgets/ai_recharge_dialog.dart';
 
 class AiTokenUsageScreen extends StatefulWidget {
@@ -37,7 +38,7 @@ class AiTokenUsageScreen extends StatefulWidget {
 class _AiTokenUsageScreenState extends State<AiTokenUsageScreen> {
   static const int _tokensPerCredit = 2000;
   /// Default monthly token budget for new/free-tier users
-  static const int _defaultBudget = 40160;
+  static const int _defaultBudget = 40000;
 
   int get _budget => widget.budget > 0 ? widget.budget : _defaultBudget;
   int get _used => widget.used.clamp(0, _budget);
@@ -239,6 +240,15 @@ class _AiTokenUsageScreenState extends State<AiTokenUsageScreen> {
                         fontSize: 13,
                         height: 1.4,
                         color: subTextColor,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Recharge rate: \u20b91 = $kVisibleAiRechargeTokensPerRupee AI tokens',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.primary,
                       ),
                     ),
                     const SizedBox(height: 16),

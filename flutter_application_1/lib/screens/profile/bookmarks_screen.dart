@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../services/supabase_service.dart';
+import '../../services/resource_state_repository.dart';
 import '../../models/resource.dart';
 import '../../models/department_account.dart';
 import '../../widgets/resource_card.dart';
@@ -14,23 +15,68 @@ class BookmarksScreen extends StatefulWidget {
   State<BookmarksScreen> createState() => _BookmarksScreenState();
 }
 
-class _BookmarksScreenState extends State<BookmarksScreen> with SingleTickerProviderStateMixin {
+class _BookmarksScreenState extends State<BookmarksScreen>
+    with SingleTickerProviderStateMixin {
   final SupabaseService _supabase = SupabaseService();
+  final ResourceStateRepository _resourceStateRepository =
+      ResourceStateRepository();
   late TabController _tabController;
-  
+
   List<Map<String, dynamic>> _allBookmarks = [];
   bool _isLoading = true;
   String? _errorMessage;
 
   // Department accounts (Twitter-style) - Mirrored from NoticesScreen
   final List<DepartmentAccount> _departmentAccounts = [
-    DepartmentAccount(id: 'general', name: 'General Notices', handle: '@general', avatarLetter: 'G', color: const Color(0xFF3B82F6)),
-    DepartmentAccount(id: 'cse', name: 'Computer Science', handle: '@cse_dept', avatarLetter: 'CS', color: const Color(0xFF8B5CF6)),
-    DepartmentAccount(id: 'ece', name: 'Electronics & Comm', handle: '@ece_dept', avatarLetter: 'EC', color: const Color(0xFF10B981)),
-    DepartmentAccount(id: 'eee', name: 'Electrical Engg', handle: '@eee_dept', avatarLetter: 'EE', color: const Color(0xFFF59E0B)),
-    DepartmentAccount(id: 'me', name: 'Mechanical Engg', handle: '@mech_dept', avatarLetter: 'ME', color: const Color(0xFFEF4444)),
-    DepartmentAccount(id: 'ce', name: 'Civil Engineering', handle: '@civil_dept', avatarLetter: 'CE', color: const Color(0xFF6366F1)),
-    DepartmentAccount(id: 'it', name: 'Information Tech', handle: '@it_dept', avatarLetter: 'IT', color: const Color(0xFF14B8A6)),
+    DepartmentAccount(
+      id: 'general',
+      name: 'General Notices',
+      handle: '@general',
+      avatarLetter: 'G',
+      color: const Color(0xFF3B82F6),
+    ),
+    DepartmentAccount(
+      id: 'cse',
+      name: 'Computer Science',
+      handle: '@cse_dept',
+      avatarLetter: 'CS',
+      color: const Color(0xFF8B5CF6),
+    ),
+    DepartmentAccount(
+      id: 'ece',
+      name: 'Electronics & Comm',
+      handle: '@ece_dept',
+      avatarLetter: 'EC',
+      color: const Color(0xFF10B981),
+    ),
+    DepartmentAccount(
+      id: 'eee',
+      name: 'Electrical Engg',
+      handle: '@eee_dept',
+      avatarLetter: 'EE',
+      color: const Color(0xFFF59E0B),
+    ),
+    DepartmentAccount(
+      id: 'me',
+      name: 'Mechanical Engg',
+      handle: '@mech_dept',
+      avatarLetter: 'ME',
+      color: const Color(0xFFEF4444),
+    ),
+    DepartmentAccount(
+      id: 'ce',
+      name: 'Civil Engineering',
+      handle: '@civil_dept',
+      avatarLetter: 'CE',
+      color: const Color(0xFF6366F1),
+    ),
+    DepartmentAccount(
+      id: 'it',
+      name: 'Information Tech',
+      handle: '@it_dept',
+      avatarLetter: 'IT',
+      color: const Color(0xFF14B8A6),
+    ),
   ];
 
   @override
@@ -53,6 +99,46 @@ class _BookmarksScreenState extends State<BookmarksScreen> with SingleTickerProv
     });
     try {
       final bookmarks = await _supabase.getBookmarks();
+      final userEmail = (_supabase.currentUserEmail ?? '').trim();
+      final bookmarkedResources = bookmarks
+          .map((bookmark) {
+            final content =
+                bookmark['content'] ??
+                bookmark['resource'] ??
+                bookmark['notice'];
+            final resolvedType =
+                (bookmark['type'] ??
+                        (bookmark['resource_id'] != null
+                            ? 'resource'
+                            : bookmark['notice_id'] != null
+                            ? 'notice'
+                            : null))
+                    ?.toString();
+            if (resolvedType != 'resource' || content is! Map) {
+              return null;
+            }
+            try {
+              return Resource.fromJson(Map<String, dynamic>.from(content));
+            } catch (_) {
+              return null;
+            }
+          })
+          .whereType<Resource>()
+          .toList(growable: false);
+
+      if (userEmail.isNotEmpty && bookmarkedResources.isNotEmpty) {
+        try {
+          await _resourceStateRepository.prefetchResourceStateForResources(
+            userEmail: userEmail,
+            resources: bookmarkedResources,
+          );
+        } catch (e, stackTrace) {
+          debugPrint(
+            'Bookmark resource-state prefetch failed: $e\n$stackTrace',
+          );
+        }
+      }
+
       if (mounted) {
         setState(() {
           _allBookmarks = bookmarks;
@@ -73,11 +159,14 @@ class _BookmarksScreenState extends State<BookmarksScreen> with SingleTickerProv
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Scaffold(
       backgroundColor: isDark ? Colors.black : AppTheme.lightBackground,
       appBar: AppBar(
-        title: Text('Bookmarks', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+        title: Text(
+          'Bookmarks',
+          style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+        ),
         backgroundColor: Colors.transparent,
         elevation: 0,
         bottom: TabBar(
@@ -95,56 +184,64 @@ class _BookmarksScreenState extends State<BookmarksScreen> with SingleTickerProv
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _errorMessage != null
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(_errorMessage!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-                      const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: _fetchBookmarks,
-                        child: const Text('Retry'),
-                      ),
-                    ],
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    _errorMessage!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
                   ),
-                )
-              : TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _buildList('all'),
-                    _buildList('resource'),
-                    _buildList('notice'),
-                  ],
-                ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: _fetchBookmarks,
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            )
+          : TabBarView(
+              controller: _tabController,
+              children: [
+                _buildList('all'),
+                _buildList('resource'),
+                _buildList('notice'),
+              ],
+            ),
     );
   }
 
   Widget _buildList(String type) {
     // Create a copy to avoid mutating the original list
     List<Map<String, dynamic>> filtered = List.from(_allBookmarks);
-    
+
     // Filter invalid entries first (where both potential targets are missing)
-    filtered.removeWhere((b) =>
-        b['resource_id'] == null &&
-        b['notice_id'] == null &&
-        b['type'] == null &&
-        b['content'] == null &&
-        b['resource'] == null &&
-        b['notice'] == null);
+    filtered.removeWhere(
+      (b) =>
+          b['resource_id'] == null &&
+          b['notice_id'] == null &&
+          b['type'] == null &&
+          b['content'] == null &&
+          b['resource'] == null &&
+          b['notice'] == null,
+    );
 
     if (type != 'all') {
       filtered = filtered.where((b) {
-        final resolvedType = (b['type'] ??
-                (b['resource_id'] != null
-                    ? 'resource'
-                    : b['notice_id'] != null
+        final resolvedType =
+            (b['type'] ??
+                    (b['resource_id'] != null
+                        ? 'resource'
+                        : b['notice_id'] != null
                         ? 'notice'
                         : null))
-            ?.toString();
+                ?.toString();
         return resolvedType == type;
       }).toList();
     }
-    
+
     // Always sort by created_at descending
     filtered.sort((a, b) {
       final aDate = DateTime.tryParse(a['created_at'] ?? '') ?? DateTime(0);
@@ -163,33 +260,38 @@ class _BookmarksScreenState extends State<BookmarksScreen> with SingleTickerProv
       itemCount: filtered.length,
       itemBuilder: (context, index) {
         final bookmark = filtered[index];
-        
-        final resolvedType = (bookmark['type'] ??
-                (bookmark['resource_id'] != null
-                    ? 'resource'
-                    : bookmark['notice_id'] != null
+
+        final resolvedType =
+            (bookmark['type'] ??
+                    (bookmark['resource_id'] != null
+                        ? 'resource'
+                        : bookmark['notice_id'] != null
                         ? 'notice'
                         : null))
-            ?.toString();
-        final content = bookmark['content'] ?? bookmark['resource'] ?? bookmark['notice'];
+                ?.toString();
+        final content =
+            bookmark['content'] ?? bookmark['resource'] ?? bookmark['notice'];
 
         if (resolvedType == 'resource' && content != null) {
-          final resource = Resource.fromJson(Map<String, dynamic>.from(content));
+          final resource = Resource.fromJson(
+            Map<String, dynamic>.from(content),
+          );
           return Padding(
             padding: const EdgeInsets.only(bottom: 16),
             child: ResourceCard(
               resource: resource,
               userEmail: _supabase.currentUserEmail ?? '',
+              deferRemoteStateHydration: true,
             ),
           );
         } else if (resolvedType == 'notice' && content != null) {
           final noticeMap = Map<String, dynamic>.from(content);
-          
+
           // Resolve DepartmentAccount
           final deptId = noticeMap['department'] as String? ?? 'general';
           final account = _departmentAccounts.firstWhere(
             (a) => a.id == deptId,
-            orElse: () => _departmentAccounts.first, 
+            orElse: () => _departmentAccounts.first,
           );
 
           return Padding(
@@ -204,6 +306,7 @@ class _BookmarksScreenState extends State<BookmarksScreen> with SingleTickerProv
         // Log unexpected data states for debugging
         debugPrint('Bookmark missing expected data: ${bookmark['id']}');
         return const SizedBox.shrink();
-      },    );
+      },
+    );
   }
 }

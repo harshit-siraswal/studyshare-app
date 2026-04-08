@@ -63,31 +63,42 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
       final resolvedCollegeId = (widget.collegeId?.trim().isNotEmpty ?? false)
           ? widget.collegeId!.trim()
           : profile['college_id']?.toString().trim() ?? '';
+      final fallbackCollegeHint =
+          (widget.collegeDomain?.trim().isNotEmpty ?? false)
+          ? widget.collegeDomain!.trim()
+          : (widget.userEmail.contains('@')
+            ? widget.userEmail.split('@').last.trim()
+            : '');
+      final profileCollege = profile['college']?.toString().trim() ?? '';
       final resolvedCollege = (widget.collegeName?.trim().isNotEmpty ?? false)
           ? widget.collegeName!.trim()
-          : profile['college']?.toString().trim() ?? '';
-      final students = resolvedCollegeId.isNotEmpty || resolvedCollege.isNotEmpty
-          ? await _supabaseService.discoverUsers(
-              query: _searchQuery,
-              limit: 50,
-              collegeId: resolvedCollegeId,
-              college: resolvedCollege,
-            )
-          : await _supabaseService.getUsersByCollege(
-              (widget.collegeDomain?.trim().isNotEmpty ?? false)
-                  ? widget.collegeDomain!.trim()
-                  : (widget.userEmail.contains('@')
-                        ? widget.userEmail.split('@').last.trim()
-                        : ''),
-              searchQuery: _searchQuery,
-            );
+          : profileCollege.isNotEmpty
+          ? profileCollege
+          : fallbackCollegeHint;
+      final students = await _supabaseService.discoverUsers(
+        query: _searchQuery,
+        limit: 50,
+        collegeId: resolvedCollegeId.isNotEmpty ? resolvedCollegeId : null,
+        college: resolvedCollege.isNotEmpty ? resolvedCollege : null,
+      );
 
       final currentUserEmail = widget.userEmail.trim().toLowerCase();
+      final allowedDomain = ((widget.collegeDomain?.trim().isNotEmpty ?? false)
+              ? widget.collegeDomain!.trim()
+              : (widget.userEmail.contains('@')
+                    ? widget.userEmail.split('@').last.trim()
+                    : ''))
+          .toLowerCase()
+          .replaceAll('@', '');
       final filtered = students.where((student) {
         final emailValue = student['email'];
         if (emailValue is! String) return false;
         final email = emailValue.trim().toLowerCase();
-        return email.isNotEmpty && email != currentUserEmail;
+        if (email.isEmpty || email == currentUserEmail) return false;
+        if (allowedDomain.isNotEmpty && !email.endsWith('@$allowedDomain')) {
+          return false;
+        }
+        return true;
       }).toList();
 
       if (mounted) {
