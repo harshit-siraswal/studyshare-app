@@ -1,5 +1,6 @@
 import 'dart:async' show unawaited;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_linkify/flutter_linkify.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:share_plus/share_plus.dart';
@@ -45,11 +46,18 @@ class _NoticeCardState extends State<NoticeCard> {
   bool _isSaved = false;
   bool _isLoading = false;
   bool _manageLoading = false;
+  OverlayEntry? _peekOverlayEntry;
 
   @override
   void initState() {
     super.initState();
     _checkSavedStatus();
+  }
+
+  @override
+  void dispose() {
+    _hidePeekPreview();
+    super.dispose();
   }
 
   Future<void> _checkSavedStatus() async {
@@ -190,6 +198,253 @@ class _NoticeCardState extends State<NoticeCard> {
         break;
     }
   }
+
+  // ─── Peek preview ────────────────────────────────────────────────────────
+
+  void _showPeekPreview() {
+    if (_peekOverlayEntry != null || !mounted) return;
+    final overlay = Overlay.maybeOf(context, rootOverlay: true);
+    if (overlay == null) return;
+
+    HapticFeedback.selectionClick();
+    _peekOverlayEntry = OverlayEntry(
+      builder: (overlayContext) => IgnorePointer(
+        ignoring: true,
+        child: Material(
+          color: Colors.black.withValues(alpha: 0.38),
+          child: _buildPeekCard(overlayContext),
+        ),
+      ),
+    );
+    overlay.insert(_peekOverlayEntry!);
+  }
+
+  void _hidePeekPreview() {
+    _peekOverlayEntry?.remove();
+    _peekOverlayEntry = null;
+  }
+
+  Widget _buildPeekCard(BuildContext overlayCtx) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final screenWidth = MediaQuery.of(overlayCtx).size.width;
+    // Wider than resource peek (460 → up to full width minus 24 px)
+    final maxWidth = screenWidth > 500 ? 460.0 : screenWidth - 24;
+
+    final title = widget.notice['title']?.toString() ?? 'Untitled';
+    final content = widget.notice['content']?.toString() ?? '';
+    final priority = widget.notice['priority']?.toString();
+    final createdAt = widget.notice['created_at']?.toString();
+    final attachmentUrl = widget.notice['attachment_url']?.toString() ?? '';
+    final hasAttachment = attachmentUrl.isNotEmpty;
+
+    final cardBg = isDark
+        ? const Color(0xFF0F1117).withValues(alpha: 0.97)
+        : Colors.white.withValues(alpha: 0.97);
+    final textColor =
+        isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
+    final subColor =
+        isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary;
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 32),
+          child: TweenAnimationBuilder<double>(
+            tween: Tween<double>(begin: 0.92, end: 1),
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOutCubic,
+            builder: (ctx, scale, child) =>
+                Transform.scale(scale: scale, child: child),
+            child: Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: cardBg,
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(
+                  color: isDark ? Colors.white12 : Colors.black12,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.32),
+                    blurRadius: 36,
+                    offset: const Offset(0, 18),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Header: avatar + account name + "Release to close" ──
+                  Row(
+                    children: [
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: widget.account.color,
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: Center(
+                          child: Text(
+                            widget.account.avatarLetter,
+                            style: GoogleFonts.inter(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.account.name,
+                              style: GoogleFonts.inter(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: textColor,
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              widget.account.handle,
+                              style: GoogleFonts.inter(
+                                fontSize: 11,
+                                color: subColor,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Text(
+                        'Release to close',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: isDark ? Colors.white54 : Colors.black45,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  // ── Chips row ──────────────────────────────────────────
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      _peekChip(
+                        label: 'NOTICE',
+                        color: AppTheme.primary,
+                        isDark: isDark,
+                      ),
+                      if (priority == 'urgent')
+                        _peekChip(
+                          label: 'URGENT',
+                          color: AppTheme.error,
+                          isDark: isDark,
+                        ),
+                      if (hasAttachment)
+                        _peekChip(
+                          label: '📎 ATTACHMENT',
+                          color: const Color(0xFF6366F1),
+                          isDark: isDark,
+                        ),
+                      if (createdAt != null)
+                        _peekChip(
+                          label: _formatPeekDate(createdAt),
+                          color: subColor,
+                          isDark: isDark,
+                          filled: false,
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  // ── Title ──────────────────────────────────────────────
+                  Text(
+                    title,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.inter(
+                      fontSize: 19,
+                      fontWeight: FontWeight.w800,
+                      color: textColor,
+                      height: 1.25,
+                    ),
+                  ),
+                  // ── Content preview ────────────────────────────────────
+                  if (content.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      content,
+                      maxLines: 8,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 13.5,
+                        color: subColor,
+                        height: 1.45,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 4),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _peekChip({
+    required String label,
+    required Color color,
+    required bool isDark,
+    bool filled = true,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: filled
+            ? color.withValues(alpha: isDark ? 0.18 : 0.12)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(999),
+        border: filled
+            ? null
+            : Border.all(
+                color: color.withValues(alpha: 0.35),
+              ),
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.inter(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          color: color,
+        ),
+      ),
+    );
+  }
+
+  String _formatPeekDate(String dateString) {
+    try {
+      final dt = DateTime.parse(dateString).toLocal();
+      // e.g. "9 Apr 2026"
+      const months = [
+        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      ];
+      return '${dt.day} ${months[dt.month - 1]} ${dt.year}';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -371,27 +626,32 @@ class _NoticeCardState extends State<NoticeCard> {
                 child: InkWell(
                   onTap: openDetail,
                   borderRadius: BorderRadius.circular(14),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: <Color>[paperTop, paperBottom],
-                      ),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: paperBorder),
-                      boxShadow: <BoxShadow>[
-                        BoxShadow(
-                          color: Colors.black.withValues(
-                            alpha: widget.isDark ? 0.18 : 0.08,
-                          ),
-                          blurRadius: 12,
-                          offset: const Offset(0, 6),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onLongPressStart: (_) => _showPeekPreview(),
+                    onLongPressCancel: _hidePeekPreview,
+                    onLongPressUp: _hidePeekPreview,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: <Color>[paperTop, paperBottom],
                         ),
-                      ],
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: paperBorder),
+                        boxShadow: <BoxShadow>[
+                          BoxShadow(
+                            color: Colors.black.withValues(
+                              alpha: widget.isDark ? 0.18 : 0.08,
+                            ),
+                            blurRadius: 12,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
@@ -614,6 +874,7 @@ class _NoticeCardState extends State<NoticeCard> {
                       ),
                     ),
                   ),
+                    ), // GestureDetector
                 ),
               ),
             ),
