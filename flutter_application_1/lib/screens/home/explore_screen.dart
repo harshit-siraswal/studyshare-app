@@ -28,7 +28,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
   final SupabaseService _supabase = SupabaseService();
   final AuthService _auth = AuthService();
   final TextEditingController _searchController = TextEditingController();
-  
+
   List<Map<String, dynamic>> _users = [];
   bool _isLoading = true;
   String _searchQuery = '';
@@ -48,7 +48,9 @@ class _ExploreScreenState extends State<ExploreScreen> {
       try {
         profile = await _supabase.getCurrentUserProfile(maxAttempts: 1);
       } catch (e) {
-        debugPrint('Failed to resolve current profile for classmates discovery: $e');
+        debugPrint(
+          'Failed to resolve current profile for classmates discovery: $e',
+        );
       }
 
       final resolvedCollegeId = (widget.collegeId?.trim().isNotEmpty ?? false)
@@ -68,17 +70,18 @@ class _ExploreScreenState extends State<ExploreScreen> {
         collegeId: resolvedCollegeId.isNotEmpty ? resolvedCollegeId : null,
         college: resolvedCollege.isNotEmpty ? resolvedCollege : null,
       );
-      
+
       // Filter out current user
       final currentEmail = (_auth.userEmail ?? '').trim().toLowerCase();
       final fallbackDomain = currentEmail.contains('@')
           ? currentEmail.split('@').last.trim()
           : '';
-      final allowedDomain = (widget.collegeDomain.trim().isNotEmpty
-              ? widget.collegeDomain.trim()
-              : fallbackDomain)
-          .toLowerCase()
-          .replaceAll('@', '');
+      final allowedDomain =
+          (widget.collegeDomain.trim().isNotEmpty
+                  ? widget.collegeDomain.trim()
+                  : fallbackDomain)
+              .toLowerCase()
+              .replaceAll('@', '');
       final filtered = users.where((u) {
         final email = (u['email']?.toString() ?? '').trim().toLowerCase();
         if (email.isEmpty) return false;
@@ -88,7 +91,7 @@ class _ExploreScreenState extends State<ExploreScreen> {
         }
         return true;
       }).toList();
-      
+
       if (mounted) {
         setState(() {
           _users = filtered;
@@ -105,7 +108,8 @@ class _ExploreScreenState extends State<ExploreScreen> {
         });
       }
     }
-  }  
+  }
+
   @override
   void dispose() {
     _debounce?.cancel();
@@ -115,22 +119,43 @@ class _ExploreScreenState extends State<ExploreScreen> {
 
   void _onSearchChanged(String query) {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
-    
+
     setState(() => _searchQuery = query);
-    
+
     _debounce = Timer(const Duration(milliseconds: 300), () {
       _fetchUsers();
     });
   }
 
+  bool _isBannedUser(Map<String, dynamic> user) {
+    final candidates = <dynamic>[
+      user['is_banned'],
+      user['isBanned'],
+      user['banned'],
+    ];
+    for (final value in candidates) {
+      if (value == true) return true;
+      final normalized = value?.toString().trim().toLowerCase() ?? '';
+      if (normalized == 'true' || normalized == '1' || normalized == 'banned') {
+        return true;
+      }
+    }
+    return false;
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    
+
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
+      backgroundColor: isDark
+          ? AppTheme.darkBackground
+          : AppTheme.lightBackground,
       appBar: AppBar(
-        title: Text('Find Classmates', style: GoogleFonts.outfit(fontWeight: FontWeight.bold)),
+        title: Text(
+          'Find Classmates',
+          style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
+        ),
         centerTitle: false,
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -156,113 +181,209 @@ class _ExploreScreenState extends State<ExploreScreen> {
               ),
             ),
           ),
-          
+
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
                 : _users.isEmpty
-                    ? Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.people_outline, size: 64, color: Colors.grey),
-                            const SizedBox(height: 16),
-                            Text('No classmates found', style: TextStyle(color: Colors.grey)),
-                          ],
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.people_outline,
+                          size: 64,
+                          color: Colors.grey,
                         ),
-                      )
-                    : _errorMessage != null
-                        ? Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(Icons.error_outline, size: 48, color: Colors.grey),
-                                const SizedBox(height: 16),
-                                Text(_errorMessage!, style: const TextStyle(color: Colors.grey)),
-                                const SizedBox(height: 8),
-                                TextButton(
-                                  onPressed: _fetchUsers,
-                                  child: const Text('Retry'),
-                                )
-                              ],
-                            ),
-                          )
-                    : ListView.builder(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        itemCount: _users.length,
-                        itemBuilder: (context, index) {
-                          final user = _users[index];
-                          return Card(
-                            margin: const EdgeInsets.only(bottom: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            color: isDark ? Colors.grey[900] : Colors.white,                            elevation: 0,
-                            child: Padding(
-                              padding: const EdgeInsets.all(12.0),
-                              child: Row(
-                                children: [
-                                  InkWell(
-                                    onTap: () {
-                                      if (user['email'] != null) {
-                                        Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (context) => UserProfileScreen(
-                                              userEmail: user['email'],
-                                              userName: user['display_name'],
-                                              userPhotoUrl: user['profile_photo_url'],
-                                            ),
-                                          ),
-                                        );
-                                      }
-                                    },
-                                    child: UserAvatar(
-                                      displayName: user['display_name'] ?? 'User',
-                                      photoUrl: user['profile_photo_url'],
-                                      radius: 24,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                        const SizedBox(height: 16),
+                        Text(
+                          'No classmates found',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ],
+                    ),
+                  )
+                : _errorMessage != null
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(
+                          Icons.error_outline,
+                          size: 48,
+                          color: Colors.grey,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          _errorMessage!,
+                          style: const TextStyle(color: Colors.grey),
+                        ),
+                        const SizedBox(height: 8),
+                        TextButton(
+                          onPressed: _fetchUsers,
+                          child: const Text('Retry'),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    itemCount: _users.length,
+                    itemBuilder: (context, index) {
+                      final user = _users[index];
+                      final isBanned = _isBannedUser(user);
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        color: isDark ? Colors.grey[900] : Colors.white,
+                        elevation: 0,
+                        child: Padding(
+                          padding: const EdgeInsets.all(12.0),
+                          child: Row(
+                            children: [
+                              InkWell(
+                                onTap: () {
+                                  if (user['email'] != null) {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => UserProfileScreen(
+                                          userEmail: user['email'],
+                                          userName: user['display_name'],
+                                          userPhotoUrl:
+                                              user['profile_photo_url'],
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                },
+                                child: UserAvatar(
+                                  displayName: user['display_name'] ?? 'User',
+                                  photoUrl: user['profile_photo_url'],
+                                  radius: 24,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
                                       children: [
-                                        Text(
-                                          user['display_name'] ?? 'Unknown User',
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 16,
-                                          ),
-                                        ),
-                                        if (user['bio'] != null)
-                                          Text(
-                                            user['bio'],
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: TextStyle(
-                                              color: Theme.of(context).textTheme.bodyMedium?.color?.withValues(alpha: 0.7) ?? Colors.grey,
-                                              fontSize: 12,
+                                        Expanded(
+                                          child: Text(
+                                            user['display_name'] ??
+                                                'Unknown User',
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 16,
                                             ),
                                           ),
-                                        Text(
-                                          '@${user['username'] ?? 'user'}',
-                                          style: TextStyle(
-                                            color: AppTheme.primary,
-                                            fontSize: 12,
-                                          ),
                                         ),
+                                        if (isBanned)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 8,
+                                              vertical: 3,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.red.withValues(
+                                                alpha: 0.12,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
+                                              border: Border.all(
+                                                color: Colors.red.withValues(
+                                                  alpha: 0.24,
+                                                ),
+                                              ),
+                                            ),
+                                            child: Text(
+                                              'Banned',
+                                              style: TextStyle(
+                                                color: Colors.red.shade700,
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                          ),
                                       ],
                                     ),
-                                  ),
-                                  if (user['email'] != null)
-                                    FollowButton(
-                                      targetEmail: user['email'],
-                                      targetName: user['display_name'],
+                                    if (user['bio'] != null)
+                                      Text(
+                                        user['bio'],
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          color:
+                                              Theme.of(context)
+                                                  .textTheme
+                                                  .bodyMedium
+                                                  ?.color
+                                                  ?.withValues(alpha: 0.7) ??
+                                              Colors.grey,
+                                          fontSize: 12,
+                                        ),
+                                      ),
+                                    Text(
+                                      '@${user['username'] ?? 'user'}',
+                                      style: TextStyle(
+                                        color: AppTheme.primary,
+                                        fontSize: 12,
+                                      ),
                                     ),
-                                ],
-                              ),                            ),
-                          );
-                        },
-                      ),
+                                    if (isBanned)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 4),
+                                        child: Text(
+                                          'This account is banned for this college.',
+                                          style: TextStyle(
+                                            color: Colors.red.shade600,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              if (user['email'] != null)
+                                isBanned
+                                    ? Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 8,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          borderRadius: BorderRadius.circular(
+                                            20,
+                                          ),
+                                          border: Border.all(
+                                            color: Colors.red.withValues(
+                                              alpha: 0.35,
+                                            ),
+                                          ),
+                                        ),
+                                        child: Text(
+                                          'Banned',
+                                          style: TextStyle(
+                                            color: Colors.red.shade700,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      )
+                                    : FollowButton(
+                                        targetEmail: user['email'],
+                                        targetName: user['display_name'],
+                                      ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
           ),
         ],
       ),

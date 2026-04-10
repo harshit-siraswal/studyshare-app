@@ -266,6 +266,11 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
       debugPrint('Failed to resolve upload permissions: $e');
     }
 
+    final shouldUseAdminResourceUpload =
+        fetchedProfile != null &&
+        fetchedProfile.isNotEmpty &&
+        hasAdminCapability(fetchedProfile, 'upload_resource');
+
     if (_title.trim().isEmpty) return _showError('Enter a title');
     if (_semester.isEmpty) return _showError('Select semester');
     if (_branch.isEmpty) return _showError('Select branch');
@@ -360,6 +365,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
             fileSha256: fileSha256,
             type: _resourceType,
             selectedScope: selectedScope,
+            collegeId: widget.collegeId,
           );
 
           if (uploadPlan['mode']?.toString() == 'reuse') {
@@ -416,7 +422,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
       }
 
       if (!mounted) return;
-      await backendApi.createResource({
+      final resourcePayload = <String, dynamic>{
         'college_id': widget.collegeId,
         'title': _title.trim(),
         'type': _typeIndex == 1 ? 'video' : _resourceType,
@@ -436,7 +442,13 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
         'uploaded_by_name': authService.displayName ?? 'Anonymous',
         'uploaded_by_email': widget.userEmail,
         'status': uploadStatus,
-      }, context: context);
+      };
+
+      if (shouldUseAdminResourceUpload) {
+        await backendApi.createResourceAsAdmin(resourcePayload);
+      } else {
+        await backendApi.createResource(resourcePayload, context: context);
+      }
 
       int? contributionCount;
       ContributionBadge? contributionBadge;

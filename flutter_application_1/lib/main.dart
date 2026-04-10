@@ -42,22 +42,31 @@ import 'widgets/branded_loader.dart';
 import 'utils/app_navigator.dart';
 import 'utils/theme_animator.dart';
 import 'services/supabase_service.dart';
-import 'models/department_account.dart';
+import 'data/department_catalog.dart';
 import 'services/home_widget_service.dart';
 
 String? _getCollegeIdFromPrefs(SharedPreferences prefs) {
+  String? id;
   try {
     final collegeJson = prefs.getString('selectedCollege');
     if (collegeJson != null && collegeJson.isNotEmpty) {
       final data = jsonDecode(collegeJson) as Map<String, dynamic>;
       if (data['id'] is String && (data['id'] as String).isNotEmpty) {
-        return data['id'];
+        id = data['id'];
       }
     }
   } catch (e) {
     debugPrint('Error decoding selectedCollege JSON: $e');
   }
-  return prefs.getString('selectedCollegeId');
+
+  id ??= prefs.getString('selectedCollegeId');
+
+  // Seamless migration for users who have the old shortcode cached instead of the UUID
+  if (id == 'kiet') {
+    id = 'fe2e3b2f-f628-49ef-8fb9-a350c808be2d';
+  }
+
+  return id;
 }
 
 String? _getCollegeDomainFromPrefs(SharedPreferences prefs) {
@@ -1326,30 +1335,8 @@ class _NoticeDeepLinkLoaderState extends State<NoticeDeepLinkLoader> {
           .timeout(const Duration(seconds: 10));
 
       if (response != null && mounted) {
-        DepartmentAccount account;
         final deptId = response['department']?.toString();
-
-        if (deptId != null) {
-          try {
-            final deptResponse = await Supabase.instance.client
-                .from('departments')
-                .select()
-                .eq('id', deptId)
-                .maybeSingle()
-                .timeout(const Duration(seconds: 5));
-
-            if (deptResponse != null) {
-              account = DepartmentAccount.fromJson(deptResponse);
-            } else {
-              account = DepartmentAccount.unknown(deptId: deptId);
-            }
-          } catch (e) {
-            debugPrint('Failed to fetch department for deep link: $e');
-            account = DepartmentAccount.unknown(deptId: deptId);
-          }
-        } else {
-          account = DepartmentAccount.unknown();
-        }
+        final account = departmentAccountFromCode(deptId);
 
         if (mounted) {
           Navigator.pushReplacement(

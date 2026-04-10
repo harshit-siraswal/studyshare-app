@@ -1,5 +1,7 @@
 import 'dart:ui';
 
+import 'department_catalog.dart';
+
 class DepartmentData {
   final String name;
   final String full;
@@ -14,7 +16,8 @@ class DepartmentData {
   Map<String, dynamic> toJson() => {
     'name': name,
     'full': full,
-    'color': '#${color.toARGB32().toRadixString(16).padLeft(8, '0').toUpperCase()}',
+    'color':
+        '#${color.toARGB32().toRadixString(16).padLeft(8, '0').toUpperCase()}',
   };
 
   factory DepartmentData.fromJson(Map<String, dynamic> json) {
@@ -60,77 +63,15 @@ class DepartmentData {
 }
 
 class DepartmentsProvider {
-  // Configurable source (can be replaced with fetch from API/Asset)
   static Future<List<DepartmentData>> getDepartments() async {
-    // Simulate async fetch or loading from config
-    await Future.delayed(const Duration(milliseconds: 10)); // Minimal delay
-
-    return const [
-      DepartmentData(
-        name: 'CSE',
-        full: 'Computer Science & Engineering (CSE/CS)',
-        color: Color(0xFF8B5CF6),
-      ),
-      DepartmentData(
-        name: 'IT/CSIT',
-        full: 'Information Technology (IT/CSIT)',
-        color: Color(0xFF14B8A6),
-      ),
-      DepartmentData(
-        name: 'CSE-AI',
-        full: 'Computer Science (AI)',
-        color: Color(0xFF6366F1),
-      ),
-      DepartmentData(
-        name: 'CSE-AIML',
-        full: 'Computer Science (AI & ML)',
-        color: Color(0xFF7C3AED),
-      ),
-      DepartmentData(
-        name: 'CSE-DS',
-        full: 'Computer Science (Data Science)',
-        color: Color(0xFF0EA5E9),
-      ),
-      DepartmentData(
-        name: 'CSE-CS',
-        full: 'Computer Science (Cyber Security)',
-        color: Color(0xFF2563EB),
-      ),
-      DepartmentData(
-        name: 'ECE',
-        full: 'Electronics & Communication Engineering (ECE)',
-        color: Color(0xFF10B981),
-      ),
-      DepartmentData(
-        name: 'ECE-VLSI',
-        full: 'ECE (VLSI Design & Technology)',
-        color: Color(0xFF0F766E),
-      ),
-      DepartmentData(
-        name: 'EEE',
-        full: 'Electrical & Electronics Engineering (EEE)',
-        color: Color(0xFFF59E0B),
-      ),
-      DepartmentData(
-        name: 'ELCE',
-        full: 'Electrical & Computer Engineering (ELCE)',
-        color: Color(0xFF0284C7),
-      ),
-      DepartmentData(
-        name: 'ME',
-        full: 'Mechanical Engineering (ME)',
-        color: Color(0xFFEF4444),
-      ),
-      DepartmentData(
-        name: 'AM&IA',
-        full: 'Advanced Mechatronics & Industrial Automation',
-        color: Color(0xFFDC2626),
-      ),
-      DepartmentData(
-        name: 'CE',
-        full: 'Civil Engineering',
-        color: Color(0xFF6366F1),
-      ),
-    ];
+    return departmentCatalogEntries
+        .map(
+          (entry) => DepartmentData(
+            name: entry.shortName,
+            full: entry.name,
+            color: entry.color,
+          ),
+        )
+        .toList(growable: false);
   }
 }

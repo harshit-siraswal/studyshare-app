@@ -7,6 +7,7 @@ import '../../models/department_account.dart';
 import '../../widgets/resource_card.dart';
 import '../../widgets/notice_card.dart';
 import '../../config/theme.dart';
+import '../../data/department_catalog.dart';
 
 class BookmarksScreen extends StatefulWidget {
   const BookmarksScreen({super.key});
@@ -26,58 +27,12 @@ class _BookmarksScreenState extends State<BookmarksScreen>
   bool _isLoading = true;
   String? _errorMessage;
 
-  // Department accounts (Twitter-style) - Mirrored from NoticesScreen
-  final List<DepartmentAccount> _departmentAccounts = [
-    DepartmentAccount(
-      id: 'general',
-      name: 'General Notices',
-      handle: '@general',
-      avatarLetter: 'G',
-      color: const Color(0xFF3B82F6),
-    ),
-    DepartmentAccount(
-      id: 'cse',
-      name: 'Computer Science',
-      handle: '@cse_dept',
-      avatarLetter: 'CS',
-      color: const Color(0xFF8B5CF6),
-    ),
-    DepartmentAccount(
-      id: 'ece',
-      name: 'Electronics & Comm',
-      handle: '@ece_dept',
-      avatarLetter: 'EC',
-      color: const Color(0xFF10B981),
-    ),
-    DepartmentAccount(
-      id: 'eee',
-      name: 'Electrical Engg',
-      handle: '@eee_dept',
-      avatarLetter: 'EE',
-      color: const Color(0xFFF59E0B),
-    ),
-    DepartmentAccount(
-      id: 'me',
-      name: 'Mechanical Engg',
-      handle: '@mech_dept',
-      avatarLetter: 'ME',
-      color: const Color(0xFFEF4444),
-    ),
-    DepartmentAccount(
-      id: 'ce',
-      name: 'Civil Engineering',
-      handle: '@civil_dept',
-      avatarLetter: 'CE',
-      color: const Color(0xFF6366F1),
-    ),
-    DepartmentAccount(
-      id: 'it',
-      name: 'Information Tech',
-      handle: '@it_dept',
-      avatarLetter: 'IT',
-      color: const Color(0xFF14B8A6),
-    ),
-  ];
+  final List<DepartmentAccount> _departmentAccounts =
+      List<DepartmentAccount>.from(
+        buildDepartmentAccountsFromCodes(
+          departmentCatalogEntries.map((entry) => entry.code),
+        ),
+      );
 
   @override
   void initState() {
@@ -288,10 +243,10 @@ class _BookmarksScreenState extends State<BookmarksScreen>
           final noticeMap = Map<String, dynamic>.from(content);
 
           // Resolve DepartmentAccount
-          final deptId = noticeMap['department'] as String? ?? 'general';
+          final deptId = noticeMap['department'] as String?;
           final account = _departmentAccounts.firstWhere(
-            (a) => a.id == deptId,
-            orElse: () => _departmentAccounts.first,
+            (a) => a.id == normalizeDepartmentCode(deptId),
+            orElse: () => departmentAccountFromCode(deptId),
           );
 
           return Padding(

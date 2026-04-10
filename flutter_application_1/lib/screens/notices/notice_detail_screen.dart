@@ -1,5 +1,5 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_linkify/flutter_linkify.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:screenshot/screenshot.dart';
@@ -54,6 +54,8 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
   final TextEditingController _commentController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final FocusNode _commentFocusNode = FocusNode();
+  final List<TapGestureRecognizer> _noticeLinkRecognizers =
+      <TapGestureRecognizer>[];
 
   List<Map<String, dynamic>> _comments = [];
   List<String> _mediaUrls = [];
@@ -69,6 +71,18 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
   bool _isReadOnly = true;
   bool _hasAccessOverride = false;
 
+  bool _isKietEmail(String email) {
+    final normalized = email.trim().toLowerCase();
+    return normalized.endsWith('@kiet.edu');
+  }
+
+  bool _emailMatchesDomain(String email, String domain) {
+    final normalizedEmail = email.trim().toLowerCase();
+    final normalizedDomain = domain.trim().toLowerCase().replaceAll('@', '');
+    if (normalizedEmail.isEmpty || normalizedDomain.isEmpty) return false;
+    return normalizedEmail.endsWith('@$normalizedDomain');
+  }
+
   @override
   void initState() {
     super.initState();
@@ -78,6 +92,18 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     _loadWriterRole();
     _extractMedia();
     _checkSavedStatus();
+  }
+
+  @override
+  void dispose() {
+    for (final recognizer in _noticeLinkRecognizers) {
+      recognizer.dispose();
+    }
+    _noticeLinkRecognizers.clear();
+    _commentController.dispose();
+    _scrollController.dispose();
+    _commentFocusNode.dispose();
+    super.dispose();
   }
 
   Future<void> _loadWriterRole() async {
@@ -98,20 +124,20 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
 
   Future<void> _initReadOnly() async {
     try {
+      final email = (_authService.userEmail ?? '').trim().toLowerCase();
       if (_hasAccessOverride) {
+        _isReadOnly = false;
+      } else if (_isKietEmail(email)) {
+        // KIET students should always have comment access.
         _isReadOnly = false;
       } else {
         final prefs = await SharedPreferences.getInstance();
-        final domain = prefs.getString('selectedCollegeDomain') ?? '';
-        final email = _authService.userEmail ?? '';
+        final domain = (prefs.getString('selectedCollegeDomain') ?? '').trim();
 
-        if (email.isEmpty || domain.trim().isEmpty) {
+        if (email.isEmpty || domain.isEmpty) {
           _isReadOnly = true;
         } else {
-          final domainToCheck = domain.startsWith('@') ? domain : '@$domain';
-          _isReadOnly = !email.toLowerCase().endsWith(
-            domainToCheck.toLowerCase(),
-          );
+          _isReadOnly = !_emailMatchesDomain(email, domain);
         }
       }
       if (!mounted) return;
@@ -132,14 +158,6 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
         _comments = [];
       });
     }
-  }
-
-  @override
-  void dispose() {
-    _commentController.dispose();
-    _scrollController.dispose();
-    _commentFocusNode.dispose();
-    super.dispose();
   }
 
   void _extractMedia() {
@@ -453,6 +471,192 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     }
   }
 
+  void _resetNoticeLinkRecognizers() {
+    for (final recognizer in _noticeLinkRecognizers) {
+      recognizer.dispose();
+    }
+    _noticeLinkRecognizers.clear();
+  }
+
+  Future<void> _openInlineNoticeLink(String rawUrl) async {
+    try {
+      final launched = await openStudyShareLink(
+        context,
+        rawUrl: rawUrl,
+        title: widget.notice['title']?.toString() ?? 'Notice link',
+      );
+      if (!mounted) return;
+      if (!launched) {
+        _showError('Could not open link');
+      }
+    } catch (e) {
+      debugPrint('Failed to launch inline notice URL: $e');
+      if (mounted) {
+        _showError('Unable to open link');
+      }
+    }
+  }
+
+  List<InlineSpan> _buildNoticeTextSpans({
+    required String text,
+    required TextStyle baseStyle,
+    required TextStyle linkStyle,
+  }) {
+    final spans = <InlineSpan>[];
+    final urlPattern = RegExp(
+      r'((?:https?:\/\/|www\.)[^\s<]+)',
+      caseSensitive: false,
+    );
+    final emphasisPattern = RegExp(
+      r'(\*\*[^*\n]+\*\*|__[^_\n]+__|(?<!\*)\*[^*\n]+\*(?!\*)|(?<!_)_[^_\n]+_(?!_))',
+    );
+
+    void appendStyledChunk(String chunk) {
+      if (chunk.isEmpty) return;
+      final matches = emphasisPattern.allMatches(chunk).toList();
+      if (matches.isEmpty) {
+        spans.add(TextSpan(text: chunk, style: baseStyle));
+        return;
+      }
+
+      var lastIndex = 0;
+      for (final match in matches) {
+        if (match.start > lastIndex) {
+          spans.add(
+            TextSpan(
+              text: chunk.substring(lastIndex, match.start),
+              style: baseStyle,
+            ),
+          );
+        }
+
+        final token = match.group(0) ?? '';
+        final isDoubleMarker =
+            (token.startsWith('**') && token.endsWith('**')) ||
+            (token.startsWith('__') && token.endsWith('__'));
+        final visibleText = isDoubleMarker
+            ? token.substring(2, token.length - 2)
+            : token.substring(1, token.length - 1);
+
+        spans.add(
+          TextSpan(
+            text: visibleText,
+            style: baseStyle.copyWith(
+              fontWeight: isDoubleMarker ? FontWeight.w800 : FontWeight.w600,
+            ),
+          ),
+        );
+        lastIndex = match.end;
+      }
+
+      if (lastIndex < chunk.length) {
+        spans.add(TextSpan(text: chunk.substring(lastIndex), style: baseStyle));
+      }
+    }
+
+    var lastIndex = 0;
+    for (final match in urlPattern.allMatches(text)) {
+      if (match.start > lastIndex) {
+        appendStyledChunk(text.substring(lastIndex, match.start));
+      }
+
+      final matchedText = match.group(0) ?? '';
+      if (matchedText.isNotEmpty) {
+        final normalizedUrl =
+            matchedText.toLowerCase().startsWith('http://') ||
+                matchedText.toLowerCase().startsWith('https://')
+            ? matchedText
+            : 'https://$matchedText';
+        final recognizer = TapGestureRecognizer()
+          ..onTap = () => _openInlineNoticeLink(normalizedUrl);
+        _noticeLinkRecognizers.add(recognizer);
+        spans.add(
+          TextSpan(text: matchedText, style: linkStyle, recognizer: recognizer),
+        );
+      }
+
+      lastIndex = match.end;
+    }
+
+    if (lastIndex < text.length) {
+      appendStyledChunk(text.substring(lastIndex));
+    }
+
+    return spans;
+  }
+
+  Widget _buildNoticeBody(bool isDark, String rawContent) {
+    _resetNoticeLinkRecognizers();
+
+    final baseStyle = GoogleFonts.inter(
+      fontSize: 16,
+      color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF334155),
+      height: 1.6,
+    );
+    final linkStyle = GoogleFonts.inter(
+      fontSize: 16,
+      color: AppTheme.primary,
+      decoration: TextDecoration.underline,
+      height: 1.6,
+      fontWeight: FontWeight.w700,
+    );
+
+    final normalizedContent = rawContent.replaceAll('\r\n', '\n');
+    final lines = normalizedContent.split('\n');
+    final children = <Widget>[];
+
+    for (final rawLine in lines) {
+      final trimmedLine = rawLine.trimRight();
+      if (trimmedLine.trim().isEmpty) {
+        children.add(const SizedBox(height: 10));
+        continue;
+      }
+
+      final bulletMatch = RegExp(r'^\s*[*-]\s+(.*)$').firstMatch(trimmedLine);
+      final lineText = bulletMatch != null
+          ? (bulletMatch.group(1) ?? '')
+          : trimmedLine;
+      final richLine = SelectableText.rich(
+        TextSpan(
+          style: baseStyle,
+          children: _buildNoticeTextSpans(
+            text: lineText,
+            baseStyle: baseStyle,
+            linkStyle: linkStyle,
+          ),
+        ),
+      );
+
+      if (bulletMatch != null) {
+        children.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text('•', style: baseStyle),
+                ),
+                const SizedBox(width: 8),
+                Expanded(child: richLine),
+              ],
+            ),
+          ),
+        );
+      } else {
+        children.add(
+          Padding(padding: const EdgeInsets.only(bottom: 6), child: richLine),
+        );
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: children,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -532,41 +736,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
                     const SizedBox(height: 12),
 
                     // Content Body
-                    SelectableLinkify(
-                      onOpen: (link) async {
-                        try {
-                          final launched = await openStudyShareLink(
-                            context,
-                            rawUrl: link.url,
-                            title:
-                                widget.notice['title']?.toString() ??
-                                'Notice link',
-                          );
-                          if (!launched && mounted) {
-                            _showError('Could not open link');
-                          }
-                        } catch (e) {
-                          debugPrint('Failed to launch URL: $e');
-                          if (mounted) {
-                            _showError('Unable to open link');
-                          }
-                        }
-                      },
-                      text: content,
-                      style: GoogleFonts.inter(
-                        fontSize: 16,
-                        color: isDark
-                            ? const Color(0xFFE2E8F0)
-                            : const Color(0xFF334155),
-                        height: 1.6,
-                      ),
-                      linkStyle: GoogleFonts.inter(
-                        fontSize: 16,
-                        color: AppTheme.primary,
-                        decoration: TextDecoration.underline,
-                        height: 1.6,
-                      ),
-                    ),
+                    _buildNoticeBody(isDark, content.toString()),
                     const SizedBox(height: 20),
 
                     if (_documentUrl?.isNotEmpty ?? false) ...[

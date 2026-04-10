@@ -5,6 +5,7 @@ import 'dart:ui';
 import '../../config/theme.dart';
 import '../../providers/theme_provider.dart';
 import '../../services/auth_service.dart';
+import '../../services/backend_api_service.dart';
 import 'help_support_screen.dart';
 import 'saved_posts_screen.dart';
 
@@ -46,7 +47,8 @@ class SettingsScreen extends StatefulWidget {
     PushNotificationService? pushNotificationService,
   }) : authService = authService ?? AuthService(),
        subscriptionService = subscriptionService ?? SubscriptionService(),
-       pushNotificationService = pushNotificationService ?? PushNotificationService();
+       pushNotificationService =
+           pushNotificationService ?? PushNotificationService();
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -58,11 +60,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   static const Color darkSystemBackground = Color(0xFF000000);
 
   late final AuthService _authService;
+  final BackendApiService _backendApiService = BackendApiService();
   late final SubscriptionService _subscriptionService;
   late final PushNotificationService _pushNotificationService;
   bool _notificationsEnabled = true;
   bool _isLoading = true;
   bool _isPremium = false;
+  bool _isDeletingAccount = false;
   String _appVersion = '...';
 
   @override
@@ -230,6 +234,98 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Future<void> _handleDeleteAccount() async {
+    if (_isDeletingAccount) return;
+
+    final confirmationController = TextEditingController();
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        final isDark = Theme.of(dialogContext).brightness == Brightness.dark;
+        return AlertDialog(
+          backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
+          title: Text(
+            'Delete account?',
+            style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'This permanently removes your account and your app access. '
+                'Type DELETE to confirm.',
+                style: GoogleFonts.inter(fontSize: 13.5),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: confirmationController,
+                autofocus: true,
+                textCapitalization: TextCapitalization.characters,
+                decoration: const InputDecoration(
+                  labelText: 'Type DELETE',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final isMatch =
+                    confirmationController.text.trim().toUpperCase() ==
+                    'DELETE';
+                Navigator.pop(dialogContext, isMatch);
+              },
+              style: FilledButton.styleFrom(backgroundColor: AppTheme.error),
+              child: const Text('Delete'),
+            ),
+          ],
+        );
+      },
+    );
+    confirmationController.dispose();
+
+    if (confirmed != true) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Account deletion cancelled or not confirmed.'),
+          ),
+        );
+      }
+      return;
+    }
+
+    setState(() => _isDeletingAccount = true);
+    try {
+      await _backendApiService.deleteAccount(confirmation: 'DELETE');
+      await _authService.signOut();
+      if (!mounted) return;
+      Navigator.pop(context);
+      widget.onLogout();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e.toString().replaceFirst('Exception: ', '').trim().isNotEmpty
+                ? e.toString().replaceFirst('Exception: ', '').trim()
+                : 'Failed to delete account.',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isDeletingAccount = false);
+      }
+    }
+  }
+
   void _showLegalDialog(String title, String content) {
     showDialog(
       context: context,
@@ -338,6 +434,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             },
                             isDark: isDark,
                           ),
+                          _buildDivider(isDark),
+                          _buildGroupedTile(
+                            icon: Icons.delete_forever_outlined,
+                            iconBgColor: Colors.red.shade600,
+                            title: 'Delete Account',
+                            subtitle: _isDeletingAccount
+                                ? 'Removing your account...'
+                                : 'Permanently remove your account',
+                            onTap: _isDeletingAccount
+                                ? null
+                                : _handleDeleteAccount,
+                            isDark: isDark,
+                            titleColor: Colors.red.shade600,
+                            trailing: _isDeletingAccount
+                                ? const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : null,
+                          ),
                         ],
                       ),
 
@@ -352,7 +471,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             title: 'Appearance',
                             trailing: Switch.adaptive(
                               value: isDark,
-                              activeColor: AppTheme.primary,
+                              activeThumbColor: AppTheme.primary,
                               onChanged: (_) {
                                 animateThemeTransition(context, () {
                                   themeProvider.toggleTheme();
@@ -368,7 +487,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             title: 'Notifications',
                             trailing: Switch.adaptive(
                               value: _notificationsEnabled,
-                              activeColor: AppTheme.primary,
+                              activeThumbColor: AppTheme.primary,
                               onChanged: _toggleNotifications,
                             ),
                             isDark: isDark,
@@ -531,6 +650,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     String? subtitle,
     VoidCallback? onTap,
     Widget? trailing,
+    Color? titleColor,
     required bool isDark,
   }) {
     VoidCallback? fallbackTap = onTap;
@@ -569,7 +689,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       title,
                       style: GoogleFonts.inter(
                         fontWeight: FontWeight.w500,
-                        color: isDark ? Colors.white : Colors.black,
+                        color:
+                            titleColor ??
+                            (isDark ? Colors.white : Colors.black),
                         fontSize: 15,
                       ),
                     ),

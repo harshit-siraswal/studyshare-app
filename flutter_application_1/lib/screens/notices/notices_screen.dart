@@ -14,6 +14,7 @@ import '../../widgets/branded_loader.dart';
 import '../../services/home_widget_service.dart';
 import '../../models/notice.dart';
 import '../../utils/admin_access.dart';
+import '../../data/department_catalog.dart';
 import 'package:intl/intl.dart';
 import 'dart:math' as math;
 
@@ -47,62 +48,23 @@ class _NoticesScreenState extends State<NoticesScreen>
 
   late TabController _tabController;
 
-  // Department accounts (Twitter-style)
-  final List<DepartmentAccount> _departmentAccounts = [
-    DepartmentAccount(
-      id: 'general',
-      name: 'General Notices',
-      handle: '@general',
-      avatarLetter: 'G',
-      color: const Color(0xFF3B82F6),
+  List<DepartmentAccount> _departmentAccounts = List<DepartmentAccount>.from(
+    buildDepartmentAccountsFromCodes(
+      departmentCatalogEntries.map((entry) => entry.code),
     ),
-    DepartmentAccount(
-      id: 'cse',
-      name: 'Computer Science',
-      handle: '@cse_dept',
-      avatarLetter: 'CS',
-      color: const Color(0xFF8B5CF6),
-    ),
-    DepartmentAccount(
-      id: 'ece',
-      name: 'Electronics & Comm',
-      handle: '@ece_dept',
-      avatarLetter: 'EC',
-      color: const Color(0xFF10B981),
-    ),
-    DepartmentAccount(
-      id: 'eee',
-      name: 'Electrical Engg',
-      handle: '@eee_dept',
-      avatarLetter: 'EE',
-      color: const Color(0xFFF59E0B),
-    ),
-    DepartmentAccount(
-      id: 'me',
-      name: 'Mechanical Engg',
-      handle: '@mech_dept',
-      avatarLetter: 'ME',
-      color: const Color(0xFFEF4444),
-    ),
-    DepartmentAccount(
-      id: 'ce',
-      name: 'Civil Engineering',
-      handle: '@civil_dept',
-      avatarLetter: 'CE',
-      color: const Color(0xFF6366F1),
-    ),
-    DepartmentAccount(
-      id: 'it',
-      name: 'Information Tech',
-      handle: '@it_dept',
-      avatarLetter: 'IT',
-      color: const Color(0xFF14B8A6),
-    ),
-  ];
+  );
 
   DateTime? _startDate;
   DateTime? _endDate;
   final Map<String, int> _departmentFollowerCounts = {};
+
+  DepartmentAccount _accountForDepartment(String? rawDepartmentId) {
+    final departmentId = normalizeDepartmentCode(rawDepartmentId);
+    for (final account in _departmentAccounts) {
+      if (account.id == departmentId) return account;
+    }
+    return departmentAccountFromCode(departmentId);
+  }
 
   Future<void> _showDateFilter() async {
     final picked = await showDateRangePicker(
@@ -237,11 +199,8 @@ class _NoticesScreenState extends State<NoticesScreen>
                             itemCount: searchResults.length,
                             itemBuilder: (context, index) {
                               final notice = searchResults[index];
-                              final deptId =
-                                  notice['department'] as String? ?? 'general';
-                              final account = _departmentAccounts.firstWhere(
-                                (a) => a.id == deptId,
-                                orElse: () => _departmentAccounts.first,
+                              final account = _accountForDepartment(
+                                notice['department'] as String?,
                               );
                               return Padding(
                                 padding: const EdgeInsets.only(bottom: 12),
@@ -401,6 +360,20 @@ class _NoticesScreenState extends State<NoticesScreen>
           email,
         );
       }
+
+      if (mounted) {
+        try {
+          final actualCount = await _supabaseService.getDepartmentFollowerCount(
+            deptId,
+            widget.collegeId,
+          );
+          setState(() {
+            _departmentFollowerCounts[deptId] = actualCount;
+          });
+        } catch (countError) {
+          debugPrint('Error refreshing follower count: $countError');
+        }
+      }
     } catch (e) {
       // Revert on error
       if (mounted) {
@@ -459,6 +432,12 @@ class _NoticesScreenState extends State<NoticesScreen>
       final activeNotices = visibleNotices
           .where((notice) => notice['is_active'] != false)
           .toList();
+      final mergedAccounts = buildDepartmentAccountsFromCodes([
+        ..._departmentAccounts.map((account) => account.id),
+        ...visibleNotices.map(
+          (notice) => notice['department']?.toString() ?? '',
+        ),
+      ]);
 
       // Filter by date range if set
       List<Map<String, dynamic>> filtered = visibleNotices;
@@ -475,6 +454,7 @@ class _NoticesScreenState extends State<NoticesScreen>
 
       if (mounted) {
         setState(() {
+          _departmentAccounts = mergedAccounts;
           if (reset) {
             _filteredNotices = filtered;
           } else {
@@ -681,10 +661,9 @@ class _NoticesScreenState extends State<NoticesScreen>
                                           ? const SizedBox(
                                               width: 22,
                                               height: 22,
-                                              child:
-                                                  CircularProgressIndicator(
-                                                    strokeWidth: 2,
-                                                  ),
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                              ),
                                             )
                                           : OutlinedButton.icon(
                                               onPressed: _loadMoreNotices,
@@ -698,14 +677,8 @@ class _NoticesScreenState extends State<NoticesScreen>
                                 }
 
                                 final notice = _filteredNotices[index];
-                                // Attempt to map to department, fallback to General
-                                // Depending on notice schema, it might have 'department' key
-                                final deptId =
-                                    notice['department'] as String? ??
-                                    'general';
-                                final account = _departmentAccounts.firstWhere(
-                                  (a) => a.id == deptId,
-                                  orElse: () => _departmentAccounts.first,
+                                final account = _accountForDepartment(
+                                  notice['department'] as String?,
                                 );
 
                                 return AnimationConfiguration.staggeredList(

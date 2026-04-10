@@ -1131,6 +1131,44 @@ class BackendApiService {
     return _requestJson('/api/resources', method: 'POST', body: input);
   }
 
+  Future<Map<String, dynamic>> createResourceAsAdmin(
+    Map<String, dynamic> input,
+  ) async {
+    final normalizedBody = <String, dynamic>{
+      'collegeId':
+          input['collegeId'] ?? input['college_id'] ?? input['college'],
+      'title': input['title'],
+      'type': input['type'],
+      'description': input['description'],
+      'branch': input['branch'],
+      'semester': input['semester'],
+      'subject': input['subject'],
+      'chapter': input['chapter'],
+      'topic': input['topic'],
+      'fileUrl':
+          input['fileUrl'] ??
+          input['file_url'] ??
+          input['pdfUrl'] ??
+          input['pdf_url'],
+      'videoUrl': input['videoUrl'] ?? input['video_url'],
+      'fileSha256': input['fileSha256'] ?? input['file_sha256'],
+      'selectedScope': input['selectedScope'],
+    };
+
+    normalizedBody.removeWhere((key, value) {
+      if (value == null) return true;
+      if (value is String) return value.trim().isEmpty;
+      return false;
+    });
+
+    return _requestJson(
+      '/api/admin/resources',
+      method: 'POST',
+      body: normalizedBody,
+      requireAuthToken: true,
+    );
+  }
+
   Future<Map<String, dynamic>> getAcademicCatalog() async {
     return _requestJson('/api/academics/catalog', method: 'GET');
   }
@@ -1201,6 +1239,7 @@ class BackendApiService {
     required String fileSha256,
     required String type,
     required Map<String, dynamic> selectedScope,
+    String? collegeId,
   }) async {
     return _requestJson(
       '/api/resources/upload-plan',
@@ -1212,6 +1251,8 @@ class BackendApiService {
         'fileSha256': fileSha256,
         'type': type,
         'selectedScope': selectedScope,
+        'collegeId': ?collegeId,
+        'college_id': ?collegeId,
       },
     );
   }
@@ -1514,6 +1555,16 @@ class BackendApiService {
 
   Future<Map<String, dynamic>> getProfile() async {
     return _requestJson('/api/users/profile', method: 'GET');
+  }
+
+  Future<Map<String, dynamic>> deleteAccount({
+    required String confirmation,
+  }) async {
+    return _requestJson(
+      '/api/users/account',
+      method: 'DELETE',
+      body: <String, dynamic>{'confirmation': confirmation.trim()},
+    );
   }
 
   Future<Map<String, dynamic>> getPublicProfile({required String email}) async {
@@ -2341,8 +2392,12 @@ class BackendApiService {
         .map((id) => id.trim())
         .where((id) => id.isNotEmpty)
         .toList();
-    if (sanitizedFileIds.isEmpty) throw ArgumentError('fileIds must not be empty');
-    if (sanitizedFileIds.length > 5) throw ArgumentError('Maximum 5 PDFs allowed');
+    if (sanitizedFileIds.isEmpty) {
+      throw ArgumentError('fileIds must not be empty');
+    }
+    if (sanitizedFileIds.length > 5) {
+      throw ArgumentError('Maximum 5 PDFs allowed');
+    }
     return _requestJson(
       '/api/ai/multi-quiz',
       method: 'POST',
@@ -2767,8 +2822,8 @@ class BackendApiService {
         response['answer_origin'] ??
         (data is Map ? data['answer_origin'] : null);
     final insufficientGrounding =
-      response['insufficient_grounding'] == true ||
-      (data is Map && data['insufficient_grounding'] == true);
+        response['insufficient_grounding'] == true ||
+        (data is Map && data['insufficient_grounding'] == true);
     final strictNotesMode =
         response['strict_notes_mode'] ??
         (data is Map ? data['strict_notes_mode'] : null);

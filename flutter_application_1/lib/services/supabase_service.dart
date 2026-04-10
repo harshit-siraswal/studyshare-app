@@ -9,6 +9,7 @@ import '../models/resource.dart';
 import '../models/user.dart';
 import 'backend_api_service.dart';
 import '../models/department_account.dart';
+import '../data/department_catalog.dart';
 import '../utils/admin_access.dart';
 
 class RoomLimitException implements Exception {
@@ -161,9 +162,14 @@ class SupabaseService {
     );
     final userEmail = _normalizeEmail(user['email']?.toString());
 
-    if (normalizedCollegeId.isEmpty && _looksLikeDomainScope(normalizedCollege)) {
+    if (normalizedCollegeId.isEmpty &&
+        _looksLikeDomainScope(normalizedCollege)) {
       final scopeDomain = normalizedCollege.replaceAll('@', '');
-      return userEmail.isNotEmpty && userEmail.endsWith('@$scopeDomain');
+      // When domain filtering is active, enforce it strictly and don't fall through
+      final lowerDomain = scopeDomain.toLowerCase();
+      final isMatch =
+          userEmail.isNotEmpty && userEmail.endsWith('@$lowerDomain');
+      return isMatch;
     }
 
     if (normalizedCollegeId.isNotEmpty &&
@@ -2330,7 +2336,9 @@ class SupabaseService {
       return const <Map<String, dynamic>>[];
     }
 
-    final normalizedScopeCollege = _normalizeCollegeScopeValue(effectiveCollege);
+    final normalizedScopeCollege = _normalizeCollegeScopeValue(
+      effectiveCollege,
+    );
     final scopeLooksLikeDomain = _looksLikeDomainScope(normalizedScopeCollege);
 
     try {
@@ -5032,6 +5040,18 @@ class SupabaseService {
       debugPrint('Error syncing followed_departments array: $e');
     }
 
+    // Avoid creating duplicate follower rows when any legacy schema row exists.
+    try {
+      final alreadyFollowing = await isFollowingDepartment(
+        departmentId,
+        normalizedEmail,
+        collegeId: collegeId,
+      );
+      if (alreadyFollowing) return;
+    } catch (_) {
+      // Continue with best-effort inserts.
+    }
+
     final userId = currentUserId;
     final basePayload = <String, dynamic>{
       'department_id': departmentId,
@@ -5051,29 +5071,6 @@ class SupabaseService {
         'department_id': departmentId,
         entry.key: entry.value,
       });
-    }
-
-    final idPairs = <MapEntry<String, String>>[
-      if (userIdentifiers.containsKey('user_id'))
-        MapEntry('user_id', userIdentifiers['user_id']!),
-      if (userIdentifiers.containsKey('follower_id'))
-        MapEntry('follower_id', userIdentifiers['follower_id']!),
-    ];
-    final emailPairs = <MapEntry<String, String>>[
-      if (userIdentifiers.containsKey('user_email'))
-        MapEntry('user_email', userIdentifiers['user_email']!),
-      if (userIdentifiers.containsKey('follower_email'))
-        MapEntry('follower_email', userIdentifiers['follower_email']!),
-    ];
-
-    for (final idEntry in idPairs) {
-      for (final emailEntry in emailPairs) {
-        payloads.add(<String, dynamic>{
-          ...basePayload,
-          idEntry.key: idEntry.value,
-          emailEntry.key: emailEntry.value,
-        });
-      }
     }
 
     Object? lastError;
@@ -5171,8 +5168,11 @@ class SupabaseService {
             collegeId.trim().isNotEmpty) {
           query = query.eq('college_id', collegeId);
         }
-        await query;
-        return;
+        final deletedRows = await query.select('id');
+        final deletedCount = deletedRows.length;
+        if (deletedCount > 0) {
+          return;
+        }
       } catch (e) {
         lastError = e;
         final schemaMismatch =
@@ -5246,8 +5246,10 @@ class SupabaseService {
             collegeId.trim().isNotEmpty) {
           query = query.eq('college_id', collegeId);
         }
-        final response = await query.maybeSingle();
-        return response != null;
+        final response = await query.limit(1).maybeSingle();
+        if (response != null) {
+          return true;
+        }
       } catch (e) {
         final schemaMismatch =
             _isMissingColumnError(e, column) ||
@@ -5268,6 +5270,35 @@ class SupabaseService {
     String collegeId,
   ) async {
     try {
+      var uniqueQuery = _client
+          .from('department_followers')
+          .select('user_id, follower_id, user_email, follower_email')
+          .eq('department_id', departmentId);
+      if (collegeId.trim().isNotEmpty) {
+        uniqueQuery = uniqueQuery.eq('college_id', collegeId);
+      }
+      final uniqueResponse = await uniqueQuery;
+      final uniqueFollowerKeys = <String>{};
+      for (final row in (uniqueResponse as List).whereType<Map>()) {
+        final map = Map<String, dynamic>.from(row);
+        final keyCandidates = <String>[
+          map['user_id']?.toString().trim() ?? '',
+          map['follower_id']?.toString().trim() ?? '',
+          _normalizeEmail(map['user_email']?.toString()),
+          _normalizeEmail(map['follower_email']?.toString()),
+        ];
+        final key = keyCandidates.firstWhere(
+          (value) => value.isNotEmpty,
+          orElse: () => '',
+        );
+        if (key.isNotEmpty) {
+          uniqueFollowerKeys.add(key);
+        }
+      }
+      if (uniqueFollowerKeys.isNotEmpty) {
+        return uniqueFollowerKeys.length;
+      }
+
       var query = _client
           .from('department_followers')
           .count(CountOption.exact)
@@ -5352,7 +5383,9 @@ class SupabaseService {
             .cast<String>()
             .toList();
         finalSet.addAll(fetchedIds);
-        break; // Stop falling back if query succeeds
+        if (fetchedIds.isNotEmpty) {
+          break; // Stop falling back only when this schema variant has rows.
+        }
       } catch (e) {
         final schemaMismatch =
             _isMissingColumnError(e, column) ||
@@ -5931,12 +5964,11 @@ class SupabaseService {
 
   Future<DepartmentAccount?> getDepartmentProfile(String departmentId) async {
     try {
-      // Assuming 'departments' table exists or 'users' with role/type
-      // Adjust table name if needed based on schema.
-      // Based on notification service, department accounts might be in 'users' or separate 'departments'.
-      // If 'department_followers' links to 'department_id', likely a separate table or users.
+      final catalogAccount = departmentAccountFromCode(departmentId);
+      if (catalogAccount.id != 'unknown') {
+        return catalogAccount;
+      }
 
-      // Try 'users' first as many systems unify accounts
       final response = await _client
           .from('users')
           .select()

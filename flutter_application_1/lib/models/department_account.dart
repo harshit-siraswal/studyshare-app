@@ -7,7 +7,7 @@ class DepartmentAccount {
   final String avatarLetter;
   final Color color;
   final int noticeCount;
-  
+
   const DepartmentAccount({
     required this.id,
     required this.name,
@@ -27,12 +27,13 @@ class DepartmentAccount {
   }
 
   factory DepartmentAccount.fromJson(Map<String, dynamic> json) {
-    final rawId = json['id']?.toString() ?? '';
+    final rawId = (json['code'] ?? json['id'])?.toString() ?? '';
     if (rawId.isEmpty) {
       return DepartmentAccount.unknown();
     }
 
-    String hexColor = json['color']?.toString() ?? '64748B'; // Default slate-500
+    String hexColor =
+        json['color']?.toString() ?? '64748B'; // Default slate-500
     if (hexColor.startsWith('#')) hexColor = hexColor.substring(1);
     final colorValue = int.tryParse('FF$hexColor', radix: 16) ?? 0xFF64748B;
 

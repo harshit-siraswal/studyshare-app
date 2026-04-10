@@ -121,9 +121,7 @@ class _NoticeCardState extends State<NoticeCard> {
       widget.onNoticeUpdated?.call();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            isActive ? 'Notice is now visible' : 'Notice hidden',
-          ),
+          content: Text(isActive ? 'Notice is now visible' : 'Notice hidden'),
         ),
       );
     } catch (e, stackTrace) {
@@ -176,9 +174,7 @@ class _NoticeCardState extends State<NoticeCard> {
       debugPrint('Error deleting notice: $e\n$stackTrace');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Unable to delete notice right now.'),
-        ),
+        const SnackBar(content: Text('Unable to delete notice right now.')),
       );
     } finally {
       if (mounted) setState(() => _manageLoading = false);
@@ -224,6 +220,115 @@ class _NoticeCardState extends State<NoticeCard> {
     _peekOverlayEntry = null;
   }
 
+  String _firstNonEmptyNoticeValue(Iterable<String> keys) {
+    for (final key in keys) {
+      final raw = widget.notice[key];
+      if (raw == null) continue;
+      final value = raw.toString().trim();
+      if (value.isNotEmpty) return value;
+    }
+    return '';
+  }
+
+  String _resolvedAttachmentUrl() {
+    final directUrl = _firstNonEmptyNoticeValue(const [
+      'attachment_url',
+      'file_url',
+      'document_url',
+      'pdf_url',
+    ]);
+    if (directUrl.isNotEmpty) return directUrl;
+
+    final mediaUrls = widget.notice['media_urls'];
+    if (mediaUrls is List) {
+      for (final item in mediaUrls) {
+        final url = item?.toString().trim() ?? '';
+        if (url.isNotEmpty) return url;
+      }
+    }
+
+    return _firstNonEmptyNoticeValue(const ['image_url']);
+  }
+
+  String _resolvedAttachmentLabel() {
+    final url = _resolvedAttachmentUrl();
+    if (url.isNotEmpty) {
+      final uri = Uri.tryParse(url);
+      if (uri != null && uri.pathSegments.isNotEmpty) {
+        final fileName = Uri.decodeComponent(uri.pathSegments.last).trim();
+        if (fileName.isNotEmpty) return fileName;
+      }
+    }
+
+    final fileType =
+        widget.notice['file_type']?.toString().trim().toLowerCase() ?? '';
+    switch (fileType) {
+      case 'pdf':
+        return 'Attachment PDF';
+      case 'image':
+        return 'Attachment image';
+      default:
+        return 'Open attachment';
+    }
+  }
+
+  IconData _resolvedAttachmentIcon() {
+    final fileType =
+        widget.notice['file_type']?.toString().trim().toLowerCase() ?? '';
+    final url = _resolvedAttachmentUrl().toLowerCase();
+
+    if (fileType == 'pdf' || url.endsWith('.pdf')) {
+      return Icons.picture_as_pdf_outlined;
+    }
+    if (fileType == 'image' ||
+        url.endsWith('.png') ||
+        url.endsWith('.jpg') ||
+        url.endsWith('.jpeg') ||
+        url.endsWith('.webp')) {
+      return Icons.image_outlined;
+    }
+    return Icons.attach_file_rounded;
+  }
+
+  String _plainPreviewText(String rawText) {
+    final withoutBullets = rawText.replaceAll(
+      RegExp(r'^\s*[*-]\s+', multiLine: true),
+      '',
+    );
+    final withoutDoubleMarkers = withoutBullets
+        .replaceAll('**', '')
+        .replaceAll('__', '');
+    final withoutSingleStars = withoutDoubleMarkers.replaceAllMapped(
+      RegExp(r'\*([^*\n]+)\*'),
+      (match) => match.group(1) ?? '',
+    );
+    return withoutSingleStars
+        .replaceAllMapped(
+          RegExp(r'_([^_\n]+)_'),
+          (match) => match.group(1) ?? '',
+        )
+        .trim();
+  }
+
+  Future<void> _showPeekDialog() async {
+    if (!mounted) return;
+    HapticFeedback.selectionClick();
+    await showGeneralDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Peek notice',
+      barrierColor: Colors.black.withValues(alpha: 0.48),
+      pageBuilder: (dialogContext, animation, secondaryAnimation) {
+        return SafeArea(
+          child: Material(
+            color: Colors.transparent,
+            child: _buildPeekCard(dialogContext),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildPeekCard(BuildContext overlayCtx) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final screenWidth = MediaQuery.of(overlayCtx).size.width;
@@ -231,19 +336,23 @@ class _NoticeCardState extends State<NoticeCard> {
     final maxWidth = screenWidth > 500 ? 460.0 : screenWidth - 24;
 
     final title = widget.notice['title']?.toString() ?? 'Untitled';
-    final content = widget.notice['content']?.toString() ?? '';
+    final content = _plainPreviewText(
+      widget.notice['content']?.toString() ?? '',
+    );
     final priority = widget.notice['priority']?.toString();
     final createdAt = widget.notice['created_at']?.toString();
-    final attachmentUrl = widget.notice['attachment_url']?.toString() ?? '';
+    final attachmentUrl = _resolvedAttachmentUrl();
     final hasAttachment = attachmentUrl.isNotEmpty;
 
     final cardBg = isDark
         ? const Color(0xFF0F1117).withValues(alpha: 0.97)
         : Colors.white.withValues(alpha: 0.97);
-    final textColor =
-        isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
-    final subColor =
-        isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary;
+    final textColor = isDark
+        ? AppTheme.darkTextPrimary
+        : AppTheme.lightTextPrimary;
+    final subColor = isDark
+        ? AppTheme.darkTextSecondary
+        : AppTheme.lightTextSecondary;
 
     return Center(
       child: ConstrainedBox(
@@ -322,7 +431,7 @@ class _NoticeCardState extends State<NoticeCard> {
                         ),
                       ),
                       Text(
-                        'Release to close',
+                        'Peek preview',
                         style: GoogleFonts.inter(
                           fontSize: 11,
                           fontWeight: FontWeight.w500,
@@ -350,7 +459,7 @@ class _NoticeCardState extends State<NoticeCard> {
                         ),
                       if (hasAttachment)
                         _peekChip(
-                          label: '📎 ATTACHMENT',
+                          label: 'ATTACHMENT',
                           color: const Color(0xFF6366F1),
                           isDark: isDark,
                         ),
@@ -415,9 +524,7 @@ class _NoticeCardState extends State<NoticeCard> {
         borderRadius: BorderRadius.circular(999),
         border: filled
             ? null
-            : Border.all(
-                color: color.withValues(alpha: 0.35),
-              ),
+            : Border.all(color: color.withValues(alpha: 0.35)),
       ),
       child: Text(
         label,
@@ -435,8 +542,18 @@ class _NoticeCardState extends State<NoticeCard> {
       final dt = DateTime.parse(dateString).toLocal();
       // e.g. "9 Apr 2026"
       const months = [
-        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec',
       ];
       return '${dt.day} ${months[dt.month - 1]} ${dt.year}';
     } catch (_) {
@@ -460,11 +577,17 @@ class _NoticeCardState extends State<NoticeCard> {
         : AppTheme.lightBorder;
 
     final title = widget.notice['title'] ?? 'Untitled';
-    final content = widget.notice['content'] ?? '';
+    final content = _plainPreviewText(
+      widget.notice['content']?.toString() ?? '',
+    );
     final createdAt = widget.notice['created_at'];
     final timeAgo = _formatTimeAgo(createdAt);
     final priority = widget.notice['priority']?.toString();
     final isActive = widget.notice['is_active'] != false;
+    final attachmentUrl = _resolvedAttachmentUrl();
+    final hasAttachment = attachmentUrl.isNotEmpty;
+    final attachmentLabel = _resolvedAttachmentLabel();
+    final attachmentIcon = _resolvedAttachmentIcon();
     final rawCount =
         widget.notice['comments'] ?? widget.notice['comment_count'];
     final commentCount = rawCount is int
@@ -579,7 +702,9 @@ class _NoticeCardState extends State<NoticeCard> {
           ),
           boxShadow: <BoxShadow>[
             BoxShadow(
-              color: Colors.black.withValues(alpha: widget.isDark ? 0.25 : 0.14),
+              color: Colors.black.withValues(
+                alpha: widget.isDark ? 0.25 : 0.14,
+              ),
               blurRadius: 20,
               offset: const Offset(0, 10),
             ),
@@ -588,8 +713,16 @@ class _NoticeCardState extends State<NoticeCard> {
         child: Stack(
           clipBehavior: Clip.none,
           children: <Widget>[
-            Positioned(top: 8, left: 22, child: _buildTapePiece(rotation: -0.18)),
-            Positioned(top: 8, right: 22, child: _buildTapePiece(rotation: 0.18)),
+            Positioned(
+              top: 8,
+              left: 22,
+              child: _buildTapePiece(rotation: -0.18),
+            ),
+            Positioned(
+              top: 8,
+              right: 22,
+              child: _buildTapePiece(rotation: 0.18),
+            ),
             Positioned(
               top: -8,
               left: 0,
@@ -652,229 +785,309 @@ class _NoticeCardState extends State<NoticeCard> {
                       ),
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: <Widget>[
-                              Container(
-                                width: 36,
-                                height: 36,
-                                decoration: BoxDecoration(
-                                  color: widget.account.color,
-                                  borderRadius: BorderRadius.circular(18),
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    widget.account.avatarLetter,
-                                    style: GoogleFonts.inter(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.white,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Container(
+                                  width: 36,
+                                  height: 36,
+                                  decoration: BoxDecoration(
+                                    color: widget.account.color,
+                                    borderRadius: BorderRadius.circular(18),
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      widget.account.avatarLetter,
+                                      style: GoogleFonts.inter(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.white,
+                                      ),
                                     ),
                                   ),
                                 ),
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: <Widget>[
-                                    Row(
-                                      children: <Widget>[
-                                        Expanded(
-                                          child: Row(
-                                            children: [
-                                              Flexible(
-                                                child: Text(
-                                                  widget.account.name,
-                                                  style: GoogleFonts.inter(
-                                                    fontSize: 13.5,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: textColor,
-                                                  ),
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                ),
-                                              ),
-                                              const SizedBox(width: 4),
-                                              Icon(
-                                                Icons.verified_rounded,
-                                                size: 12,
-                                                color: AppTheme.primary,
-                                              ),
-                                              const SizedBox(width: 6),
-                                              Container(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      horizontal: 8,
-                                                      vertical: 2,
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: <Widget>[
+                                      Row(
+                                        children: <Widget>[
+                                          Expanded(
+                                            child: Row(
+                                              children: [
+                                                Flexible(
+                                                  child: Text(
+                                                    widget.account.name,
+                                                    style: GoogleFonts.inter(
+                                                      fontSize: 13.5,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      color: textColor,
                                                     ),
-                                                decoration: BoxDecoration(
-                                                  color: widget.isDark
-                                                      ? Colors.white10
-                                                      : Colors.black.withValues(
-                                                          alpha: 0.05,
-                                                        ),
-                                                  borderRadius:
-                                                      BorderRadius.circular(
-                                                        10,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 4),
+                                                Icon(
+                                                  Icons.verified_rounded,
+                                                  size: 12,
+                                                  color: AppTheme.primary,
+                                                ),
+                                                const SizedBox(width: 6),
+                                                Container(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 8,
+                                                        vertical: 2,
                                                       ),
-                                                ),
-                                                child: Text(
-                                                  widget.account.handle,
-                                                  style: GoogleFonts.inter(
-                                                    fontSize: 10,
-                                                    color: secondaryColor,
+                                                  decoration: BoxDecoration(
+                                                    color: widget.isDark
+                                                        ? Colors.white10
+                                                        : Colors.black
+                                                              .withValues(
+                                                                alpha: 0.05,
+                                                              ),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          10,
+                                                        ),
+                                                  ),
+                                                  child: Text(
+                                                    widget.account.handle,
+                                                    style: GoogleFonts.inter(
+                                                      fontSize: 10,
+                                                      color: secondaryColor,
+                                                    ),
                                                   ),
                                                 ),
+                                              ],
+                                            ),
+                                          ),
+                                          ?manageMenu,
+                                        ],
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Row(
+                                        children: <Widget>[
+                                          Text(
+                                            timeAgo,
+                                            style: GoogleFonts.inter(
+                                              fontSize: 11,
+                                              color: secondaryColor,
+                                            ),
+                                          ),
+                                          if (!isActive) ...[
+                                            const SizedBox(width: 8),
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 8,
+                                                    vertical: 2,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: widget.isDark
+                                                    ? Colors.white12
+                                                    : Colors.black.withValues(
+                                                        alpha: 0.08,
+                                                      ),
+                                                borderRadius:
+                                                    BorderRadius.circular(10),
                                               ),
-                                            ],
-                                          ),
-                                        ),
-                                        ?manageMenu,
-                                      ],
+                                              child: Text(
+                                                'HIDDEN',
+                                                style: GoogleFonts.inter(
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: secondaryColor,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                          if (priority == 'urgent') ...[
+                                            const SizedBox(width: 8),
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 8,
+                                                    vertical: 2,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: AppTheme.error
+                                                    .withValues(alpha: 0.16),
+                                                borderRadius:
+                                                    BorderRadius.circular(10),
+                                              ),
+                                              child: Text(
+                                                'URGENT',
+                                                style: GoogleFonts.inter(
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: AppTheme.error,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            Text(
+                              title,
+                              style: GoogleFonts.inter(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: textColor,
+                                height: 1.2,
+                              ),
+                            ),
+                            if (content.isNotEmpty) ...[
+                              const SizedBox(height: 8),
+                              Linkify(
+                                onOpen: (link) => _openNoticeLink(link.url),
+                                text: content,
+                                style: GoogleFonts.inter(
+                                  fontSize: 13.5,
+                                  color: secondaryColor,
+                                  height: 1.35,
+                                ),
+                                linkStyle: GoogleFonts.inter(
+                                  fontSize: 13.5,
+                                  color: AppTheme.primary,
+                                  decoration: TextDecoration.underline,
+                                  height: 1.35,
+                                ),
+                                maxLines: 4,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                            if (hasAttachment) ...[
+                              const SizedBox(height: 10),
+                              InkWell(
+                                onTap: () => _openNoticeLink(attachmentUrl),
+                                borderRadius: BorderRadius.circular(14),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 10,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: widget.isDark
+                                        ? Colors.white.withValues(alpha: 0.06)
+                                        : Colors.black.withValues(alpha: 0.04),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: widget.isDark
+                                          ? Colors.white12
+                                          : Colors.black12,
                                     ),
-                                    const SizedBox(height: 4),
-                                    Row(
-                                      children: <Widget>[
-                                        Text(
-                                          timeAgo,
-                                          style: GoogleFonts.inter(
-                                            fontSize: 11,
-                                            color: secondaryColor,
-                                          ),
-                                        ),
-                                        if (!isActive) ...[
-                                          const SizedBox(width: 8),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 2,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: widget.isDark
-                                                  ? Colors.white12
-                                                  : Colors.black.withValues(
-                                                      alpha: 0.08,
-                                                    ),
-                                              borderRadius:
-                                                  BorderRadius.circular(10),
-                                            ),
-                                            child: Text(
-                                              'HIDDEN',
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        attachmentIcon,
+                                        size: 18,
+                                        color: AppTheme.primary,
+                                      ),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'Attachment',
                                               style: GoogleFonts.inter(
-                                                fontSize: 10,
+                                                fontSize: 11,
                                                 fontWeight: FontWeight.w700,
                                                 color: secondaryColor,
                                               ),
                                             ),
-                                          ),
-                                        ],
-                                        if (priority == 'urgent') ...[
-                                          const SizedBox(width: 8),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 2,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: AppTheme.error.withValues(
-                                                alpha: 0.16,
-                                              ),
-                                              borderRadius:
-                                                  BorderRadius.circular(10),
-                                            ),
-                                            child: Text(
-                                              'URGENT',
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              attachmentLabel,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
                                               style: GoogleFonts.inter(
-                                                fontSize: 10,
-                                                fontWeight: FontWeight.w700,
-                                                color: AppTheme.error,
+                                                fontSize: 12.5,
+                                                fontWeight: FontWeight.w600,
+                                                color: textColor,
                                               ),
                                             ),
-                                          ),
-                                        ],
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            title,
-                            style: GoogleFonts.inter(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                              color: textColor,
-                              height: 1.2,
-                            ),
-                          ),
-                          if (content.isNotEmpty) ...[
-                            const SizedBox(height: 8),
-                            Linkify(
-                              onOpen: (link) => _openNoticeLink(link.url),
-                              text: content,
-                              style: GoogleFonts.inter(
-                                fontSize: 13.5,
-                                color: secondaryColor,
-                                height: 1.35,
-                              ),
-                              linkStyle: GoogleFonts.inter(
-                                fontSize: 13.5,
-                                color: AppTheme.primary,
-                                decoration: TextDecoration.underline,
-                                height: 1.35,
-                              ),
-                              maxLines: 4,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                          const SizedBox(height: 12),
-                          Row(
-                            children: <Widget>[
-                              _buildActionButton(
-                                icon: Icons.mode_comment_outlined,
-                                count: commentCount != null
-                                    ? '$commentCount'
-                                    : 'Comment',
-                                color: secondaryColor,
-                                onTap: openDetail,
-                              ),
-                              const Spacer(),
-                              InkWell(
-                                onTap: _isLoading ? null : _toggleSaved,
-                                borderRadius: BorderRadius.circular(20),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(8),
-                                  child: Icon(
-                                    _isSaved
-                                        ? Icons.bookmark_rounded
-                                        : Icons.bookmark_border_rounded,
-                                    size: 20,
-                                    color: _isSaved
-                                        ? AppTheme.primary
-                                        : secondaryColor,
+                                          ],
+                                        ),
+                                      ),
+                                      Text(
+                                        'Open',
+                                        style: GoogleFonts.inter(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          color: AppTheme.primary,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                              _buildActionButton(
-                                icon: Icons.share_outlined,
-                                count: 'Share',
-                                color: secondaryColor,
-                                onTap: _shareAsImage,
-                              ),
                             ],
-                          ),
-                        ],
+                            const SizedBox(height: 12),
+                            Row(
+                              children: <Widget>[
+                                _buildActionButton(
+                                  icon: Icons.mode_comment_outlined,
+                                  count: commentCount != null
+                                      ? '$commentCount'
+                                      : 'Comment',
+                                  color: secondaryColor,
+                                  onTap: openDetail,
+                                ),
+                                const SizedBox(width: 8),
+                                _buildActionButton(
+                                  icon: Icons.visibility_outlined,
+                                  count: 'Peek',
+                                  color: secondaryColor,
+                                  onTap: _showPeekDialog,
+                                ),
+                                const Spacer(),
+                                InkWell(
+                                  onTap: _isLoading ? null : _toggleSaved,
+                                  borderRadius: BorderRadius.circular(20),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(8),
+                                    child: Icon(
+                                      _isSaved
+                                          ? Icons.bookmark_rounded
+                                          : Icons.bookmark_border_rounded,
+                                      size: 20,
+                                      color: _isSaved
+                                          ? AppTheme.primary
+                                          : secondaryColor,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                _buildActionButton(
+                                  icon: Icons.share_outlined,
+                                  count: 'Share',
+                                  color: secondaryColor,
+                                  onTap: _shareAsImage,
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                  ),
-                    ), // GestureDetector
+                  ), // GestureDetector
                 ),
               ),
             ),

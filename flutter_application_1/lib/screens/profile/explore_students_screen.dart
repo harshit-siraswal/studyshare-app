@@ -51,9 +51,7 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
     try {
       Map<String, dynamic> profile = const <String, dynamic>{};
       try {
-        profile = await _supabaseService.getCurrentUserProfile(
-          maxAttempts: 1,
-        );
+        profile = await _supabaseService.getCurrentUserProfile(maxAttempts: 1);
       } catch (e) {
         debugPrint(
           'Failed to resolve current profile for student discovery: $e',
@@ -67,8 +65,8 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
           (widget.collegeDomain?.trim().isNotEmpty ?? false)
           ? widget.collegeDomain!.trim()
           : (widget.userEmail.contains('@')
-            ? widget.userEmail.split('@').last.trim()
-            : '');
+                ? widget.userEmail.split('@').last.trim()
+                : '');
       final profileCollege = profile['college']?.toString().trim() ?? '';
       final resolvedCollege = (widget.collegeName?.trim().isNotEmpty ?? false)
           ? widget.collegeName!.trim()
@@ -83,13 +81,14 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
       );
 
       final currentUserEmail = widget.userEmail.trim().toLowerCase();
-      final allowedDomain = ((widget.collegeDomain?.trim().isNotEmpty ?? false)
-              ? widget.collegeDomain!.trim()
-              : (widget.userEmail.contains('@')
-                    ? widget.userEmail.split('@').last.trim()
-                    : ''))
-          .toLowerCase()
-          .replaceAll('@', '');
+      final allowedDomain =
+          ((widget.collegeDomain?.trim().isNotEmpty ?? false)
+                  ? widget.collegeDomain!.trim()
+                  : (widget.userEmail.contains('@')
+                        ? widget.userEmail.split('@').last.trim()
+                        : ''))
+              .toLowerCase()
+              .replaceAll('@', '');
       final filtered = students.where((student) {
         final emailValue = student['email'];
         if (emailValue is! String) return false;
@@ -127,6 +126,22 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
         _loadStudents();
       }
     });
+  }
+
+  bool _isBannedStudent(Map<String, dynamic> student) {
+    final candidates = <dynamic>[
+      student['is_banned'],
+      student['isBanned'],
+      student['banned'],
+    ];
+    for (final value in candidates) {
+      if (value == true) return true;
+      final normalized = value?.toString().trim().toLowerCase() ?? '';
+      if (normalized == 'true' || normalized == '1' || normalized == 'banned') {
+        return true;
+      }
+    }
+    return false;
   }
 
   @override
@@ -223,8 +238,8 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
 
   Widget _buildStudentCard(Map<String, dynamic> student, bool isDark) {
     final photoUrl = student['profile_photo_url'];
-    final hasValidPhoto =
-        photoUrl != null && photoUrl.toString().isNotEmpty;
+    final hasValidPhoto = photoUrl != null && photoUrl.toString().isNotEmpty;
+    final isBanned = _isBannedStudent(student);
 
     return InkWell(
       borderRadius: BorderRadius.circular(16),
@@ -271,15 +286,43 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    student['display_name'] ?? 'Unknown',
-                    style: GoogleFonts.inter(
-                      color: isDark
-                          ? AppTheme.darkTextPrimary
-                          : AppTheme.lightTextPrimary,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 16,
-                    ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          student['display_name'] ?? 'Unknown',
+                          style: GoogleFonts.inter(
+                            color: isDark
+                                ? AppTheme.darkTextPrimary
+                                : AppTheme.lightTextPrimary,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                      if (isBanned)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.red.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                              color: Colors.red.withValues(alpha: 0.24),
+                            ),
+                          ),
+                          child: Text(
+                            'Banned',
+                            style: GoogleFonts.inter(
+                              color: Colors.red.shade700,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                   if (student['username'] != null)
                     Text(
@@ -304,6 +347,18 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
                               ? AppTheme.darkTextMuted
                               : AppTheme.lightTextMuted,
                           fontSize: 13,
+                        ),
+                      ),
+                    ),
+                  if (isBanned)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        'This account is banned for this college.',
+                        style: GoogleFonts.inter(
+                          color: Colors.red.shade600,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ),
