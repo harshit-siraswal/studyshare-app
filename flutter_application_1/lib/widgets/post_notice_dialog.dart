@@ -31,9 +31,14 @@ Future<bool> showPostNoticeDialog({
   ];
   const maxAttachmentBytes = 10 * 1024 * 1024;
 
+  final fetchedDepartmentOptions = await supabaseService.getNoticeDepartments();
+  final effectiveDepartmentOptions = fetchedDepartmentOptions.isNotEmpty
+      ? fetchedDepartmentOptions
+      : departmentOptions;
+
   final uniqueDepartmentOptions = <DepartmentOption>[
     ...{
-      for (final option in departmentOptions)
+      for (final option in effectiveDepartmentOptions)
         if (option.id.trim().isNotEmpty && option.name.trim().isNotEmpty)
           option.id.trim(): DepartmentOption(
             id: option.id.trim(),

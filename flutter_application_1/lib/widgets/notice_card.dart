@@ -763,6 +763,7 @@ class _NoticeCardState extends State<NoticeCard> {
                     behavior: HitTestBehavior.opaque,
                     onLongPressStart: (_) => _showPeekPreview(),
                     onLongPressCancel: _hidePeekPreview,
+                    onLongPressEnd: (_) => _hidePeekPreview(),
                     onLongPressUp: _hidePeekPreview,
                     child: Container(
                       decoration: BoxDecoration(

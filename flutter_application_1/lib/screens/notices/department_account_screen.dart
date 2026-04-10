@@ -136,9 +136,11 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
             widget.account.id,
             widget.collegeId,
           );
-          setState(() {
-            _followerCount = actualCount;
-          });
+          if (mounted) {
+            setState(() {
+              _followerCount = actualCount;
+            });
+          }
         } catch (countError) {
           debugPrint('Error syncing follower count: $countError');
         }
@@ -612,6 +614,10 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
     if (message.contains('row-level security') ||
         message.contains('unauthorized')) {
       return 'Follow is not available right now. Please sign in again.';
+    }
+    if (message.contains('college context') ||
+        message.contains('college id is required')) {
+      return 'Follow needs your college profile. Please refresh your profile and try again.';
     }
     return 'Could not update follow status right now.';
   }

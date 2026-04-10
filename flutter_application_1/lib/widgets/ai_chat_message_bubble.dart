@@ -113,12 +113,13 @@ class BotMessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChatMessageBubble(
-      isUser: false,
-      isDark: isDark,
-      horizontalInset: horizontalInset,
-      padding: padding,
-      child: child,
+    final margin = EdgeInsets.only(
+      top: AppTheme.chatBubbleVerticalPadding,
+      bottom: AppTheme.chatBubbleVerticalPadding,
+      left: AppTheme.chatBubbleHorizontalPadding,
+      right: horizontalInset,
     );
+
+    return Container(margin: margin, padding: padding, child: child);
   }
 }

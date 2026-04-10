@@ -53,6 +53,7 @@ class _NoticesScreenState extends State<NoticesScreen>
       departmentCatalogEntries.map((entry) => entry.code),
     ),
   );
+  Map<String, String> _departmentNames = {};
 
   DateTime? _startDate;
   DateTime? _endDate;
@@ -63,7 +64,48 @@ class _NoticesScreenState extends State<NoticesScreen>
     for (final account in _departmentAccounts) {
       if (account.id == departmentId) return account;
     }
-    return departmentAccountFromCode(departmentId);
+    return departmentAccountFromCode(
+      departmentId,
+      fallbackName: _departmentNames[departmentId],
+    );
+  }
+
+  List<DepartmentAccount> _buildDepartmentAccountsWithNames(
+    Iterable<String> rawCodes,
+  ) {
+    final orderedCodes = <String>['general', ...rawCodes.map(normalizeDepartmentCode)];
+    final seen = <String>{};
+    final accounts = <DepartmentAccount>[];
+    for (final code in orderedCodes) {
+      if (code.isEmpty || !seen.add(code)) continue;
+      accounts.add(
+        departmentAccountFromCode(
+          code,
+          fallbackName: _departmentNames[code],
+        ),
+      );
+    }
+    return accounts;
+  }
+
+  Future<void> _loadDepartmentAccounts() async {
+    try {
+      final dynamicDepartments = await _supabaseService.getNoticeDepartments();
+      if (dynamicDepartments.isEmpty) return;
+      final names = <String, String>{
+        for (final option in dynamicDepartments)
+          normalizeDepartmentCode(option.id): option.name.trim(),
+      };
+      final accounts = _buildDepartmentAccountsWithNames(names.keys);
+      if (!mounted) return;
+      setState(() {
+        _departmentNames = names;
+        _departmentAccounts = accounts;
+      });
+      await _loadDepartmentFollowerCounts();
+    } catch (e) {
+      debugPrint('Error loading dynamic departments: $e');
+    }
   }
 
   Future<void> _showDateFilter() async {
@@ -258,6 +300,7 @@ class _NoticesScreenState extends State<NoticesScreen>
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _loadAccessContextAndNotices();
+    _loadDepartmentAccounts();
     _loadFollowedDepartments();
     _loadDepartmentFollowerCounts();
   }
@@ -438,6 +481,9 @@ class _NoticesScreenState extends State<NoticesScreen>
           (notice) => notice['department']?.toString() ?? '',
         ),
       ]);
+      final namedMergedAccounts = _buildDepartmentAccountsWithNames(
+        mergedAccounts.map((account) => account.id),
+      );
 
       // Filter by date range if set
       List<Map<String, dynamic>> filtered = visibleNotices;
@@ -454,7 +500,7 @@ class _NoticesScreenState extends State<NoticesScreen>
 
       if (mounted) {
         setState(() {
-          _departmentAccounts = mergedAccounts;
+          _departmentAccounts = namedMergedAccounts;
           if (reset) {
             _filteredNotices = filtered;
           } else {
@@ -1039,6 +1085,10 @@ class _NoticesScreenState extends State<NoticesScreen>
     if (message.contains('row-level security') ||
         message.contains('unauthorized')) {
       return 'Follow is not available right now. Please sign in again.';
+    }
+    if (message.contains('college context') ||
+        message.contains('college id is required')) {
+      return 'Follow needs your college profile. Please refresh your profile and try again.';
     }
     return 'Failed to update follow status.';
   }

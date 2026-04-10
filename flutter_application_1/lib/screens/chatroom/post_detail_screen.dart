@@ -79,9 +79,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     '🔥',
   ];
 
-  bool _isKietEmail(String email) {
+  static const List<String> _privilegedDomains = ['@kiet.edu'];
+
+  bool _isPrivilegedEmail(String email) {
     final normalized = email.trim().toLowerCase();
-    return normalized.endsWith('@kiet.edu');
+    return _privilegedDomains.any((domain) => normalized.endsWith(domain));
   }
 
   bool _emailMatchesDomain(String email, String domain) {
@@ -175,7 +177,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
   void _initReadOnly() {
     final email = widget.userEmail.trim().toLowerCase();
-    if (_hasAccessOverride || _isKietEmail(email)) {
+    if (_hasAccessOverride || _isPrivilegedEmail(email)) {
       _isReadOnly = false;
     } else if (widget.collegeDomain.isEmpty) {
       _isReadOnly = true;

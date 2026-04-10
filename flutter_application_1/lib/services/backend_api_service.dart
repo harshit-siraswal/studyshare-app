@@ -3184,18 +3184,48 @@ class BackendApiService {
   // Follows & Users (additional)
   // ----------------------------
 
-  Future<void> followDepartment(String departmentId) async {
+  Future<List<Map<String, dynamic>>> getDepartments({
+    bool includeInactive = false,
+  }) async {
+    final uri = Uri(
+      path: '/api/departments',
+      queryParameters: includeInactive
+          ? <String, String>{'includeInactive': 'true'}
+          : null,
+    );
+    final data = await _requestJson(
+      uri.toString(),
+      method: 'GET',
+      requireAuthToken: true,
+    );
+    return List<Map<String, dynamic>>.from(data['departments'] ?? const []);
+  }
+
+  Future<void> followDepartment(String departmentId, {String? collegeId}) async {
+    final normalizedCollegeId = collegeId?.trim();
     await _requestJson(
       '/api/departments/follow',
       method: 'POST',
-      body: <String, dynamic>{'id': departmentId},
+      body: <String, dynamic>{
+        'id': departmentId.trim(),
+        if (normalizedCollegeId != null && normalizedCollegeId.isNotEmpty)
+          'collegeId': normalizedCollegeId,
+      },
       requireAuthToken: true,
     );
   }
 
-  Future<void> unfollowDepartment(String departmentId) async {
+  Future<void> unfollowDepartment(String departmentId, {String? collegeId}) async {
+    final normalizedCollegeId = collegeId?.trim();
+    final path = normalizedCollegeId != null && normalizedCollegeId.isNotEmpty
+        ? Uri(
+            path:
+                '/api/departments/follow/${Uri.encodeComponent(departmentId.trim())}',
+            queryParameters: <String, String>{'collegeId': normalizedCollegeId},
+          ).toString()
+        : '/api/departments/follow/${Uri.encodeComponent(departmentId.trim())}';
     await _requestJson(
-      '/api/departments/follow/$departmentId',
+      path,
       method: 'DELETE',
       requireAuthToken: true,
     );

@@ -9,6 +9,7 @@ import '../models/resource.dart';
 import '../models/user.dart';
 import 'backend_api_service.dart';
 import '../models/department_account.dart';
+import '../models/department_option.dart';
 import '../data/department_catalog.dart';
 import '../utils/admin_access.dart';
 
@@ -5026,7 +5027,7 @@ class SupabaseService {
     String userEmail,
   ) async {
     try {
-      await _api.followDepartment(departmentId);
+      await _api.followDepartment(departmentId, collegeId: collegeId);
     } catch (e) {
       debugPrint('Error following department via API: $e');
       rethrow;
@@ -5040,11 +5041,51 @@ class SupabaseService {
     String? collegeId,
   }) async {
     try {
-      await _api.unfollowDepartment(departmentId);
+      await _api.unfollowDepartment(departmentId, collegeId: collegeId);
     } catch (e) {
       debugPrint('Error unfollowing department via API: $e');
       rethrow;
     }
+  }
+
+  Future<List<DepartmentOption>> getNoticeDepartments() async {
+    try {
+      final backendRows = await _api.getDepartments();
+      final normalized = <String, DepartmentOption>{};
+      for (final row in backendRows) {
+        final id = normalizeDepartmentCode(row['code']?.toString());
+        final name = row['name']?.toString().trim() ?? '';
+        if (id.isEmpty || name.isEmpty) continue;
+        normalized[id] = DepartmentOption(id: id, name: name);
+      }
+      if (normalized.isNotEmpty) {
+        return normalized.values.toList(growable: false);
+      }
+    } catch (e) {
+      debugPrint('Backend departments lookup failed, trying Supabase: $e');
+    }
+
+    try {
+      final rows = await _client
+          .from('departments')
+          .select('code, name, is_active')
+          .eq('is_active', true)
+          .order('name', ascending: true);
+      final normalized = <String, DepartmentOption>{};
+      for (final row in List<Map<String, dynamic>>.from(rows)) {
+        final id = normalizeDepartmentCode(row['code']?.toString());
+        final name = row['name']?.toString().trim() ?? '';
+        if (id.isEmpty || name.isEmpty) continue;
+        normalized[id] = DepartmentOption(id: id, name: name);
+      }
+      if (normalized.isNotEmpty) {
+        return normalized.values.toList(growable: false);
+      }
+    } catch (e) {
+      debugPrint('Supabase departments lookup failed: $e');
+    }
+
+    return departmentOptions;
   }
 
   /// Check if following department
