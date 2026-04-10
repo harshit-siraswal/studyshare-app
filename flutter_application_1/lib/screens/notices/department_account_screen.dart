@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
 import '../../config/theme.dart';
 import '../../services/supabase_service.dart';
+import '../../services/backend_api_service.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/notice_card.dart';
 import '../../models/department_account.dart';
@@ -25,6 +26,7 @@ class DepartmentAccountScreen extends StatefulWidget {
 
 class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
   final SupabaseService _supabaseService = SupabaseService();
+  final BackendApiService _backendApiService = BackendApiService();
   final AuthService _authService = AuthService();
   final TextEditingController _searchController = TextEditingController();
   List<Map<String, dynamic>> _notices = [];
@@ -126,6 +128,21 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
           _followerCount++;
         });
       }
+
+      // Verify and sync the actual count from the server after either action.
+      if (mounted) {
+        try {
+          final actualCount = await _supabaseService.getDepartmentFollowerCount(
+            widget.account.id,
+            widget.collegeId,
+          );
+          setState(() {
+            _followerCount = actualCount;
+          });
+        } catch (countError) {
+          debugPrint('Error syncing follower count: $countError');
+        }
+      }
     } catch (e) {
       debugPrint('Department follow update failed: $e');
       if (!mounted) return;
@@ -139,18 +156,12 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
 
   Future<void> _loadDepartmentNotices() async {
     try {
-      final departmentId = widget.account.id;
-      final allNotices = await _supabaseService.getNotices(
-        collegeId: widget.collegeId,
-        includeHidden: _canManageNotices,
+      // Fetch only notices for this department via backend query param —
+      // avoids loading all notices and filtering in-memory.
+      final departmentNotices = await _backendApiService.getNotices(
+        widget.collegeId,
+        department: widget.account.id,
       );
-      final departmentNotices = allNotices.where((notice) {
-        final noticeDepartment =
-            (notice['department'] ?? notice['department_id'] ?? '')
-                .toString()
-                .trim();
-        return noticeDepartment == departmentId;
-      }).toList();
 
       if (!mounted) return;
       setState(() {

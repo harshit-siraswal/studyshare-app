@@ -3184,6 +3184,23 @@ class BackendApiService {
   // Follows & Users (additional)
   // ----------------------------
 
+  Future<void> followDepartment(String departmentId) async {
+    await _requestJson(
+      '/api/departments/follow',
+      method: 'POST',
+      body: <String, dynamic>{'id': departmentId},
+      requireAuthToken: true,
+    );
+  }
+
+  Future<void> unfollowDepartment(String departmentId) async {
+    await _requestJson(
+      '/api/departments/follow/$departmentId',
+      method: 'DELETE',
+      requireAuthToken: true,
+    );
+  }
+
   Future<Map<String, dynamic>> getFollowers({String? email}) async {
     final normalizedEmail = email?.trim();
     final uri = normalizedEmail != null && normalizedEmail.isNotEmpty

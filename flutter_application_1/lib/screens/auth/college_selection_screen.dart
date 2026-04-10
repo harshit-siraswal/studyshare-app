@@ -21,8 +21,8 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
   static const Duration _collegeFetchTimeout = Duration(seconds: 8);
   static const List<Map<String, String>> _starterCollegeDirectory = [
     {
-      'id': 'kiet',
-      'name': 'Krishna Institute of Engineering and Technology',
+      'id': 'fe2e3b2f-f628-49ef-8fb9-a350c808be2d',
+      'name': 'KIET Group of Institutions',
       'domain': 'kiet.edu',
     },
     {'id': 'iiitbh', 'name': 'IIIT Bhagalpur', 'domain': 'iiitbh.ac.in'},

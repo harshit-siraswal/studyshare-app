@@ -5025,82 +5025,12 @@ class SupabaseService {
     String collegeId,
     String userEmail,
   ) async {
-    final normalizedEmail = _requireCurrentSessionEmail(
-      claimedEmail: userEmail,
-      action: 'follow_department',
-    );
-
     try {
-      // Sync with users target array
-      await _client.rpc(
-        'add_followed_department',
-        params: {'user_email': normalizedEmail, 'dept_id': departmentId},
-      );
+      await _api.followDepartment(departmentId);
     } catch (e) {
-      debugPrint('Error syncing followed_departments array: $e');
+      debugPrint('Error following department via API: $e');
+      rethrow;
     }
-
-    // Avoid creating duplicate follower rows when any legacy schema row exists.
-    try {
-      final alreadyFollowing = await isFollowingDepartment(
-        departmentId,
-        normalizedEmail,
-        collegeId: collegeId,
-      );
-      if (alreadyFollowing) return;
-    } catch (_) {
-      // Continue with best-effort inserts.
-    }
-
-    final userId = currentUserId;
-    final basePayload = <String, dynamic>{
-      'department_id': departmentId,
-      'college_id': collegeId,
-    };
-    final userIdentifiers = <String, String>{
-      if (userId != null && userId.isNotEmpty) 'user_id': userId,
-      if (userId != null && userId.isNotEmpty) 'follower_id': userId,
-      if (normalizedEmail.isNotEmpty) 'user_email': normalizedEmail,
-      if (normalizedEmail.isNotEmpty) 'follower_email': normalizedEmail,
-    };
-    final payloads = <Map<String, dynamic>>[];
-
-    for (final entry in userIdentifiers.entries) {
-      payloads.add(<String, dynamic>{...basePayload, entry.key: entry.value});
-      payloads.add(<String, dynamic>{
-        'department_id': departmentId,
-        entry.key: entry.value,
-      });
-    }
-
-    Object? lastError;
-    for (final payload in payloads) {
-      try {
-        await _client.from('department_followers').insert(payload);
-        return;
-      } catch (e) {
-        if (_isDuplicateKeyError(e)) return;
-        lastError = e;
-
-        final hasSchemaMismatch = payload.keys.any(
-          (key) => key != 'department_id' && _isMissingColumnError(e, key),
-        );
-        if (hasSchemaMismatch) {
-          continue;
-        }
-
-        if (_isRowLevelSecurityError(e)) {
-          continue;
-        }
-
-        debugPrint('Error following department: $e');
-        rethrow;
-      }
-    }
-
-    debugPrint('Error following department: $lastError');
-    if (lastError != null) throw Exception(lastError.toString());
-    throw Exception('Could not follow department.');
   }
 
   /// Unfollow a department
@@ -5109,87 +5039,11 @@ class SupabaseService {
     String userEmail, {
     String? collegeId,
   }) async {
-    final normalizedEmail = _requireCurrentSessionEmail(
-      claimedEmail: userEmail,
-      action: 'unfollow_department',
-    );
-
     try {
-      // Sync with users target array
-      await _client.rpc(
-        'remove_followed_department',
-        params: {'user_email': normalizedEmail, 'dept_id': departmentId},
-      );
+      await _api.unfollowDepartment(departmentId);
     } catch (e) {
-      debugPrint('Error syncing followed_departments array: $e');
-    }
-
-    final userId = currentUserId;
-    final filters = <Map<String, String>>[
-      if (userId != null && userId.isNotEmpty)
-        {'column': 'user_id', 'value': userId},
-      if (userId != null && userId.isNotEmpty)
-        {'column': 'follower_id', 'value': userId},
-      if (normalizedEmail.isNotEmpty)
-        {'column': 'follower_email', 'value': normalizedEmail},
-      if (normalizedEmail.isNotEmpty)
-        {'column': 'user_email', 'value': normalizedEmail},
-    ];
-    final attempts = <Map<String, dynamic>>[
-      for (final filter in filters)
-        {
-          'column': filter['column']!,
-          'value': filter['value']!,
-          'useCollegeFilter': true,
-        },
-      for (final filter in filters)
-        {
-          'column': filter['column']!,
-          'value': filter['value']!,
-          'useCollegeFilter': false,
-        },
-    ];
-
-    if (attempts.isEmpty) return;
-
-    Object? lastError;
-    for (final attempt in attempts) {
-      final column = attempt['column'] as String;
-      final value = attempt['value'] as String;
-      final useCollegeFilter = attempt['useCollegeFilter'] == true;
-      try {
-        var query = _client
-            .from('department_followers')
-            .delete()
-            .eq('department_id', departmentId)
-            .eq(column, value);
-        if (useCollegeFilter &&
-            collegeId != null &&
-            collegeId.trim().isNotEmpty) {
-          query = query.eq('college_id', collegeId);
-        }
-        final deletedRows = await query.select('id');
-        final deletedCount = deletedRows.length;
-        if (deletedCount > 0) {
-          return;
-        }
-      } catch (e) {
-        lastError = e;
-        final schemaMismatch =
-            _isMissingColumnError(e, column) ||
-            (useCollegeFilter && _isMissingColumnError(e, 'college_id'));
-        if (schemaMismatch || _isRowLevelSecurityError(e)) {
-          continue;
-        }
-
-        debugPrint('Error unfollowing department: $e');
-        rethrow;
-      }
-    }
-
-    debugPrint('Error unfollowing department: $lastError');
-    if (lastError != null) {
-      throw Exception(lastError.toString());
+      debugPrint('Error unfollowing department via API: $e');
+      rethrow;
     }
   }
 

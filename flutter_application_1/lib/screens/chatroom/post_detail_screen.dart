@@ -79,6 +79,18 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     '🔥',
   ];
 
+  bool _isKietEmail(String email) {
+    final normalized = email.trim().toLowerCase();
+    return normalized.endsWith('@kiet.edu');
+  }
+
+  bool _emailMatchesDomain(String email, String domain) {
+    final normalizedEmail = email.trim().toLowerCase();
+    final normalizedDomain = domain.trim().toLowerCase().replaceAll('@', '');
+    if (normalizedEmail.isEmpty || normalizedDomain.isEmpty) return false;
+    return normalizedEmail.endsWith('@$normalizedDomain');
+  }
+
   Widget _buildCommentContent(
     String content,
     bool isDark,
@@ -162,12 +174,13 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   void _initReadOnly() {
-    if (_hasAccessOverride) {
+    final email = widget.userEmail.trim().toLowerCase();
+    if (_hasAccessOverride || _isKietEmail(email)) {
       _isReadOnly = false;
     } else if (widget.collegeDomain.isEmpty) {
       _isReadOnly = true;
     } else {
-      _isReadOnly = !widget.userEmail.endsWith(widget.collegeDomain);
+      _isReadOnly = !_emailMatchesDomain(email, widget.collegeDomain);
     }
   }
 
@@ -981,7 +994,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   Widget _buildPostContent(Map<String, dynamic> post, bool isDark) {
     // Parse title and content from full content
     final fullContent = post['content']?.toString() ?? '';
-    final dbTitle = post['title']?.toString().trim(); // Fallback if column exists
+    final dbTitle = post['title']
+        ?.toString()
+        .trim(); // Fallback if column exists
 
     String title;
     String content;
@@ -1002,7 +1017,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
     final authorEmail = (post['author_email'] ?? post['user_email'] ?? '')
         .toString();
-    final authorName = (post['author_name']?.toString().trim().isNotEmpty ?? false)
+    final authorName =
+        (post['author_name']?.toString().trim().isNotEmpty ?? false)
         ? post['author_name'].toString().trim()
         : authorEmail.contains('@')
         ? authorEmail.split('@').first
