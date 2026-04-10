@@ -25,7 +25,7 @@ android {
             ?.toString()
             ?.trim()
             ?.lowercase(Locale.ROOT)
-            ?.toBooleanStrictOrNull() == true
+            ?.toBooleanStrictOrNull() != false
     val enableLocalRelease =
         project.findProperty("enableLocalRelease")
             ?.toString()
