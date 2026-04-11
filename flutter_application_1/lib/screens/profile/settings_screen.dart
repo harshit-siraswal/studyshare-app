@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'dart:ui';
+import '../../config/app_config.dart';
+import '../../config/legal_documents.dart';
 import '../../config/theme.dart';
 import '../../providers/theme_provider.dart';
 import '../../services/auth_service.dart';
@@ -326,7 +329,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  void _showLegalDialog(String title, String content) {
+  Future<void> _openExternalLink(String rawUrl) async {
+    final uri = Uri.tryParse(rawUrl);
+    if (uri == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invalid link for this legal document.')),
+      );
+      return;
+    }
+
+    try {
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Unable to open legal document link.')),
+        );
+      }
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open legal document link.')),
+      );
+    }
+  }
+
+  void _showLegalDialog(
+    String title,
+    String content, {
+    String? onlineUrl,
+  }) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -341,6 +376,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: Text(content, style: GoogleFonts.inter()),
         ),
         actions: [
+          if (onlineUrl != null)
+            TextButton(
+              onPressed: () => _openExternalLink(onlineUrl),
+              child: const Text('View Online'),
+            ),
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Close'),
@@ -514,7 +554,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             title: 'Privacy Policy',
                             onTap: () => _showLegalDialog(
                               'Privacy Policy',
-                              'This is a placeholder for the Privacy Policy.\n\nWe value your privacy...',
+                              LegalDocuments.privacyPolicy(
+                                supportEmail: AppConfig.supportEmail,
+                              ),
+                              onlineUrl: LegalDocuments.privacyPolicyUrl,
                             ),
                             isDark: isDark,
                           ),
@@ -522,10 +565,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           _buildGroupedTile(
                             icon: Icons.description_outlined,
                             iconBgColor: Colors.blueGrey.shade500,
-                            title: 'Terms of Service',
+                            title: 'Terms of Use',
                             onTap: () => _showLegalDialog(
-                              'Terms of Service',
-                              'This is a placeholder for the Terms of Service.\n\nBy using this app...',
+                              'Terms of Use',
+                              LegalDocuments.termsOfUse(
+                                supportEmail: AppConfig.supportEmail,
+                              ),
+                              onlineUrl: LegalDocuments.termsOfUseUrl,
+                            ),
+                            isDark: isDark,
+                          ),
+                          _buildDivider(isDark),
+                          _buildGroupedTile(
+                            icon: Icons.groups_2_outlined,
+                            iconBgColor: Colors.indigo.shade500,
+                            title: 'Community Guidelines',
+                            onTap: () => _showLegalDialog(
+                              'Community Guidelines',
+                              LegalDocuments.communityGuidelines(
+                                supportEmail: AppConfig.supportEmail,
+                              ),
+                              onlineUrl: LegalDocuments.communityGuidelinesUrl,
+                            ),
+                            isDark: isDark,
+                          ),
+                          _buildDivider(isDark),
+                          _buildGroupedTile(
+                            icon: Icons.delete_sweep_outlined,
+                            iconBgColor: Colors.red.shade500,
+                            title: 'Account & Data Deletion',
+                            onTap: () => _showLegalDialog(
+                              'Account & Data Deletion',
+                              LegalDocuments.accountDeletionPolicy(
+                                supportEmail: AppConfig.supportEmail,
+                              ),
+                              onlineUrl: LegalDocuments.accountDeletionUrl,
                             ),
                             isDark: isDark,
                           ),

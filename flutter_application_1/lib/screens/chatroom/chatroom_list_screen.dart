@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
 import '../../services/supabase_service.dart';
 import '../../services/backend_api_service.dart';
+import '../../services/auth_service.dart';
 
 import '../profile/saved_posts_screen.dart';
 import '../../services/subscription_service.dart';
@@ -31,6 +32,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
   static const double _bottomNavSpacing = 148.0;
 
   final SupabaseService _supabaseService = SupabaseService();
+  final AuthService _authService = AuthService();
   final TextEditingController _searchController = TextEditingController();
 
   final FocusNode _searchFocusNode = FocusNode();
@@ -145,6 +147,18 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
 
   Future<void> _loadWriterRole({bool loadRoomsWhenFinished = false}) async {
     try {
+      final authIdentity = _authService.currentIdentity;
+      if (authIdentity != null) {
+        if (!mounted) return;
+        setState(() {
+          _isTeacherOrAdmin = authIdentity.canPostNotices;
+        });
+        if (loadRoomsWhenFinished) {
+          await _loadRooms();
+        }
+        return;
+      }
+
       final profile = await _supabaseService.getCurrentUserProfile(
         maxAttempts: 1,
       );

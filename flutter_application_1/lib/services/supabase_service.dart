@@ -12,6 +12,7 @@ import '../models/department_account.dart';
 import '../models/department_option.dart';
 import '../data/department_catalog.dart';
 import '../utils/admin_access.dart';
+import '../utils/user_identity_resolver.dart';
 
 class RoomLimitException implements Exception {
   final String message;
@@ -29,9 +30,9 @@ class SupabaseService {
 
   static const int kUnlimitedDuration = -1;
   static const int kDefaultExpiryDays = 7;
-  static const Duration _profileCacheTtl = Duration(seconds: 45);
   static const Duration _resourcesCacheTtl = Duration(seconds: 20);
   static const Duration _filterValuesCacheTtl = Duration(minutes: 5);
+  static const Duration _noticeDepartmentsCacheTtl = Duration(minutes: 10);
   static const int _maxResourceListCacheEntries = 24;
   static const int _maxFilterValuesCacheEntries = 24;
   static final ValueNotifier<int> aiTokenRefreshNotifier = ValueNotifier<int>(
@@ -44,6 +45,15 @@ class SupabaseService {
   static String? _cachedCurrentUserProfileEmail;
   static DateTime? _cachedCurrentUserProfileAt;
   static Future<Map<String, dynamic>>? _currentUserProfileFetchFuture;
+  static Map<String, dynamic>? _cachedCurrentUserIdentity;
+  static String? _cachedCurrentUserIdentityEmail;
+  static String? _cachedCurrentUserIdentityUserId;
+  static Future<Map<String, dynamic>>? _currentUserIdentityFetchFuture;
+  static ResolvedUserType _cachedResolvedUserType =
+      ResolvedUserType.unauthenticated;
+  static List<College>? _cachedColleges;
+  static ({DateTime cachedAt, List<DepartmentOption> data})?
+  _noticeDepartmentsCache;
   static final Map<String, ({DateTime cachedAt, List<Resource> data})>
   _resourceListCache = <String, ({DateTime cachedAt, List<Resource> data})>{};
   static final Map<String, Future<List<Resource>>> _resourceListInFlight =
@@ -200,11 +210,8 @@ class SupabaseService {
 
   bool _hasFreshCurrentUserProfileCacheFor(String email) {
     if (email.isEmpty) return false;
-    final cachedAt = _cachedCurrentUserProfileAt;
-    if (cachedAt == null) return false;
     return _cachedCurrentUserProfile != null &&
-        _cachedCurrentUserProfileEmail == email &&
-        DateTime.now().difference(cachedAt) < _profileCacheTtl;
+      _cachedCurrentUserProfileEmail == email;
   }
 
   void _cacheCurrentUserProfile(String email, Map<String, dynamic> profile) {
@@ -212,12 +219,205 @@ class SupabaseService {
     _cachedCurrentUserProfile = Map<String, dynamic>.from(profile);
     _cachedCurrentUserProfileEmail = email;
     _cachedCurrentUserProfileAt = DateTime.now();
+
+    final identity = _mapProfileToIdentity(profile);
+    if (identity.isNotEmpty) {
+      _cachedCurrentUserIdentity = identity;
+      _cachedCurrentUserIdentityEmail = _normalizeEmail(
+        identity['email']?.toString(),
+      );
+      _cachedCurrentUserIdentityUserId =
+          identity['id']?.toString().trim().isNotEmpty == true
+          ? identity['id'].toString().trim()
+          : null;
+      _cachedResolvedUserType = resolveUserType(identity);
+    }
   }
 
   void invalidateCurrentUserProfileCache() {
     _cachedCurrentUserProfile = null;
     _cachedCurrentUserProfileEmail = null;
     _cachedCurrentUserProfileAt = null;
+    _currentUserProfileFetchFuture = null;
+  }
+
+  void invalidateCurrentUserIdentityCache() {
+    _cachedCurrentUserIdentity = null;
+    _cachedCurrentUserIdentityEmail = null;
+    _cachedCurrentUserIdentityUserId = null;
+    _currentUserIdentityFetchFuture = null;
+    _cachedResolvedUserType = ResolvedUserType.unauthenticated;
+  }
+
+  void clearSessionCachesOnSignOut() {
+    invalidateCurrentUserProfileCache();
+    invalidateCurrentUserIdentityCache();
+  }
+
+  Map<String, dynamic>? get cachedCurrentUserIdentity {
+    final cached = _cachedCurrentUserIdentity;
+    if (cached == null || cached.isEmpty) return null;
+    return Map<String, dynamic>.from(cached);
+  }
+
+  ResolvedUserType get cachedResolvedUserType => _cachedResolvedUserType;
+
+  bool _hasFreshCurrentUserIdentityCacheFor({
+    required String userId,
+    required String email,
+  }) {
+    if (_cachedCurrentUserIdentity == null) return false;
+    if (userId.isNotEmpty && _cachedCurrentUserIdentityUserId == userId) {
+      return true;
+    }
+    return email.isNotEmpty && _cachedCurrentUserIdentityEmail == email;
+  }
+
+  Map<String, dynamic> _normalizeIdentityPayload(Map<String, dynamic> raw) {
+    final identity = Map<String, dynamic>.from(raw);
+
+    if ((identity['profile_photo_url']?.toString().trim().isEmpty ?? true) &&
+        (identity['photo_url']?.toString().trim().isNotEmpty ?? false)) {
+      identity['profile_photo_url'] = identity['photo_url'];
+    }
+
+    final role = identity['user_role']?.toString().trim() ?? '';
+    if (role.isEmpty && (identity['role']?.toString().trim().isNotEmpty ?? false)) {
+      identity['user_role'] = identity['role'];
+    }
+
+    return identity;
+  }
+
+  Map<String, dynamic> _mapProfileToIdentity(Map<String, dynamic> profile) {
+    if (profile.isEmpty) return <String, dynamic>{};
+
+    final normalized = Map<String, dynamic>.from(profile);
+    final resolvedRole = resolveEffectiveProfileRole(normalized);
+    final normalizedEmail = _normalizeEmail(normalized['email']?.toString());
+
+    final hasElevatedRole =
+        resolvedRole == AppRoles.admin ||
+        resolvedRole == AppRoles.teacher ||
+        resolvedRole == AppRoles.moderator;
+
+    return _normalizeIdentityPayload(<String, dynamic>{
+      'id': normalized['id'],
+      'email': normalizedEmail,
+      'display_name': normalized['display_name'],
+      'profile_photo_url':
+          normalized['profile_photo_url'] ?? normalized['photo_url'],
+      'user_role':
+          normalized['user_role'] ?? normalized['role'] ?? resolvedRole,
+      'college_id': normalized['college_id'],
+      'branch': normalized['branch'],
+      'semester': normalized['semester'],
+      'subscription_tier': normalized['subscription_tier'],
+      'premium_until':
+          normalized['premium_until'] ?? normalized['subscription_end_date'],
+      'college_name': normalized['college_name'] ?? normalized['college'],
+      'college_domain': normalized['college_domain'],
+      'college_logo': normalized['college_logo'] ?? normalized['college_logo_url'],
+      'admin_role': normalized['admin_role'] ?? (hasElevatedRole ? resolvedRole : null),
+      'admin_department': normalized['admin_department'] ?? normalized['department'],
+      'admin_capabilities': normalized['admin_capabilities'] ?? const <String, dynamic>{},
+    });
+  }
+
+  Future<Map<String, dynamic>> getCurrentUserIdentity({
+    bool forceRefresh = false,
+  }) async {
+    final userId = currentUserId?.trim() ?? '';
+    final email = _currentSessionEmail();
+
+    if (forceRefresh) {
+      invalidateCurrentUserIdentityCache();
+    }
+
+    if (!forceRefresh &&
+        _hasFreshCurrentUserIdentityCacheFor(userId: userId, email: email)) {
+      return Map<String, dynamic>.from(_cachedCurrentUserIdentity!);
+    }
+
+    if (_currentUserIdentityFetchFuture != null) {
+      return _currentUserIdentityFetchFuture!;
+    }
+
+    _currentUserIdentityFetchFuture = () async {
+      Map<String, dynamic> identity = <String, dynamic>{};
+
+      if (_hasConfiguredSupabaseAnonKey) {
+        try {
+          Map<String, dynamic>? identityRow;
+
+          if (userId.isNotEmpty) {
+            final byId = await _client
+                .from('user_identity')
+                .select()
+                .eq('id', userId)
+                .maybeSingle();
+            if (byId != null) {
+              identityRow = Map<String, dynamic>.from(byId);
+            }
+          }
+
+          if (identityRow == null && email.isNotEmpty) {
+            final byEmail = await _client
+                .from('user_identity')
+                .select()
+                .eq('email', email)
+                .maybeSingle();
+            if (byEmail != null) {
+              identityRow = Map<String, dynamic>.from(byEmail);
+            }
+          }
+
+          if (identityRow != null) {
+            identity = _normalizeIdentityPayload(identityRow);
+          }
+        } catch (e) {
+          debugPrint('user_identity view lookup failed, falling back: $e');
+        }
+      }
+
+      if (identity.isEmpty) {
+        final profile = await getCurrentUserProfile(
+          maxAttempts: 2,
+          forceRefresh: forceRefresh,
+        );
+        if (profile.isNotEmpty) {
+          identity = _mapProfileToIdentity(profile);
+        }
+      }
+
+      if (identity.isNotEmpty) {
+        _cachedCurrentUserIdentity = Map<String, dynamic>.from(identity);
+        _cachedCurrentUserIdentityEmail = _normalizeEmail(
+          identity['email']?.toString(),
+        );
+        _cachedCurrentUserIdentityUserId =
+            identity['id']?.toString().trim().isNotEmpty == true
+            ? identity['id'].toString().trim()
+            : null;
+        _cachedResolvedUserType = resolveUserType(identity);
+      }
+
+      return identity;
+    }();
+
+    try {
+      return await _currentUserIdentityFetchFuture!;
+    } finally {
+      _currentUserIdentityFetchFuture = null;
+    }
+  }
+
+  Future<void> warmCurrentUserIdentity({bool forceRefresh = false}) async {
+    try {
+      await getCurrentUserIdentity(forceRefresh: forceRefresh);
+    } catch (e) {
+      debugPrint('Failed to warm current user identity: $e');
+    }
   }
 
   void markAiTokenBalanceStale() {
@@ -960,6 +1160,11 @@ class SupabaseService {
 
   /// Get all active colleges
   Future<List<College>> getColleges() async {
+    final cachedColleges = _cachedColleges;
+    if (cachedColleges != null && cachedColleges.isNotEmpty) {
+      return List<College>.from(cachedColleges);
+    }
+
     try {
       final response = await _client
           .from('colleges')
@@ -967,7 +1172,7 @@ class SupabaseService {
           .eq('is_active', true)
           .order('name');
 
-      return (response as List)
+      final colleges = (response as List)
           .whereType<Map<String, dynamic>>()
           .map(College.fromJson)
           .where(
@@ -977,10 +1182,15 @@ class SupabaseService {
                 college.domain.isNotEmpty,
           )
           .toList();
+
+      if (colleges.isNotEmpty) {
+        _cachedColleges = List<College>.unmodifiable(colleges);
+      }
+      return colleges;
     } catch (e) {
       if (_isMissingColumnError(e, 'is_active')) {
         final response = await _client.from('colleges').select().order('name');
-        return (response as List)
+        final colleges = (response as List)
             .whereType<Map<String, dynamic>>()
             .map(College.fromJson)
             .where(
@@ -990,6 +1200,10 @@ class SupabaseService {
                   college.domain.isNotEmpty,
             )
             .toList();
+        if (colleges.isNotEmpty) {
+          _cachedColleges = List<College>.unmodifiable(colleges);
+        }
+        return colleges;
       }
       debugPrint('Error fetching colleges: $e');
       rethrow;
@@ -2164,6 +2378,35 @@ class SupabaseService {
   }
 
   Future<String> getCurrentUserRole() async {
+    final cachedType = _cachedResolvedUserType;
+    if (cachedType.type != ResolvedUserType.unauthenticated.type) {
+      final cachedRole = cachedType.role?.trim();
+      if (cachedRole != null && cachedRole.isNotEmpty) {
+        return _normalizeRoleValue(cachedRole);
+      }
+      if (cachedType.isAdmin) return AppRoles.admin;
+      if (cachedType.isCollegeUser) return AppRoles.collegeUser;
+    }
+
+    try {
+      final identity = await getCurrentUserIdentity();
+      if (identity.isNotEmpty) {
+        final identityRole =
+            (identity['user_role'] ?? identity['role'] ?? identity['admin_role'])
+                ?.toString()
+                .trim();
+        if (identityRole != null && identityRole.isNotEmpty) {
+          return _normalizeRoleValue(identityRole);
+        }
+
+        final resolvedType = resolveUserType(identity);
+        if (resolvedType.isAdmin) return AppRoles.admin;
+        if (resolvedType.isCollegeUser) return AppRoles.collegeUser;
+      }
+    } catch (e) {
+      debugPrint('Failed to resolve role from user_identity cache: $e');
+    }
+
     final profile = await getCurrentUserProfile(maxAttempts: 1);
     if (profile.isEmpty) return AppRoles.readOnly;
     return _resolveEffectiveRole(profile);
@@ -3493,7 +3736,8 @@ class SupabaseService {
   /// Get posts for a room (Reddit-style)
   Future<List<Map<String, dynamic>>> getRoomPosts(
     String roomId, {
-    int limit = 50,
+    int limit = 20,
+    int offset = 0,
     String sortBy = 'recent',
   }) async {
     Future<List<Map<String, dynamic>>> normalizePosts(
@@ -3556,10 +3800,15 @@ class SupabaseService {
       if (!_hasConfiguredSupabaseAnonKey) {
         final backendPosts = await _api.getChatRoomPosts(
           roomId,
-          limit: limit,
+          limit: limit + (offset < 0 ? 0 : offset),
           sortBy: sortBy,
         );
-        return normalizePosts(backendPosts);
+        final safeOffset = offset < 0 ? 0 : offset;
+        if (safeOffset >= backendPosts.length) {
+          return const <Map<String, dynamic>>[];
+        }
+        final end = (safeOffset + limit).clamp(0, backendPosts.length);
+        return normalizePosts(backendPosts.sublist(safeOffset, end));
       }
 
       final String orderColumn = sortBy == 'top' ? 'upvotes' : 'created_at';
@@ -3571,7 +3820,7 @@ class SupabaseService {
           .select('*, comment_count:room_post_comments(count)')
           .eq('room_id', roomId)
           .order(orderColumn, ascending: false)
-          .range(0, limit - 1);
+          .range(offset < 0 ? 0 : offset, (offset < 0 ? 0 : offset) + limit - 1);
       return normalizePosts(
         (response as List)
             .map((entry) => Map<String, dynamic>.from(entry as Map))
@@ -3582,11 +3831,17 @@ class SupabaseService {
       try {
         final backendPosts = await _api.getChatRoomPosts(
           roomId,
-          limit: limit,
+          limit: limit + (offset < 0 ? 0 : offset),
           sortBy: sortBy,
         );
-        if (backendPosts.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
-          return normalizePosts(backendPosts);
+        final safeOffset = offset < 0 ? 0 : offset;
+        if (safeOffset >= backendPosts.length) {
+          return const <Map<String, dynamic>>[];
+        }
+        final end = (safeOffset + limit).clamp(0, backendPosts.length);
+        final sliced = backendPosts.sublist(safeOffset, end);
+        if (sliced.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
+          return normalizePosts(sliced);
         }
       } catch (backendError) {
         debugPrint('Backend getRoomPosts fallback failed: $backendError');
@@ -5259,6 +5514,13 @@ class SupabaseService {
   }
 
   Future<List<DepartmentOption>> getNoticeDepartments() async {
+    final cachedDepartments = _noticeDepartmentsCache;
+    if (cachedDepartments != null &&
+        DateTime.now().difference(cachedDepartments.cachedAt) <
+            _noticeDepartmentsCacheTtl) {
+      return List<DepartmentOption>.from(cachedDepartments.data);
+    }
+
     try {
       final backendRows = await _api.getDepartments();
       final normalized = <String, DepartmentOption>{};
@@ -5269,7 +5531,12 @@ class SupabaseService {
         normalized[id] = DepartmentOption(id: id, name: name);
       }
       if (normalized.isNotEmpty) {
-        return normalized.values.toList(growable: false);
+        final resolved = normalized.values.toList(growable: false);
+        _noticeDepartmentsCache = (
+          cachedAt: DateTime.now(),
+          data: List<DepartmentOption>.unmodifiable(resolved),
+        );
+        return resolved;
       }
     } catch (e) {
       debugPrint('Backend departments lookup failed, trying Supabase: $e');
@@ -5289,12 +5556,21 @@ class SupabaseService {
         normalized[id] = DepartmentOption(id: id, name: name);
       }
       if (normalized.isNotEmpty) {
-        return normalized.values.toList(growable: false);
+        final resolved = normalized.values.toList(growable: false);
+        _noticeDepartmentsCache = (
+          cachedAt: DateTime.now(),
+          data: List<DepartmentOption>.unmodifiable(resolved),
+        );
+        return resolved;
       }
     } catch (e) {
       debugPrint('Supabase departments lookup failed: $e');
     }
 
+    _noticeDepartmentsCache = (
+      cachedAt: DateTime.now(),
+      data: List<DepartmentOption>.unmodifiable(departmentOptions),
+    );
     return departmentOptions;
   }
 
@@ -5737,6 +6013,7 @@ class SupabaseService {
 
   Future<List<Map<String, dynamic>>> getNotices({
     required String collegeId,
+    String? department,
     bool includeHidden = false,
     int limit = 80,
     int offset = 0,
@@ -5761,9 +6038,15 @@ class SupabaseService {
     try {
       final safeLimit = limit < 1 ? 1 : (limit > 500 ? 500 : limit);
       final safeOffset = offset < 0 ? 0 : offset;
+      final normalizedDepartment = normalizeDepartmentCode(department);
       if (!_hasConfiguredSupabaseAnonKey) {
         final backendRows = normalizeBackendRows(
-          await _api.getNotices(collegeId),
+          await _api.getNotices(
+            collegeId,
+            department: normalizedDepartment.isEmpty
+                ? null
+                : normalizedDepartment,
+          ),
         );
         if (safeOffset >= backendRows.length) {
           return const <Map<String, dynamic>>[];
@@ -5772,6 +6055,9 @@ class SupabaseService {
         return backendRows.sublist(safeOffset, end);
       }
       var query = _client.from('notices').select().eq('college_id', collegeId);
+      if (normalizedDepartment.isNotEmpty) {
+        query = query.eq('department', normalizedDepartment);
+      }
       if (!includeHidden) {
         query = query.eq('is_active', true);
       }
@@ -5784,8 +6070,14 @@ class SupabaseService {
       try {
         final safeLimit = limit < 1 ? 1 : (limit > 500 ? 500 : limit);
         final safeOffset = offset < 0 ? 0 : offset;
+        final normalizedDepartment = normalizeDepartmentCode(department);
         final backendRows = normalizeBackendRows(
-          await _api.getNotices(collegeId),
+          await _api.getNotices(
+            collegeId,
+            department: normalizedDepartment.isEmpty
+                ? null
+                : normalizedDepartment,
+          ),
         );
         if (safeOffset >= backendRows.length) {
           return const <Map<String, dynamic>>[];

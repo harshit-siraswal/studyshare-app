@@ -43,7 +43,7 @@ class AppConfig {
     return effectiveValue;
   }
 
-  static const String supportEmail = 'support@studyshare.me';
+  static const String supportEmail = 'support@studyshare.in';
 
   static const String giphyApiKey = String.fromEnvironment(
     'GIPHY_API_KEY',

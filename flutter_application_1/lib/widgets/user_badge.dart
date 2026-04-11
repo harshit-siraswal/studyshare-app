@@ -1,7 +1,19 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../config/theme.dart';
+import '../services/backend_api_service.dart';
 import '../services/supabase_service.dart';
+
+class _BadgeSnapshot {
+  const _BadgeSnapshot({
+    required this.isVerified,
+    required this.isPremium,
+    required this.cachedAt,
+  });
+
+  final bool isVerified;
+  final bool isPremium;
+  final DateTime cachedAt;
+}
 
 class UserBadge extends StatefulWidget {
   final String email;
@@ -13,19 +25,16 @@ class UserBadge extends StatefulWidget {
 }
 
 class _UserBadgeState extends State<UserBadge> {
-  static bool? _usersTableHasRoleColumn;
+  static const Duration _badgeCacheTtl = Duration(minutes: 10);
+  static final Map<String, _BadgeSnapshot> _badgeCache =
+      <String, _BadgeSnapshot>{};
+
   final SupabaseService _supabaseService = SupabaseService();
+  final BackendApiService _backendApiService = BackendApiService();
 
   bool _isLoading = true;
   bool _isVerified = false;
   bool _isPremium = false;
-
-  bool _isMissingRoleColumnError(Object error) {
-    final message = error.toString().toLowerCase();
-    return message.contains('column') &&
-        message.contains('users.role') &&
-        message.contains('does not exist');
-  }
 
   @override
   void initState() {
@@ -59,47 +68,49 @@ class _UserBadgeState extends State<UserBadge> {
       return;
     }
 
+    final cached = _badgeCache[email];
+    if (cached != null &&
+        DateTime.now().difference(cached.cachedAt) <= _badgeCacheTtl) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _isVerified = cached.isVerified;
+          _isPremium = cached.isPremium;
+        });
+      }
+      return;
+    }
+
     try {
       Map<String, dynamic>? userResponse;
       final currentEmail = (_supabaseService.currentUserEmail ?? '')
           .trim()
           .toLowerCase();
-      if (!_supabaseService.hasConfiguredSupabaseAnonKey) {
-        if (currentEmail == email) {
-          final profile = await _supabaseService.getCurrentUserProfile(
-            maxAttempts: 1,
-          );
-          if (profile.isNotEmpty) {
-            userResponse = <String, dynamic>{...profile, 'email': email};
-          }
+      if (currentEmail == email) {
+        final profile = await _supabaseService.getCurrentUserProfile(
+          maxAttempts: 1,
+        );
+        if (profile.isNotEmpty) {
+          userResponse = <String, dynamic>{...profile, 'email': email};
         }
-      } else if (_usersTableHasRoleColumn == false) {
-        userResponse = await Supabase.instance.client
-            .from('users_safe')
-            .select('subscription_tier, subscription_end_date')
-            .eq('email', email)
-            .maybeSingle();
       } else {
         try {
-          userResponse = await Supabase.instance.client
-              .from('users_safe')
-              .select('role, subscription_tier, subscription_end_date')
-              .eq('email', email)
-              .maybeSingle();
-          _usersTableHasRoleColumn = true;
-        } catch (e) {
-          if (_isMissingRoleColumnError(e)) {
-            _usersTableHasRoleColumn = false;
-            userResponse = await Supabase.instance.client
-                .from('users_safe')
-                .select('subscription_tier, subscription_end_date')
-                .eq('email', email)
-                .maybeSingle();
+          final payload = await _backendApiService.getPublicProfile(email: email);
+          final profilePayload = payload['profile'];
+          if (profilePayload is Map) {
+            userResponse = Map<String, dynamic>.from(profilePayload);
           } else {
-            rethrow;
+            userResponse = Map<String, dynamic>.from(payload);
           }
+        } catch (e) {
+          debugPrint('UserBadge backend public profile lookup failed: $e');
         }
+
+        userResponse ??= await _supabaseService.getUserInfo(email);
       }
+
+      var verified = false;
+      var premium = false;
 
       if (mounted && userResponse != null) {
         final role = userResponse['role']?.toString().trim().toUpperCase();
@@ -107,21 +118,34 @@ class _UserBadgeState extends State<UserBadge> {
             role == 'MODERATOR' ||
             role == 'ADMIN' ||
             role == 'TEACHER') {
-          _isVerified = true;
+          verified = true;
         }
 
         final tier = userResponse['subscription_tier']
             ?.toString()
             .toLowerCase();
+        final premiumUntilRaw =
+            userResponse['subscription_end_date'] ?? userResponse['premium_until'];
         if ((tier == 'pro' || tier == 'max') &&
-            userResponse['subscription_end_date'] != null) {
+            premiumUntilRaw != null) {
           final premiumUntil = DateTime.parse(
-            userResponse['subscription_end_date'].toString(),
+            premiumUntilRaw.toString(),
           );
           if (premiumUntil.toUtc().isAfter(DateTime.now().toUtc())) {
-            _isPremium = true;
+            premium = true;
           }
         }
+
+        _badgeCache[email] = _BadgeSnapshot(
+          isVerified: verified,
+          isPremium: premium,
+          cachedAt: DateTime.now(),
+        );
+
+        setState(() {
+          _isVerified = verified;
+          _isPremium = premium;
+        });
       }
     } catch (e) {
       debugPrint('Error loading badge: $e');

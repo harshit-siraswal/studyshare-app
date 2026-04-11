@@ -17,7 +17,7 @@ class CollegeSelectionScreen extends StatefulWidget {
 }
 
 class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
-  static const String _collegeRequestEmail = 'siraswalharshit@gmail.com';
+  static const String _collegeRequestEmail = AppConfig.supportEmail;
   static const Duration _collegeFetchTimeout = Duration(seconds: 8);
   static const List<Map<String, String>> _starterCollegeDirectory = [
     {
@@ -557,9 +557,9 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
       );
       if (!launched && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              'Could not open email app. Please email siraswalharshit@gmail.com manually.',
+              'Could not open email app. Please email $_collegeRequestEmail manually.',
             ),
           ),
         );
@@ -567,9 +567,9 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Could not open email app. Please email siraswalharshit@gmail.com manually.',
+            'Could not open email app. Please email $_collegeRequestEmail manually.',
           ),
         ),
       );

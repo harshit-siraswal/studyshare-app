@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter/services.dart';
 import '../../config/theme.dart';
 import '../../services/supabase_service.dart';
+import '../../services/auth_service.dart';
 
 import '../../services/backend_api_service.dart';
 import '../../widgets/advanced_search_bar.dart';
@@ -28,6 +29,7 @@ class DiscoverRoomsScreen extends StatefulWidget {
 
 class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
   final SupabaseService _supabaseService = SupabaseService();
+  final AuthService _authService = AuthService();
 
   List<Map<String, dynamic>> _rooms = [];
   bool _isLoading = true;
@@ -102,6 +104,17 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
     const maxAttempts = 3;
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
+        final authIdentity = _authService.currentIdentity;
+        if (authIdentity != null) {
+          if (!mounted) return;
+          setState(() {
+            _hasWriteAccess = authIdentity.canUploadResources;
+            _roleLoaded = true;
+            _roleLoadFailed = false;
+          });
+          return;
+        }
+
         final role = await _supabaseService.getCurrentUserRole();
         if (!mounted) return;
         setState(() {
@@ -247,7 +260,7 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
 
           Expanded(
             child: isBusy
-                ? const Center(child: CircularProgressIndicator())
+                ? _buildRoomGridSkeleton(isDark)
                 : _loadErrorMessage != null
                 ? Center(
                     child: Text(
@@ -308,6 +321,85 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
               ),
             )
           : null,
+    );
+  }
+
+  Widget _buildRoomGridSkeleton(bool isDark) {
+    final base = isDark ? const Color(0xFF2A2A2E) : const Color(0xFFE9ECF2);
+    final highlight = isDark
+        ? const Color(0xFF3A3A40)
+        : const Color(0xFFF6F8FC);
+
+    return GridView.builder(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        childAspectRatio: 0.85,
+        crossAxisSpacing: 16,
+        mainAxisSpacing: 16,
+      ),
+      itemCount: 6,
+      itemBuilder: (context, index) {
+        return TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0.35, end: 1),
+          duration: Duration(milliseconds: 700 + (index * 80)),
+          curve: Curves.easeInOut,
+          builder: (context, value, child) {
+            return Opacity(opacity: value, child: child);
+          },
+          child: Container(
+            decoration: BoxDecoration(
+              color: base,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 110,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    color: highlight,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  width: 84,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: highlight,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                const Spacer(),
+                Row(
+                  children: [
+                    Container(
+                      width: 56,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        color: highlight,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      width: 70,
+                      height: 22,
+                      decoration: BoxDecoration(
+                        color: highlight,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 

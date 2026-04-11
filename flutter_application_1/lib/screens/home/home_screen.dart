@@ -30,6 +30,7 @@ import '../../widgets/post_notice_dialog.dart';
 import '../../widgets/paywall_dialog.dart';
 import '../../models/user.dart';
 import '../../utils/admin_access.dart';
+import '../../utils/user_identity_resolver.dart';
 import '../../data/departments_data.dart';
 import '../../data/academic_subjects_data.dart';
 import '../study/syllabus_upload_screen.dart';
@@ -182,9 +183,38 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     var canUpload = fallbackCanUpload;
     var canPost = false;
 
+    final authIdentity = _authService.currentIdentity;
+    if (authIdentity != null) {
+      canUpload = authIdentity.canUploadResources;
+      canPost = authIdentity.canPostNotices;
+    }
+
+    void applyResolvedUserType(ResolvedUserType userType) {
+      if (userType.type == 'unauthenticated') return;
+      canUpload = userType.canUploadResources;
+      canPost = userType.canPostNotices;
+    }
+
+    applyResolvedUserType(_supabaseService.cachedResolvedUserType);
+
+    try {
+      final identity = await _supabaseService
+          .getCurrentUserIdentity()
+          .timeout(
+            const Duration(seconds: 4),
+            onTimeout: () => <String, dynamic>{},
+          );
+
+      if (identity.isNotEmpty) {
+        applyResolvedUserType(resolveUserType(identity));
+      }
+    } catch (e) {
+      debugPrint('Failed to resolve cached identity for composer access: $e');
+    }
+
     try {
       final profile = await _supabaseService
-          .getCurrentUserProfile(maxAttempts: 2, forceRefresh: true)
+          .getCurrentUserProfile(maxAttempts: 1)
           .timeout(
             const Duration(seconds: 5),
             onTimeout: () => <String, dynamic>{},

@@ -227,8 +227,8 @@ class _AppRootState extends State<AppRoot> {
   String? _lastRegisteredFcmToken;
   static const String _fcmOwnerEmailKey = 'fcm_token_owner_email';
   static const Set<String> _trustedExternalHosts = {
-    'studyshare.me',
-    'www.studyshare.me',
+    'studyshare.in',
+    'www.studyshare.in',
     'youtube.com',
     'www.youtube.com',
     'm.youtube.com',
@@ -240,7 +240,7 @@ class _AppRootState extends State<AppRoot> {
     final host = uri.host.toLowerCase();
     if (host.isEmpty) return false;
     return _trustedExternalHosts.contains(host) ||
-        host.endsWith('.studyshare.me');
+      host.endsWith('.studyshare.in');
   }
 
   ThemeMode get _bootThemeMode {
@@ -266,9 +266,23 @@ class _AppRootState extends State<AppRoot> {
     _authStateSubscription = _authService.authStateChanges.listen((user) async {
       if (user == null) {
         await AnalyticsService.instance.clearUserContext();
+        _authService.clearIdentity();
+        SupabaseService().clearSessionCachesOnSignOut();
         await _handleSignedOutFcmState();
         return;
       }
+
+      // Resolve once on login and store in auth state for role/college checks.
+      unawaited(() async {
+        try {
+          final identity = await SupabaseService().getCurrentUserIdentity();
+          _authService.setIdentityFromMap(identity);
+        } catch (e) {
+          debugPrint('Failed to resolve auth identity on sign-in: $e');
+          _authService.clearIdentity();
+        }
+      }());
+
       await AnalyticsService.instance.setUserContext(
         userId: user.uid,
         authProvider: _resolveAuthProviderForAnalytics(user.providerData),

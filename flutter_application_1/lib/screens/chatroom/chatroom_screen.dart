@@ -59,6 +59,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   final BackendApiService _backendApiService = BackendApiService();
   final SubscriptionService _subscriptionService = SubscriptionService();
   bool _isTeacherOrAdmin = false;
+  static const int _roomPostPageSize = 20;
 
   bool get _isReadOnly {
     if (_isTeacherOrAdmin) return false;
@@ -69,6 +70,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
 
   List<Map<String, dynamic>> _posts = [];
   bool _isLoading = true;
+  bool _isLoadingMorePosts = false;
+  bool _hasMorePosts = true;
+  int _postsOffset = 0;
   String _sortBy = 'recent'; // 'recent' or 'top'
   Map<String, dynamic>? _roomInfo;
   bool _isAdmin = false;
@@ -96,6 +100,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
 
   // Search state
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _postScrollController = ScrollController();
   bool _isSearching = false;
 
   @override
@@ -105,6 +110,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       vsync: this,
       duration: const Duration(milliseconds: 600),
     );
+    _postScrollController.addListener(_onPostScroll);
 
     _loadWriterRole();
     _loadRoomData();
@@ -121,6 +127,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   @override
   void dispose() {
     _fabAnimationController.dispose();
+    _postScrollController.dispose();
     _subscription?.unsubscribe();
     _presenceChannel?.untrack();
     _presenceChannel?.unsubscribe();
@@ -133,6 +140,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   // Request sequencing
   int _loadRequestId = 0;
 
+  void _onPostScroll() {
+    if (!_postScrollController.hasClients) return;
+    if (_postScrollController.position.pixels >=
+        _postScrollController.position.maxScrollExtent - 320) {
+      _loadMorePosts();
+    }
+  }
+
   Future<void> _loadRoomData({bool silent = false}) async {
     final int requestId = ++_loadRequestId;
     if (!silent && mounted) setState(() => _isLoading = true);
@@ -140,7 +155,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
     try {
       // Parallelize requests to speed up load time
       final results = await Future.wait([
-        _supabaseService.getRoomPosts(widget.roomId, sortBy: _sortBy),
+        _supabaseService.getRoomPosts(
+          widget.roomId,
+          sortBy: _sortBy,
+          limit: _roomPostPageSize,
+          offset: 0,
+        ),
         _supabaseService.getRoomInfo(widget.roomId),
         _supabaseService.isRoomAdmin(widget.roomId, widget.userEmail),
         _supabaseService.getUserRoomIds(widget.userEmail),
@@ -194,6 +214,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
           _isMember =
               memberCheckIds.contains(widget.roomId) ||
               (info?['isMember'] == true);
+          _postsOffset = posts.length;
+          _hasMorePosts = posts.length >= _roomPostPageSize;
+          _isLoadingMorePosts = false;
           _isLoading = false;
         });
 
@@ -206,8 +229,82 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
     } catch (e) {
       debugPrint('Error loading room data: $e');
       if (mounted && requestId == _loadRequestId) {
-        setState(() => _isLoading = false);
+        setState(() {
+          _isLoading = false;
+          _isLoadingMorePosts = false;
+        });
       }
+    }
+  }
+
+  Future<void> _loadMorePosts() async {
+    if (_isLoading || _isLoadingMorePosts || !_hasMorePosts) {
+      return;
+    }
+    if (_searchController.text.trim().isNotEmpty) {
+      return;
+    }
+
+    if (mounted) {
+      setState(() => _isLoadingMorePosts = true);
+    }
+
+    try {
+      final results = await Future.wait<Object?>([
+        _supabaseService.getRoomPosts(
+          widget.roomId,
+          sortBy: _sortBy,
+          limit: _roomPostPageSize,
+          offset: _postsOffset,
+        ),
+        _supabaseService.getSavedPostIds(widget.userEmail),
+        _supabaseService.getUserVotes(widget.roomId),
+      ]);
+
+      if (!mounted) return;
+
+      final incomingPosts = _coerceMapList(results[0])
+          .map(_normalizePostMetrics)
+          .toList();
+
+      final rawSavedPostIds = results[1];
+      final Set<String> savedPostIds = (rawSavedPostIds is List)
+          ? rawSavedPostIds.map((e) => e.toString()).toSet()
+          : (rawSavedPostIds is Set)
+          ? rawSavedPostIds.map((e) => e.toString()).toSet()
+          : <String>{};
+      final userVotes = _coerceStringIntMap(results[2]);
+
+      final existingIds = _posts
+          .map((post) => post['id']?.toString() ?? '')
+          .where((id) => id.isNotEmpty)
+          .toSet();
+
+      final newPosts = <Map<String, dynamic>>[];
+      for (final post in incomingPosts) {
+        final postId = post['id']?.toString() ?? '';
+        if (postId.isNotEmpty && existingIds.contains(postId)) {
+          continue;
+        }
+        if (postId.isNotEmpty) {
+          _savedPosts[postId] = savedPostIds.contains(postId);
+          _userVotes[postId] = userVotes[postId] ?? 0;
+        }
+        newPosts.add(post);
+      }
+
+      _primePhotoCacheFromPosts(newPosts);
+
+      setState(() {
+        _posts = [..._posts, ...newPosts];
+        _postsOffset = _postsOffset + incomingPosts.length;
+        _hasMorePosts = incomingPosts.length >= _roomPostPageSize;
+        _isLoadingMorePosts = false;
+      });
+    } catch (e) {
+      debugPrint('Error loading more room posts: $e');
+      if (!mounted) return;
+      setState(() => _isLoadingMorePosts = false);
     }
   }
 
@@ -927,6 +1024,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   Widget _buildPostList(bool isDark) {
     // Filter posts based on search query
     final query = _searchController.text.toLowerCase();
+    final canPaginate = query.isEmpty;
     final displayPosts = _posts.where((p) {
       if (query.isEmpty) return true;
       final title = p['title']?.toString().toLowerCase() ?? '';
@@ -951,15 +1049,37 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
     if (_posts.isEmpty) {
       return _buildEmptyState(isDark);
     }
+    final showPaginationFooter = canPaginate && (_hasMorePosts || _isLoadingMorePosts);
+
     return ListView.builder(
+      controller: _postScrollController,
       padding: const EdgeInsets.fromLTRB(
         18,
         18,
         18,
         108,
       ), // Bottom padding for FAB
-      itemCount: displayPosts.length,
+      itemCount: displayPosts.length + (showPaginationFooter ? 1 : 0),
       itemBuilder: (context, index) {
+        if (showPaginationFooter && index == displayPosts.length) {
+          return Padding(
+            padding: const EdgeInsets.only(top: 8, bottom: 20),
+            child: Center(
+              child: _isLoadingMorePosts
+                  ? const SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : OutlinedButton.icon(
+                      onPressed: _loadMorePosts,
+                      icon: const Icon(Icons.expand_more_rounded),
+                      label: const Text('Load older posts'),
+                    ),
+            ),
+          );
+        }
+
         final post = displayPosts[index];
         final stablePostKey = ValueKey(
           post['id']?.toString() ?? post['postId']?.toString() ?? 'post_$index',

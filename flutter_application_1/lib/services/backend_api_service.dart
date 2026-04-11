@@ -107,6 +107,9 @@ class BackendApiService {
     525,
     526,
   };
+  static const Duration _academicCatalogCacheTtl = Duration(minutes: 30);
+  static Map<String, dynamic>? _academicCatalogCache;
+  static DateTime? _academicCatalogCachedAt;
 
   static List<String> _normalizeApiBaseUrls(List<String> baseUrls) {
     final normalized = <String>[];
@@ -1170,7 +1173,18 @@ class BackendApiService {
   }
 
   Future<Map<String, dynamic>> getAcademicCatalog() async {
-    return _requestJson('/api/academics/catalog', method: 'GET');
+    final cached = _academicCatalogCache;
+    final cachedAt = _academicCatalogCachedAt;
+    if (cached != null &&
+        cachedAt != null &&
+        DateTime.now().difference(cachedAt) < _academicCatalogCacheTtl) {
+      return Map<String, dynamic>.from(cached);
+    }
+
+    final payload = await _requestJson('/api/academics/catalog', method: 'GET');
+    _academicCatalogCache = Map<String, dynamic>.from(payload);
+    _academicCatalogCachedAt = DateTime.now();
+    return payload;
   }
 
   Future<Map<String, dynamic>> syncKietAttendance({

@@ -3,7 +3,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
 import '../../config/theme.dart';
 import '../../services/supabase_service.dart';
-import '../../services/backend_api_service.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/notice_card.dart';
 import '../../models/department_account.dart';
@@ -27,11 +26,15 @@ class DepartmentAccountScreen extends StatefulWidget {
 
 class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
   final SupabaseService _supabaseService = SupabaseService();
-  final BackendApiService _backendApiService = BackendApiService();
   final AuthService _authService = AuthService();
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
   List<Map<String, dynamic>> _notices = [];
   bool _isLoading = true;
+  bool _isLoadingMoreNotices = false;
+  bool _hasMoreNotices = true;
+  int _noticesOffset = 0;
+  static const int _noticesPageSize = 10;
   bool _isFollowing = false;
   int _followerCount = 0;
   bool _isFollowLoading = true;
@@ -50,7 +53,7 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
     return (_supabaseService.currentUserId?.trim().isNotEmpty ?? false);
   }
 
-  Future<void> _loadNoticeAccess() async {
+  Future<bool> _loadNoticeAccess() async {
     try {
       final profile = await _supabaseService.getCurrentUserProfile(
         maxAttempts: 2,
@@ -58,23 +61,59 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
       final canManage =
           isTeacherOrAdminProfile(profile) ||
           hasAdminCapability(profile, 'upload_notice');
-      if (!mounted) return;
+      if (!mounted) return canManage;
       setState(() => _canManageNotices = canManage);
+      return canManage;
     } catch (e) {
       debugPrint('Failed to resolve notice access: $e');
+      return false;
     }
   }
 
-  Future<void> _loadAccessContextAndNotices() async {
-    await _loadNoticeAccess();
-    await _loadDepartmentNotices();
+  Future<void> _loadInitialData() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+      _isFollowLoading = true;
+      _isLoadingMoreNotices = false;
+      _hasMoreNotices = true;
+      _noticesOffset = 0;
+    });
+
+    final results = await Future.wait<dynamic>([
+      _loadNoticeAccess(),
+      _loadDepartmentNotices(reset: true),
+      _loadFollowData(),
+    ]);
+
+    final canManage = results.isNotEmpty && results.first == true;
+    if (canManage && mounted) {
+      await _loadDepartmentNotices(reset: true);
+    }
+  }
+
+  void _onScroll() {
+    if (!_scrollController.hasClients) return;
+    if (_isLoading || _isLoadingMoreNotices || !_hasMoreNotices) return;
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 220) {
+      _loadDepartmentNotices();
+    }
+  }
+
+  Future<void> _refreshDepartmentData() async {
+    await Future.wait<dynamic>([
+      _loadNoticeAccess(),
+      _loadDepartmentNotices(reset: true),
+      _loadFollowData(),
+    ]);
   }
 
   @override
   void initState() {
     super.initState();
-    _loadAccessContextAndNotices();
-    _loadFollowData();
+    _scrollController.addListener(_onScroll);
+    _loadInitialData();
   }
 
   Future<void> _loadFollowData() async {
@@ -194,24 +233,50 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
     }
   }
 
-  Future<void> _loadDepartmentNotices() async {
+  Future<void> _loadDepartmentNotices({bool reset = false}) async {
+    if (!mounted) return;
+
+    if (reset) {
+      setState(() {
+        _isLoading = true;
+        _isLoadingMoreNotices = false;
+        _hasMoreNotices = true;
+      });
+    } else {
+      if (_isLoading || _isLoadingMoreNotices || !_hasMoreNotices) return;
+      setState(() => _isLoadingMoreNotices = true);
+    }
+
+    final requestOffset = reset ? 0 : _noticesOffset;
+
     try {
-      // Fetch only notices for this department via backend query param —
-      // avoids loading all notices and filtering in-memory.
-      final departmentNotices = await _backendApiService.getNotices(
-        widget.collegeId,
+      final departmentNotices = await _supabaseService.getNotices(
+        collegeId: widget.collegeId,
         department: widget.account.id,
+        includeHidden: _canManageNotices,
+        limit: _noticesPageSize,
+        offset: requestOffset,
       );
 
       if (!mounted) return;
       setState(() {
-        _notices = departmentNotices;
+        if (reset) {
+          _notices = departmentNotices;
+        } else {
+          _notices = [..._notices, ...departmentNotices];
+        }
+        _noticesOffset = requestOffset + departmentNotices.length;
+        _hasMoreNotices = departmentNotices.length >= _noticesPageSize;
         _isLoading = false;
+        _isLoadingMoreNotices = false;
       });
     } catch (e) {
       debugPrint('Error loading department notices: $e');
       if (!mounted) return;
-      setState(() => _isLoading = false);
+      setState(() {
+        _isLoading = false;
+        _isLoadingMoreNotices = false;
+      });
     }
   }
 
@@ -333,6 +398,7 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
 
   @override
   void dispose() {
+    _scrollController.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -402,6 +468,7 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
         ],
       ),
       body: CustomScrollView(
+        controller: _scrollController,
         slivers: [
           // Profile Header Section
           SliverToBoxAdapter(
@@ -513,14 +580,14 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
                   Row(
                     children: [
                       _buildXStat(
-                        _followerCount.toString(),
+                        _isFollowLoading ? '...' : _followerCount.toString(),
                         'Followers',
                         textColor,
                         secondaryColor,
                       ),
                       const SizedBox(width: 16),
                       _buildXStat(
-                        '${_notices.length}',
+                        _isLoading ? '...' : '${_notices.length}',
                         'Notices',
                         textColor,
                         secondaryColor,
@@ -556,9 +623,36 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
                   collegeId: widget.collegeId,
                   isDark: isDark,
                   canManage: _canManageNotices,
-                  onNoticeUpdated: _loadAccessContextAndNotices,
+                  onNoticeUpdated: _refreshDepartmentData,
                 ),
                 childCount: visibleNotices.length,
+              ),
+            ),
+
+          if (!_isLoading && _isLoadingMoreNotices)
+            const SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Center(
+                  child: SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              ),
+            )
+          else if (!_isLoading && _hasMoreNotices)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Center(
+                  child: OutlinedButton.icon(
+                    onPressed: () => _loadDepartmentNotices(),
+                    icon: const Icon(Icons.expand_more_rounded),
+                    label: const Text('Load more'),
+                  ),
+                ),
               ),
             ),
 

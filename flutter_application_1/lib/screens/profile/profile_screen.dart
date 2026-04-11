@@ -59,6 +59,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final SubscriptionService _subscriptionService = SubscriptionService();
 
   bool _profileLoading = true;
+  bool _statsLoading = true;
   String? _profilePhotoUrl;
   String? _profileDisplayName;
   String? _profileBio;
@@ -212,9 +213,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _loadStats() async {
+    if (mounted) {
+      setState(() => _statsLoading = true);
+    }
+
     if (_authService.userEmail == null) {
+      if (mounted) {
+        setState(() => _statsLoading = false);
+      }
       return;
     }
+
     try {
       final userEmail = _authService.userEmail!;
       final stats = await _supabaseService.getUserStats(userEmail);
@@ -229,10 +238,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
           _followersCount = followersCount;
           _followingCount = followingCount;
           _contributionBadge = ContributionBadgeCatalog.resolve(_uploadCount);
+          _statsLoading = false;
         });
       }
     } catch (e) {
       debugPrint('Failed to refresh profile stats: $e');
+      if (mounted) {
+        setState(() => _statsLoading = false);
+      }
     }
   }
 
@@ -431,7 +444,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ],
       ),
       body: _profileLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? _buildProfileSkeleton(isDark)
           : RefreshIndicator(
               onRefresh: () async {
                 await _loadProfile(forceRefresh: true);
@@ -895,7 +908,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Text(
-                _uploadCount.toString(),
+                _statsLoading ? '...' : _uploadCount.toString(),
                 style: GoogleFonts.inter(
                   fontSize: 14,
                   fontWeight: FontWeight.w700,
@@ -910,6 +923,90 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildProfileSkeleton(bool isDark) {
+    final blockColor = isDark ? const Color(0xFF2A2A2E) : const Color(0xFFE8ECF3);
+    final lineColor = isDark ? const Color(0xFF3A3A40) : const Color(0xFFF3F6FC);
+
+    return ListView(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 40),
+      children: [
+        Center(
+          child: Container(
+            width: 92,
+            height: 92,
+            decoration: BoxDecoration(color: blockColor, shape: BoxShape.circle),
+          ),
+        ),
+        const SizedBox(height: 18),
+        Center(
+          child: Container(
+            width: 170,
+            height: 18,
+            decoration: BoxDecoration(
+              color: lineColor,
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Center(
+          child: Container(
+            width: 110,
+            height: 12,
+            decoration: BoxDecoration(
+              color: lineColor,
+              borderRadius: BorderRadius.circular(999),
+            ),
+          ),
+        ),
+        const SizedBox(height: 22),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: List.generate(3, (index) {
+            return Column(
+              children: [
+                Container(
+                  width: 36,
+                  height: 18,
+                  decoration: BoxDecoration(
+                    color: lineColor,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Container(
+                  width: 72,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: blockColor,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ],
+            );
+          }),
+        ),
+        const SizedBox(height: 26),
+        Container(
+          height: 88,
+          decoration: BoxDecoration(
+            color: blockColor,
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Container(
+          height: 88,
+          decoration: BoxDecoration(
+            color: blockColor,
+            borderRadius: BorderRadius.circular(16),
+          ),
+        ),
+      ],
     );
   }
 
@@ -1278,6 +1375,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           () {
             // Already on profile showing contributions, maybe scroll down?
           },
+          isLoading: _statsLoading,
         ),
         _buildStatItem(
           'Followers',
@@ -1294,6 +1392,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             );
             if (mounted) _loadStats();
           },
+          isLoading: _statsLoading,
         ),
         _buildStatItem(
           'Following',
@@ -1310,6 +1409,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             );
             if (mounted) _loadStats();
           },
+          isLoading: _statsLoading,
         ),
       ],
     );
@@ -1376,7 +1476,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${_contributionBadge.label} • $_uploadCount contributions',
+                    '${_contributionBadge.label} • ${_statsLoading ? '...' : _uploadCount} contributions',
                     style: GoogleFonts.inter(fontSize: 12, color: subTextColor),
                   ),
                 ],
@@ -1417,20 +1517,31 @@ class _ProfileScreenState extends State<ProfileScreen> {
     String value,
     Color textColor,
     Color subTextColor,
-    VoidCallback onTap,
+    VoidCallback onTap, {
+    bool isLoading = false,
+  }
   ) {
     return GestureDetector(
       onTap: onTap,
       child: Column(
         children: [
-          AnimatedCounter(
-            count: int.tryParse(value) ?? 0,
-            style: GoogleFonts.inter(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: textColor,
-            ),
-          ),
+          isLoading
+              ? Container(
+                  width: 30,
+                  height: 18,
+                  decoration: BoxDecoration(
+                    color: textColor.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                )
+              : AnimatedCounter(
+                  count: int.tryParse(value) ?? 0,
+                  style: GoogleFonts.inter(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: textColor,
+                  ),
+                ),
           const SizedBox(height: 4),
           Text(
             label,

@@ -83,6 +83,7 @@ class _StudyScreenState extends State<StudyScreen>
   bool _hasMoreModeration = true;
   int _moderationPage = 1;
   static const int _moderationPageSize = 50;
+  static const int _resourcePageSize = 12;
   bool _isModerating = false;
 
   // User Profile Data
@@ -930,6 +931,7 @@ class _StudyScreenState extends State<StudyScreen>
           ? _searchController.text
           : null,
       sortBy: _mapSortOption(_selectedSort),
+      limit: _resourcePageSize,
       offset: offset,
     );
   }
@@ -2028,12 +2030,16 @@ class _StudyScreenState extends State<StudyScreen>
           );
         }
         if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
+          return _buildDepartmentsLoadingSkeleton(isDark);
         }
         final departments = snapshot.data!;
+        final bottomSafeInset = MediaQuery.of(context).padding.bottom;
 
         return SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+          physics: const BouncingScrollPhysics(
+            parent: AlwaysScrollableScrollPhysics(),
+          ),
+          padding: EdgeInsets.fromLTRB(16, 16, 16, 32 + bottomSafeInset + 80),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -2054,6 +2060,7 @@ class _StudyScreenState extends State<StudyScreen>
 
               // Department Grid
               GridView(
+                primary: false,
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -2072,6 +2079,65 @@ class _StudyScreenState extends State<StudyScreen>
           ),
         );
       },
+    );
+  }
+
+  Widget _buildDepartmentsLoadingSkeleton(bool isDark) {
+    final baseColor = isDark ? AppTheme.darkCard : Colors.grey.shade200;
+    final highlightColor = isDark ? AppTheme.darkBorder : Colors.grey.shade100;
+    final bottomSafeInset = MediaQuery.of(context).padding.bottom;
+
+    return SingleChildScrollView(
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.fromLTRB(16, 16, 16, 32 + bottomSafeInset + 80),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Select Department',
+            style: GoogleFonts.inter(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'View syllabus by department',
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
+            ),
+          ),
+          const SizedBox(height: 20),
+          GridView.builder(
+            primary: false,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+              childAspectRatio: 1.4,
+            ),
+            itemCount: 6,
+            itemBuilder: (context, index) {
+              return Shimmer.fromColors(
+                baseColor: baseColor,
+                highlightColor: highlightColor,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: baseColor,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
     );
   }
 

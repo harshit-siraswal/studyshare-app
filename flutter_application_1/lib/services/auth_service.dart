@@ -8,9 +8,11 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
+import '../models/user_identity.dart' as app_identity;
 import 'analytics_service.dart';
 import 'backend_api_service.dart';
 import 'push_notification_service.dart';
+import 'supabase_service.dart';
 
 class LocalRateLimitException implements Exception {
   const LocalRateLimitException({
@@ -26,6 +28,9 @@ class LocalRateLimitException implements Exception {
 }
 
 class AuthService {
+  static final ValueNotifier<app_identity.UserIdentity?> identityNotifier =
+      ValueNotifier<app_identity.UserIdentity?>(null);
+
   int _banCheckFailureCount = 0;
   DateTime? _lastBanCheckFailureAt;
   DateTime? _lastBanCheckAlertAt;
@@ -170,6 +175,33 @@ class AuthService {
 
   // Get photo URL
   String? get photoUrl => currentUser?.photoURL;
+
+  app_identity.UserIdentity? get currentIdentity => identityNotifier.value;
+
+  void setIdentityFromMap(Map<String, dynamic>? rawIdentity) {
+    if (rawIdentity == null || rawIdentity.isEmpty) {
+      clearIdentity();
+      return;
+    }
+
+    try {
+      final parsed = app_identity.UserIdentity.fromJson(rawIdentity);
+      final existing = identityNotifier.value;
+      if (existing != null && existing.equivalentTo(parsed)) {
+        return;
+      }
+      identityNotifier.value = parsed;
+    } catch (e) {
+      debugPrint('Failed to parse identity payload: $e');
+      clearIdentity();
+    }
+  }
+
+  void clearIdentity() {
+    if (identityNotifier.value != null) {
+      identityNotifier.value = null;
+    }
+  }
 
   bool get requiresEmailVerificationForCurrentUser {
     final user = currentUser;
@@ -911,6 +943,8 @@ class AuthService {
       await AnalyticsService.instance.logEvent('auth_logout');
       // Always sign out of Firebase
       await _auth.signOut();
+      clearIdentity();
+      SupabaseService().clearSessionCachesOnSignOut();
     } catch (e) {
       debugPrint('Error signing out: $e');
       rethrow;
@@ -1073,6 +1107,115 @@ class AuthService {
     return 'READ_ONLY';
   }
 
+  String _buildUsernameBase(String normalizedEmail) {
+    final localPart = normalizedEmail.split('@').first.trim().toLowerCase();
+    var normalized = localPart
+        .replaceAll(RegExp(r'[^a-z0-9_]'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+
+    if (normalized.isEmpty) {
+      normalized = 'user';
+    }
+
+    if (normalized.length < 3) {
+      normalized = '${normalized}user';
+    }
+
+    if (normalized.length > 24) {
+      normalized = normalized.substring(0, 24).replaceAll(RegExp(r'_+$'), '');
+    }
+
+    if (normalized.isEmpty) {
+      normalized = 'user';
+    }
+
+    return normalized;
+  }
+
+  String _buildUsernameFallback(String baseUsername, String userId) {
+    final normalizedId = userId
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]'), '');
+    final suffix = normalizedId.isEmpty
+        ? DateTime.now().millisecondsSinceEpoch.toString().substring(8)
+        : normalizedId.substring(0, normalizedId.length < 6 ? normalizedId.length : 6);
+    final maxBaseLength = (30 - suffix.length - 1).clamp(3, baseUsername.length);
+    var safeBase = baseUsername;
+    if (safeBase.length > maxBaseLength) {
+      safeBase = safeBase
+          .substring(0, maxBaseLength)
+          .replaceAll(RegExp(r'_+$'), '');
+    }
+    if (safeBase.length < 3) {
+      safeBase = 'user';
+    }
+    return '${safeBase}_$suffix';
+  }
+
+  bool _isUsernameColumnMissingError(PostgrestException error) {
+    final details = '${error.message} ${error.details ?? ''} ${error.hint ?? ''}'
+        .toLowerCase();
+    return error.code == '42703' ||
+        (details.contains('column') && details.contains('username'));
+  }
+
+  Future<String?> _resolveUsernameForUser({
+    required String userId,
+    required String normalizedEmail,
+  }) async {
+    final baseUsername = _buildUsernameBase(normalizedEmail);
+    final fallbackUsername = _buildUsernameFallback(baseUsername, userId);
+
+    try {
+      final existingRow = await _supabase
+          .from('users')
+          .select('username')
+          .eq('id', userId)
+          .maybeSingle()
+          .timeout(const Duration(seconds: 4));
+
+      final existingUsername = existingRow == null
+          ? ''
+          : (existingRow['username']?.toString().trim() ?? '');
+      if (existingUsername.isNotEmpty) {
+        return existingUsername;
+      }
+    } on TimeoutException {
+      return fallbackUsername;
+    } on PostgrestException catch (e) {
+      if (_isUsernameColumnMissingError(e)) {
+        return null;
+      }
+      debugPrint('Unable to resolve existing username: ${e.message}');
+    } catch (e) {
+      debugPrint('Unable to resolve existing username: $e');
+    }
+
+    try {
+      final collision = await _supabase
+          .from('users_safe')
+          .select('id')
+          .eq('username', baseUsername)
+          .limit(1)
+          .maybeSingle()
+          .timeout(const Duration(seconds: 4));
+      final collisionId = collision == null
+          ? ''
+          : (collision['id']?.toString().trim() ?? '');
+      if (collisionId.isEmpty || collisionId == userId) {
+        return baseUsername;
+      }
+    } on TimeoutException {
+      return fallbackUsername;
+    } catch (e) {
+      debugPrint('Username availability check skipped: $e');
+      return fallbackUsername;
+    }
+
+    return fallbackUsername;
+  }
+
   /// Save user to Supabase database
   Future<void> _saveUserToDatabase(firebase_auth.User user) async {
     try {
@@ -1088,6 +1231,11 @@ class AuthService {
         return;
       }
 
+      final resolvedUsername = await _resolveUsernameForUser(
+        userId: userId,
+        normalizedEmail: normalizedEmail,
+      );
+
       final now = DateTime.now().toIso8601String();
       final payload = <String, dynamic>{
         'id': userId,
@@ -1095,12 +1243,47 @@ class AuthService {
         'display_name': user.displayName ?? normalizedEmail.split('@')[0],
         'profile_photo_url': user.photoURL,
         'updated_at': now,
+        if (resolvedUsername != null && resolvedUsername.isNotEmpty)
+          'username': resolvedUsername,
       };
 
-      await _supabase
-          .from('users')
-          .upsert(payload, onConflict: 'id')
-          .timeout(const Duration(seconds: 5));
+      Future<void> runUpsert(Map<String, dynamic> data) {
+        return _supabase
+            .from('users')
+            .upsert(data, onConflict: 'id')
+            .timeout(const Duration(seconds: 5));
+      }
+
+      try {
+        await runUpsert(payload);
+      } on PostgrestException catch (e) {
+        if (_isUsernameColumnMissingError(e) && payload.containsKey('username')) {
+          payload.remove('username');
+          await runUpsert(payload);
+          debugPrint('User saved to database without username column.');
+          return;
+        }
+
+        if (e.code == '23505' && payload.containsKey('username')) {
+          final fallbackUsername = _buildUsernameFallback(
+            _buildUsernameBase(normalizedEmail),
+            userId,
+          );
+          final currentUsername = payload['username']?.toString().trim() ?? '';
+          if (fallbackUsername != currentUsername) {
+            final retryPayload = <String, dynamic>{
+              ...payload,
+              'username': fallbackUsername,
+            };
+            await runUpsert(retryPayload);
+            debugPrint('User saved to database using fallback username.');
+            return;
+          }
+        }
+
+        rethrow;
+      }
+
       debugPrint('User saved to database.');
     } on TimeoutException {
       debugPrint('Database save timeout - user sign-in will proceed');

@@ -280,7 +280,7 @@ class _NoticesScreenState extends State<NoticesScreen>
     return (_supabaseService.currentUserId?.trim().isNotEmpty ?? false);
   }
 
-  Future<void> _loadNoticeAccess() async {
+  Future<bool> _loadNoticeAccess() async {
     try {
       final profile = await _supabaseService.getCurrentUserProfile(
         maxAttempts: 2,
@@ -288,16 +288,25 @@ class _NoticesScreenState extends State<NoticesScreen>
       final canManage =
           isTeacherOrAdminProfile(profile) ||
           hasAdminCapability(profile, 'upload_notice');
-      if (!mounted) return;
+        if (!mounted) return canManage;
       setState(() => _canManageNotices = canManage);
+      return canManage;
     } catch (e) {
       debugPrint('Failed to resolve notice access: $e');
+      return false;
     }
   }
 
   Future<void> _loadAccessContextAndNotices() async {
-    await _loadNoticeAccess();
-    await _loadNotices(reset: true);
+    final results = await Future.wait<dynamic>([
+      _loadNoticeAccess(),
+      _loadNotices(reset: true),
+    ]);
+
+    final canManage = results.isNotEmpty && results.first == true;
+    if (canManage && mounted) {
+      await _loadNotices(reset: true);
+    }
   }
 
   @override
@@ -806,7 +815,7 @@ class _NoticesScreenState extends State<NoticesScreen>
     int index,
   ) {
     final isFollowing = _followedDepartments.contains(account.id);
-    final followerCount = _departmentFollowerCounts[account.id] ?? 0;
+    final followerCount = _departmentFollowerCounts[account.id];
 
     return AnimationConfiguration.staggeredList(
       position: index,
@@ -909,7 +918,9 @@ class _NoticesScreenState extends State<NoticesScreen>
                             ),
                             const SizedBox(width: 2),
                             Text(
-                              '$followerCount followers',
+                              followerCount == null
+                                  ? '... followers'
+                                  : '$followerCount followers',
                               style: GoogleFonts.inter(
                                 fontSize: 12,
                                 color: isDark
