@@ -7,6 +7,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -28,7 +29,6 @@ import '../services/summary_pdf_service.dart';
 import '../services/supabase_service.dart';
 import '../controllers/ai_chat_animation_controller.dart';
 import '../widgets/ai_chat_message_bubble.dart';
-import '../widgets/ai_formatted_text.dart';
 import '../widgets/ai_logo.dart';
 import '../widgets/onboarding_overlay.dart';
 import '../widgets/paywall_dialog.dart';
@@ -3944,12 +3944,13 @@ class _AIChatScreenState extends State<AIChatScreen>
           strictAntiPlaceholder: strictMode,
           strictRetryReason: strictRetryReason,
         );
-        final allowWeb = _allowWebMode;
+        const allowWeb = false;
         final response = await _api.queryRag(
           question: prompt,
           collegeId: widget.collegeId,
           sessionId: _activeSessionId,
-          topK: 6,
+          topK: 15,
+          minScore: 0.32,
           fileId: searchAllForPrompt ? null : widget.resourceContext?.fileId,
           videoUrl: widget.resourceContext?.videoUrl,
           allowWeb: allowWeb,
@@ -5395,11 +5396,25 @@ class _AIChatScreenState extends State<AIChatScreen>
             ),
           )
         else if (msg.content.trim().isNotEmpty)
-          AiFormattedText(
-            text: msg.content,
-            baseStyle: messageTextStyle,
-            bulletColor: AppTheme.primary,
-            headingColor: textColor,
+          MarkdownBody(
+            data: msg.content,
+            softLineBreak: true,
+            styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context))
+                .copyWith(
+                  p: messageTextStyle,
+                  strong: messageTextStyle.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                  h3: messageTextStyle.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                  blockquoteDecoration: BoxDecoration(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
           ),
         if (!msg.isUser && msg.ocrFailureAffectsRetrieval) ...[
           const SizedBox(height: 10),
