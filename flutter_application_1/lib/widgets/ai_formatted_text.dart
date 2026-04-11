@@ -24,6 +24,9 @@ class AiFormattedText extends StatelessWidget {
   static final RegExp _bulletPattern = RegExp(
     '^([-*\\u2022]|\\d+[.)])\\s+(.+)\$',
   );
+  static final RegExp _quoteBulletPattern = RegExp(
+    r'^(?:>\s*)+(?:[-*\u2022]|\d+[.)])?\s*(.+)$',
+  );
   static final RegExp _mathSegmentPattern = RegExp(
     r'(\$\$[\s\S]+?\$\$|\$[^$\n]+\$|\\\[[\s\S]+?\\\]|\\\([^\n]+?\\\))',
     multiLine: true,
@@ -35,11 +38,20 @@ class AiFormattedText extends StatelessWidget {
     final lines = normalized.split('\n');
     final widgets = <Widget>[];
 
-    for (var i = 0; i < lines.length; i++) {
+    var i = 0;
+    while (i < lines.length) {
       final trimmed = lines[i].trim();
 
       if (trimmed.isEmpty) {
         widgets.add(const SizedBox(height: 6));
+        i++;
+        continue;
+      }
+
+      final tableBlock = _tryParseTableBlock(lines, i);
+      if (tableBlock != null) {
+        widgets.add(_buildTable(tableBlock));
+        i = tableBlock.nextIndex;
         continue;
       }
 
@@ -51,6 +63,7 @@ class AiFormattedText extends StatelessWidget {
         r'^\*\*([^*\n][^*\n]{1,120})\*\*(?:\s*:?\s*)(.+)$',
       ).firstMatch(trimmed);
       final bulletMatch = _bulletPattern.firstMatch(trimmed);
+      final quoteBulletMatch = _quoteBulletPattern.firstMatch(trimmed);
 
       final isColonHeading =
           detectColonHeadings &&
@@ -69,6 +82,7 @@ class AiFormattedText extends StatelessWidget {
             headingMatch?.group(1)?.trim() ??
             trimmed.replaceFirst(RegExp(r':\s*$'), '');
         widgets.add(_buildHeading(headingText, i == 0 ? 0 : 6));
+        i++;
         continue;
       }
 
@@ -76,6 +90,7 @@ class AiFormattedText extends StatelessWidget {
         widgets.add(
           _buildHeading(boldHeadingMatch.group(1)!.trim(), i == 0 ? 0 : 6),
         );
+        i++;
         continue;
       }
 
@@ -91,13 +106,18 @@ class AiFormattedText extends StatelessWidget {
             ),
           );
         }
+        i++;
         continue;
       }
 
-      if (bulletMatch != null) {
-        final marker = bulletMatch.group(1)?.trim() ?? '*';
-        final body = bulletMatch.group(2)?.trim() ?? '';
-        final isNumericMarker = RegExp(r'^\d').hasMatch(marker);
+      if (bulletMatch != null || quoteBulletMatch != null) {
+        final marker = bulletMatch?.group(1)?.trim() ?? '*';
+        final body =
+            bulletMatch?.group(2)?.trim() ??
+            quoteBulletMatch?.group(1)?.trim() ??
+            '';
+        final isNumericMarker =
+            bulletMatch != null && RegExp(r'^\d').hasMatch(marker);
 
         widgets.add(
           Padding(
@@ -132,10 +152,12 @@ class AiFormattedText extends StatelessWidget {
             ),
           ),
         );
+        i++;
         continue;
       }
 
       widgets.add(_buildInlineContent(trimmed, baseStyle));
+      i++;
     }
 
     return Column(
@@ -175,6 +197,111 @@ class AiFormattedText extends StatelessWidget {
           fontWeight: FontWeight.w800,
           color: headingColor,
           height: 1.4,
+        ),
+      ),
+    );
+  }
+
+  _TableBlock? _tryParseTableBlock(List<String> lines, int startIndex) {
+    if (startIndex + 1 >= lines.length) return null;
+
+    final headerLine = lines[startIndex].trim();
+    final dividerLine = lines[startIndex + 1].trim();
+    if (!_looksLikeTableRow(headerLine) || !_looksLikeTableDivider(dividerLine)) {
+      return null;
+    }
+
+    final headers = _splitTableCells(headerLine);
+    if (headers.length < 2) return null;
+
+    final rows = <List<String>>[];
+    var rowIndex = startIndex + 2;
+    while (rowIndex < lines.length) {
+      final rowLine = lines[rowIndex].trim();
+      if (rowLine.isEmpty || !_looksLikeTableRow(rowLine)) break;
+      final rowCells = _splitTableCells(rowLine);
+      if (rowCells.isEmpty) break;
+      rows.add(rowCells);
+      rowIndex++;
+    }
+
+    return _TableBlock(
+      headers: headers,
+      rows: rows,
+      nextIndex: rowIndex,
+    );
+  }
+
+  bool _looksLikeTableRow(String line) {
+    if (!line.contains('|')) return false;
+    return _splitTableCells(line).length >= 2;
+  }
+
+  bool _looksLikeTableDivider(String line) {
+    final cells = _splitTableCells(line);
+    if (cells.length < 2) return false;
+    final dividerPattern = RegExp(r'^:?-{3,}:?$');
+    return cells.every((cell) => dividerPattern.hasMatch(cell.replaceAll(' ', '')));
+  }
+
+  List<String> _splitTableCells(String rowLine) {
+    var row = rowLine.trim();
+    if (row.startsWith('|')) row = row.substring(1);
+    if (row.endsWith('|')) row = row.substring(0, row.length - 1);
+    final cells = row.split('|').map((cell) => cell.trim()).toList();
+    if (cells.length < 2) return <String>[];
+    return cells;
+  }
+
+  Widget _buildTable(_TableBlock tableBlock) {
+    var columnCount = tableBlock.headers.length;
+    for (final row in tableBlock.rows) {
+      if (row.length > columnCount) {
+        columnCount = row.length;
+      }
+    }
+
+    final borderColor = (baseStyle.color ?? Colors.black).withValues(alpha: 0.2);
+    final headerStyle = baseStyle.copyWith(
+      fontWeight: FontWeight.w700,
+      color: headingColor,
+    );
+
+    List<Widget> buildCells(List<String> values, TextStyle cellStyle) {
+      return List<Widget>.generate(columnCount, (index) {
+        final value = index < values.length ? values[index] : '';
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: _buildInlineContent(value, cellStyle),
+        );
+      });
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8, bottom: 6),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 260),
+          child: Table(
+            defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+            border: TableBorder.all(
+              color: borderColor,
+              width: 1,
+            ),
+            children: [
+              TableRow(
+                decoration: BoxDecoration(
+                  color: headingColor.withValues(alpha: 0.08),
+                ),
+                children: buildCells(tableBlock.headers, headerStyle),
+              ),
+              for (final row in tableBlock.rows)
+                TableRow(
+                  children: buildCells(row, baseStyle),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -348,7 +475,7 @@ class AiFormattedText extends StatelessWidget {
 
     final spans = <InlineSpan>[];
     final matcher = RegExp(
-      r'(\*\*[^*]+\*\*)|(_[^_]+_)|(?:^|(?<=\s))\*([^*]+)\*(?=[^*]|$)',
+      r'(\*\*[^*\n]+\*\*)|(_[^_\n]+_)|(?<!\*)\*([^*\n]+)\*(?!\*)',
     );
     var cursor = 0;
 
@@ -410,5 +537,17 @@ class _MathSegment {
   const _MathSegment({
     required this.isMath,
     required this.value,
+  });
+}
+
+class _TableBlock {
+  final List<String> headers;
+  final List<List<String>> rows;
+  final int nextIndex;
+
+  const _TableBlock({
+    required this.headers,
+    required this.rows,
+    required this.nextIndex,
   });
 }

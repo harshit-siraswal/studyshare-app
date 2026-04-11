@@ -690,14 +690,14 @@ class SupabaseService {
       Map<String, dynamic>? user;
       if (_usersTableHasFirebaseUid == false) {
         user = await _client
-            .from('users')
+            .from('users_safe')
             .select('id')
             .eq('email', email)
             .maybeSingle();
       } else {
         try {
           user = await _client
-              .from('users')
+              .from('users_safe')
               .select('id, firebase_uid')
               .eq('email', email)
               .maybeSingle();
@@ -706,7 +706,7 @@ class SupabaseService {
           if (_isMissingColumnError(e, 'firebase_uid')) {
             _usersTableHasFirebaseUid = false;
             user = await _client
-                .from('users')
+                .from('users_safe')
                 .select('id')
                 .eq('email', email)
                 .maybeSingle();
@@ -742,7 +742,7 @@ class SupabaseService {
       // Run both queries in parallel to fetch users by id or firebase_uid
       final results = await Future.wait([
         _client
-            .from('users')
+            .from('users_safe')
             .select('id, email, display_name, profile_photo_url, username')
             .inFilter('id', ids)
             .catchError((e) {
@@ -750,7 +750,7 @@ class SupabaseService {
               return [];
             }),
         _client
-            .from('users')
+            .from('users_safe')
             .select('id, email, display_name, profile_photo_url, username')
             .inFilter('firebase_uid', ids)
             .catchError((e) {
@@ -849,7 +849,7 @@ class SupabaseService {
           )
           .join(',');
       final rows = await _client
-          .from('users')
+          .from('users_safe')
           .select(
             'email, display_name, username, profile_photo_url, role, admin_capabilities, scope_all_colleges, admin_college_id',
           )
@@ -1829,7 +1829,7 @@ class SupabaseService {
   Future<String?> getUserId(String email) async {
     try {
       final res = await _client
-          .from('users')
+          .from('users_safe')
           .select('id')
           .eq('email', email)
           .maybeSingle();
@@ -1843,7 +1843,7 @@ class SupabaseService {
   Future<String?> getUserEmail(String id) async {
     try {
       final res = await _client
-          .from('users')
+          .from('users_safe')
           .select('email')
           .eq('id', id)
           .maybeSingle();
@@ -1890,7 +1890,7 @@ class SupabaseService {
 
     try {
       final res = await _client
-          .from('users')
+          .from('users_safe')
           .select(
             'id, email, display_name, profile_photo_url, username, bio, semester, branch, subject, role, admin_capabilities, scope_all_colleges, admin_college_id',
           )
@@ -2181,6 +2181,10 @@ class SupabaseService {
     final normalizedImageUrl = imageUrl?.trim() ?? '';
     final normalizedFileUrl = fileUrl?.trim() ?? '';
     final normalizedFileType = fileType?.trim().toLowerCase() ?? '';
+    final normalizedDepartment = normalizeDepartmentCode(department);
+    if (normalizedDepartment.isEmpty) {
+      throw Exception('Please select a valid department');
+    }
 
     Object? backendError;
     StackTrace? backendStackTrace;
@@ -2189,7 +2193,7 @@ class SupabaseService {
         collegeId: collegeId,
         title: title,
         content: content,
-        department: department,
+        department: normalizedDepartment,
         imageUrl: normalizedImageUrl.isEmpty ? null : normalizedImageUrl,
         fileUrl: normalizedFileUrl.isEmpty ? null : normalizedFileUrl,
         fileType: normalizedFileType.isEmpty ? null : normalizedFileType,
@@ -2222,7 +2226,7 @@ class SupabaseService {
       'college_id': collegeId,
       'title': title,
       'content': content,
-      'department': department,
+      'department': normalizedDepartment,
       'created_by': email,
       'created_by_name': displayName,
       if (normalizedImageUrl.isNotEmpty) 'image_url': normalizedImageUrl,
@@ -2232,9 +2236,202 @@ class SupabaseService {
 
     try {
       await _client.from('notices').insert(payload);
+      try {
+        await _notifyDepartmentFollowersForNotice(
+          collegeId: collegeId,
+          departmentId: normalizedDepartment,
+          noticeTitle: title,
+          noticeContent: content,
+        );
+      } catch (notifyError) {
+        debugPrint(
+          'Fallback department notification dispatch failed: $notifyError',
+        );
+      }
     } catch (e) {
       debugPrint('Error posting notice: $e');
       rethrow;
+    }
+  }
+
+  Future<void> _notifyDepartmentFollowersForNotice({
+    required String collegeId,
+    required String departmentId,
+    required String noticeTitle,
+    required String noticeContent,
+  }) async {
+    final normalizedDepartmentId = normalizeDepartmentCode(departmentId);
+    if (normalizedDepartmentId.isEmpty) return;
+
+    final normalizedCollegeId = collegeId.trim();
+    final senderUserId = currentUserId?.trim() ?? '';
+    final senderEmail = _normalizeEmail(currentUserEmail);
+
+    Future<List<Map<String, dynamic>>> fetchFollowers({
+      required bool applyCollegeScope,
+    }) async {
+      var query = _client
+          .from('department_followers')
+          .select('user_id, follower_id, user_email, follower_email')
+          .eq('department_id', normalizedDepartmentId);
+      if (applyCollegeScope && normalizedCollegeId.isNotEmpty) {
+        query = query.eq('college_id', normalizedCollegeId);
+      }
+      final response = await query;
+      return List<Map<String, dynamic>>.from(response);
+    }
+
+    List<Map<String, dynamic>> followerRows = const [];
+    try {
+      followerRows = await fetchFollowers(applyCollegeScope: true);
+      if (followerRows.isEmpty && normalizedCollegeId.isNotEmpty) {
+        followerRows = await fetchFollowers(applyCollegeScope: false);
+      }
+    } catch (e) {
+      if (_isMissingColumnError(e, 'college_id')) {
+        try {
+          followerRows = await fetchFollowers(applyCollegeScope: false);
+        } catch (fallbackError) {
+          debugPrint(
+            'Error loading department followers for notifications: '
+            '$e | $fallbackError',
+          );
+          return;
+        }
+      } else {
+        debugPrint('Error loading department followers for notifications: $e');
+        return;
+      }
+    }
+
+    if (followerRows.isEmpty) return;
+
+    final recipientUserIds = <String>{};
+    final recipientEmails = <String>{};
+
+    void addRecipientId(String? rawValue) {
+      final value = rawValue?.trim() ?? '';
+      if (value.isEmpty || value == senderUserId) return;
+      recipientUserIds.add(value);
+    }
+
+    void addRecipientEmail(String? rawValue) {
+      final value = _normalizeEmail(rawValue);
+      if (value.isEmpty || value == senderEmail) return;
+      recipientEmails.add(value);
+    }
+
+    for (final row in followerRows) {
+      addRecipientId(row['user_id']?.toString());
+      addRecipientId(row['follower_id']?.toString());
+      addRecipientEmail(row['user_email']?.toString());
+      addRecipientEmail(row['follower_email']?.toString());
+    }
+
+    if (recipientUserIds.isEmpty && recipientEmails.isEmpty) return;
+
+    final departmentAccount = departmentAccountFromCode(normalizedDepartmentId);
+    final notificationTitle = 'New notice from ${departmentAccount.name}';
+    final rawMessage = noticeContent.trim().isNotEmpty
+        ? noticeContent.trim()
+        : noticeTitle.trim();
+    final resolvedMessage = rawMessage.isNotEmpty
+        ? rawMessage
+        : 'A new notice is available.';
+    final notificationMessage = resolvedMessage.length > 180
+        ? '${resolvedMessage.substring(0, 177)}...'
+        : resolvedMessage;
+
+    final metadata = <String, dynamic>{
+      'department_id': normalizedDepartmentId,
+      if (normalizedCollegeId.isNotEmpty) 'college_id': normalizedCollegeId,
+      'notice_title': noticeTitle.trim(),
+    };
+
+    for (final userId in recipientUserIds) {
+      await _insertDepartmentNoticeNotification(
+        userId: userId,
+        title: notificationTitle,
+        message: notificationMessage,
+        metadata: metadata,
+      );
+    }
+
+    for (final userEmail in recipientEmails) {
+      await _insertDepartmentNoticeNotification(
+        userEmail: userEmail,
+        title: notificationTitle,
+        message: notificationMessage,
+        metadata: metadata,
+      );
+    }
+  }
+
+  Future<void> _insertDepartmentNoticeNotification({
+    String? userId,
+    String? userEmail,
+    required String title,
+    required String message,
+    required Map<String, dynamic> metadata,
+  }) async {
+    final recipientPayloads = <Map<String, dynamic>>[
+      if (userId != null && userId.trim().isNotEmpty)
+        {'user_id': userId.trim()},
+      if (userId != null && userId.trim().isNotEmpty)
+        {'recipient_id': userId.trim()},
+      if (userEmail != null && userEmail.trim().isNotEmpty)
+        {'user_email': _normalizeEmail(userEmail)},
+      if (userEmail != null && userEmail.trim().isNotEmpty)
+        {'recipient_email': _normalizeEmail(userEmail)},
+    ];
+
+    if (recipientPayloads.isEmpty) return;
+
+    final basePayloads = <Map<String, dynamic>>[
+      {
+        'type': 'department_notice',
+        'title': title,
+        'message': message,
+        'is_read': false,
+        'metadata': metadata,
+      },
+      {
+        'type': 'department_notice',
+        'title': title,
+        'message': message,
+        'is_read': false,
+        'data': metadata,
+      },
+      {
+        'type': 'department_notice',
+        'title': title,
+        'message': message,
+        'is_read': false,
+      },
+    ];
+
+    for (final recipient in recipientPayloads) {
+      for (final basePayload in basePayloads) {
+        try {
+          await _client.from('notifications').insert({
+            ...recipient,
+            ...basePayload,
+          });
+          return;
+        } catch (e) {
+          final schemaIssue =
+              _isMissingColumnError(e, 'user_id') ||
+              _isMissingColumnError(e, 'recipient_id') ||
+              _isMissingColumnError(e, 'user_email') ||
+              _isMissingColumnError(e, 'recipient_email') ||
+              _isMissingColumnError(e, 'metadata') ||
+              _isMissingColumnError(e, 'data') ||
+              _isMissingColumnError(e, 'is_read');
+          if (!schemaIssue && !_isRowLevelSecurityError(e)) {
+            debugPrint('Error creating department notice notification: $e');
+          }
+        }
+      }
     }
   }
 
@@ -2371,7 +2568,7 @@ class SupabaseService {
 
     try {
       var dbQuery = _client
-          .from('users')
+          .from('users_safe')
           .select(
             'id, email, display_name, username, profile_photo_url, college, college_id, bio',
           );
@@ -2434,7 +2631,7 @@ class SupabaseService {
           .replaceAll('_', r'\_'); // Escape LIKE single-char wildcard
       if (safeDomain.isEmpty) return [];
       var dbQuery = _client
-          .from('users')
+          .from('users_safe')
           .select(
             'id, email, display_name, username, profile_photo_url, college, bio',
           )
@@ -2535,7 +2732,7 @@ class SupabaseService {
       if (followerEmails.isEmpty) return [];
 
       final usersResponse = await _client
-          .from('users')
+          .from('users_safe')
           .select('email, display_name, profile_photo_url, username')
           .inFilter('email', followerEmails);
 
@@ -2616,7 +2813,7 @@ class SupabaseService {
       if (followingEmails.isEmpty) return [];
 
       final usersResponse = await _client
-          .from('users')
+          .from('users_safe')
           .select('email, display_name, profile_photo_url, username')
           .inFilter('email', followingEmails);
 
@@ -5026,8 +5223,13 @@ class SupabaseService {
     String collegeId,
     String userEmail,
   ) async {
+    final normalizedDepartmentId = normalizeDepartmentCode(departmentId);
+    if (normalizedDepartmentId.isEmpty) {
+      throw Exception('Department ID is required');
+    }
+
     try {
-      await _api.followDepartment(departmentId, collegeId: collegeId);
+      await _api.followDepartment(normalizedDepartmentId, collegeId: collegeId);
     } catch (e) {
       debugPrint('Error following department via API: $e');
       rethrow;
@@ -5040,8 +5242,16 @@ class SupabaseService {
     String userEmail, {
     String? collegeId,
   }) async {
+    final normalizedDepartmentId = normalizeDepartmentCode(departmentId);
+    if (normalizedDepartmentId.isEmpty) {
+      throw Exception('Department ID is required');
+    }
+
     try {
-      await _api.unfollowDepartment(departmentId, collegeId: collegeId);
+      await _api.unfollowDepartment(
+        normalizedDepartmentId,
+        collegeId: collegeId,
+      );
     } catch (e) {
       debugPrint('Error unfollowing department via API: $e');
       rethrow;
@@ -5094,6 +5304,9 @@ class SupabaseService {
     String userEmail, {
     String? collegeId,
   }) async {
+    final normalizedDepartmentId = normalizeDepartmentCode(departmentId);
+    if (normalizedDepartmentId.isEmpty) return false;
+
     final normalizedEmail = _requireCurrentSessionEmail(
       claimedEmail: userEmail,
       action: 'is_following_department',
@@ -5134,7 +5347,7 @@ class SupabaseService {
         var query = _client
             .from('department_followers')
             .select('id')
-            .eq('department_id', departmentId)
+          .eq('department_id', normalizedDepartmentId)
             .eq(column, value);
         if (useCollegeFilter &&
             collegeId != null &&
@@ -5164,11 +5377,14 @@ class SupabaseService {
     String departmentId,
     String collegeId,
   ) async {
+    final normalizedDepartmentId = normalizeDepartmentCode(departmentId);
+    if (normalizedDepartmentId.isEmpty) return 0;
+
     try {
       var uniqueQuery = _client
           .from('department_followers')
           .select('user_id, follower_id, user_email, follower_email')
-          .eq('department_id', departmentId);
+          .eq('department_id', normalizedDepartmentId);
       if (collegeId.trim().isNotEmpty) {
         uniqueQuery = uniqueQuery.eq('college_id', collegeId);
       }
@@ -5197,7 +5413,7 @@ class SupabaseService {
       var query = _client
           .from('department_followers')
           .count(CountOption.exact)
-          .eq('department_id', departmentId);
+          .eq('department_id', normalizedDepartmentId);
       if (collegeId.trim().isNotEmpty) {
         query = query.eq('college_id', collegeId);
       }
@@ -5209,7 +5425,7 @@ class SupabaseService {
           final response = await _client
               .from('department_followers')
               .count(CountOption.exact)
-              .eq('department_id', departmentId);
+              .eq('department_id', normalizedDepartmentId);
           return response;
         } catch (fallbackError) {
           debugPrint(
@@ -5273,9 +5489,8 @@ class SupabaseService {
         }
         final response = await query;
         final fetchedIds = (response as List)
-            .map((e) => e['department_id']?.toString())
-            .where((id) => id != null && id.isNotEmpty)
-            .cast<String>()
+          .map((e) => normalizeDepartmentCode(e['department_id']?.toString()))
+          .where((id) => id.isNotEmpty)
             .toList();
         finalSet.addAll(fetchedIds);
         if (fetchedIds.isNotEmpty) {
@@ -5295,7 +5510,7 @@ class SupabaseService {
     // Merge with user profile followed_departments
     try {
       final userRes = await _client
-          .from('users')
+          .from('users_safe')
           .select('followed_departments')
           .eq('email', normalizedEmail)
           .maybeSingle();
@@ -5303,7 +5518,10 @@ class SupabaseService {
         final profileFollows =
             userRes['followed_departments'] as List<dynamic>? ?? [];
         for (final id in profileFollows) {
-          if (id != null) finalSet.add(id.toString());
+          final normalizedId = normalizeDepartmentCode(id?.toString());
+          if (normalizedId.isNotEmpty) {
+            finalSet.add(normalizedId);
+          }
         }
       }
     } catch (e) {
@@ -5865,7 +6083,7 @@ class SupabaseService {
       }
 
       final response = await _client
-          .from('users')
+          .from('users_safe')
           .select()
           .eq('id', departmentId)
           .maybeSingle();

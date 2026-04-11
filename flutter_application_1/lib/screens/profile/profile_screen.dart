@@ -27,6 +27,7 @@ import '../../widgets/animated_counter.dart';
 import '../../data/academic_subjects_data.dart';
 import '../../utils/ai_token_budget_utils.dart';
 import '../../utils/admin_access.dart';
+import '../../widgets/collapsible_profile_header.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String? collegeId;
@@ -441,70 +442,528 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   _refreshContributionsFuture();
                 });
               },
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: EdgeInsets.fromLTRB(20, 0, 20, bottomPadding),
-                child: Column(
-                  children: [
-                    const SizedBox(height: 20),
-                    _buildProfileHeader(textColor, subTextColor),
-                    const SizedBox(height: 24),
-                    _buildStatsRow(textColor, subTextColor),
-                    const SizedBox(height: 16),
-                    _buildBadgeStickerRow(textColor, subTextColor, isDark),
-                    const SizedBox(height: 24),
-                    _buildAiTokenUsageCard(textColor, subTextColor, isDark),
-                    const SizedBox(height: 24),
-                    FutureBuilder<bool>(
-                      future: _isPremiumFuture ??= _subscriptionService
-                          .isPremium(),
-                      builder: (context, snapshot) {
-                        if (snapshot.hasError || !snapshot.hasData) {
-                          return const SizedBox.shrink();
-                        }
-                        final isPremium = snapshot.data ?? false;
-                        return isPremium
-                            ? const SizedBox.shrink()
-                            : Padding(
-                                padding: const EdgeInsets.only(bottom: 24),
-                                child: _buildUpgradeCard(),
-                              );
+              child: CustomScrollView(
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: BouncingScrollPhysics(),
+                ),
+                slivers: [
+                  SliverPersistentHeader(
+                    pinned: true,
+                    delegate: CollapsibleProfileHeaderDelegate(
+                      expandedHeight: 470,
+                      collapsedHeight: 118,
+                      backgroundColor: isDark
+                          ? Colors.black
+                          : AppTheme.lightBackground,
+                      builder: (context, collapseProgress) {
+                        final expandedScale = 1.0 - (collapseProgress * 0.12);
+                        final expandedOpacity =
+                            (1.0 - (collapseProgress * 1.2)).clamp(0.0, 1.0);
+                        final compactOpacity = collapseProgress.clamp(0.0, 1.0);
+
+                        return Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(
+                                20,
+                                18,
+                                20,
+                                16,
+                              ),
+                              child: Transform.scale(
+                                alignment: Alignment.topCenter,
+                                scale: expandedScale,
+                                child: Opacity(
+                                  opacity: expandedOpacity,
+                                  child: Column(
+                                    children: [
+                                      _buildCollapsibleProfileHero(
+                                        textColor,
+                                        subTextColor,
+                                        isDark,
+                                      ),
+                                      const SizedBox(height: 20),
+                                      _buildStatsRow(textColor, subTextColor),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Align(
+                              alignment: Alignment.bottomCenter,
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  0,
+                                  16,
+                                  14,
+                                ),
+                                child: Opacity(
+                                  opacity: compactOpacity,
+                                  child: _buildCompactProfileStrip(
+                                    textColor,
+                                    subTextColor,
+                                    isDark,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
                       },
                     ),
-                    // Search & Filter
-                    _buildSearchBar(isDark),
-                    const SizedBox(height: 16),
-                    // Offline Toggle (Only if Premium, or disabled if Free)
-                    _buildOfflineToggle(textColor),
-                    const SizedBox(height: 16),
-
-                    // My Posts Link
-                    _buildMyPostsLink(textColor),
-                    const SizedBox(height: 16),
-
-                    // Contributions Header
-                    Align(
-                      key: _myPostsSectionKey,
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        'Contributions',
-                        style: GoogleFonts.inter(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                          color: textColor,
-                        ),
+                  ),
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: EdgeInsets.fromLTRB(20, 12, 20, bottomPadding),
+                      child: Column(
+                        children: [
+                          _buildBadgeStickerRow(textColor, subTextColor, isDark),
+                          const SizedBox(height: 24),
+                          _buildAiTokenUsageCard(textColor, subTextColor, isDark),
+                          const SizedBox(height: 24),
+                          FutureBuilder<bool>(
+                            future: _isPremiumFuture ??= _subscriptionService
+                                .isPremium(),
+                            builder: (context, snapshot) {
+                              if (snapshot.hasError || !snapshot.hasData) {
+                                return const SizedBox.shrink();
+                              }
+                              final isPremium = snapshot.data ?? false;
+                              return isPremium
+                                  ? const SizedBox.shrink()
+                                  : Padding(
+                                      padding: const EdgeInsets.only(bottom: 24),
+                                      child: _buildUpgradeCard(),
+                                    );
+                            },
+                          ),
+                          _buildSearchBar(isDark),
+                          const SizedBox(height: 16),
+                          _buildOfflineToggle(textColor),
+                          const SizedBox(height: 16),
+                          _buildMyPostsLink(textColor),
+                          const SizedBox(height: 16),
+                          Align(
+                            key: _myPostsSectionKey,
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'Contributions',
+                              style: GoogleFonts.inter(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                                color: textColor,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          _buildContributionsList(),
+                          const SizedBox(height: 16),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    _buildContributionsList(),
-                    const SizedBox(height: 16),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
     );
   }
 
+  Widget _buildCollapsibleProfileHero(
+    Color textColor,
+    Color subTextColor,
+    bool isDark,
+  ) {
+    return FutureBuilder<bool>(
+      future: _isPremiumFuture ??= _subscriptionService.isPremium(),
+      builder: (context, snapshot) {
+        final isPremium = snapshot.data ?? false;
+
+        return Column(
+          children: [
+            Stack(
+              children: [
+                if (isPremium)
+                  Positioned.fill(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFFFFD700).withValues(
+                              alpha: 0.5,
+                            ),
+                            blurRadius: 20,
+                            spreadRadius: 2,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                Container(
+                  width: 96,
+                  height: 96,
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: isPremium
+                        ? const LinearGradient(
+                            colors: [
+                              Color(0xFFFFD700),
+                              Color(0xFFFFA500),
+                              Color(0xFFFFD700),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          )
+                        : null,
+                    color: isPremium ? null : Colors.transparent,
+                  ),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: isPremium
+                            ? Colors.white
+                            : textColor.withValues(alpha: 0.1),
+                        width: isPremium ? 2 : 1,
+                      ),
+                      color: textColor.withValues(alpha: 0.05),
+                    ),
+                    child: ClipOval(
+                      child: _photoUrl != null
+                          ? Image.network(
+                              _photoUrl!,
+                              cacheWidth: 320,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return Center(
+                                  child: Text(
+                                    getInitials(_displayName),
+                                    style: GoogleFonts.inter(
+                                      fontSize: 28,
+                                      fontWeight: FontWeight.w600,
+                                      color: textColor,
+                                    ),
+                                  ),
+                                );
+                              },
+                            )
+                          : Center(
+                              child: Text(
+                                getInitials(_displayName),
+                                style: GoogleFonts.inter(
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w600,
+                                  color: textColor,
+                                ),
+                              ),
+                            ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  bottom: 0,
+                  right: 0,
+                  child: GestureDetector(
+                    onTap: () async {
+                      final updated = await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => EditProfileScreen(
+                            initialName: _displayName,
+                            initialPhotoUrl: _photoUrl,
+                            initialBio: _profileBio,
+                            initialSemester: _profileSemester,
+                            initialBranch: _profileBranch,
+                            initialSubject: _profileSubject,
+                            role: _profileRole,
+                          ),
+                        ),
+                      );
+                      if (updated != null && mounted) {
+                        await _loadProfile(forceRefresh: true);
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Theme.of(context).scaffoldBackgroundColor,
+                          width: 2,
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.edit,
+                        size: 14,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _displayName,
+                  style: GoogleFonts.inter(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    color: textColor,
+                  ),
+                ),
+                if (isPremium) ...[
+                  const SizedBox(width: 6),
+                  const Icon(
+                    Icons.verified,
+                    color: Color(0xFFFFD700),
+                    size: 20,
+                  ),
+                ],
+                const SizedBox(width: 8),
+                Tooltip(
+                  message:
+                      '${_contributionBadge.label}: ${_contributionBadge.description}',
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: _contributionBadge.color.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: _contributionBadge.color.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _contributionBadge.icon,
+                          size: 14,
+                          color: _contributionBadge.color,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          _contributionBadge.label,
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: _contributionBadge.color,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '@${_profileDisplayName?.replaceAll(" ", "").toLowerCase() ?? "user"}',
+              style: GoogleFonts.inter(fontSize: 14, color: subTextColor),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              _authService.userEmail ?? '',
+              style: GoogleFonts.inter(fontSize: 13, color: subTextColor),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              widget.collegeName,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(fontSize: 14, color: subTextColor),
+            ),
+            const SizedBox(height: 8),
+            if ((_profileSemester != null && _profileSemester!.isNotEmpty) ||
+                (_profileBranch != null && _profileBranch!.isNotEmpty))
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                margin: const EdgeInsets.only(bottom: 8),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: AppTheme.primary.withValues(alpha: 0.2),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.school_outlined,
+                      size: 16,
+                      color: AppTheme.primary,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      [
+                        if (_profileBranch != null && _profileBranch!.isNotEmpty)
+                          _profileBranchLabel(),
+                        if (_profileSemester != null &&
+                            _profileSemester!.isNotEmpty)
+                          'Sem $_profileSemester',
+                      ].join(' • '),
+                      style: GoogleFonts.inter(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (_profileBio != null && _profileBio!.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Text(
+                  _profileBio!,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(fontSize: 14, color: textColor),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildCompactProfileStrip(
+    Color textColor,
+    Color subTextColor,
+    bool isDark,
+  ) {
+    return Container(
+      height: 62,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? AppTheme.darkCard : Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isDark
+              ? AppTheme.darkBorder.withValues(alpha: 0.8)
+              : AppTheme.lightBorder,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: isDark ? 0.24 : 0.07),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          _buildCollapsedAvatar(textColor),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _displayName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: textColor,
+                  ),
+                ),
+                Text(
+                  '@${_profileDisplayName?.replaceAll(" ", "").toLowerCase() ?? "user"}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.inter(fontSize: 12, color: subTextColor),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                _uploadCount.toString(),
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: textColor,
+                ),
+              ),
+              Text(
+                'contributions',
+                style: GoogleFonts.inter(fontSize: 11, color: subTextColor),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCollapsedAvatar(Color textColor) {
+    if (_photoUrl != null && _photoUrl!.isNotEmpty) {
+      return ClipOval(
+        child: Image.network(
+          _photoUrl!,
+          width: 40,
+          height: 40,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) {
+            return Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: textColor.withValues(alpha: 0.08),
+                shape: BoxShape.circle,
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                getInitials(_displayName),
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: textColor,
+                ),
+              ),
+            );
+          },
+        ),
+      );
+    }
+
+    return Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: textColor.withValues(alpha: 0.08),
+        shape: BoxShape.circle,
+      ),
+      alignment: Alignment.center,
+      child: Text(
+        getInitials(_displayName),
+        style: GoogleFonts.inter(
+          fontSize: 14,
+          fontWeight: FontWeight.w700,
+          color: textColor,
+        ),
+      ),
+    );
+  }
+
+  // ignore: unused_element
   Widget _buildProfileHeader(Color textColor, Color subTextColor) {
     return FutureBuilder<bool>(
       future: _isPremiumFuture ??= _subscriptionService.isPremium(),

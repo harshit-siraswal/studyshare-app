@@ -310,30 +310,10 @@ class _NoticeCardState extends State<NoticeCard> {
         .trim();
   }
 
-  Future<void> _showPeekDialog() async {
-    if (!mounted) return;
-    HapticFeedback.selectionClick();
-    await showGeneralDialog<void>(
-      context: context,
-      barrierDismissible: true,
-      barrierLabel: 'Peek notice',
-      barrierColor: Colors.black.withValues(alpha: 0.48),
-      pageBuilder: (dialogContext, animation, secondaryAnimation) {
-        return SafeArea(
-          child: Material(
-            color: Colors.transparent,
-            child: _buildPeekCard(dialogContext),
-          ),
-        );
-      },
-    );
-  }
-
   Widget _buildPeekCard(BuildContext overlayCtx) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final screenWidth = MediaQuery.of(overlayCtx).size.width;
-    // Wider than resource peek (460 → up to full width minus 24 px)
-    final maxWidth = screenWidth > 500 ? 460.0 : screenWidth - 24;
+    final maxWidth = screenWidth > 740 ? 620.0 : screenWidth - 16;
 
     final title = widget.notice['title']?.toString() ?? 'Untitled';
     final content = _plainPreviewText(
@@ -356,7 +336,7 @@ class _NoticeCardState extends State<NoticeCard> {
 
     return Center(
       child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: maxWidth),
+        constraints: BoxConstraints(maxWidth: maxWidth, maxHeight: 680),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 32),
           child: TweenAnimationBuilder<double>(
@@ -431,7 +411,7 @@ class _NoticeCardState extends State<NoticeCard> {
                         ),
                       ),
                       Text(
-                        'Peek preview',
+                        'Release to close',
                         style: GoogleFonts.inter(
                           fontSize: 11,
                           fontWeight: FontWeight.w500,
@@ -490,7 +470,7 @@ class _NoticeCardState extends State<NoticeCard> {
                     const SizedBox(height: 10),
                     Text(
                       content,
-                      maxLines: 8,
+                      maxLines: 12,
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.inter(
                         fontSize: 13.5,
@@ -1050,13 +1030,6 @@ class _NoticeCardState extends State<NoticeCard> {
                                       : 'Comment',
                                   color: secondaryColor,
                                   onTap: openDetail,
-                                ),
-                                const SizedBox(width: 8),
-                                _buildActionButton(
-                                  icon: Icons.visibility_outlined,
-                                  count: 'Peek',
-                                  color: secondaryColor,
-                                  onTap: _showPeekDialog,
                                 ),
                                 const Spacer(),
                                 InkWell(

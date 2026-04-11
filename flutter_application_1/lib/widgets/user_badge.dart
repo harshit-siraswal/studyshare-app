@@ -75,14 +75,14 @@ class _UserBadgeState extends State<UserBadge> {
         }
       } else if (_usersTableHasRoleColumn == false) {
         userResponse = await Supabase.instance.client
-            .from('users')
+            .from('users_safe')
             .select('subscription_tier, subscription_end_date')
             .eq('email', email)
             .maybeSingle();
       } else {
         try {
           userResponse = await Supabase.instance.client
-              .from('users')
+              .from('users_safe')
               .select('role, subscription_tier, subscription_end_date')
               .eq('email', email)
               .maybeSingle();
@@ -91,7 +91,7 @@ class _UserBadgeState extends State<UserBadge> {
           if (_isMissingRoleColumnError(e)) {
             _usersTableHasRoleColumn = false;
             userResponse = await Supabase.instance.client
-                .from('users')
+                .from('users_safe')
                 .select('subscription_tier, subscription_end_date')
                 .eq('email', email)
                 .maybeSingle();

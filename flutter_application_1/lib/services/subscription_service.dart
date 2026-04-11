@@ -136,7 +136,7 @@ class SubscriptionService {
       String? premiumUntilStr;
       if (_supabaseService.hasConfiguredSupabaseAnonKey) {
         final res = await _supabase
-            .from('users')
+            .from('users_safe')
             .select('subscription_end_date, subscription_tier')
             .eq('email', email)
             .maybeSingle();

@@ -275,6 +275,11 @@ class _NoticesScreenState extends State<NoticesScreen>
         .trim();
   }
 
+  bool get _hasFollowSession {
+    if (_activeUserEmail.isNotEmpty) return true;
+    return (_supabaseService.currentUserId?.trim().isNotEmpty ?? false);
+  }
+
   Future<void> _loadNoticeAccess() async {
     try {
       final profile = await _supabaseService.getCurrentUserProfile(
@@ -345,17 +350,27 @@ class _NoticesScreenState extends State<NoticesScreen>
   }
 
   Future<void> _loadFollowedDepartments() async {
+    if (!_hasFollowSession) {
+      if (mounted) {
+        setState(() => _followedDepartments = <String>{});
+      }
+      return;
+    }
+
     final email = _activeUserEmail;
-    if (email.isEmpty) return;
 
     try {
       final followedIds = await _supabaseService.getFollowedDepartmentIds(
         widget.collegeId,
         email,
       );
+      final normalizedFollowedIds = followedIds
+          .map(normalizeDepartmentCode)
+          .where((id) => id.isNotEmpty)
+          .toSet();
       if (mounted) {
         setState(() {
-          _followedDepartments = followedIds.toSet();
+          _followedDepartments = normalizedFollowedIds;
         });
       }
     } catch (e) {
@@ -364,41 +379,45 @@ class _NoticesScreenState extends State<NoticesScreen>
   }
 
   Future<void> _toggleDepartmentFollow(String deptId) async {
-    final email = _activeUserEmail;
-    if (email.isEmpty) {
+    final normalizedDeptId = normalizeDepartmentCode(deptId);
+    if (normalizedDeptId.isEmpty) return;
+
+    if (!_hasFollowSession) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Please log in to follow')));
       return;
     }
 
-    final isFollowing = _followedDepartments.contains(deptId);
+    final email = _activeUserEmail;
+
+    final isFollowing = _followedDepartments.contains(normalizedDeptId);
 
     // Optimistic update
     setState(() {
       if (isFollowing) {
-        _followedDepartments.remove(deptId);
-        _departmentFollowerCounts[deptId] = math.max(
+        _followedDepartments.remove(normalizedDeptId);
+        _departmentFollowerCounts[normalizedDeptId] = math.max(
           0,
-          (_departmentFollowerCounts[deptId] ?? 1) - 1,
+          (_departmentFollowerCounts[normalizedDeptId] ?? 1) - 1,
         );
       } else {
-        _followedDepartments.add(deptId);
-        _departmentFollowerCounts[deptId] =
-            (_departmentFollowerCounts[deptId] ?? 0) + 1;
+        _followedDepartments.add(normalizedDeptId);
+        _departmentFollowerCounts[normalizedDeptId] =
+            (_departmentFollowerCounts[normalizedDeptId] ?? 0) + 1;
       }
     });
 
     try {
       if (isFollowing) {
         await _supabaseService.unfollowDepartment(
-          deptId,
+          normalizedDeptId,
           email,
           collegeId: widget.collegeId,
         );
       } else {
         await _supabaseService.followDepartment(
-          deptId,
+          normalizedDeptId,
           widget.collegeId,
           email,
         );
@@ -407,29 +426,31 @@ class _NoticesScreenState extends State<NoticesScreen>
       if (mounted) {
         try {
           final actualCount = await _supabaseService.getDepartmentFollowerCount(
-            deptId,
+            normalizedDeptId,
             widget.collegeId,
           );
+          if (!mounted) return;
           setState(() {
-            _departmentFollowerCounts[deptId] = actualCount;
+            _departmentFollowerCounts[normalizedDeptId] = actualCount;
           });
         } catch (countError) {
           debugPrint('Error refreshing follower count: $countError');
         }
+        await _loadFollowedDepartments();
       }
     } catch (e) {
       // Revert on error
       if (mounted) {
         setState(() {
           if (isFollowing) {
-            _followedDepartments.add(deptId);
-            _departmentFollowerCounts[deptId] =
-                (_departmentFollowerCounts[deptId] ?? 0) + 1;
+            _followedDepartments.add(normalizedDeptId);
+            _departmentFollowerCounts[normalizedDeptId] =
+                (_departmentFollowerCounts[normalizedDeptId] ?? 0) + 1;
           } else {
-            _followedDepartments.remove(deptId);
-            _departmentFollowerCounts[deptId] = math.max(
+            _followedDepartments.remove(normalizedDeptId);
+            _departmentFollowerCounts[normalizedDeptId] = math.max(
               0,
-              (_departmentFollowerCounts[deptId] ?? 1) - 1,
+              (_departmentFollowerCounts[normalizedDeptId] ?? 1) - 1,
             );
           }
         });

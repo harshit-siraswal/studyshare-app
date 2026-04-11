@@ -8,6 +8,7 @@ import '../../services/auth_service.dart';
 import '../../widgets/notice_card.dart';
 import '../../models/department_account.dart';
 import '../../utils/admin_access.dart';
+import '../../data/department_catalog.dart';
 
 class DepartmentAccountScreen extends StatefulWidget {
   final DepartmentAccount account;
@@ -39,6 +40,16 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
   String _searchQuery = '';
   DateTimeRange? _selectedDateRange;
 
+  String get _activeUserEmail {
+    return (_authService.userEmail ?? _supabaseService.currentUserEmail ?? '')
+        .trim();
+  }
+
+  bool get _hasFollowSession {
+    if (_activeUserEmail.isNotEmpty) return true;
+    return (_supabaseService.currentUserId?.trim().isNotEmpty ?? false);
+  }
+
   Future<void> _loadNoticeAccess() async {
     try {
       final profile = await _supabaseService.getCurrentUserProfile(
@@ -67,22 +78,35 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
   }
 
   Future<void> _loadFollowData() async {
-    final email = _authService.userEmail;
-    if (email == null) {
+    final normalizedDeptId = normalizeDepartmentCode(widget.account.id);
+    if (normalizedDeptId.isEmpty) {
       if (mounted) {
         setState(() => _isFollowLoading = false);
       }
       return;
     }
+
     try {
-      final isFollowing = await _supabaseService.isFollowingDepartment(
-        widget.account.id,
-        email,
-        collegeId: widget.collegeId,
-      );
       final count = await _supabaseService.getDepartmentFollowerCount(
-        widget.account.id,
+        normalizedDeptId,
         widget.collegeId,
+      );
+
+      if (!_hasFollowSession) {
+        if (mounted) {
+          setState(() {
+            _isFollowing = false;
+            _followerCount = count;
+            _isFollowLoading = false;
+          });
+        }
+        return;
+      }
+
+      final isFollowing = await _supabaseService.isFollowingDepartment(
+        normalizedDeptId,
+        _activeUserEmail,
+        collegeId: widget.collegeId,
       );
 
       if (mounted) {
@@ -101,49 +125,63 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
   }
 
   Future<void> _toggleFollow() async {
-    final email = _authService.userEmail;
-    if (email == null) return;
+    final normalizedDeptId = normalizeDepartmentCode(widget.account.id);
+    if (normalizedDeptId.isEmpty) return;
+
+    if (!_hasFollowSession) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Please log in to follow')));
+      return;
+    }
+
+    final email = _activeUserEmail;
+    final wasFollowing = _isFollowing;
 
     setState(() => _isFollowLoading = true);
 
     try {
-      if (_isFollowing) {
+      if (wasFollowing) {
         await _supabaseService.unfollowDepartment(
-          widget.account.id,
+          normalizedDeptId,
           email,
           collegeId: widget.collegeId,
         );
-        setState(() {
-          _isFollowing = false;
-          _followerCount--;
-        });
       } else {
         await _supabaseService.followDepartment(
-          widget.account.id,
+          normalizedDeptId,
           widget.collegeId,
           email,
         );
-        setState(() {
-          _isFollowing = true;
-          _followerCount++;
-        });
       }
 
-      // Verify and sync the actual count from the server after either action.
+      var resolvedFollowState = !wasFollowing;
+      try {
+        resolvedFollowState = await _supabaseService.isFollowingDepartment(
+          normalizedDeptId,
+          email,
+          collegeId: widget.collegeId,
+        );
+      } catch (followStateError) {
+        debugPrint('Error syncing follow state: $followStateError');
+      }
+
+      var resolvedCount = _followerCount;
+      try {
+        resolvedCount = await _supabaseService.getDepartmentFollowerCount(
+          normalizedDeptId,
+          widget.collegeId,
+        );
+      } catch (countError) {
+        debugPrint('Error syncing follower count: $countError');
+      }
+
       if (mounted) {
-        try {
-          final actualCount = await _supabaseService.getDepartmentFollowerCount(
-            widget.account.id,
-            widget.collegeId,
-          );
-          if (mounted) {
-            setState(() {
-              _followerCount = actualCount;
-            });
-          }
-        } catch (countError) {
-          debugPrint('Error syncing follower count: $countError');
-        }
+        setState(() {
+          _isFollowing = resolvedFollowState;
+          _followerCount = resolvedCount;
+        });
       }
     } catch (e) {
       debugPrint('Department follow update failed: $e');
