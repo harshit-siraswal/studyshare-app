@@ -249,27 +249,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
   }
 
   Future<void> _handleSubmit() async {
-    Map<String, dynamic>? fetchedProfile;
-    try {
-      fetchedProfile = await SupabaseService().getCurrentUserProfile(
-        maxAttempts: 1,
-        forceRefresh: true,
-      );
-      if (fetchedProfile.isNotEmpty &&
-          resolveEffectiveProfileRole(fetchedProfile) == appRoleReadOnly &&
-          !canManageAdminResourcesProfile(fetchedProfile)) {
-        debugPrint(
-          'Upload pre-check resolved as read-only; deferring final authorization to backend.',
-        );
-      }
-    } catch (e) {
-      debugPrint('Failed to resolve upload permissions: $e');
-    }
-
-    final shouldUseAdminResourceUpload =
-        fetchedProfile != null &&
-        fetchedProfile.isNotEmpty &&
-        hasAdminCapability(fetchedProfile, 'upload_resource');
+    if (_isUploading) return;
 
     if (_title.trim().isEmpty) return _showError('Enter a title');
     if (_semester.isEmpty) return _showError('Select semester');
@@ -293,10 +273,33 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
       resolvedVideoUrl = (youtube?.watchUri ?? uri).toString();
     }
 
+    // Mark upload active before network pre-checks so one tap always starts the flow.
     setState(() {
       _isUploading = true;
-      _uploadProgress = 0.1;
+      _uploadProgress = 0.05;
     });
+
+    Map<String, dynamic>? fetchedProfile;
+    try {
+      fetchedProfile = await SupabaseService().getCurrentUserProfile(
+        maxAttempts: 1,
+        forceRefresh: true,
+      );
+      if (fetchedProfile.isNotEmpty &&
+          resolveEffectiveProfileRole(fetchedProfile) == appRoleReadOnly &&
+          !canManageAdminResourcesProfile(fetchedProfile)) {
+        debugPrint(
+          'Upload pre-check resolved as read-only; deferring final authorization to backend.',
+        );
+      }
+    } catch (e) {
+      debugPrint('Failed to resolve upload permissions: $e');
+    }
+
+    final shouldUseAdminResourceUpload =
+        fetchedProfile != null &&
+        fetchedProfile.isNotEmpty &&
+        hasAdminCapability(fetchedProfile, 'upload_resource');
 
     try {
       final supabaseService = SupabaseService();
@@ -414,7 +417,9 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
       var uploadStatus = Resource.pendingStatus;
       try {
         final profile = fetchedProfile;
-        if (profile != null && profile.isNotEmpty && isTeacherOrAdminProfile(profile)) {
+        if (profile != null &&
+            profile.isNotEmpty &&
+            isTeacherOrAdminProfile(profile)) {
           uploaderSource = 'teacher';
         }
       } catch (e) {
