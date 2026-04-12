@@ -107,6 +107,39 @@ class SupabaseService {
     return firebaseEmail;
   }
 
+  Future<String> _resolveDepartmentFollowEmail({String? claimedEmail}) async {
+    final sessionEmail = _currentSessionEmail();
+    final normalizedClaimed = _normalizeEmail(claimedEmail);
+
+    if (sessionEmail.isNotEmpty) {
+      if (normalizedClaimed.isNotEmpty && normalizedClaimed != sessionEmail) {
+        throw Exception('Authenticated user mismatch. Please sign in again.');
+      }
+      return sessionEmail;
+    }
+
+    if (_cachedCurrentUserIdentityEmail != null &&
+        _cachedCurrentUserIdentityEmail!.isNotEmpty) {
+      return _normalizeEmail(_cachedCurrentUserIdentityEmail);
+    }
+
+    if (normalizedClaimed.isNotEmpty) {
+      return normalizedClaimed;
+    }
+
+    try {
+      final identity = await getCurrentUserIdentity();
+      final resolvedEmail = _normalizeEmail(identity['email']?.toString());
+      if (resolvedEmail.isNotEmpty) {
+        return resolvedEmail;
+      }
+    } catch (e) {
+      debugPrint('Error resolving department follow email: $e');
+    }
+
+    return '';
+  }
+
   String _normalizeEmail(String? email) => email?.trim().toLowerCase() ?? '';
 
   String _requireCurrentSessionEmail({
@@ -1279,6 +1312,7 @@ class SupabaseService {
         subject: subject,
         type: type,
         search: searchQuery,
+        sortBy: sortBy,
         page: page,
         limit: limit,
       );
@@ -1416,6 +1450,31 @@ class SupabaseService {
     }
 
     final fetchFuture = () async {
+      if ((sortBy?.trim().toLowerCase() ?? '') == 'teacher') {
+        final backendTeacherRows = await _fetchResourcesViaBackend(
+          collegeId: collegeId,
+          semester: normalizedSemester,
+          branch: normalizedBranch,
+          subject: normalizedSubject,
+          type: normalizedType,
+          searchQuery: normalizedSearch,
+          sortBy: sortBy,
+          limit: limit,
+          offset: offset,
+        );
+
+        if (backendTeacherRows.isNotEmpty) {
+          if (shouldUseCache) {
+            _resourceListCache[cacheKey] = (
+              cachedAt: DateTime.now(),
+              data: List<Resource>.unmodifiable(backendTeacherRows),
+            );
+            _pruneResourceListCacheIfNeeded();
+          }
+          return backendTeacherRows;
+        }
+      }
+
       if (!_hasConfiguredSupabaseAnonKey) {
         debugPrint(
           'Supabase anon key missing; using backend resources fallback directly.',
@@ -5479,12 +5538,16 @@ class SupabaseService {
     String userEmail,
   ) async {
     final normalizedDepartmentId = normalizeDepartmentCode(departmentId);
+    final normalizedCollegeId = _normalizeCollegeScopeValue(collegeId);
     if (normalizedDepartmentId.isEmpty) {
       throw Exception('Department ID is required');
     }
 
     try {
-      await _api.followDepartment(normalizedDepartmentId, collegeId: collegeId);
+      await _api.followDepartment(
+        normalizedDepartmentId,
+        collegeId: normalizedCollegeId.isNotEmpty ? normalizedCollegeId : null,
+      );
     } catch (e) {
       debugPrint('Error following department via API: $e');
       rethrow;
@@ -5498,6 +5561,7 @@ class SupabaseService {
     String? collegeId,
   }) async {
     final normalizedDepartmentId = normalizeDepartmentCode(departmentId);
+    final normalizedCollegeId = _normalizeCollegeScopeValue(collegeId);
     if (normalizedDepartmentId.isEmpty) {
       throw Exception('Department ID is required');
     }
@@ -5505,7 +5569,7 @@ class SupabaseService {
     try {
       await _api.unfollowDepartment(
         normalizedDepartmentId,
-        collegeId: collegeId,
+        collegeId: normalizedCollegeId.isNotEmpty ? normalizedCollegeId : null,
       );
     } catch (e) {
       debugPrint('Error unfollowing department via API: $e');
@@ -5581,11 +5645,11 @@ class SupabaseService {
     String? collegeId,
   }) async {
     final normalizedDepartmentId = normalizeDepartmentCode(departmentId);
+    final normalizedCollegeId = _normalizeCollegeScopeValue(collegeId);
     if (normalizedDepartmentId.isEmpty) return false;
 
-    final normalizedEmail = _requireCurrentSessionEmail(
+    final normalizedEmail = await _resolveDepartmentFollowEmail(
       claimedEmail: userEmail,
-      action: 'is_following_department',
     );
     final userId = currentUserId;
     final filters = <Map<String, String>>[
@@ -5623,12 +5687,12 @@ class SupabaseService {
         var query = _client
             .from('department_followers')
             .select('id')
-          .eq('department_id', normalizedDepartmentId)
-            .eq(column, value);
-        if (useCollegeFilter &&
-            collegeId != null &&
-            collegeId.trim().isNotEmpty) {
-          query = query.eq('college_id', collegeId);
+            .ilike('department_id', normalizedDepartmentId);
+        query = column.contains('email')
+            ? query.ilike(column, value)
+            : query.eq(column, value);
+        if (useCollegeFilter && normalizedCollegeId.isNotEmpty) {
+          query = query.ilike('college_id', normalizedCollegeId);
         }
         final response = await query.limit(1).maybeSingle();
         if (response != null) {
@@ -5654,15 +5718,16 @@ class SupabaseService {
     String collegeId,
   ) async {
     final normalizedDepartmentId = normalizeDepartmentCode(departmentId);
+    final normalizedCollegeId = _normalizeCollegeScopeValue(collegeId);
     if (normalizedDepartmentId.isEmpty) return 0;
 
     try {
       var uniqueQuery = _client
           .from('department_followers')
           .select('user_id, follower_id, user_email, follower_email')
-          .eq('department_id', normalizedDepartmentId);
-      if (collegeId.trim().isNotEmpty) {
-        uniqueQuery = uniqueQuery.eq('college_id', collegeId);
+          .ilike('department_id', normalizedDepartmentId);
+      if (normalizedCollegeId.isNotEmpty) {
+        uniqueQuery = uniqueQuery.ilike('college_id', normalizedCollegeId);
       }
       final uniqueResponse = await uniqueQuery;
       final uniqueFollowerKeys = <String>{};
@@ -5689,9 +5754,9 @@ class SupabaseService {
       var query = _client
           .from('department_followers')
           .count(CountOption.exact)
-          .eq('department_id', normalizedDepartmentId);
-      if (collegeId.trim().isNotEmpty) {
-        query = query.eq('college_id', collegeId);
+          .ilike('department_id', normalizedDepartmentId);
+      if (normalizedCollegeId.isNotEmpty) {
+        query = query.ilike('college_id', normalizedCollegeId);
       }
       final response = await query;
       return response;
@@ -5720,7 +5785,10 @@ class SupabaseService {
     String collegeId,
     String userEmail,
   ) async {
-    final normalizedEmail = _normalizeEmail(userEmail);
+    final normalizedEmail = await _resolveDepartmentFollowEmail(
+      claimedEmail: userEmail,
+    );
+    final normalizedCollegeId = _normalizeCollegeScopeValue(collegeId);
     final userId = currentUserId;
     final filters = <Map<String, String>>[
       if (userId != null && userId.isNotEmpty)
@@ -5756,12 +5824,12 @@ class SupabaseService {
       final value = attempt['value'] as String;
       final useCollegeFilter = attempt['useCollegeFilter'] == true;
       try {
-        var query = _client
-            .from('department_followers')
-            .select('department_id')
-            .eq(column, value);
-        if (useCollegeFilter && collegeId.trim().isNotEmpty) {
-          query = query.eq('college_id', collegeId);
+        var query = _client.from('department_followers').select('department_id');
+        query = column.contains('email')
+            ? query.ilike(column, value)
+            : query.eq(column, value);
+        if (useCollegeFilter && normalizedCollegeId.isNotEmpty) {
+          query = query.ilike('college_id', normalizedCollegeId);
         }
         final response = await query;
         final fetchedIds = (response as List)
@@ -5785,10 +5853,13 @@ class SupabaseService {
 
     // Merge with user profile followed_departments
     try {
+      if (normalizedEmail.isEmpty) {
+        return finalSet.toList();
+      }
       final userRes = await _client
           .from('users_safe')
           .select('followed_departments')
-          .eq('email', normalizedEmail)
+          .ilike('email', normalizedEmail)
           .maybeSingle();
       if (userRes != null) {
         final profileFollows =

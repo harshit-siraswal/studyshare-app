@@ -350,8 +350,12 @@ class _StudyScreenState extends State<StudyScreen>
       filtered.sort((a, b) => b.upvotes.compareTo(a.upvotes));
     } else if (sortBy == 'teacher') {
       filtered.sort((a, b) {
-        if (a.isTeacherUpload == b.isTeacherUpload) return 0;
-        return a.isTeacherUpload ? -1 : 1;
+        if (a.isTeacherUpload != b.isTeacherUpload) {
+          return a.isTeacherUpload ? -1 : 1;
+        }
+        final createdAtComparison = b.createdAt.compareTo(a.createdAt);
+        if (createdAtComparison != 0) return createdAtComparison;
+        return a.title.toLowerCase().compareTo(b.title.toLowerCase());
       });
     } else {
       filtered.sort((a, b) => b.createdAt.compareTo(a.createdAt));

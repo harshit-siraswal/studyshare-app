@@ -16,7 +16,6 @@ import '../../widgets/user_badge.dart';
 import 'edit_profile_screen.dart';
 import '../../utils/admin_access.dart';
 import '../../utils/profile_photo_utils.dart';
-import '../../widgets/collapsible_profile_header.dart';
 
 class UserProfileScreen extends StatefulWidget {
   final String userEmail;
@@ -538,259 +537,231 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                     parent: AlwaysScrollableScrollPhysics(),
                   ),
                   slivers: [
-                    SliverPersistentHeader(
-                      pinned: true,
-                      delegate: CollapsibleProfileHeaderDelegate(
-                        expandedHeight: 392,
-                        collapsedHeight: 122,
-                        backgroundColor: bgColor,
-                        builder: (context, collapseProgress) {
-                          final scale = 1.0 - (collapseProgress * 0.16);
-                          final opacity = (1.0 - collapseProgress * 0.88)
-                              .clamp(0.0, 1.0);
-
-                          return Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
-                            child: Align(
-                              alignment: Alignment.topCenter,
-                              child: Transform.scale(
-                                alignment: Alignment.topCenter,
-                                scale: scale,
-                                child: Opacity(
-                                  opacity: opacity,
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          InkWell(
-                                            borderRadius: BorderRadius.circular(40),
-                                            onTap: () {
-                                              if (_photoUrl != null &&
-                                                  _photoUrl!.isNotEmpty) {
-                                                Navigator.push(
-                                                  context,
-                                                  MaterialPageRoute(
-                                                    builder: (context) =>
-                                                        FullScreenImageViewer(
-                                                          imageUrl: _photoUrl!,
-                                                          heroTag:
-                                                              'avatar-${widget.userEmail}',
-                                                        ),
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                InkWell(
+                                  borderRadius: BorderRadius.circular(40),
+                                  onTap: () {
+                                    if (_photoUrl != null &&
+                                        _photoUrl!.isNotEmpty) {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              FullScreenImageViewer(
+                                                imageUrl: _photoUrl!,
+                                                heroTag:
+                                                    'avatar-${widget.userEmail}',
+                                              ),
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  child: Hero(
+                                    tag: 'avatar-${widget.userEmail}',
+                                    child: Container(
+                                      width: 80,
+                                      height: 80,
+                                      decoration: BoxDecoration(
+                                        color: AppTheme.primary,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      clipBehavior: Clip.antiAlias,
+                                      child: _photoUrl != null &&
+                                              _photoUrl!.isNotEmpty
+                                          ? Image.network(
+                                              _photoUrl!,
+                                              fit: BoxFit.cover,
+                                              loadingBuilder: (
+                                                context,
+                                                child,
+                                                loadingProgress,
+                                              ) {
+                                                if (loadingProgress == null) {
+                                                  return child;
+                                                }
+                                                return Center(
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                    value:
+                                                        loadingProgress
+                                                                    .expectedTotalBytes !=
+                                                                null
+                                                            ? loadingProgress
+                                                                      .cumulativeBytesLoaded /
+                                                                  loadingProgress
+                                                                      .expectedTotalBytes!
+                                                            : null,
                                                   ),
                                                 );
-                                              }
-                                            },
-                                            child: Hero(
-                                              tag: 'avatar-${widget.userEmail}',
-                                              child: Container(
-                                                width: 80,
-                                                height: 80,
-                                                decoration: BoxDecoration(
-                                                  color: AppTheme.primary,
-                                                  shape: BoxShape.circle,
+                                              },
+                                              errorBuilder: (
+                                                context,
+                                                error,
+                                                stackTrace,
+                                              ) {
+                                                return Center(
+                                                  child: Text(
+                                                    _avatarLetter,
+                                                    style: GoogleFonts.inter(
+                                                      fontSize: 32,
+                                                      fontWeight:
+                                                          FontWeight.bold,
+                                                      color: Colors.white,
+                                                    ),
+                                                  ),
+                                                );
+                                              },
+                                            )
+                                          : Center(
+                                              child: Text(
+                                                _avatarLetter,
+                                                style: GoogleFonts.inter(
+                                                  fontSize: 32,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: Colors.white,
                                                 ),
-                                                clipBehavior: Clip.antiAlias,
-                                                child: _photoUrl != null &&
-                                                        _photoUrl!.isNotEmpty
-                                                    ? Image.network(
-                                                        _photoUrl!,
-                                                        fit: BoxFit.cover,
-                                                        loadingBuilder: (
-                                                          context,
-                                                          child,
-                                                          loadingProgress,
-                                                        ) {
-                                                          if (loadingProgress ==
-                                                              null) {
-                                                            return child;
-                                                          }
-                                                          return Center(
-                                                            child:
-                                                                CircularProgressIndicator(
-                                                              value:
-                                                                  loadingProgress
-                                                                              .expectedTotalBytes !=
-                                                                          null
-                                                                      ? loadingProgress
-                                                                                .cumulativeBytesLoaded /
-                                                                            loadingProgress
-                                                                                .expectedTotalBytes!
-                                                                      : null,
-                                                            ),
-                                                          );
-                                                        },
-                                                        errorBuilder: (
-                                                          context,
-                                                          error,
-                                                          stackTrace,
-                                                        ) {
-                                                          return Center(
-                                                            child: Text(
-                                                              _avatarLetter,
-                                                              style:
-                                                                  GoogleFonts.inter(
-                                                                fontSize: 32,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .bold,
-                                                                color: Colors.white,
-                                                              ),
-                                                            ),
-                                                          );
-                                                        },
-                                                      )
-                                                    : Center(
-                                                        child: Text(
-                                                          _avatarLetter,
-                                                          style:
-                                                              GoogleFonts.inter(
-                                                            fontSize: 32,
-                                                            fontWeight:
-                                                                FontWeight.bold,
-                                                            color: Colors.white,
-                                                          ),
-                                                        ),
-                                                      ),
                                               ),
                                             ),
-                                          ),
-                                          const Spacer(),
-                                          Padding(
-                                            padding: const EdgeInsets.only(top: 12),
-                                            child: _buildProfileActions(isDark),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 16),
-                                      Row(
-                                        children: [
-                                          Text(
-                                            _displayName,
-                                            style: GoogleFonts.inter(
-                                              fontSize: 22,
-                                              fontWeight: FontWeight.w800,
-                                              color: textColor,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 6),
-                                          UserBadge(
-                                            email: widget.userEmail,
-                                            size: 18,
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        _bio,
-                                        style: GoogleFonts.inter(
-                                          fontSize: 15,
-                                          color: isDark
-                                              ? AppTheme.darkTextSecondary
-                                              : AppTheme.lightTextSecondary,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 16),
-                                      Row(
-                                        children: [
-                                          _buildXStat(
-                                            _followersCount.toString(),
-                                            'Followers',
-                                            textColor,
-                                            isDark,
-                                            () {
-                                              Navigator.push(
-                                                context,
-                                                MaterialPageRoute(
-                                                  builder: (_) => FollowingScreen(
-                                                    userEmail: widget.userEmail,
-                                                    initialTab: 0,
-                                                  ),
-                                                ),
-                                              );
-                                            },
-                                          ),
-                                          const SizedBox(width: 16),
-                                          _buildXStat(
-                                            _followingCount.toString(),
-                                            'Following',
-                                            textColor,
-                                            isDark,
-                                            () {
-                                              Navigator.push(
-                                                context,
-                                                MaterialPageRoute(
-                                                  builder: (_) => FollowingScreen(
-                                                    userEmail: widget.userEmail,
-                                                    initialTab: 1,
-                                                  ),
-                                                ),
-                                              );
-                                            },
-                                          ),
-                                          const SizedBox(width: 16),
-                                          _buildXStat(
-                                            _uploadCount.toString(),
-                                            'Contributions',
-                                            textColor,
-                                            isDark,
-                                            null,
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 16),
-                                      const Divider(height: 1),
-                                      const SizedBox(height: 16),
-                                      Row(
-                                        children: [
-                                          Text(
-                                            'Contributions',
-                                            style: GoogleFonts.inter(
-                                              fontSize: 18,
-                                              fontWeight: FontWeight.bold,
-                                              color: textColor,
-                                            ),
-                                          ),
-                                          const Spacer(),
-                                          IconButton(
-                                            tooltip: _showContributionSearch
-                                                ? 'Hide contribution search'
-                                                : 'Search contributions',
-                                            onPressed: () {
-                                              setState(() {
-                                                _showContributionSearch =
-                                                    !_showContributionSearch;
-                                                if (!_showContributionSearch) {
-                                                  _contributionSearchController.clear();
-                                                  _contributionSearchQuery = '';
-                                                }
-                                              });
-                                            },
-                                            icon: Icon(
-                                              _showContributionSearch
-                                                  ? Icons.close_rounded
-                                                  : Icons.search_rounded,
-                                              color: textColor,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 12),
-                                      AnimatedSwitcher(
-                                        duration:
-                                            const Duration(milliseconds: 180),
-                                        child: _showContributionSearch
-                                            ? _buildContributionSearchBar(isDark)
-                                            : const SizedBox.shrink(),
-                                      ),
-                                    ],
+                                    ),
                                   ),
                                 ),
+                                const Spacer(),
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 12),
+                                  child: _buildProfileActions(isDark),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                            Row(
+                              children: [
+                                Text(
+                                  _displayName,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w800,
+                                    color: textColor,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                UserBadge(
+                                  email: widget.userEmail,
+                                  size: 18,
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _bio,
+                              style: GoogleFonts.inter(
+                                fontSize: 15,
+                                color: isDark
+                                    ? AppTheme.darkTextSecondary
+                                    : AppTheme.lightTextSecondary,
                               ),
                             ),
-                          );
-                        },
+                            const SizedBox(height: 16),
+                            Row(
+                              children: [
+                                _buildXStat(
+                                  _followersCount.toString(),
+                                  'Followers',
+                                  textColor,
+                                  isDark,
+                                  () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => FollowingScreen(
+                                          userEmail: widget.userEmail,
+                                          initialTab: 0,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                                const SizedBox(width: 16),
+                                _buildXStat(
+                                  _followingCount.toString(),
+                                  'Following',
+                                  textColor,
+                                  isDark,
+                                  () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => FollowingScreen(
+                                          userEmail: widget.userEmail,
+                                          initialTab: 1,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                                const SizedBox(width: 16),
+                                _buildXStat(
+                                  _uploadCount.toString(),
+                                  'Contributions',
+                                  textColor,
+                                  isDark,
+                                  null,
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                            const Divider(height: 1),
+                            const SizedBox(height: 16),
+                            Row(
+                              children: [
+                                Text(
+                                  'Contributions',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: textColor,
+                                  ),
+                                ),
+                                const Spacer(),
+                                IconButton(
+                                  tooltip: _showContributionSearch
+                                      ? 'Hide contribution search'
+                                      : 'Search contributions',
+                                  onPressed: () {
+                                    setState(() {
+                                      _showContributionSearch =
+                                          !_showContributionSearch;
+                                      if (!_showContributionSearch) {
+                                        _contributionSearchController.clear();
+                                        _contributionSearchQuery = '';
+                                      }
+                                    });
+                                  },
+                                  icon: Icon(
+                                    _showContributionSearch
+                                        ? Icons.close_rounded
+                                        : Icons.search_rounded,
+                                    color: textColor,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 180),
+                              child: _showContributionSearch
+                                  ? _buildContributionSearchBar(isDark)
+                                  : const SizedBox.shrink(),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
 

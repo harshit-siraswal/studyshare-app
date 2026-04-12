@@ -1278,6 +1278,7 @@ class BackendApiService {
     String? subject,
     String? type,
     String? search,
+    String? sortBy,
     int? page,
     int? limit,
   }) async {
@@ -1301,6 +1302,9 @@ class BackendApiService {
     }
     if (search != null && search.trim().isNotEmpty) {
       query['search'] = search.trim();
+    }
+    if (sortBy != null && sortBy.trim().isNotEmpty) {
+      query['sortBy'] = sortBy.trim();
     }
     if (page != null && page > 0) {
       query['page'] = page.toString();
@@ -3216,7 +3220,7 @@ class BackendApiService {
   }
 
   Future<void> followDepartment(String departmentId, {String? collegeId}) async {
-    final normalizedCollegeId = collegeId?.trim();
+    final normalizedCollegeId = collegeId?.trim().toLowerCase();
     await _requestJson(
       '/api/departments/follow',
       method: 'POST',
@@ -3230,7 +3234,7 @@ class BackendApiService {
   }
 
   Future<void> unfollowDepartment(String departmentId, {String? collegeId}) async {
-    final normalizedCollegeId = collegeId?.trim();
+    final normalizedCollegeId = collegeId?.trim().toLowerCase();
     final path = normalizedCollegeId != null && normalizedCollegeId.isNotEmpty
         ? Uri(
             path:

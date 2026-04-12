@@ -27,7 +27,6 @@ import '../../widgets/animated_counter.dart';
 import '../../data/academic_subjects_data.dart';
 import '../../utils/ai_token_budget_utils.dart';
 import '../../utils/admin_access.dart';
-import '../../widgets/collapsible_profile_header.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String? collegeId;
@@ -460,71 +459,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   parent: BouncingScrollPhysics(),
                 ),
                 slivers: [
-                  SliverPersistentHeader(
-                    pinned: true,
-                    delegate: CollapsibleProfileHeaderDelegate(
-                      expandedHeight: 470,
-                      collapsedHeight: 118,
-                      backgroundColor: isDark
-                          ? Colors.black
-                          : AppTheme.lightBackground,
-                      builder: (context, collapseProgress) {
-                        final expandedScale = 1.0 - (collapseProgress * 0.12);
-                        final expandedOpacity =
-                            (1.0 - (collapseProgress * 1.2)).clamp(0.0, 1.0);
-                        final compactOpacity = collapseProgress.clamp(0.0, 1.0);
-
-                        return Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(
-                                20,
-                                18,
-                                20,
-                                16,
-                              ),
-                              child: Transform.scale(
-                                alignment: Alignment.topCenter,
-                                scale: expandedScale,
-                                child: Opacity(
-                                  opacity: expandedOpacity,
-                                  child: Column(
-                                    children: [
-                                      _buildCollapsibleProfileHero(
-                                        textColor,
-                                        subTextColor,
-                                        isDark,
-                                      ),
-                                      const SizedBox(height: 20),
-                                      _buildStatsRow(textColor, subTextColor),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                            Align(
-                              alignment: Alignment.bottomCenter,
-                              child: Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  16,
-                                  0,
-                                  16,
-                                  14,
-                                ),
-                                child: Opacity(
-                                  opacity: compactOpacity,
-                                  child: _buildCompactProfileStrip(
-                                    textColor,
-                                    subTextColor,
-                                    isDark,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        );
-                      },
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 18, 20, 16),
+                      child: Column(
+                        children: [
+                          _buildCollapsibleProfileHero(
+                            textColor,
+                            subTextColor,
+                            isDark,
+                          ),
+                          const SizedBox(height: 20),
+                          _buildStatsRow(textColor, subTextColor),
+                        ],
+                      ),
                     ),
                   ),
                   SliverToBoxAdapter(

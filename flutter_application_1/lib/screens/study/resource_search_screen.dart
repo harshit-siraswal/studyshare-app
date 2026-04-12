@@ -179,8 +179,12 @@ class _ResourceSearchScreenState extends State<ResourceSearchScreen> {
           localResults.sort((a, b) => b.upvotes.compareTo(a.upvotes));
         } else if (localSort == 'teacher') {
           localResults.sort((a, b) {
-            if (a.isTeacherUpload == b.isTeacherUpload) return 0;
-            return a.isTeacherUpload ? -1 : 1;
+            if (a.isTeacherUpload != b.isTeacherUpload) {
+              return a.isTeacherUpload ? -1 : 1;
+            }
+            final createdAtComparison = b.createdAt.compareTo(a.createdAt);
+            if (createdAtComparison != 0) return createdAtComparison;
+            return a.title.toLowerCase().compareTo(b.title.toLowerCase());
           });
         } else {
           localResults.sort((a, b) => b.createdAt.compareTo(a.createdAt));
