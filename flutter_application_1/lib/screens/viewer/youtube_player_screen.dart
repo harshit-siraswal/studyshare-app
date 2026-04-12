@@ -121,16 +121,7 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
     );
   }
 
-  Future<void> _openInYoutubeApp() async {
-    final opened = await openYoutubeInAppOnly(_activeLink);
-    if (opened || !mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Could not open the YouTube app right now.'),
-      ),
-    );
-  }
 
   void _openAiStudioSheet({int initialTabIndex = 0, String? autoGenerateType}) {
     final resourceId = widget.resourceId?.trim() ?? '';
@@ -286,11 +277,6 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
               onPressed: _openAiStudioSheet,
               icon: const Icon(Icons.auto_awesome_rounded),
             ),
-          IconButton(
-            tooltip: 'Open in YouTube app',
-            onPressed: _openInYoutubeApp,
-            icon: const Icon(Icons.ondemand_video_rounded),
-          ),
         ],
       ),
       body: SafeArea(
@@ -298,7 +284,12 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
           children: [
             Padding(
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
-              child: _buildPlayerSurface(),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 800, maxHeight: 400),
+                  child: _buildPlayerSurface(),
+                ),
+              ),
             ),
             const SizedBox(height: 8),
             Expanded(
