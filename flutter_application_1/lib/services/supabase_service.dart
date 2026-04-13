@@ -5531,6 +5531,34 @@ class SupabaseService {
 
   // ============ DEPARTMENT FOLLOWERS ============
 
+  Future<String> _resolveDepartmentCollegeScope(String? collegeId) async {
+    final normalizedInput = _normalizeCollegeScopeValue(collegeId);
+    if (normalizedInput.isNotEmpty) {
+      return normalizedInput;
+    }
+
+    try {
+      final profile = await getCurrentUserProfile(maxAttempts: 1);
+      final profileCollegeId = _normalizeCollegeScopeValue(
+        profile['college_id']?.toString(),
+      );
+      if (profileCollegeId.isNotEmpty) {
+        return profileCollegeId;
+      }
+
+      final profileCollege = _normalizeCollegeScopeValue(
+        profile['college']?.toString(),
+      );
+      if (profileCollege.isNotEmpty) {
+        return profileCollege;
+      }
+    } catch (e) {
+      debugPrint('Error resolving department college scope: $e');
+    }
+
+    return '';
+  }
+
   /// Follow a department
   Future<void> followDepartment(
     String departmentId,
@@ -5538,7 +5566,7 @@ class SupabaseService {
     String userEmail,
   ) async {
     final normalizedDepartmentId = normalizeDepartmentCode(departmentId);
-    final normalizedCollegeId = _normalizeCollegeScopeValue(collegeId);
+    final normalizedCollegeId = await _resolveDepartmentCollegeScope(collegeId);
     if (normalizedDepartmentId.isEmpty) {
       throw Exception('Department ID is required');
     }
@@ -5561,7 +5589,7 @@ class SupabaseService {
     String? collegeId,
   }) async {
     final normalizedDepartmentId = normalizeDepartmentCode(departmentId);
-    final normalizedCollegeId = _normalizeCollegeScopeValue(collegeId);
+    final normalizedCollegeId = await _resolveDepartmentCollegeScope(collegeId);
     if (normalizedDepartmentId.isEmpty) {
       throw Exception('Department ID is required');
     }
@@ -5645,71 +5673,9 @@ class SupabaseService {
     String? collegeId,
   }) async {
     final normalizedDepartmentId = normalizeDepartmentCode(departmentId);
-    final normalizedCollegeId = _normalizeCollegeScopeValue(collegeId);
     if (normalizedDepartmentId.isEmpty) return false;
-
-    final normalizedEmail = await _resolveDepartmentFollowEmail(
-      claimedEmail: userEmail,
-    );
-    final userId = currentUserId;
-    final filters = <Map<String, String>>[
-      if (userId != null && userId.isNotEmpty)
-        {'column': 'user_id', 'value': userId},
-      if (userId != null && userId.isNotEmpty)
-        {'column': 'follower_id', 'value': userId},
-      if (normalizedEmail.isNotEmpty)
-        {'column': 'follower_email', 'value': normalizedEmail},
-      if (normalizedEmail.isNotEmpty)
-        {'column': 'user_email', 'value': normalizedEmail},
-    ];
-    final attempts = <Map<String, dynamic>>[
-      for (final filter in filters)
-        {
-          'column': filter['column']!,
-          'value': filter['value']!,
-          'useCollegeFilter': true,
-        },
-      for (final filter in filters)
-        {
-          'column': filter['column']!,
-          'value': filter['value']!,
-          'useCollegeFilter': false,
-        },
-    ];
-
-    if (attempts.isEmpty) return false;
-
-    for (final attempt in attempts) {
-      final column = attempt['column'] as String;
-      final value = attempt['value'] as String;
-      final useCollegeFilter = attempt['useCollegeFilter'] == true;
-      try {
-        var query = _client
-            .from('department_followers')
-            .select('id')
-            .ilike('department_id', normalizedDepartmentId);
-        query = column.contains('email')
-            ? query.ilike(column, value)
-            : query.eq(column, value);
-        if (useCollegeFilter && normalizedCollegeId.isNotEmpty) {
-          query = query.ilike('college_id', normalizedCollegeId);
-        }
-        final response = await query.limit(1).maybeSingle();
-        if (response != null) {
-          return true;
-        }
-      } catch (e) {
-        final schemaMismatch =
-            _isMissingColumnError(e, column) ||
-            (useCollegeFilter && _isMissingColumnError(e, 'college_id'));
-        if (!schemaMismatch && !_isRowLevelSecurityError(e)) {
-          debugPrint('Error checking department follow: $e');
-          return false;
-        }
-      }
-    }
-
-    return false;
+    final followedIds = await getFollowedDepartmentIds(collegeId ?? '', userEmail);
+    return followedIds.contains(normalizedDepartmentId);
   }
 
   /// Get department follower count
@@ -5718,7 +5684,7 @@ class SupabaseService {
     String collegeId,
   ) async {
     final normalizedDepartmentId = normalizeDepartmentCode(departmentId);
-    final normalizedCollegeId = _normalizeCollegeScopeValue(collegeId);
+    final normalizedCollegeId = await _resolveDepartmentCollegeScope(collegeId);
     if (normalizedDepartmentId.isEmpty) return 0;
 
     try {
@@ -5785,10 +5751,27 @@ class SupabaseService {
     String collegeId,
     String userEmail,
   ) async {
+    final normalizedCollegeId = await _resolveDepartmentCollegeScope(collegeId);
+    try {
+      // Prefer the backend-owned route because writes already go through the
+      // backend, while direct client reads can be blocked by RLS or schema drift.
+      final backendIds = await _api.getFollowedDepartments(
+        collegeId: normalizedCollegeId.isNotEmpty ? normalizedCollegeId : null,
+      );
+      return backendIds
+          .map(normalizeDepartmentCode)
+          .where((id) => id.isNotEmpty)
+          .toSet()
+          .toList(growable: false);
+    } catch (e) {
+      debugPrint(
+        'Backend followed departments lookup failed, falling back to Supabase: $e',
+      );
+    }
+
     final normalizedEmail = await _resolveDepartmentFollowEmail(
       claimedEmail: userEmail,
     );
-    final normalizedCollegeId = _normalizeCollegeScopeValue(collegeId);
     final userId = currentUserId;
     final filters = <Map<String, String>>[
       if (userId != null && userId.isNotEmpty)

@@ -3219,6 +3219,26 @@ class BackendApiService {
     return List<Map<String, dynamic>>.from(data['departments'] ?? const []);
   }
 
+  Future<List<String>> getFollowedDepartments({String? collegeId}) async {
+    final normalizedCollegeId = collegeId?.trim().toLowerCase();
+    final uri = normalizedCollegeId != null && normalizedCollegeId.isNotEmpty
+        ? Uri(
+            path: '/api/departments/following',
+            queryParameters: <String, String>{'collegeId': normalizedCollegeId},
+          )
+        : Uri(path: '/api/departments/following');
+    final data = await _requestJson(
+      uri.toString(),
+      method: 'GET',
+      requireAuthToken: true,
+    );
+    final rows = (data['departments'] as List?) ?? const [];
+    return rows
+        .map((value) => value?.toString().trim() ?? '')
+        .where((value) => value.isNotEmpty)
+        .toList(growable: false);
+  }
+
   Future<void> followDepartment(String departmentId, {String? collegeId}) async {
     final normalizedCollegeId = collegeId?.trim().toLowerCase();
     await _requestJson(

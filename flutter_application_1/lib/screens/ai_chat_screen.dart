@@ -3954,7 +3954,7 @@ class _AIChatScreenState extends State<AIChatScreen>
           fileId: searchAllForPrompt ? null : widget.resourceContext?.fileId,
           videoUrl: widget.resourceContext?.videoUrl,
           allowWeb: allowWeb,
-          useOcr: hasImageAttachments || forceOcr,
+          useOcr: hasImageAttachments || hasPdfAttachments || forceOcr,
           forceOcr: forceOcr,
           attachments: mergedAttachments,
           history: history,
@@ -4559,7 +4559,28 @@ class _AIChatScreenState extends State<AIChatScreen>
         );
         final hasOcrEligibleAttachments =
             hasImageAttachments || hasPdfAttachments;
-        final effectiveAllowWeb = _allowWebMode;
+        final isQuestionPaperRequest = _isQuestionPaperIntent(
+          prompt: userPrompt,
+          hasAttachments: hasAttachments,
+        );
+        final isQuestionPaperContinuation =
+          !isQuestionPaperRequest &&
+          _hasActiveQuestionPaperResponse() &&
+          _isQuestionPaperContinuationIntent(userPrompt);
+        final isQuestionPaperClarificationReply =
+          !isQuestionPaperRequest &&
+          !isQuestionPaperContinuation &&
+          _pendingQuestionPaperRequest != null &&
+          _looksLikeQuestionPaperClarificationReply(userPrompt);
+        final shouldGenerateQuestionPaper =
+          isQuestionPaperRequest ||
+          isQuestionPaperContinuation ||
+          isQuestionPaperClarificationReply;
+        final mustUseGroundedLocalContext =
+          localContextRequired ||
+          hasOcrEligibleAttachments ||
+          shouldGenerateQuestionPaper;
+        final effectiveAllowWeb = _allowWebMode && !mustUseGroundedLocalContext;
         final effectiveFileId = effectiveAllowWeb
             ? null
             : (searchAllForPrompt ? null : widget.resourceContext?.fileId);
@@ -4587,23 +4608,6 @@ class _AIChatScreenState extends State<AIChatScreen>
         final userVisible = turnAttachments.isEmpty
             ? userPrompt
             : '$userPrompt\n\n${turnAttachments.length} attachments added.';
-        final isQuestionPaperRequest = _isQuestionPaperIntent(
-          prompt: userPrompt,
-          hasAttachments: hasAttachments,
-        );
-        final isQuestionPaperContinuation =
-            !isQuestionPaperRequest &&
-            _hasActiveQuestionPaperResponse() &&
-            _isQuestionPaperContinuationIntent(userPrompt);
-        final isQuestionPaperClarificationReply =
-            !isQuestionPaperRequest &&
-            !isQuestionPaperContinuation &&
-            _pendingQuestionPaperRequest != null &&
-            _looksLikeQuestionPaperClarificationReply(userPrompt);
-        final shouldGenerateQuestionPaper =
-            isQuestionPaperRequest ||
-            isQuestionPaperContinuation ||
-            isQuestionPaperClarificationReply;
         final isSummaryExportRequest = _isSummaryExportIntent(
           prompt: userPrompt,
           hasAttachments: hasAttachments,
