@@ -1024,6 +1024,27 @@ class SupabaseService {
 
   Map<String, dynamic> _normalizeReadableUserRecord(Map<String, dynamic> raw) {
     final normalized = Map<String, dynamic>.from(raw);
+    final resolvedEmail = _firstNonEmptyValue(normalized, const ['email']);
+    if (resolvedEmail.isNotEmpty) {
+      normalized['email'] = resolvedEmail;
+    }
+
+    final existingUsername = _firstNonEmptyValue(normalized, const ['username']);
+    if (existingUsername.isNotEmpty) {
+      normalized['username'] = existingUsername;
+    } else if (resolvedEmail.contains('@')) {
+      final fallbackUsername = resolvedEmail
+          .split('@')
+          .first
+          .toLowerCase()
+          .replaceAll(RegExp(r'[^a-z0-9._-]'), '')
+          .replaceAll(RegExp(r'^[._-]+'), '')
+          .replaceAll(RegExp(r'[._-]+$'), '');
+      if (fallbackUsername.isNotEmpty) {
+        normalized['username'] = fallbackUsername;
+      }
+    }
+
     final resolvedPhoto = _firstNonEmptyValue(normalized, const [
       'photo_url',
       'profile_photo_url',
@@ -2180,6 +2201,7 @@ class SupabaseService {
 
   Future<Map<String, dynamic>> updateCurrentUserProfileDirect({
     String? displayName,
+    String? username,
     String? bio,
     String? profilePhotoUrl,
     String? semester,
@@ -2195,6 +2217,7 @@ class SupabaseService {
     final updates = <String, dynamic>{
       'updated_at': DateTime.now().toIso8601String(),
       if (displayName != null) 'display_name': displayName.trim(),
+      if (username != null) 'username': username.trim(),
       if (bio != null) 'bio': bio.trim(),
       if (profilePhotoUrl != null) 'profile_photo_url': profilePhotoUrl.trim(),
       if (semester != null) 'semester': semester.trim(),
@@ -2314,6 +2337,7 @@ class SupabaseService {
       } catch (e) {
         String? missingColumn;
         for (final candidate in const [
+          'username',
           'subject',
           'semester',
           'branch',

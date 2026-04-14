@@ -61,6 +61,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _statsLoading = true;
   String? _profilePhotoUrl;
   String? _profileDisplayName;
+  String? _profileUsername;
   String? _profileBio;
   String? _profileSemester;
   String? _profileBranch;
@@ -164,6 +165,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       if (!mounted) return;
       setState(() {
         _profileDisplayName = profile['display_name']?.toString();
+        _profileUsername = profile['username']?.toString();
         _profilePhotoUrl = resolveProfilePhotoUrl(profile);
         _profileBio = profile['bio']?.toString();
         _profileSemester = profile['semester']?.toString();
@@ -257,6 +259,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String get _displayName =>
       _profileDisplayName ?? _authService.displayName ?? 'User';
   String? get _photoUrl => _profilePhotoUrl ?? _authService.photoUrl;
+
+  String _usernameFromEmail(String? email) {
+    final normalized = (email ?? '').trim().toLowerCase();
+    if (!normalized.contains('@')) return '';
+    final local = normalized.split('@').first;
+    return local
+        .replaceAll(RegExp(r'[^a-z0-9._-]'), '')
+        .replaceAll(RegExp(r'^[._-]+'), '')
+        .replaceAll(RegExp(r'[._-]+$'), '');
+  }
+
+  String get _resolvedUsername {
+    final fromProfile = (_profileUsername ?? '').trim().toLowerCase();
+    if (fromProfile.isNotEmpty) return fromProfile;
+
+    final fromEmail = _usernameFromEmail(_userEmail);
+    if (fromEmail.isNotEmpty) return fromEmail;
+
+    return _displayName.replaceAll(' ', '').toLowerCase();
+  }
 
   int _toSafeInt(dynamic value) {
     if (value is int) return value;
@@ -634,6 +656,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         MaterialPageRoute(
                           builder: (_) => EditProfileScreen(
                             initialName: _displayName,
+                            initialUsername: _resolvedUsername,
+                            initialEmail: _userEmail,
                             initialPhotoUrl: _photoUrl,
                             initialBio: _profileBio,
                             initialSemester: _profileSemester,
@@ -728,7 +752,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              '@${_profileDisplayName?.replaceAll(" ", "").toLowerCase() ?? "user"}',
+              '@$_resolvedUsername',
               style: GoogleFonts.inter(fontSize: 14, color: subTextColor),
             ),
             const SizedBox(height: 2),
@@ -842,7 +866,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
                 Text(
-                  '@${_profileDisplayName?.replaceAll(" ", "").toLowerCase() ?? "user"}',
+                  '@$_resolvedUsername',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.inter(fontSize: 12, color: subTextColor),
@@ -1111,6 +1135,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         MaterialPageRoute(
                           builder: (_) => EditProfileScreen(
                             initialName: _displayName,
+                            initialUsername: _resolvedUsername,
+                            initialEmail: _userEmail,
                             initialPhotoUrl: _photoUrl,
                             initialBio: _profileBio,
                             initialSemester: _profileSemester,
@@ -1230,7 +1256,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 children: [
                   const SizedBox(height: 4),
                   Text(
-                    '@${_profileDisplayName?.replaceAll(" ", "").toLowerCase() ?? "user"}',
+                    '@$_resolvedUsername',
                     style: GoogleFonts.inter(fontSize: 14, color: subTextColor),
                   ),
                   const SizedBox(height: 4),

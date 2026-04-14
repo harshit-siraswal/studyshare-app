@@ -15,6 +15,8 @@ import '../../utils/admin_access.dart';
 
 class EditProfileScreen extends StatefulWidget {
   final String initialName;
+  final String? initialUsername;
+  final String? initialEmail;
   final String? initialPhotoUrl;
   final String? initialBio;
   final String? initialSemester;
@@ -25,6 +27,8 @@ class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({
     super.key,
     required this.initialName,
+    this.initialUsername,
+    this.initialEmail,
     required this.initialPhotoUrl,
     required this.initialBio,
     this.initialSemester,
@@ -43,6 +47,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   final _api = BackendApiService();
   final _supabaseService = SupabaseService();
   late final TextEditingController _nameController;
+  late final TextEditingController _usernameController;
   late final TextEditingController _bioController;
   late final TextEditingController _subjectController;
 
@@ -100,10 +105,44 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return knownBranch ? normalized : null;
   }
 
+  String _deriveUsernameFromEmail(String? email) {
+    final normalized = (email ?? '').trim().toLowerCase();
+    if (!normalized.contains('@')) return '';
+    return _sanitizeUsernameInput(normalized.split('@').first);
+  }
+
+  String _sanitizeUsernameInput(String value) {
+    final normalized = value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '');
+    final cleaned = normalized
+        .replaceAll(RegExp(r'[^a-z0-9._-]'), '')
+        .replaceAll(RegExp(r'^[._-]+'), '')
+        .replaceAll(RegExp(r'[._-]+$'), '');
+    if (cleaned.length <= 32) return cleaned;
+    return cleaned.substring(0, 32);
+  }
+
+  String? _validateUsernameInput(String value) {
+    if (value.isEmpty) return null;
+    if (value.length < 3) {
+      return 'Username must be at least 3 characters.';
+    }
+    if (!RegExp(r'^[a-z0-9][a-z0-9._-]{1,31}$').hasMatch(value)) {
+      return 'Use letters, numbers, dot, underscore, or hyphen.';
+    }
+    return null;
+  }
+
   @override
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.initialName);
+    final seededUsername = _sanitizeUsernameInput(
+      (widget.initialUsername ?? '').trim(),
+    );
+    final defaultUsername = _deriveUsernameFromEmail(widget.initialEmail);
+    _usernameController = TextEditingController(
+      text: seededUsername.isNotEmpty ? seededUsername : defaultUsername,
+    );
     _bioController = TextEditingController(text: widget.initialBio ?? '');
     _selectedSemester = _normalizedSemester(widget.initialSemester);
     _selectedBranch = _normalizedBranch(widget.initialBranch);
@@ -150,6 +189,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   @override
   void dispose() {
     _nameController.dispose();
+    _usernameController.dispose();
     _bioController.dispose();
     _subjectController.dispose();
     super.dispose();
@@ -221,6 +261,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       return;
     }
 
+    final sanitizedUsername = _sanitizeUsernameInput(_usernameController.text);
+    final usernameValidationError = _validateUsernameInput(sanitizedUsername);
+    if (usernameValidationError != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(usernameValidationError)));
+      return;
+    }
+
+    final effectiveUsername = sanitizedUsername.isNotEmpty
+        ? sanitizedUsername
+        : _deriveUsernameFromEmail(widget.initialEmail);
+
     setState(() => _saving = true);
     try {
       String? photoUrl = widget.initialPhotoUrl;
@@ -235,6 +288,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           : null;
       final submittedProfile = _submittedProfilePayload(
         name: name,
+        username: effectiveUsername,
         photoUrl: photoUrl,
         semester: normalizedSemester,
         branch: normalizedBranch,
@@ -246,6 +300,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         if (!mounted) return;
         final response = await _api.updateProfile(
           displayName: name,
+          username: effectiveUsername,
           bio: _bioController.text.trim(),
           profilePhotoUrl: photoUrl,
           semester: normalizedSemester,
@@ -267,6 +322,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         );
         updatedProfile = await _supabaseService.updateCurrentUserProfileDirect(
           displayName: name,
+          username: effectiveUsername,
           bio: _bioController.text.trim(),
           profilePhotoUrl: photoUrl,
           semester: normalizedSemester,
@@ -319,6 +375,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   Map<String, dynamic> _submittedProfilePayload({
     required String name,
+    required String? username,
     required String? photoUrl,
     required String? semester,
     required String? branch,
@@ -326,6 +383,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }) {
     return <String, dynamic>{
       'display_name': name,
+      'username': username,
       'profile_photo_url': photoUrl,
       'bio': _bioController.text.trim(),
       'semester': semester,
@@ -489,6 +547,31 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _usernameController,
+              enabled: !_saving,
+              autocorrect: false,
+              decoration: InputDecoration(
+                labelText: 'Username',
+                prefixText: '@',
+                helperText: 'Unique handle. Letters, numbers, . _ -',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              onChanged: (value) {
+                final sanitized = _sanitizeUsernameInput(value);
+                if (sanitized == value) return;
+                final selection = TextSelection.collapsed(
+                  offset: sanitized.length,
+                );
+                _usernameController.value = TextEditingValue(
+                  text: sanitized,
+                  selection: selection,
+                );
+              },
             ),
             const SizedBox(height: 12),
             TextField(
