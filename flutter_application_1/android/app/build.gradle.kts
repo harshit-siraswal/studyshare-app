@@ -63,6 +63,12 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         multiDexEnabled = true
+        ndk {
+            // Keep distributed APK ABIs aligned with Flutter engine binaries.
+            // This prevents packaging x86/x64-only plugin libs without matching
+            // libflutter/libapp artifacts, which can cause launch-time crashes.
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
     }
 
     signingConfigs {
@@ -117,6 +123,14 @@ android {
     lint {
         abortOnError = false
         checkReleaseBuilds = false
+    }
+
+    packaging {
+        jniLibs {
+            // Drop desktop/emulator ABIs from transitive Android AARs so APK
+            // does not advertise unsupported x86/x86_64 native stacks.
+            excludes += setOf("**/x86/*.so", "**/x86_64/*.so")
+        }
     }
 }
 
