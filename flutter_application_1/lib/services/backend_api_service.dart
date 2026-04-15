@@ -69,6 +69,12 @@ class BackendApiService {
 
   static const String _primaryBackendHost = 'api.studyshare.in';
   static const String _primaryBackendFallbackIp = '13.61.19.178';
+  static const String _highTrafficMessage =
+      'StudyShare is seeing high traffic right now. Please try again in a moment.';
+  static const Set<String> _knownIncompatibleAiHosts = <String>{
+    'studyshare.in',
+    'www.studyshare.in',
+  };
   static const Duration _connectionAttemptTimeout = Duration(seconds: 10);
 
   static final http.Client _sharedHttpClient = _createSharedHttpClient();
@@ -126,6 +132,25 @@ class BackendApiService {
       normalized.add(AppConfig.apiUrl);
     }
     return normalized;
+  }
+
+  bool _looksLikeTokenQuotaMessage(String message) {
+    final lowered = message.toLowerCase();
+    return (lowered.contains('token') &&
+            (lowered.contains('limit') ||
+                lowered.contains('quota') ||
+                lowered.contains('insufficient') ||
+                lowered.contains('exceed') ||
+                lowered.contains('remaining') ||
+                lowered.contains('balance'))) ||
+        (lowered.contains('credit') &&
+            (lowered.contains('limit') || lowered.contains('insufficient')));
+  }
+
+  bool _isAiCompatibleBackendUri(Uri uri) {
+    final host = uri.host.trim().toLowerCase();
+    if (host.isEmpty) return true;
+    return !_knownIncompatibleAiHosts.contains(host);
   }
 
   static http.Client _createSharedHttpClient() {
@@ -327,9 +352,15 @@ class BackendApiService {
       AppConfig.apiUrl; // e.g. https://studyspace-backend.onrender.com
 
   List<Uri> _backendUris(String path) {
-    return _apiBaseUrls
+    final uris = _apiBaseUrls
         .map((baseUrl) => Uri.parse('$baseUrl$path'))
         .toList(growable: false);
+    if (!_isAiOrRagPath(path)) return uris;
+
+    final compatible = uris
+        .where((uri) => _isAiCompatibleBackendUri(uri))
+        .toList(growable: false);
+    return compatible.isNotEmpty ? compatible : uris;
   }
 
   bool _shouldRequireAuthForPath(String path, String method) {
@@ -367,7 +398,7 @@ class BackendApiService {
       );
       throw const BackendApiHttpException(
         statusCode: 429,
-        message: 'Too many requests. Please slow down and try again shortly.',
+        message: _highTrafficMessage,
       );
     }
     events.add(now);
@@ -500,6 +531,9 @@ class BackendApiService {
     required String body,
     required String fallbackMessage,
   }) {
+    if (statusCode == 429) {
+      return _highTrafficMessage;
+    }
     if (_looksLikeHtmlPayload(body)) {
       if (_edgeNetworkErrorStatuses.contains(statusCode)) {
         return 'Backend temporarily unreachable (HTTP $statusCode). '
@@ -514,6 +548,9 @@ class BackendApiService {
 
   bool _shouldFallbackToNextBaseUrl(Object error, String path, String method) {
     if (_apiBaseUrls.length <= 1) return false;
+    if (_isAiOrRagPath(path) && isBackendCompatibilityFallbackError(error)) {
+      return true;
+    }
     if (!_isTransientConnectionFailure(error)) return false;
 
     final normalizedMethod = method.toUpperCase();
@@ -678,6 +715,12 @@ class BackendApiService {
       final msg =
           data?['message']?.toString() ?? data?['error']?.toString() ?? '';
       if (msg.trim().isNotEmpty) {
+        if (res.statusCode == 429 && !_looksLikeTokenQuotaMessage(msg.trim())) {
+          throw const BackendApiHttpException(
+            statusCode: 429,
+            message: _highTrafficMessage,
+          );
+        }
         throw BackendApiHttpException(
           statusCode: res.statusCode,
           message: msg.trim(),
@@ -3239,7 +3282,10 @@ class BackendApiService {
         .toList(growable: false);
   }
 
-  Future<void> followDepartment(String departmentId, {String? collegeId}) async {
+  Future<void> followDepartment(
+    String departmentId, {
+    String? collegeId,
+  }) async {
     final normalizedCollegeId = collegeId?.trim().toLowerCase();
     await _requestJson(
       '/api/departments/follow',
@@ -3253,7 +3299,10 @@ class BackendApiService {
     );
   }
 
-  Future<void> unfollowDepartment(String departmentId, {String? collegeId}) async {
+  Future<void> unfollowDepartment(
+    String departmentId, {
+    String? collegeId,
+  }) async {
     final normalizedCollegeId = collegeId?.trim().toLowerCase();
     final path = normalizedCollegeId != null && normalizedCollegeId.isNotEmpty
         ? Uri(
@@ -3262,11 +3311,7 @@ class BackendApiService {
             queryParameters: <String, String>{'collegeId': normalizedCollegeId},
           ).toString()
         : '/api/departments/follow/${Uri.encodeComponent(departmentId.trim())}';
-    await _requestJson(
-      path,
-      method: 'DELETE',
-      requireAuthToken: true,
-    );
+    await _requestJson(path, method: 'DELETE', requireAuthToken: true);
   }
 
   Future<Map<String, dynamic>> getFollowers({String? email}) async {

@@ -270,6 +270,22 @@ class HomeWidgetService {
     return 'Room $trimmed';
   }
 
+  String _entryHeroSubtitle(AttendanceScheduleEntry entry) {
+    final parts = <String>[];
+    final room = entry.classRoom.trim();
+    final timeRange = _formatScheduleRange(entry);
+    if (room.isNotEmpty) {
+      parts.add(_formatRoomLabel(room));
+    }
+    if (timeRange.isNotEmpty) {
+      parts.add(timeRange);
+    }
+    if (parts.isEmpty) {
+      return _entrySecondaryLabel(entry);
+    }
+    return parts.join(' • ');
+  }
+
   bool _isSameScheduleEntry(
     AttendanceScheduleEntry first,
     AttendanceScheduleEntry second,
@@ -379,9 +395,12 @@ class HomeWidgetService {
       badge: 'Schedule',
       isLive: false,
       locationLabel: semester.trim().isEmpty
-          ? 'Current Class Location'
+          ? 'Open your upcoming classes'
           : '$branchLabel | Semester $semester',
       roomLabel: 'Open Schedule',
+      heroProgress: 0,
+      heroProgressLabel: '',
+      showHeroProgress: false,
       footerLabel: 'Tap to open schedule',
       emptyMessage:
           'Live class and room will appear here when schedule data is available.',
@@ -416,14 +435,18 @@ class HomeWidgetService {
     }
 
     if (current != null) {
+      final progress = _progressPercent(current, now);
       return _ScheduleWidgetPayload(
         badge: 'Live now',
         isLive: true,
-        locationLabel: 'Current Class Location',
-        roomLabel: _sanitizeWidgetLine(
-          _formatRoomLabel(current.classRoom),
-          maxLength: 24,
+        locationLabel: _sanitizeWidgetLine(
+          _entryHeroSubtitle(current),
+          maxLength: 42,
         ),
+        roomLabel: _sanitizeWidgetLine(_entryCardTitle(current), maxLength: 30),
+        heroProgress: progress,
+        heroProgressLabel: '$progress% complete',
+        showHeroProgress: true,
         footerLabel: footerLabel(),
         emptyMessage: defaultPayload.emptyMessage,
         indicatorCount: indicatorCount,
@@ -434,13 +457,16 @@ class HomeWidgetService {
     if (upcoming.isNotEmpty) {
       final next = upcoming.first;
       final roomLabel = next.classRoom.trim().isNotEmpty
-          ? _formatRoomLabel(next.classRoom)
+          ? _entryHeroSubtitle(next)
           : _formatScheduleRange(next);
       return _ScheduleWidgetPayload(
         badge: 'Up next',
         isLive: false,
-        locationLabel: 'Next Class Location',
-        roomLabel: _sanitizeWidgetLine(roomLabel, maxLength: 24),
+        locationLabel: _sanitizeWidgetLine(roomLabel, maxLength: 42),
+        roomLabel: _sanitizeWidgetLine(_entryCardTitle(next), maxLength: 30),
+        heroProgress: 0,
+        heroProgressLabel: '',
+        showHeroProgress: false,
         footerLabel: 'Tap to open schedule',
         emptyMessage: defaultPayload.emptyMessage,
         indicatorCount: indicatorCount,
@@ -451,8 +477,11 @@ class HomeWidgetService {
     return _ScheduleWidgetPayload(
       badge: 'Today',
       isLive: false,
-      locationLabel: 'Current Class Location',
+      locationLabel: 'No live class right now',
       roomLabel: 'No Live Class',
+      heroProgress: 0,
+      heroProgressLabel: '',
+      showHeroProgress: false,
       footerLabel: 'Tap to open schedule',
       emptyMessage: defaultPayload.emptyMessage,
       indicatorCount: indicatorCount,
@@ -530,6 +559,18 @@ class HomeWidgetService {
           'schedule_room_label',
           payload.roomLabel,
         ),
+        HomeWidget.saveWidgetData<int>(
+          'schedule_hero_progress',
+          payload.heroProgress,
+        ),
+        HomeWidget.saveWidgetData<String>(
+          'schedule_progress_label',
+          payload.heroProgressLabel,
+        ),
+        HomeWidget.saveWidgetData<bool>(
+          'schedule_hero_progress_visible',
+          payload.showHeroProgress,
+        ),
         HomeWidget.saveWidgetData<String>(
           'schedule_footer_label',
           payload.footerLabel,
@@ -565,6 +606,9 @@ class _ScheduleWidgetPayload {
     required this.isLive,
     required this.locationLabel,
     required this.roomLabel,
+    required this.heroProgress,
+    required this.heroProgressLabel,
+    required this.showHeroProgress,
     required this.footerLabel,
     required this.emptyMessage,
     required this.indicatorCount,
@@ -575,6 +619,9 @@ class _ScheduleWidgetPayload {
   final bool isLive;
   final String locationLabel;
   final String roomLabel;
+  final int heroProgress;
+  final String heroProgressLabel;
+  final bool showHeroProgress;
   final String footerLabel;
   final String emptyMessage;
   final int indicatorCount;

@@ -13,9 +13,11 @@ class StudyAiLiveActivityCard extends StatelessWidget {
     this.isRunning = false,
     this.showExport = false,
     this.onOpenPdf,
+    this.onOpenNotice,
     this.onOpenUrl,
     this.onOpenVideo,
     this.onExport,
+    this.onPlayGame,
   });
 
   final String title;
@@ -24,9 +26,11 @@ class StudyAiLiveActivityCard extends StatelessWidget {
   final bool isRunning;
   final bool showExport;
   final void Function(String fileId, int? page)? onOpenPdf;
+  final void Function(String noticeId)? onOpenNotice;
   final void Function(String url)? onOpenUrl;
   final void Function(String url, String? timestamp)? onOpenVideo;
   final VoidCallback? onExport;
+  final VoidCallback? onPlayGame;
 
   @override
   Widget build(BuildContext context) {
@@ -61,6 +65,17 @@ class StudyAiLiveActivityCard extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               _LiveDot(isRunning: isRunning),
+              const Spacer(),
+              if (onPlayGame != null)
+                IconButton(
+                  onPressed: onPlayGame,
+                  tooltip: 'Open live game',
+                  icon: Icon(
+                    Icons.casino_rounded,
+                    size: 20,
+                    color: textSecondary,
+                  ),
+                ),
             ],
           ),
           const SizedBox(height: 10),
@@ -106,6 +121,7 @@ class StudyAiLiveActivityCard extends StatelessWidget {
                     isDark: isDark,
                     isLast: i == steps.length - 1,
                     onOpenPdf: onOpenPdf,
+                    onOpenNotice: onOpenNotice,
                     onOpenUrl: onOpenUrl,
                     onOpenVideo: onOpenVideo,
                   ),
@@ -223,6 +239,7 @@ class _LiveStepRow extends StatefulWidget {
     required this.isDark,
     required this.isLast,
     this.onOpenPdf,
+    this.onOpenNotice,
     this.onOpenUrl,
     this.onOpenVideo,
   });
@@ -231,6 +248,7 @@ class _LiveStepRow extends StatefulWidget {
   final bool isDark;
   final bool isLast;
   final void Function(String fileId, int? page)? onOpenPdf;
+  final void Function(String noticeId)? onOpenNotice;
   final void Function(String url)? onOpenUrl;
   final void Function(String url, String? timestamp)? onOpenVideo;
 
@@ -351,6 +369,7 @@ class _LiveStepRowState extends State<_LiveStepRow> {
                           event: event,
                           isDark: widget.isDark,
                           onOpenPdf: widget.onOpenPdf,
+                          onOpenNotice: widget.onOpenNotice,
                           onOpenUrl: widget.onOpenUrl,
                           onOpenVideo: widget.onOpenVideo,
                         ),
@@ -361,6 +380,7 @@ class _LiveStepRowState extends State<_LiveStepRow> {
                       sources: widget.step.sources,
                       isDark: widget.isDark,
                       onOpenPdf: widget.onOpenPdf,
+                      onOpenNotice: widget.onOpenNotice,
                       onOpenUrl: widget.onOpenUrl,
                       onOpenVideo: widget.onOpenVideo,
                     ),
@@ -379,6 +399,7 @@ class _EventRow extends StatelessWidget {
     required this.event,
     required this.isDark,
     this.onOpenPdf,
+    this.onOpenNotice,
     this.onOpenUrl,
     this.onOpenVideo,
   });
@@ -386,6 +407,7 @@ class _EventRow extends StatelessWidget {
   final AiLiveActivityEvent event;
   final bool isDark;
   final void Function(String fileId, int? page)? onOpenPdf;
+  final void Function(String noticeId)? onOpenNotice;
   final void Function(String url)? onOpenUrl;
   final void Function(String url, String? timestamp)? onOpenVideo;
 
@@ -438,6 +460,7 @@ class _EventRow extends StatelessWidget {
               sources: event.sources,
               isDark: isDark,
               onOpenPdf: onOpenPdf,
+              onOpenNotice: onOpenNotice,
               onOpenUrl: onOpenUrl,
               onOpenVideo: onOpenVideo,
             ),
@@ -453,6 +476,7 @@ class _SourceWrap extends StatelessWidget {
     required this.sources,
     required this.isDark,
     this.onOpenPdf,
+    this.onOpenNotice,
     this.onOpenUrl,
     this.onOpenVideo,
   });
@@ -460,6 +484,7 @@ class _SourceWrap extends StatelessWidget {
   final List<AiLiveActivitySource> sources;
   final bool isDark;
   final void Function(String fileId, int? page)? onOpenPdf;
+  final void Function(String noticeId)? onOpenNotice;
   final void Function(String url)? onOpenUrl;
   final void Function(String url, String? timestamp)? onOpenVideo;
 
@@ -490,6 +515,12 @@ class _SourceWrap extends StatelessWidget {
                     final url = source.url?.trim() ?? '';
                     if (url.isNotEmpty) {
                       onOpenVideo?.call(url, source.timestamp);
+                    }
+                    break;
+                  case AiLiveSourceKind.notice:
+                    final noticeId = source.sourceId?.trim() ?? '';
+                    if (noticeId.isNotEmpty) {
+                      onOpenNotice?.call(noticeId);
                     }
                     break;
                 }
@@ -544,6 +575,7 @@ class _SourceChip extends StatelessWidget {
                   AiLiveSourceKind.notes => Icons.picture_as_pdf_rounded,
                   AiLiveSourceKind.web => Icons.public_rounded,
                   AiLiveSourceKind.video => Icons.play_circle_outline_rounded,
+                  AiLiveSourceKind.notice => Icons.campaign_rounded,
                 },
                 size: 13,
                 color: textColor,

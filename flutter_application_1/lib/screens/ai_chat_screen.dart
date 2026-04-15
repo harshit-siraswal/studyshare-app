@@ -16,6 +16,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../config/app_config.dart';
 import '../config/theme.dart';
 import '../models/ai_question_paper.dart';
+import '../models/department_account.dart';
 import '../models/resource.dart';
 import '../models/study_ai_live_activity.dart';
 import '../services/auth_service.dart';
@@ -29,6 +30,7 @@ import '../services/summary_pdf_service.dart';
 import '../services/supabase_service.dart';
 import '../controllers/ai_chat_animation_controller.dart';
 import '../widgets/ai_chat_message_bubble.dart';
+import '../widgets/ai_loading_game_card.dart';
 import '../widgets/ai_logo.dart';
 import '../widgets/onboarding_overlay.dart';
 import '../widgets/paywall_dialog.dart';
@@ -37,6 +39,7 @@ import '../utils/ai_token_budget_utils.dart';
 import '../utils/ai_question_paper_parser.dart';
 import '../utils/link_navigation_utils.dart';
 import 'ai_question_paper_quiz_screen.dart';
+import 'notices/notice_detail_screen.dart';
 import 'viewer/pdf_viewer_screen.dart';
 import 'viewer/web_source_viewer_screen.dart';
 import '../utils/youtube_link_utils.dart';
@@ -51,6 +54,9 @@ bool _looksLikePdfSourceUrl(String value) {
 
 class RagSource {
   final String fileId;
+  final String? sourceId;
+  final String? sourceTable;
+  final String? noticeDepartment;
   final String title;
   final String? subject;
   final String sourceType;
@@ -64,6 +70,9 @@ class RagSource {
 
   RagSource({
     required this.fileId,
+    this.sourceId,
+    this.sourceTable,
+    this.noticeDepartment,
     required this.title,
     this.subject,
     this.sourceType = 'pdf',
@@ -88,6 +97,11 @@ class RagSource {
         json['href']?.toString();
     final resolvedVideoUrl =
         json['video_url']?.toString() ?? json['youtube_url']?.toString();
+    final resolvedSourceId = json['source_id']?.toString().trim();
+    final resolvedSourceTable = json['source_table']?.toString().trim();
+    final resolvedNoticeDepartment = json['notice_department']
+        ?.toString()
+        .trim();
     final explicitType = json['source_type']?.toString().trim().toLowerCase();
     final inferredType = explicitType?.isNotEmpty == true
         ? explicitType!
@@ -99,6 +113,17 @@ class RagSource {
                     : 'pdf'));
     return RagSource(
       fileId: json['file_id']?.toString() ?? '',
+      sourceId: resolvedSourceId != null && resolvedSourceId.isNotEmpty
+          ? resolvedSourceId
+          : null,
+      sourceTable: resolvedSourceTable != null && resolvedSourceTable.isNotEmpty
+          ? resolvedSourceTable
+          : null,
+      noticeDepartment:
+          resolvedNoticeDepartment != null &&
+              resolvedNoticeDepartment.isNotEmpty
+          ? resolvedNoticeDepartment
+          : null,
       title: json['title']?.toString() ?? 'Source',
       subject: resolvedSubject != null && resolvedSubject.isNotEmpty
           ? resolvedSubject
@@ -113,6 +138,10 @@ class RagSource {
       isPrimary: json['is_primary'] == true,
     );
   }
+
+  bool get isNoticeSource =>
+      sourceTable?.trim().toLowerCase() == 'notices' &&
+      (sourceId?.trim().isNotEmpty ?? false);
 }
 
 enum _QuestionPaperRetryReason {
@@ -813,7 +842,8 @@ class _AIChatScreenState extends State<AIChatScreen>
     if (_shouldSearchAllPdfsForPrompt(normalized)) return false;
     if (_referencesCurrentStudyMaterial(normalized)) return false;
     if ((widget.resourceContext?.fileId ?? '').trim().isNotEmpty) return false;
-    if ((widget.resourceContext?.videoUrl ?? '').trim().isNotEmpty) return false;
+    if ((widget.resourceContext?.videoUrl ?? '').trim().isNotEmpty)
+      return false;
 
     final topicHint = _extractAcademicTopicHint(normalized);
     if (topicHint.isEmpty) return false;
@@ -822,8 +852,9 @@ class _AIChatScreenState extends State<AIChatScreen>
     }
 
     final loweredTopic = topicHint.toLowerCase();
-    if (RegExp(r'\b(this|that|these|those|my|current|attached|uploaded)\b')
-        .hasMatch(loweredTopic)) {
+    if (RegExp(
+      r'\b(this|that|these|those|my|current|attached|uploaded)\b',
+    ).hasMatch(loweredTopic)) {
       return false;
     }
 
@@ -1160,7 +1191,8 @@ class _AIChatScreenState extends State<AIChatScreen>
               if ((item.fileId ?? '').trim().isNotEmpty) 'file_id': item.fileId,
               if ((item.resourceId ?? '').trim().isNotEmpty)
                 'resource_id': item.resourceId,
-              if ((item.subject ?? '').trim().isNotEmpty) 'subject': item.subject,
+              if ((item.subject ?? '').trim().isNotEmpty)
+                'subject': item.subject,
               if ((item.semester ?? '').trim().isNotEmpty)
                 'semester': item.semester,
               if ((item.branch ?? '').trim().isNotEmpty) 'branch': item.branch,
@@ -1461,6 +1493,12 @@ class _AIChatScreenState extends State<AIChatScreen>
           .map(
             (source) => {
               'file_id': source.fileId,
+              if (source.sourceId?.trim().isNotEmpty ?? false)
+                'source_id': source.sourceId,
+              if (source.sourceTable?.trim().isNotEmpty ?? false)
+                'source_table': source.sourceTable,
+              if (source.noticeDepartment?.trim().isNotEmpty ?? false)
+                'notice_department': source.noticeDepartment,
               'title': source.title,
               'source_type': source.sourceType,
               'is_primary':
@@ -1611,6 +1649,7 @@ class _AIChatScreenState extends State<AIChatScreen>
   }
 
   AiLiveSourceKind _sourceKindFromRagSource(RagSource source) {
+    if (source.isNoticeSource) return AiLiveSourceKind.notice;
     final normalized = source.sourceType.trim().toLowerCase();
     if (normalized == 'web') return AiLiveSourceKind.web;
     if (normalized == 'youtube' || normalized == 'video') {
@@ -1630,6 +1669,7 @@ class _AIChatScreenState extends State<AIChatScreen>
       final kind = _sourceKindFromRagSource(source);
       final key = [
         source.fileId.trim(),
+        source.sourceId?.trim() ?? '',
         source.title.trim(),
         source.startPage?.toString() ?? '',
         kind.wireValue,
@@ -1646,6 +1686,11 @@ class _AIChatScreenState extends State<AIChatScreen>
               ? source.fileUrl
               : (source.videoUrl ?? source.fileUrl),
           fileId: source.fileId.trim().isEmpty ? null : source.fileId.trim(),
+          sourceId: source.sourceId?.trim().isEmpty == false
+              ? source.sourceId!.trim()
+              : null,
+          sourceTable: source.sourceTable,
+          departmentId: source.noticeDepartment,
         ),
       );
       if (activitySources.length >= limit) break;
@@ -1790,6 +1835,79 @@ class _AIChatScreenState extends State<AIChatScreen>
     );
   }
 
+  DepartmentAccount _fallbackNoticeDepartmentAccount(String departmentId) {
+    final normalized = departmentId.trim();
+    if (normalized.isEmpty) {
+      return DepartmentAccount.unknown();
+    }
+    final label = normalized.toUpperCase();
+    return DepartmentAccount(
+      id: normalized,
+      name: '$label Department',
+      handle: '@${normalized.toLowerCase()}',
+      avatarLetter: label[0],
+      color: AppTheme.primary,
+    );
+  }
+
+  Future<void> _openNoticeById(String noticeId, {RagSource? source}) async {
+    final normalizedNoticeId = noticeId.trim();
+    if (normalizedNoticeId.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Notice link is unavailable right now.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final notice = await _supabase.getNotice(normalizedNoticeId);
+    if (!mounted) return;
+    if (notice == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'The notice linked to "${source?.title ?? 'this source'}" could not be loaded.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final departmentId =
+        (source?.noticeDepartment ??
+                notice['department']?.toString() ??
+                notice['department_id']?.toString() ??
+                '')
+            .trim();
+    final account =
+        await _supabase.getDepartmentProfile(departmentId) ??
+        _fallbackNoticeDepartmentAccount(departmentId);
+    if (!mounted) return;
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NoticeDetailScreen(
+          notice: notice,
+          account: account,
+          collegeId: widget.collegeId,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openNoticeSource(RagSource source) async {
+    await _openNoticeById(source.sourceId?.trim() ?? '', source: source);
+  }
+
+  Future<void> _openLiveNoticeSource(String noticeId) async {
+    await _openNoticeById(noticeId);
+  }
+
   Future<void> _openLiveWebSource(String url) async {
     final uri = _buildExternalLaunchUri(_normalizeExternalUrl(url));
     if (uri == null) {
@@ -1840,19 +1958,18 @@ class _AIChatScreenState extends State<AIChatScreen>
   }) {
     final seen = <String>{};
     final activitySources = <AiLiveActivitySource>[];
-      for (final attachment in attachments) {
-        final title = attachment['name']?.toString().trim() ?? 'Study material';
-        final rawUrl = attachment['url']?.toString().trim() ?? '';
-        final fileId =
-            attachment['file_id']?.toString().trim().isNotEmpty == true
-            ? attachment['file_id']!.toString().trim()
-            : (attachment['resource_id']?.toString().trim().isNotEmpty == true
-                  ? attachment['resource_id']!.toString().trim()
-                  : null);
-        final normalizedType = attachment['type']?.toString().toLowerCase() ?? '';
-        final kind =
-            rawUrl.toLowerCase().contains('youtu') ||
-                normalizedType == 'youtube' ||
+    for (final attachment in attachments) {
+      final title = attachment['name']?.toString().trim() ?? 'Study material';
+      final rawUrl = attachment['url']?.toString().trim() ?? '';
+      final fileId = attachment['file_id']?.toString().trim().isNotEmpty == true
+          ? attachment['file_id']!.toString().trim()
+          : (attachment['resource_id']?.toString().trim().isNotEmpty == true
+                ? attachment['resource_id']!.toString().trim()
+                : null);
+      final normalizedType = attachment['type']?.toString().toLowerCase() ?? '';
+      final kind =
+          rawUrl.toLowerCase().contains('youtu') ||
+              normalizedType == 'youtube' ||
               normalizedType == 'video'
           ? AiLiveSourceKind.video
           : (normalizedType == 'web'
@@ -1861,14 +1978,14 @@ class _AIChatScreenState extends State<AIChatScreen>
       final key = '$title|${kind.wireValue}|$rawUrl';
       if (seen.contains(key)) continue;
       seen.add(key);
-        activitySources.add(
-          AiLiveActivitySource(
-            title: title,
-            kind: kind,
-            url: rawUrl.isEmpty ? null : rawUrl,
-            fileId: fileId,
-          ),
-        );
+      activitySources.add(
+        AiLiveActivitySource(
+          title: title,
+          kind: kind,
+          url: rawUrl.isEmpty ? null : rawUrl,
+          fileId: fileId,
+        ),
+      );
       if (activitySources.length >= limit) break;
     }
     return activitySources;
@@ -2000,6 +2117,34 @@ class _AIChatScreenState extends State<AIChatScreen>
         ),
       );
     }
+  }
+
+  bool _supportsLiveQuestionPaperGame(AIChatMessage message) {
+    if (message.isUser) return false;
+    if (message.quizActionPaper != null) return true;
+    return message.liveSteps.any((step) => step.id.startsWith('qp_'));
+  }
+
+  Future<void> _openQuestionPaperGameSheet(AIChatMessage message) async {
+    if (!mounted) return;
+    final loadingMessage = message.quizActionPaper == null
+        ? 'Question paper is still generating. Beat the arcade score while you wait.'
+        : 'Question paper is ready. Try to beat the loading-game high score too.';
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+          child: AiLoadingGameCard(
+            loadingMessage: loadingMessage,
+            headline: 'Live side quest',
+            subheadline: 'Dice open the arcade only for question-paper runs.',
+          ),
+        ),
+      ),
+    );
   }
 
   double? _toNullableDouble(dynamic value) {
@@ -2754,11 +2899,19 @@ class _AIChatScreenState extends State<AIChatScreen>
 
   String? _extractPrimarySourceFileId(Map<String, dynamic> response) {
     final direct = response['primary_source_file_id']?.toString().trim();
-    if (direct != null && direct.isNotEmpty) return direct;
+    if (direct != null &&
+        direct.isNotEmpty &&
+        !_isTransientPrimarySourceId(direct)) {
+      return direct;
+    }
     final data = response['data'];
     if (data is Map) {
       final nested = data['primary_source_file_id']?.toString().trim();
-      if (nested != null && nested.isNotEmpty) return nested;
+      if (nested != null &&
+          nested.isNotEmpty &&
+          !_isTransientPrimarySourceId(nested)) {
+        return nested;
+      }
     }
     return null;
   }
@@ -3132,6 +3285,35 @@ class _AIChatScreenState extends State<AIChatScreen>
             (lowered.contains('limit') || lowered.contains('insufficient')));
   }
 
+  bool _looksLikeHighTrafficError(String message) {
+    final lowered = message.toLowerCase();
+    return lowered.contains('rate limit') ||
+        lowered.contains('too many requests') ||
+        lowered.contains('http 429') ||
+        lowered.contains('high traffic');
+  }
+
+  String _presentAiErrorMessage(
+    String message, {
+    String fallback = 'StudyShare could not complete this AI request.',
+  }) {
+    final trimmed = message.trim();
+    if (trimmed.isEmpty) return fallback;
+    if (_looksLikeHighTrafficError(trimmed)) {
+      return 'StudyShare is seeing high traffic right now. Please try again in a moment.';
+    }
+    return trimmed;
+  }
+
+  bool _isTransientPrimarySourceId(String? value) {
+    final normalized = value?.trim().toLowerCase() ?? '';
+    if (normalized.isEmpty) return true;
+    return normalized.startsWith('inline_') ||
+        normalized.startsWith('attachment_') ||
+        normalized.contains(':chunk:') ||
+        normalized.contains(':ocr:');
+  }
+
   Future<void> _refreshAiTokenStatus({bool forceRefresh = false}) async {
     if (_isAiTokenStatusLoading || !_auth.isSignedIn) return;
     _isAiTokenStatusLoading = true;
@@ -3278,6 +3460,9 @@ class _AIChatScreenState extends State<AIChatScreen>
   String _cleanUserVisibleErrorMessage(Object error) {
     final raw = error.toString().replaceFirst('Exception: ', '').trim();
     final lowered = raw.toLowerCase();
+    if (_looksLikeHighTrafficError(raw)) {
+      return 'StudyShare is seeing high traffic right now. Please try again in a moment.';
+    }
     if (lowered.contains('connection reset') ||
         lowered.contains('reset by peer') ||
         lowered.contains('socketexception') ||
@@ -3386,7 +3571,8 @@ class _AIChatScreenState extends State<AIChatScreen>
             fileId: item['file_id']?.toString().trim().isNotEmpty == true
                 ? item['file_id']!.toString().trim()
                 : null,
-            resourceId: item['resource_id']?.toString().trim().isNotEmpty == true
+            resourceId:
+                item['resource_id']?.toString().trim().isNotEmpty == true
                 ? item['resource_id']!.toString().trim()
                 : null,
             subject: item['subject']?.toString().trim().isNotEmpty == true
@@ -3643,7 +3829,7 @@ class _AIChatScreenState extends State<AIChatScreen>
   }
 
   bool _isLowQualityQuestionPaper(AiQuestionPaper paper) {
-    if (paper.questions.length < 5) return true;
+    if (paper.questions.length < 3) return true;
     if (_isTemplateToken(paper.subject) || _isTemplateToken(paper.title)) {
       return true;
     }
@@ -3691,18 +3877,20 @@ class _AIChatScreenState extends State<AIChatScreen>
       normalizedQuestions.add(_normalizeTemplateToken(q.question));
     }
 
-    if (placeholderCount > 0) return true;
-    if (sentenceCompletionCount >= (paper.questions.length / 2).ceil()) {
+    final questionCount = paper.questions.length;
+    if (placeholderCount >= math.max(2, (questionCount * 0.4).ceil())) {
       return true;
     }
-    if (genericStemCount > 0) return true;
-    if (noisyOptionCount > 0) return true;
-    if (pronounOptionCount > 0) return true;
-    if (genericOptionCount > 0) return true;
+    if (sentenceCompletionCount >= math.max(2, (questionCount * 0.75).ceil())) {
+      return true;
+    }
+    if (genericStemCount > (questionCount / 2).floor()) return true;
+    if (noisyOptionCount >= math.max(3, questionCount)) return true;
+    if (pronounOptionCount >= math.max(3, questionCount)) return true;
+    if (genericOptionCount >= math.max(3, questionCount + 1)) return true;
     final duplicateRatio =
-        1 -
-        (normalizedQuestions.length / paper.questions.length.clamp(1, 9999));
-    if (duplicateRatio > 0.35) return true;
+        1 - (normalizedQuestions.length / questionCount.clamp(1, 9999));
+    if (duplicateRatio > 0.55) return true;
     return false;
   }
 
@@ -3857,18 +4045,21 @@ class _AIChatScreenState extends State<AIChatScreen>
               branch: preferTopicOnlyScope ? '' : config.branch,
               inferredSubject: inferredSubject,
             );
-      final mergedAttachments = <Map<String, dynamic>>[
-        ...attachmentPayload,
+      final groundingAttachments = <Map<String, dynamic>>[...attachmentPayload];
+      final displayAttachments = <Map<String, dynamic>>[
+        ...groundingAttachments,
         ...contextAttachments,
       ];
-      final totalAttachmentCount = mergedAttachments.length;
-      final hasPdfAttachments = mergedAttachments.any(
+      final totalAttachmentCount = displayAttachments.length;
+      final hasPdfAttachments = groundingAttachments.any(
         (item) => item['type']?.toString().toLowerCase() == 'pdf',
       );
-      final hasImageAttachments = mergedAttachments.any(
+      final hasImageAttachments = groundingAttachments.any(
         (item) => item['type']?.toString().toLowerCase() == 'image',
       );
-      final noteSources = _activitySourcesFromAttachmentMaps(mergedAttachments);
+      final noteSources = _activitySourcesFromAttachmentMaps(
+        displayAttachments,
+      );
       final notesDescription = noteSources.isNotEmpty
           ? 'Using ${noteSources.length} note source'
                 '${noteSources.length == 1 ? '' : 's'} for grounding.'
@@ -3944,7 +4135,7 @@ class _AIChatScreenState extends State<AIChatScreen>
           strictAntiPlaceholder: strictMode,
           strictRetryReason: strictRetryReason,
         );
-        const allowWeb = false;
+        final allowWeb = _allowWebMode && groundingAttachments.isEmpty;
         final response = await _api.queryRag(
           question: prompt,
           collegeId: widget.collegeId,
@@ -3954,9 +4145,9 @@ class _AIChatScreenState extends State<AIChatScreen>
           fileId: searchAllForPrompt ? null : widget.resourceContext?.fileId,
           videoUrl: widget.resourceContext?.videoUrl,
           allowWeb: allowWeb,
-          useOcr: hasImageAttachments || hasPdfAttachments || forceOcr,
+          useOcr: hasImageAttachments || forceOcr,
           forceOcr: forceOcr,
-          attachments: mergedAttachments,
+          attachments: groundingAttachments,
           history: history,
           filters: effectiveQuestionPaperFilters,
           sourceSwitchForTurn: sourceSwitchForTurn,
@@ -4039,7 +4230,7 @@ class _AIChatScreenState extends State<AIChatScreen>
         final attemptSources = _activitySourcesFromRagSources(responseSources);
         debugPrint(
           'QuizGen attempt=${attempt + 1} noLocal=$noLocal '
-          'attachments=${mergedAttachments.length} '
+          'attachments=${displayAttachments.length} '
           'answerLen=${answer.length}',
         );
         if (noLocal && hasPdfAttachments && !forceOcr) {
@@ -4212,10 +4403,12 @@ class _AIChatScreenState extends State<AIChatScreen>
       await _persistCurrentSession();
     } catch (e) {
       if (!mounted) return;
+      final errorMessage = _presentAiErrorMessage(
+        e.toString().replaceFirst('Exception: ', ''),
+        fallback: 'StudyShare could not finish the question paper right now.',
+      );
       setState(() {
-        aiMessage.content =
-            'Question paper generation failed: '
-            '${e.toString().replaceFirst('Exception: ', '')}';
+        aiMessage.content = errorMessage;
         aiMessage.showLiveExport = false;
         aiMessage.liveSteps = _updateLiveStepList(
           aiMessage.liveSteps,
@@ -4528,7 +4721,8 @@ class _AIChatScreenState extends State<AIChatScreen>
                 'name': item.name,
                 'url': item.url,
                 'type': item.isPdf ? 'pdf' : 'image',
-                if ((item.fileId ?? '').trim().isNotEmpty) 'file_id': item.fileId,
+                if ((item.fileId ?? '').trim().isNotEmpty)
+                  'file_id': item.fileId,
                 if ((item.resourceId ?? '').trim().isNotEmpty)
                   'resource_id': item.resourceId,
                 if ((item.subject ?? '').trim().isNotEmpty)
@@ -4564,22 +4758,22 @@ class _AIChatScreenState extends State<AIChatScreen>
           hasAttachments: hasAttachments,
         );
         final isQuestionPaperContinuation =
-          !isQuestionPaperRequest &&
-          _hasActiveQuestionPaperResponse() &&
-          _isQuestionPaperContinuationIntent(userPrompt);
+            !isQuestionPaperRequest &&
+            _hasActiveQuestionPaperResponse() &&
+            _isQuestionPaperContinuationIntent(userPrompt);
         final isQuestionPaperClarificationReply =
-          !isQuestionPaperRequest &&
-          !isQuestionPaperContinuation &&
-          _pendingQuestionPaperRequest != null &&
-          _looksLikeQuestionPaperClarificationReply(userPrompt);
+            !isQuestionPaperRequest &&
+            !isQuestionPaperContinuation &&
+            _pendingQuestionPaperRequest != null &&
+            _looksLikeQuestionPaperClarificationReply(userPrompt);
         final shouldGenerateQuestionPaper =
-          isQuestionPaperRequest ||
-          isQuestionPaperContinuation ||
-          isQuestionPaperClarificationReply;
+            isQuestionPaperRequest ||
+            isQuestionPaperContinuation ||
+            isQuestionPaperClarificationReply;
         final mustUseGroundedLocalContext =
-          localContextRequired ||
-          hasOcrEligibleAttachments ||
-          shouldGenerateQuestionPaper;
+            localContextRequired ||
+            hasOcrEligibleAttachments ||
+            shouldGenerateQuestionPaper;
         final effectiveAllowWeb = _allowWebMode && !mustUseGroundedLocalContext;
         final effectiveFileId = effectiveAllowWeb
             ? null
@@ -4738,14 +4932,8 @@ class _AIChatScreenState extends State<AIChatScreen>
                   primarySource,
                   sources,
                 );
-                final primarySourceFileIdRaw = data['primary_source_file_id']
-                    ?.toString()
-                    .trim();
                 final primarySourceFileId =
-                    primarySourceFileIdRaw != null &&
-                        primarySourceFileIdRaw.isNotEmpty
-                    ? primarySourceFileIdRaw
-                    : primarySource?.fileId;
+                    _extractPrimarySourceFileId(data) ?? primarySource?.fileId;
                 final answerOrigin = AiAnswerOriginX.fromWireValue(
                   data['answer_origin']?.toString(),
                 );
@@ -4829,14 +5017,11 @@ class _AIChatScreenState extends State<AIChatScreen>
                     primarySource,
                     sources,
                   );
-                  final primarySourceFileIdRaw = chunk['primary_source_file_id']
-                      ?.toString()
-                      .trim();
                   final primarySourceFileId =
-                      primarySourceFileIdRaw != null &&
-                          primarySourceFileIdRaw.isNotEmpty
-                      ? primarySourceFileIdRaw
-                      : primarySource?.fileId;
+                      _extractPrimarySourceFileId(
+                        Map<String, dynamic>.from(chunk),
+                      ) ??
+                      primarySource?.fileId;
                   if (sources.isNotEmpty) {
                     final chunkAnswerOrigin = AiAnswerOriginX.fromWireValue(
                       chunk['answer_origin']?.toString(),
@@ -5409,13 +5594,11 @@ class _AIChatScreenState extends State<AIChatScreen>
                   strong: messageTextStyle.copyWith(
                     fontWeight: FontWeight.w600,
                   ),
-                  h3: messageTextStyle.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+                  h3: messageTextStyle.copyWith(fontWeight: FontWeight.w700),
                   blockquoteDecoration: BoxDecoration(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .surfaceContainerHighest,
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(4),
                   ),
                 ),
@@ -5525,6 +5708,7 @@ class _AIChatScreenState extends State<AIChatScreen>
                   (s.videoUrl?.toLowerCase().contains('youtu') ?? false) ||
                   (s.fileUrl?.toLowerCase().contains('youtu') ?? false);
               final isWebSource = s.sourceType == 'web';
+              final isNoticeSource = s.isNoticeSource;
               final launchTarget = (s.videoUrl?.trim().isNotEmpty == true)
                   ? s.videoUrl!.trim()
                   : (s.fileUrl?.trim() ?? '');
@@ -5539,7 +5723,7 @@ class _AIChatScreenState extends State<AIChatScreen>
                         ? '${s.title} (p${s.startPage}-${s.endPage})'
                         : s.title);
               return InkWell(
-                onTap: normalizedLaunchTarget.isEmpty
+                onTap: !isNoticeSource && normalizedLaunchTarget.isEmpty
                     ? null
                     : () async {
                         if (_isOpeningSourceLink) return;
@@ -5549,7 +5733,9 @@ class _AIChatScreenState extends State<AIChatScreen>
                         );
                         try {
                           if (!mounted) return;
-                          if (isYoutubeSource) {
+                          if (isNoticeSource) {
+                            await _openNoticeSource(s);
+                          } else if (isYoutubeSource) {
                             bool opened;
                             try {
                               opened = await openStudyShareLink(
@@ -5733,11 +5919,15 @@ class _AIChatScreenState extends State<AIChatScreen>
       isRunning: isStreamingAssistantMessage,
       showExport: msg.showLiveExport,
       onOpenPdf: (fileId, page) => _openLivePdfSource(msg, fileId, page),
+      onOpenNotice: _openLiveNoticeSource,
       onOpenUrl: _openLiveWebSource,
       onOpenVideo: _openLiveVideoSource,
       onExport: msg.quizActionPaper == null
           ? null
           : () => _exportQuestionPaperFromMessage(msg),
+      onPlayGame: _supportsLiveQuestionPaperGame(msg)
+          ? () => _openQuestionPaperGameSheet(msg)
+          : null,
     );
   }
 

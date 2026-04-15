@@ -1,6 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../config/theme.dart';
@@ -34,6 +37,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   bool _hasSavedSession = false;
   String? _lastSyncErrorMessage;
   String? _lastSyncErrorCode;
+  final Set<String> _projectedMissedEntries = <String>{};
+  final Set<String> _expandedProjectionDays = <String>{};
 
   /// Periodic timer that calls [setState] during an ongoing class so the
   /// [LinearProgressIndicator] in each schedule card updates in real time.
@@ -150,6 +155,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       _hasSavedSession = token != null && token.trim().isNotEmpty;
       _isLoading = false;
     });
+    if (snapshot != null) {
+      _seedProjectionDays(snapshot);
+    }
     _startScheduleProgressTimerIfNeeded();
     unawaited(_syncScheduleWidget(snapshot));
   }
@@ -283,6 +291,8 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       _hasSavedSession = false;
       _lastSyncErrorMessage = null;
       _lastSyncErrorCode = null;
+      _projectedMissedEntries.clear();
+      _expandedProjectionDays.clear();
     });
     unawaited(_syncScheduleWidget());
     ScaffoldMessenger.of(
@@ -319,6 +329,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         _lastSyncErrorMessage = null;
         _lastSyncErrorCode = null;
       });
+      _seedProjectionDays(snapshot);
       unawaited(_syncScheduleWidget(snapshot));
       if (showSuccessToast) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -468,6 +479,269 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     return _attendanceService.formatDateDdMmYyyy(rawDate);
   }
 
+  String _scheduleEntryIdentity(AttendanceScheduleEntry entry) {
+    return [
+      entry.lectureDate.trim(),
+      entry.start.trim(),
+      entry.end.trim(),
+      entry.courseCode.trim(),
+      entry.courseComponentName.trim(),
+      entry.classRoom.trim(),
+    ].join('|');
+  }
+
+  String _projectionBucketKeyForEntry(AttendanceScheduleEntry entry) {
+    return [
+      entry.courseCode.trim().toLowerCase(),
+      entry.courseComponentName.trim().toLowerCase(),
+    ].join('|');
+  }
+
+  String _projectionBucketKeyForComponent(AttendanceComponent component) {
+    return [
+      component.courseCode.trim().toLowerCase(),
+      component.componentName.trim().toLowerCase(),
+    ].join('|');
+  }
+
+  bool _isClassEntry(AttendanceScheduleEntry entry) {
+    return entry.type.trim().toUpperCase() != 'HOLIDAY';
+  }
+
+  void _seedProjectionDays(AttendanceSnapshot snapshot) {
+    if (_expandedProjectionDays.isNotEmpty) return;
+    for (final entry in _upcomingScheduleEntries(snapshot)) {
+      if (!_isClassEntry(entry)) continue;
+      _expandedProjectionDays.add(_formatDate(entry.lectureDate));
+      break;
+    }
+  }
+
+  DateTime? _parseEntryDateTime(String rawDate, String rawTime) {
+    final baseDate = _attendanceService.tryParseDate(rawDate);
+    if (baseDate == null) return null;
+    final normalizedTime = rawTime.trim();
+    if (normalizedTime.isEmpty) return baseDate;
+    final parts = normalizedTime.split(':');
+    if (parts.length < 2) return baseDate;
+    final hour = int.tryParse(parts[0]) ?? 0;
+    final minute = int.tryParse(parts[1]) ?? 0;
+    return DateTime(baseDate.year, baseDate.month, baseDate.day, hour, minute);
+  }
+
+  int _additionalClassesCanMiss({
+    required int present,
+    required int total,
+    required int threshold,
+  }) {
+    if (total <= 0) return 0;
+    final thresholdRatio = threshold / 100;
+    final remaining = (present - (thresholdRatio * total)) / thresholdRatio;
+    return remaining.isFinite ? remaining.floor().clamp(0, 100000) : 0;
+  }
+
+  int _classesNeededToRecover({
+    required int present,
+    required int total,
+    required int threshold,
+  }) {
+    if (total <= 0) return 0;
+    final thresholdRatio = threshold / 100;
+    final required =
+        ((thresholdRatio * total) - present) / (1 - thresholdRatio);
+    if (!required.isFinite) return 0;
+    return required.ceil().clamp(0, 100000);
+  }
+
+  Map<String, int> _projectedMissCountByComponent(AttendanceSnapshot snapshot) {
+    final counts = <String, int>{};
+    for (final entry in _upcomingScheduleEntries(
+      snapshot,
+    ).where(_isClassEntry)) {
+      final identity = _scheduleEntryIdentity(entry);
+      if (!_projectedMissedEntries.contains(identity)) continue;
+      final key = _projectionBucketKeyForEntry(entry);
+      counts.update(key, (value) => value + 1, ifAbsent: () => 1);
+    }
+    return counts;
+  }
+
+  _AttendanceProjectionSummary _buildProjectedSummary(
+    AttendanceComponent component, {
+    int projectedMisses = 0,
+  }) {
+    final present = component.attendedClasses + component.extraAttendance;
+    final total = component.totalClasses + projectedMisses;
+    final percentage = total <= 0 ? 0.0 : (present / total) * 100;
+    final safe = percentage >= component.threshold;
+    final classesToSafety = safe
+        ? _additionalClassesCanMiss(
+            present: present,
+            total: total,
+            threshold: component.threshold,
+          )
+        : _classesNeededToRecover(
+            present: present,
+            total: total,
+            threshold: component.threshold,
+          );
+
+    final message = total <= 0
+        ? 'No classes held yet.'
+        : safe
+        ? classesToSafety > 0
+              ? 'You can still miss $classesToSafety more '
+                    'class${classesToSafety == 1 ? '' : 'es'} and stay above '
+                    '${component.threshold}%.'
+              : 'Try not to miss any more classes.'
+        : 'Need to attend next $classesToSafety '
+              'class${classesToSafety == 1 ? '' : 'es'} to reach '
+              '${component.threshold}%.';
+
+    return _AttendanceProjectionSummary(
+      percentage: percentage,
+      projectedTotal: total,
+      projectedPresent: present,
+      projectedMisses: projectedMisses,
+      isSafe: safe,
+      message: message,
+    );
+  }
+
+  String _formatIcsDateTime(DateTime dateTime) {
+    final utc = dateTime.toUtc();
+    String twoDigits(int value) => value.toString().padLeft(2, '0');
+    return '${utc.year}'
+        '${twoDigits(utc.month)}'
+        '${twoDigits(utc.day)}'
+        'T'
+        '${twoDigits(utc.hour)}'
+        '${twoDigits(utc.minute)}'
+        '${twoDigits(utc.second)}'
+        'Z';
+  }
+
+  String _escapeIcsText(String value) {
+    return value
+        .replaceAll('\\', r'\\')
+        .replaceAll(';', r'\;')
+        .replaceAll(',', r'\,')
+        .replaceAll('\n', r'\n');
+  }
+
+  Future<void> _addEntriesToCalendar(
+    List<AttendanceScheduleEntry> entries,
+  ) async {
+    final classes = entries.where(_isClassEntry).toList(growable: false);
+    if (classes.isEmpty) return;
+
+    final seenEntries = <String>{};
+    const eol = '\r\n';
+    final timestamp = _formatIcsDateTime(DateTime.now());
+    final lines = <String>[
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//StudyShare//KIET Schedule//EN',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+    ];
+
+    for (final entry in classes) {
+      final start = _parseEntryDateTime(entry.lectureDate, entry.start);
+      if (start == null) continue;
+      final end =
+          _parseEntryDateTime(entry.lectureDate, entry.end) ??
+          start.add(const Duration(hours: 1));
+      final safeEnd = end.isAfter(start)
+          ? end
+          : start.add(const Duration(hours: 1));
+      final key = [
+        entry.courseCode.trim(),
+        entry.courseComponentName.trim(),
+        entry.lectureDate.trim(),
+        entry.start.trim(),
+      ].join('|');
+      if (!seenEntries.add(key)) continue;
+
+      final summary = entry.courseName.trim().isNotEmpty
+          ? entry.courseName.trim()
+          : (entry.title.trim().isNotEmpty ? entry.title.trim() : 'Class');
+      final description = <String>[
+        if (entry.courseCode.trim().isNotEmpty)
+          'Course Code: ${entry.courseCode.trim()}',
+        if (entry.courseComponentName.trim().isNotEmpty)
+          'Component: ${entry.courseComponentName.trim()}',
+        if (entry.facultyName.trim().isNotEmpty)
+          'Faculty: ${entry.facultyName.trim()}',
+      ].join('\n');
+
+      lines.addAll(<String>[
+        'BEGIN:VEVENT',
+        'UID:${_escapeIcsText(key)}@studyshare',
+        'DTSTAMP:$timestamp',
+        'DTSTART:${_formatIcsDateTime(start)}',
+        'DTEND:${_formatIcsDateTime(safeEnd)}',
+        'SUMMARY:${_escapeIcsText(summary)}',
+        if (description.isNotEmpty)
+          'DESCRIPTION:${_escapeIcsText(description)}',
+        if (entry.classRoom.trim().isNotEmpty)
+          'LOCATION:${_escapeIcsText(entry.classRoom.trim())}',
+        'END:VEVENT',
+      ]);
+    }
+
+    lines.add('END:VCALENDAR');
+    final tempDir = await getTemporaryDirectory();
+    final file = File(
+      '${tempDir.path}/studyshare_schedule_${DateTime.now().millisecondsSinceEpoch}.ics',
+    );
+    await file.writeAsString(lines.join(eol));
+
+    if (!mounted) return;
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(file.path)],
+        text:
+            'StudyShare weekly schedule export. Import this .ics file into '
+            'Google Calendar or any calendar app.',
+      ),
+    );
+    unawaited(
+      Future.delayed(const Duration(seconds: 10), () async {
+        if (await file.exists()) {
+          await file.delete();
+        }
+      }),
+    );
+  }
+
+  void _toggleProjectedMiss(AttendanceScheduleEntry entry) {
+    final identity = _scheduleEntryIdentity(entry);
+    setState(() {
+      if (_projectedMissedEntries.contains(identity)) {
+        _projectedMissedEntries.remove(identity);
+      } else {
+        _projectedMissedEntries.add(identity);
+      }
+    });
+  }
+
+  void _toggleProjectedDayEntries(
+    List<AttendanceScheduleEntry> entries, {
+    required bool shouldSelect,
+  }) {
+    setState(() {
+      for (final entry in entries) {
+        final identity = _scheduleEntryIdentity(entry);
+        if (shouldSelect) {
+          _projectedMissedEntries.add(identity);
+        } else {
+          _projectedMissedEntries.remove(identity);
+        }
+      }
+    });
+  }
+
   Map<String, List<AttendanceScheduleEntry>> _groupScheduleEntries(
     List<AttendanceScheduleEntry> entries,
   ) {
@@ -555,89 +829,235 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final snapshot = _snapshot;
     if (snapshot == null) return;
 
-    final entries = _weeklyScheduleEntries(snapshot);
+    final entries = _weeklyScheduleEntries(
+      snapshot,
+    ).where(_isClassEntry).toList();
     final groupedEntries = _groupScheduleEntries(entries);
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       builder: (context) {
         final isDark = Theme.of(context).brightness == Brightness.dark;
+        final expandedDays = <String>{
+          if (groupedEntries.isNotEmpty) groupedEntries.keys.first,
+        };
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
             child: SizedBox(
               height: MediaQuery.of(context).size.height * 0.72,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Weekly Schedule',
-                    style: GoogleFonts.inter(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                      color: isDark
-                          ? AppTheme.darkTextPrimary
-                          : AppTheme.lightTextPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    '${_formatDate(snapshot.schedule.weekStartDate)} - ${_formatDate(snapshot.schedule.weekEndDate)}',
-                    style: GoogleFonts.inter(
-                      color: isDark
-                          ? AppTheme.darkTextSecondary
-                          : AppTheme.lightTextSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Expanded(
-                    child: entries.isEmpty
-                        ? Center(
-                            child: Text(
-                              'No classes in this week schedule.',
+              child: StatefulBuilder(
+                builder: (context, setModalState) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Weekly Schedule',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.w700,
+                                    color: isDark
+                                        ? AppTheme.darkTextPrimary
+                                        : AppTheme.lightTextPrimary,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${_formatDate(snapshot.schedule.weekStartDate)} - ${_formatDate(snapshot.schedule.weekEndDate)}',
+                                  style: GoogleFonts.inter(
+                                    color: isDark
+                                        ? AppTheme.darkTextSecondary
+                                        : AppTheme.lightTextSecondary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          TextButton.icon(
+                            onPressed: entries.isEmpty
+                                ? null
+                                : () => _addEntriesToCalendar(entries),
+                            icon: const Icon(
+                              Icons.event_available_rounded,
+                              size: 18,
+                            ),
+                            label: Text(
+                              'Add',
                               style: GoogleFonts.inter(
-                                color: isDark
-                                    ? AppTheme.darkTextSecondary
-                                    : AppTheme.lightTextSecondary,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
-                          )
-                        : ListView(
-                            children: groupedEntries.entries.map((group) {
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 18),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      group.key,
-                                      style: GoogleFonts.inter(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        color: isDark
-                                            ? AppTheme.darkTextSecondary
-                                            : AppTheme.lightTextSecondary,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 10),
-                                    ...group.value.map(
-                                      (entry) => Padding(
-                                        padding: const EdgeInsets.only(
-                                          bottom: 10,
-                                        ),
-                                        child: _buildScheduleEntryCard(
-                                          entry,
-                                          isDark,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              );
-                            }).toList(),
                           ),
-                  ),
-                ],
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Expanded(
+                        child: entries.isEmpty
+                            ? Center(
+                                child: Text(
+                                  'No classes in this week schedule.',
+                                  style: GoogleFonts.inter(
+                                    color: isDark
+                                        ? AppTheme.darkTextSecondary
+                                        : AppTheme.lightTextSecondary,
+                                  ),
+                                ),
+                              )
+                            : ListView(
+                                children: groupedEntries.entries
+                                    .map((group) {
+                                      final dayKey = group.key;
+                                      final dayEntries = group.value
+                                          .where(_isClassEntry)
+                                          .toList();
+                                      final expanded = expandedDays.contains(
+                                        dayKey,
+                                      );
+                                      return Padding(
+                                        padding: const EdgeInsets.only(
+                                          bottom: 12,
+                                        ),
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            color: isDark
+                                                ? Colors.white.withValues(
+                                                    alpha: 0.04,
+                                                  )
+                                                : const Color(0xFFF8FAFC),
+                                            borderRadius: BorderRadius.circular(
+                                              20,
+                                            ),
+                                            border: Border.all(
+                                              color: isDark
+                                                  ? Colors.white10
+                                                  : Colors.black12,
+                                            ),
+                                          ),
+                                          child: Column(
+                                            children: [
+                                              InkWell(
+                                                borderRadius:
+                                                    BorderRadius.circular(20),
+                                                onTap: () {
+                                                  setModalState(() {
+                                                    if (expanded) {
+                                                      expandedDays.remove(
+                                                        dayKey,
+                                                      );
+                                                    } else {
+                                                      expandedDays.add(dayKey);
+                                                    }
+                                                  });
+                                                },
+                                                child: Padding(
+                                                  padding:
+                                                      const EdgeInsets.fromLTRB(
+                                                        16,
+                                                        14,
+                                                        16,
+                                                        14,
+                                                      ),
+                                                  child: Row(
+                                                    children: [
+                                                      Expanded(
+                                                        child: Column(
+                                                          crossAxisAlignment:
+                                                              CrossAxisAlignment
+                                                                  .start,
+                                                          children: [
+                                                            Text(
+                                                              dayKey,
+                                                              style: GoogleFonts.inter(
+                                                                fontSize: 15,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w700,
+                                                                color: isDark
+                                                                    ? AppTheme
+                                                                          .darkTextPrimary
+                                                                    : AppTheme
+                                                                          .lightTextPrimary,
+                                                              ),
+                                                            ),
+                                                            const SizedBox(
+                                                              height: 4,
+                                                            ),
+                                                            Text(
+                                                              '${dayEntries.length} class${dayEntries.length == 1 ? '' : 'es'} • ${dayEntries.first.start} - ${dayEntries.last.end}',
+                                                              style: GoogleFonts.inter(
+                                                                fontSize: 12.4,
+                                                                color: isDark
+                                                                    ? AppTheme
+                                                                          .darkTextSecondary
+                                                                    : AppTheme
+                                                                          .lightTextSecondary,
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ),
+                                                      ),
+                                                      Icon(
+                                                        expanded
+                                                            ? Icons
+                                                                  .keyboard_arrow_up_rounded
+                                                            : Icons
+                                                                  .keyboard_arrow_down_rounded,
+                                                        color: isDark
+                                                            ? AppTheme
+                                                                  .darkTextSecondary
+                                                            : AppTheme
+                                                                  .lightTextSecondary,
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                              if (expanded)
+                                                Padding(
+                                                  padding:
+                                                      const EdgeInsets.fromLTRB(
+                                                        12,
+                                                        0,
+                                                        12,
+                                                        12,
+                                                      ),
+                                                  child: Column(
+                                                    children: dayEntries
+                                                        .map((entry) {
+                                                          return Padding(
+                                                            padding:
+                                                                const EdgeInsets.only(
+                                                                  bottom: 10,
+                                                                ),
+                                                            child:
+                                                                _buildScheduleEntryCard(
+                                                                  entry,
+                                                                  isDark,
+                                                                ),
+                                                          );
+                                                        })
+                                                        .toList(
+                                                          growable: false,
+                                                        ),
+                                                  ),
+                                                ),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    })
+                                    .toList(growable: false),
+                              ),
+                      ),
+                    ],
+                  );
+                },
               ),
             ),
           ),
@@ -834,7 +1254,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       );
     }
 
-    final upcomingEntries = _upcomingScheduleEntries(snapshot).take(5).toList();
+    final upcomingEntries = _upcomingScheduleEntries(
+      snapshot,
+    ).where(_isClassEntry).take(5).toList();
+    final weeklyEntries = _weeklyScheduleEntries(
+      snapshot,
+    ).where(_isClassEntry).toList(growable: false);
+    final projectedMissCounts = _projectedMissCountByComponent(snapshot);
 
     return RefreshIndicator(
       onRefresh: _syncWithSavedToken,
@@ -848,6 +1274,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           const SizedBox(height: 16),
           if (snapshot.lowAttendance.isNotEmpty) ...[
             _buildLowAttendanceCard(snapshot, isDark),
+            const SizedBox(height: 16),
+          ],
+          if (weeklyEntries.isNotEmpty) ...[
+            _buildProjectionPlanner(entries: weeklyEntries, isDark: isDark),
             const SizedBox(height: 16),
           ],
           const SizedBox(height: 4),
@@ -866,21 +1296,43 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             (course) => course.components.map(
               (component) => Padding(
                 padding: const EdgeInsets.only(bottom: 12),
-                child: _buildComponentCard(component, isDark),
+                child: _buildComponentCard(
+                  component,
+                  isDark,
+                  projectedMisses:
+                      projectedMissCounts[_projectionBucketKeyForComponent(
+                        component,
+                      )] ??
+                      0,
+                ),
               ),
             ),
           ),
           if (upcomingEntries.isNotEmpty) ...[
             const SizedBox(height: 8),
-            Text(
-              'Upcoming Classes',
-              style: GoogleFonts.inter(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: isDark
-                    ? AppTheme.darkTextPrimary
-                    : AppTheme.lightTextPrimary,
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    'Upcoming Classes',
+                    style: GoogleFonts.inter(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                      color: isDark
+                          ? AppTheme.darkTextPrimary
+                          : AppTheme.lightTextPrimary,
+                    ),
+                  ),
+                ),
+                TextButton.icon(
+                  onPressed: () => _addEntriesToCalendar(weeklyEntries),
+                  icon: const Icon(Icons.event_available_rounded, size: 18),
+                  label: Text(
+                    'Add to Calendar',
+                    style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 12),
             ...upcomingEntries.map(
@@ -1102,8 +1554,335 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     );
   }
 
-  Widget _buildComponentCard(AttendanceComponent component, bool isDark) {
-    final accent = component.isLowAttendance ? Colors.redAccent : Colors.green;
+  Widget _buildProjectionPlanner({
+    required List<AttendanceScheduleEntry> entries,
+    required bool isDark,
+  }) {
+    final groupedEntries = _groupScheduleEntries(entries);
+    final selectedCount = entries
+        .where(
+          (entry) =>
+              _projectedMissedEntries.contains(_scheduleEntryIdentity(entry)),
+        )
+        .length;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: isDark ? Colors.white10 : Colors.black12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Projection Planner',
+                      style: GoogleFonts.inter(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: isDark
+                            ? AppTheme.darkTextPrimary
+                            : AppTheme.lightTextPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Use the upcoming schedule to see how planned misses '
+                      'change each subject before the week hits you.',
+                      style: GoogleFonts.inter(
+                        fontSize: 12.8,
+                        height: 1.45,
+                        color: isDark
+                            ? AppTheme.darkTextSecondary
+                            : AppTheme.lightTextSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (selectedCount > 0)
+                TextButton.icon(
+                  onPressed: () {
+                    setState(() => _projectedMissedEntries.clear());
+                  },
+                  icon: const Icon(Icons.restart_alt_rounded, size: 18),
+                  label: Text(
+                    'Reset',
+                    style: GoogleFonts.inter(fontWeight: FontWeight.w700),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          ...groupedEntries.entries.map((group) {
+            final dayEntries = group.value.where(_isClassEntry).toList();
+            if (dayEntries.isEmpty) {
+              return const SizedBox.shrink();
+            }
+            final dayKey = group.key;
+            final expanded = _expandedProjectionDays.contains(dayKey);
+            final selectedForDay = dayEntries
+                .where(
+                  (entry) => _projectedMissedEntries.contains(
+                    _scheduleEntryIdentity(entry),
+                  ),
+                )
+                .length;
+            final allSelected = selectedForDay == dayEntries.length;
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? Colors.white.withValues(alpha: 0.04)
+                      : const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isDark ? Colors.white10 : Colors.black12,
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    InkWell(
+                      borderRadius: BorderRadius.circular(20),
+                      onTap: () {
+                        setState(() {
+                          if (expanded) {
+                            _expandedProjectionDays.remove(dayKey);
+                          } else {
+                            _expandedProjectionDays.add(dayKey);
+                          }
+                        });
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    dayKey,
+                                    style: GoogleFonts.inter(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w700,
+                                      color: isDark
+                                          ? AppTheme.darkTextPrimary
+                                          : AppTheme.lightTextPrimary,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '${dayEntries.length} class${dayEntries.length == 1 ? '' : 'es'} • '
+                                    '${dayEntries.first.start} - ${dayEntries.last.end}',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 12.4,
+                                      color: isDark
+                                          ? AppTheme.darkTextSecondary
+                                          : AppTheme.lightTextSecondary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (selectedForDay > 0)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.orange.withValues(alpha: 0.14),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  '$selectedForDay skipped',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 11.2,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.orange.shade700,
+                                  ),
+                                ),
+                              ),
+                            const SizedBox(width: 10),
+                            Icon(
+                              expanded
+                                  ? Icons.keyboard_arrow_up_rounded
+                                  : Icons.keyboard_arrow_down_rounded,
+                              color: isDark
+                                  ? AppTheme.darkTextSecondary
+                                  : AppTheme.lightTextSecondary,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (expanded)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                        child: Column(
+                          children: [
+                            Row(
+                              children: [
+                                TextButton.icon(
+                                  onPressed: () => _toggleProjectedDayEntries(
+                                    dayEntries,
+                                    shouldSelect: !allSelected,
+                                  ),
+                                  icon: Icon(
+                                    allSelected
+                                        ? Icons.check_box_rounded
+                                        : Icons.check_box_outline_blank_rounded,
+                                    size: 18,
+                                  ),
+                                  label: Text(
+                                    allSelected
+                                        ? 'Unmark day'
+                                        : 'Mark day as skipped',
+                                    style: GoogleFonts.inter(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            ...dayEntries.map((entry) {
+                              final identity = _scheduleEntryIdentity(entry);
+                              final isSelected = _projectedMissedEntries
+                                  .contains(identity);
+                              return Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(16),
+                                  onTap: () => _toggleProjectedMiss(entry),
+                                  child: Container(
+                                    padding: const EdgeInsets.all(14),
+                                    decoration: BoxDecoration(
+                                      color: isSelected
+                                          ? Colors.orange.withValues(
+                                              alpha: isDark ? 0.16 : 0.10,
+                                            )
+                                          : (isDark
+                                                ? Colors.white.withValues(
+                                                    alpha: 0.03,
+                                                  )
+                                                : Colors.white),
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(
+                                        color: isSelected
+                                            ? Colors.orange.withValues(
+                                                alpha: 0.3,
+                                              )
+                                            : (isDark
+                                                  ? Colors.white10
+                                                  : Colors.black12),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Icon(
+                                          isSelected
+                                              ? Icons.check_circle_rounded
+                                              : Icons
+                                                    .radio_button_unchecked_rounded,
+                                          color: isSelected
+                                              ? Colors.orange.shade700
+                                              : (isDark
+                                                    ? AppTheme.darkTextSecondary
+                                                    : AppTheme
+                                                          .lightTextSecondary),
+                                        ),
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                entry.courseName
+                                                        .trim()
+                                                        .isNotEmpty
+                                                    ? entry.courseName.trim()
+                                                    : entry.title.trim(),
+                                                style: GoogleFonts.inter(
+                                                  fontSize: 13.8,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: isDark
+                                                      ? AppTheme.darkTextPrimary
+                                                      : AppTheme
+                                                            .lightTextPrimary,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                '${entry.start} - ${entry.end}'
+                                                '${entry.classRoom.trim().isEmpty ? '' : ' • Room ${entry.classRoom.trim()}'}',
+                                                style: GoogleFonts.inter(
+                                                  fontSize: 12.2,
+                                                  color: isDark
+                                                      ? AppTheme
+                                                            .darkTextSecondary
+                                                      : AppTheme
+                                                            .lightTextSecondary,
+                                                ),
+                                              ),
+                                              if (entry.courseComponentName
+                                                  .trim()
+                                                  .isNotEmpty) ...[
+                                                const SizedBox(height: 2),
+                                                Text(
+                                                  entry.courseComponentName
+                                                      .trim(),
+                                                  style: GoogleFonts.inter(
+                                                    fontSize: 11.8,
+                                                    fontWeight: FontWeight.w600,
+                                                    color: AppTheme.primary,
+                                                  ),
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildComponentCard(
+    AttendanceComponent component,
+    bool isDark, {
+    int projectedMisses = 0,
+  }) {
+    final summary = _buildProjectedSummary(
+      component,
+      projectedMisses: projectedMisses,
+    );
+    final accent = summary.isSafe ? Colors.green : Colors.redAccent;
+    final isProjected = projectedMisses > 0;
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -1152,7 +1931,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
-                  '${component.percentage.toStringAsFixed(2)}%',
+                  '${summary.percentage.toStringAsFixed(2)}%',
                   style: GoogleFonts.inter(
                     fontWeight: FontWeight.w700,
                     color: accent,
@@ -1166,7 +1945,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             borderRadius: BorderRadius.circular(999),
             child: LinearProgressIndicator(
               minHeight: 7,
-              value: (component.percentage / 100).clamp(0.0, 1.0),
+              value: (summary.percentage / 100).clamp(0.0, 1.0),
               backgroundColor: isDark
                   ? Colors.white.withValues(alpha: 0.08)
                   : Colors.black.withValues(alpha: 0.06),
@@ -1180,7 +1959,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             children: [
               _buildComponentStatChip(
                 label: 'Attended',
-                value: '${component.attendedClasses}/${component.totalClasses}',
+                value: '${summary.projectedPresent}/${summary.projectedTotal}',
                 isDark: isDark,
               ),
               _buildComponentStatChip(
@@ -1188,6 +1967,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 value: '${component.extraAttendance}',
                 isDark: isDark,
               ),
+              if (isProjected)
+                _buildComponentStatChip(
+                  label: 'Skipped',
+                  value: '$projectedMisses',
+                  isDark: isDark,
+                ),
             ],
           ),
           const SizedBox(height: 12),
@@ -1202,7 +1987,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  component.isLowAttendance ? 'Next action' : 'Safe zone',
+                  isProjected
+                      ? 'Projection'
+                      : (summary.isSafe ? 'Safe zone' : 'Next action'),
                   style: GoogleFonts.inter(
                     fontSize: 10.5,
                     fontWeight: FontWeight.w700,
@@ -1212,9 +1999,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 ),
                 const SizedBox(height: 5),
                 Text(
-                  component.isLowAttendance
-                      ? 'Attend ${component.classesNeededForThreshold} more classes to reach ${component.threshold}%.'
-                      : 'You can miss ${component.bunkAllowance} classes and stay above ${component.threshold}%.',
+                  summary.message,
                   style: GoogleFonts.inter(
                     fontSize: 12.8,
                     fontWeight: FontWeight.w600,
@@ -1224,6 +2009,19 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                         : AppTheme.lightTextPrimary,
                   ),
                 ),
+                if (isProjected) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    'Based on the classes marked as skipped in the planner above.',
+                    style: GoogleFonts.inter(
+                      fontSize: 11.4,
+                      height: 1.35,
+                      color: isDark
+                          ? AppTheme.darkTextSecondary
+                          : AppTheme.lightTextSecondary,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -1681,4 +2479,22 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }
     return '${difference.inDays} day${difference.inDays == 1 ? '' : 's'} ago';
   }
+}
+
+class _AttendanceProjectionSummary {
+  const _AttendanceProjectionSummary({
+    required this.percentage,
+    required this.projectedTotal,
+    required this.projectedPresent,
+    required this.projectedMisses,
+    required this.isSafe,
+    required this.message,
+  });
+
+  final double percentage;
+  final int projectedTotal;
+  final int projectedPresent;
+  final int projectedMisses;
+  final bool isSafe;
+  final String message;
 }

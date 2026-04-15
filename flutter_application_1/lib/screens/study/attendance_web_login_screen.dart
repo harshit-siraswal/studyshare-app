@@ -19,13 +19,10 @@ class AttendanceWebLoginScreen extends StatefulWidget {
 class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
   late final WebViewController _controller;
   Timer? _tokenPollTimer;
-  final TextEditingController _manualTokenController = TextEditingController();
   bool _isLoading = true;
   bool _didReturnToken = false;
   bool _isDisposed = false;
-  String? _manualTokenError;
-  bool _manualEntryExpanded = false;
-  bool _captchaFallbackSuggested = false;
+  bool _hasShownEmbedWarning = false;
 
   static const String _loginUrl = 'https://kiet.cybervidya.net/';
   static const String _noTokenMessage = '__NO_TOKEN__';
@@ -132,7 +129,6 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
   void dispose() {
     _isDisposed = true;
     _tokenPollTimer?.cancel();
-    _manualTokenController.dispose();
     super.dispose();
   }
 
@@ -162,18 +158,6 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
     await _controller.loadRequest(Uri.parse(_loginUrl));
   }
 
-  void _submitManualToken() {
-    final token = _manualTokenController.text.trim();
-    if (token.length < _minTokenLength) {
-      setState(
-        () => _manualTokenError = 'Enter a valid KIET authentication token.',
-      );
-      return;
-    }
-    if (!mounted) return;
-    Navigator.of(context).pop(token);
-  }
-
   bool _looksLikeCaptchaIssue(String text) {
     final normalized = text.toLowerCase();
     return (normalized.contains('captcha') &&
@@ -187,163 +171,11 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
   }
 
   void _suggestCaptchaFallback(String message) {
-    if (_captchaFallbackSuggested) {
-      if (!_manualEntryExpanded && mounted) {
-        setState(() => _manualEntryExpanded = true);
-      }
-      return;
-    }
-    if (!mounted) return;
-    setState(() {
-      _captchaFallbackSuggested = true;
-      _manualEntryExpanded = true;
-    });
+    if (_hasShownEmbedWarning || !mounted) return;
+    setState(() => _hasShownEmbedWarning = true);
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  Widget _buildManualFallback(bool isDark) {
-    final textColor = isDark ? Colors.white : Colors.black87;
-    final secondary = isDark ? Colors.white70 : Colors.black54;
-    final panelColor = isDark ? const Color(0xFF1F1F22) : Colors.white;
-    final borderColor = isDark ? Colors.white12 : Colors.black12;
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOutCubic,
-      margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-      padding: const EdgeInsets.fromLTRB(14, 10, 14, 12),
-      decoration: BoxDecoration(
-        color: panelColor.withValues(alpha: 0.96),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: borderColor),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.12),
-            blurRadius: 16,
-            offset: const Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (_captchaFallbackSuggested) ...[
-            Container(
-              width: double.infinity,
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: Colors.orange.withValues(alpha: isDark ? 0.18 : 0.1),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: Colors.orange.withValues(alpha: 0.35),
-                ),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Padding(
-                    padding: EdgeInsets.only(top: 1),
-                    child: Icon(
-                      Icons.warning_amber_rounded,
-                      size: 18,
-                      color: Colors.orange,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'KIET ERP may reject embedded sign-in with a low captcha '
-                      'score. If the in-app page keeps failing, open KIET ERP '
-                      'in your browser and paste the '
-                      '`authenticationtoken` here.',
-                      style: GoogleFonts.inter(
-                        fontSize: 11.5,
-                        height: 1.35,
-                        color: textColor,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-          Row(
-            children: [
-              Icon(Icons.help_outline, size: 18, color: secondary),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'Having trouble with the in-app login?',
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: textColor,
-                  ),
-                ),
-              ),
-              TextButton(
-                onPressed: () => setState(
-                  () => _manualEntryExpanded = !_manualEntryExpanded,
-                ),
-                child: Text(
-                  _manualEntryExpanded ? 'Hide' : 'Use token',
-                  style: GoogleFonts.inter(fontWeight: FontWeight.w700),
-                ),
-              ),
-            ],
-          ),
-          if (_manualEntryExpanded) ...[
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _openKietLoginInBrowser,
-              icon: const Icon(Icons.open_in_new_rounded, size: 16),
-              label: Text(
-                'Open KIET ERP',
-                style: GoogleFonts.inter(fontWeight: FontWeight.w600),
-              ),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: _manualTokenController,
-              decoration: InputDecoration(
-                labelText: 'KIET authentication token',
-                hintText: 'Paste authenticationtoken value',
-                errorText: _manualTokenError,
-                border: const OutlineInputBorder(),
-              ),
-              maxLines: 2,
-              minLines: 1,
-              onChanged: (_) {
-                if (_manualTokenError != null) {
-                  setState(() => _manualTokenError = null);
-                }
-              },
-            ),
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                'Tip: In the KIET ERP tab, open devtools and copy localStorage.authenticationtoken.',
-                style: GoogleFonts.inter(fontSize: 11, color: secondary),
-              ),
-            ),
-            const SizedBox(height: 10),
-            FilledButton.icon(
-              onPressed: _submitManualToken,
-              icon: const Icon(Icons.check_circle_outline_rounded, size: 18),
-              label: Text(
-                'Continue with token',
-                style: GoogleFonts.inter(fontWeight: FontWeight.w700),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
   }
 
   Future<void> _installBridge() async {
@@ -566,7 +398,8 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
             padding: const EdgeInsets.all(20),
             children: [
               Text(
-                'Browser security blocks embedded KIET ERP on web. Use KIET ERP in a new tab, then paste your authentication token below.',
+                'Attendance sync is available only inside the mobile app. '
+                'Browser security blocks the KIET ERP session bridge on web.',
                 style: GoogleFonts.inter(
                   fontSize: 14,
                   height: 1.45,
@@ -584,40 +417,16 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
                   style: GoogleFonts.inter(fontWeight: FontWeight.w600),
                 ),
               ),
-              const SizedBox(height: 20),
-              TextField(
-                controller: _manualTokenController,
-                decoration: InputDecoration(
-                  labelText: 'KIET authentication token',
-                  hintText: 'Paste authenticationtoken value',
-                  errorText: _manualTokenError,
-                  border: const OutlineInputBorder(),
-                ),
-                maxLines: 2,
-                minLines: 1,
-                onChanged: (_) {
-                  if (_manualTokenError != null) {
-                    setState(() => _manualTokenError = null);
-                  }
-                },
-              ),
               const SizedBox(height: 12),
               Text(
-                'Tip: In KIET ERP tab, open browser devtools and copy localStorage.authenticationtoken.',
+                'Use the KIET ERP site directly in your browser if you only '
+                'need portal access. To sync attendance into StudyShare, open '
+                'this flow in the Android app.',
                 style: GoogleFonts.inter(
                   fontSize: 12,
                   color: isDark
                       ? AppTheme.darkTextSecondary
                       : AppTheme.lightTextSecondary,
-                ),
-              ),
-              const SizedBox(height: 20),
-              FilledButton.icon(
-                onPressed: _submitManualToken,
-                icon: const Icon(Icons.check_circle_outline_rounded),
-                label: Text(
-                  'Continue with token',
-                  style: GoogleFonts.inter(fontWeight: FontWeight.w600),
                 ),
               ),
             ],
@@ -667,10 +476,6 @@ class _AttendanceWebLoginScreenState extends State<AttendanceWebLoginScreen> {
                 ),
               ),
             ),
-          Align(
-            alignment: Alignment.bottomCenter,
-            child: SafeArea(top: false, child: _buildManualFallback(isDark)),
-          ),
         ],
       ),
     );

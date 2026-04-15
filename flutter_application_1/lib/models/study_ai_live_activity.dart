@@ -4,7 +4,7 @@ enum AiLiveActivityStatus { pending, active, completed, warning, failed }
 
 enum AiAnswerOrigin { notesOnly, notesPlusWeb, webOnly, insufficientNotes }
 
-enum AiLiveSourceKind { notes, web, video }
+enum AiLiveSourceKind { notes, web, video, notice }
 
 extension AiLiveActivityStatusX on AiLiveActivityStatus {
   String get wireValue => switch (this) {
@@ -65,6 +65,7 @@ extension AiLiveSourceKindX on AiLiveSourceKind {
     AiLiveSourceKind.notes => 'notes',
     AiLiveSourceKind.web => 'web',
     AiLiveSourceKind.video => 'video',
+    AiLiveSourceKind.notice => 'notice',
   };
 
   static AiLiveSourceKind fromWireValue(String? value) {
@@ -74,6 +75,8 @@ extension AiLiveSourceKindX on AiLiveSourceKind {
       case 'video':
       case 'youtube':
         return AiLiveSourceKind.video;
+      case 'notice':
+        return AiLiveSourceKind.notice;
       case 'notes':
       default:
         return AiLiveSourceKind.notes;
@@ -90,6 +93,9 @@ class AiLiveActivitySource {
     this.timestamp,
     this.url,
     this.fileId,
+    this.sourceId,
+    this.sourceTable,
+    this.departmentId,
     this.subject,
   });
 
@@ -99,11 +105,16 @@ class AiLiveActivitySource {
   final String? timestamp;
   final String? url;
   final String? fileId;
+  final String? sourceId;
+  final String? sourceTable;
+  final String? departmentId;
   final String? subject;
 
   bool get isClickable =>
       (kind == AiLiveSourceKind.notes &&
           (fileId?.trim().isNotEmpty ?? false)) ||
+      (kind == AiLiveSourceKind.notice &&
+          (sourceId?.trim().isNotEmpty ?? false)) ||
       (kind != AiLiveSourceKind.notes && (url?.trim().isNotEmpty ?? false));
 
   AiLiveActivitySource copyWith({
@@ -113,6 +124,9 @@ class AiLiveActivitySource {
     String? timestamp,
     String? url,
     String? fileId,
+    String? sourceId,
+    String? sourceTable,
+    String? departmentId,
     String? subject,
   }) {
     return AiLiveActivitySource(
@@ -122,6 +136,9 @@ class AiLiveActivitySource {
       timestamp: timestamp ?? this.timestamp,
       url: url ?? this.url,
       fileId: fileId ?? this.fileId,
+      sourceId: sourceId ?? this.sourceId,
+      sourceTable: sourceTable ?? this.sourceTable,
+      departmentId: departmentId ?? this.departmentId,
       subject: subject ?? this.subject,
     );
   }
@@ -137,6 +154,9 @@ class AiLiveActivitySource {
       timestamp: json['timestamp']?.toString(),
       url: json['url']?.toString(),
       fileId: json['file_id']?.toString(),
+      sourceId: json['source_id']?.toString(),
+      sourceTable: json['source_table']?.toString(),
+      departmentId: json['department_id']?.toString(),
       subject: json['subject']?.toString(),
     );
   }
@@ -147,6 +167,12 @@ class AiLiveActivitySource {
       'kind': kind.wireValue,
       if (page != null) 'page': page,
       if (fileId != null && fileId!.trim().isNotEmpty) 'file_id': fileId,
+      if (sourceId != null && sourceId!.trim().isNotEmpty)
+        'source_id': sourceId,
+      if (sourceTable != null && sourceTable!.trim().isNotEmpty)
+        'source_table': sourceTable,
+      if (departmentId != null && departmentId!.trim().isNotEmpty)
+        'department_id': departmentId,
       if (url != null && url!.trim().isNotEmpty) 'url': url,
       if (timestamp != null && timestamp!.trim().isNotEmpty)
         'timestamp': timestamp,

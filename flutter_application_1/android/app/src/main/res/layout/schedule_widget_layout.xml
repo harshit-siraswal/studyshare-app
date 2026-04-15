@@ -68,6 +68,34 @@
         android:textStyle="bold" />
 
     <LinearLayout
+        android:id="@+id/widget_progress_section"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/widget_progress_label"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="end"
+            android:textColor="@color/widget_schedule_live_accent"
+            android:textSize="12sp"
+            android:textStyle="bold" />
+
+        <ProgressBar
+            android:id="@+id/widget_hero_progress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="6dp"
+            android:layout_marginTop="8dp"
+            android:max="100"
+            android:progress="0"
+            android:progressDrawable="@drawable/widget_schedule_progress_drawable" />
+    </LinearLayout>
+
+    <LinearLayout
         android:id="@+id/widget_cards_container"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"

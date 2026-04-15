@@ -15,8 +15,8 @@ import '../services/ai_output_local_service.dart';
 import '../services/backend_api_service.dart';
 import '../services/summary_pdf_service.dart';
 import '../services/supabase_service.dart';
+import 'ai_loading_game_card.dart';
 import 'ai_logo.dart';
-import 'branded_loader.dart';
 import 'paywall_dialog.dart';
 
 class QuizQuestion {
@@ -178,6 +178,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   String _classifyGenerationError(String message) {
     final lowered = message.toLowerCase();
     if (_looksLikeTokenLimitError(message)) return 'token_limit';
+    if (_looksLikeHighTrafficError(message)) return 'traffic';
     if (lowered.contains('socket') ||
         lowered.contains('host lookup') ||
         lowered.contains('network')) {
@@ -189,6 +190,24 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
       return 'format';
     }
     return 'unknown';
+  }
+
+  bool _looksLikeHighTrafficError(String message) {
+    final lowered = message.toLowerCase();
+    return lowered.contains('rate limit') ||
+        lowered.contains('too many requests') ||
+        lowered.contains('http 429') ||
+        lowered.contains('high traffic');
+  }
+
+  String _presentGenerationError(String message) {
+    if (_looksLikeTokenLimitError(message)) {
+      return 'Your AI tokens are exhausted for this cycle. Buy more AI tokens to continue.';
+    }
+    if (_looksLikeHighTrafficError(message)) {
+      return 'StudyShare is seeing high traffic right now. Please try again in a moment.';
+    }
+    return message;
   }
 
   @override
@@ -919,9 +938,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         },
       );
       setState(() {
-        _error = _looksLikeTokenLimitError(message)
-            ? 'Your AI tokens are exhausted for this cycle. Buy more AI tokens to continue.'
-            : message;
+        _error = _presentGenerationError(message);
       });
     } finally {
       if (mounted) {
@@ -937,11 +954,10 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   /// extra PDFs. Uses the /api/ai/multi-quiz endpoint.
   Future<void> _generateMultiQuiz() async {
     if (_isMultiQuizLoading) return;
-    final allIds = [widget.resourceId, ..._extraPdfIds]
-        .map((id) => id.trim())
-        .where((id) => id.isNotEmpty)
-        .toSet()
-        .toList();
+    final allIds = [
+      widget.resourceId,
+      ..._extraPdfIds,
+    ].map((id) => id.trim()).where((id) => id.isNotEmpty).toSet().toList();
     if (allIds.isEmpty) return;
 
     setState(() {
@@ -1022,9 +1038,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
       if (mounted) {
         setState(() {
-          _multiQuizError = _looksLikeTokenLimitError(message)
-              ? 'Your AI tokens are exhausted for this cycle. Buy more AI tokens to continue.'
-              : message;
+          _multiQuizError = _presentGenerationError(message);
         });
       }
     } finally {
@@ -1036,7 +1050,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     final collegeId = widget.collegeId;
     if (collegeId == null || collegeId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('College scope required for multi-PDF quiz.')),
+        const SnackBar(
+          content: Text('College scope required for multi-PDF quiz.'),
+        ),
       );
       return;
     }
@@ -1109,7 +1125,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                             style: GoogleFonts.inter(
                               fontWeight: FontWeight.w700,
                               fontSize: 15,
-                              color: isDark ? Colors.white : const Color(0xFF0F172A),
+                              color: isDark
+                                  ? Colors.white
+                                  : const Color(0xFF0F172A),
                             ),
                           ),
                         ),
@@ -1140,7 +1158,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                             if (val == true && selected.length >= 4) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(
-                                  content: Text('Maximum 4 extra PDFs allowed.'),
+                                  content: Text(
+                                    'Maximum 4 extra PDFs allowed.',
+                                  ),
                                 ),
                               );
                               return;
@@ -1160,7 +1180,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                             style: GoogleFonts.inter(
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
-                              color: isDark ? Colors.white : const Color(0xFF1E293B),
+                              color: isDark
+                                  ? Colors.white
+                                  : const Color(0xFF1E293B),
                             ),
                           ),
                           controlAffinity: ListTileControlAffinity.leading,
@@ -2039,15 +2061,18 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     return TextSpan(children: spans);
   }
 
+  Widget _buildLoadingArcade({required String loadingMessage}) {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+        child: AiLoadingGameCard(compact: true, loadingMessage: loadingMessage),
+      ),
+    );
+  }
+
   Widget _buildSummaryTab(bool isDark) {
     if (_isLoading && _loadingType == 'summary') {
-      return const Center(
-        child: BrandedLoader(
-          compact: true,
-          showQuotes: false,
-          message: 'Generating summary...',
-        ),
-      );
+      return _buildLoadingArcade(loadingMessage: 'Generating summary...');
     }
 
     if (_summary == null || _summary!.trim().isEmpty) {
@@ -2164,13 +2189,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
   Widget _buildQuizTab(bool isDark) {
     if (_isLoading && _loadingType == 'quiz') {
-      return const Center(
-        child: BrandedLoader(
-          compact: true,
-          showQuotes: false,
-          message: 'Building quiz...',
-        ),
-      );
+      return _buildLoadingArcade(loadingMessage: 'Building quiz...');
     }
 
     if (_quiz == null || _quiz!.isEmpty) {
@@ -2187,13 +2206,15 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
             const SizedBox(height: 12),
             // Multi-PDF question paper CTA
             if (_isMultiQuizLoading)
-              const Center(
+              Center(
                 child: Padding(
                   padding: EdgeInsets.all(16),
-                  child: BrandedLoader(
+                  child: AiLoadingGameCard(
                     compact: true,
-                    showQuotes: false,
-                    message: 'Building multi-PDF question paper...',
+                    loadingMessage: 'Building multi-PDF question paper...',
+                    headline: 'Beat the high score before the paper lands',
+                    subheadline:
+                        'Fast arcade rounds keep the wait from feeling idle.',
                   ),
                 ),
               )
@@ -2239,7 +2260,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                               style: GoogleFonts.inter(
                                 fontSize: 13.5,
                                 fontWeight: FontWeight.w700,
-                                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                color: isDark
+                                    ? Colors.white
+                                    : const Color(0xFF0F172A),
                               ),
                             ),
                             const SizedBox(height: 2),
@@ -2247,7 +2270,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                               'Combine up to 5 PDFs for a comprehensive exam prep paper.',
                               style: GoogleFonts.inter(
                                 fontSize: 11.5,
-                                color: isDark ? Colors.white60 : const Color(0xFF475569),
+                                color: isDark
+                                    ? Colors.white60
+                                    : const Color(0xFF475569),
                               ),
                             ),
                           ],
@@ -2256,7 +2281,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                       const SizedBox(width: 8),
                       Icon(
                         Icons.chevron_right_rounded,
-                        color: isDark ? Colors.white38 : const Color(0xFF94A3B8),
+                        color: isDark
+                            ? Colors.white38
+                            : const Color(0xFF94A3B8),
                       ),
                     ],
                   ),
@@ -2267,10 +2294,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                 padding: const EdgeInsets.only(top: 10),
                 child: Text(
                   _multiQuizError!,
-                  style: GoogleFonts.inter(
-                    fontSize: 12,
-                    color: AppTheme.error,
-                  ),
+                  style: GoogleFonts.inter(fontSize: 12, color: AppTheme.error),
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -2456,13 +2480,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
   Widget _buildFlashcardsTab(bool isDark) {
     if (_isLoading && _loadingType == 'flashcards') {
-      return const Center(
-        child: BrandedLoader(
-          compact: true,
-          showQuotes: false,
-          message: 'Creating flashcards...',
-        ),
-      );
+      return _buildLoadingArcade(loadingMessage: 'Creating flashcards...');
     }
 
     if (_flashcards == null || _flashcards!.isEmpty) {
@@ -2607,10 +2625,11 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                                           vertical: 5,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: (isBackFace
-                                                  ? const Color(0xFF2E1065)
-                                                  : Colors.white)
-                                              .withValues(alpha: 0.22),
+                                          color:
+                                              (isBackFace
+                                                      ? const Color(0xFF2E1065)
+                                                      : Colors.white)
+                                                  .withValues(alpha: 0.22),
                                           borderRadius: BorderRadius.circular(
                                             14,
                                           ),

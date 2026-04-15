@@ -146,6 +146,9 @@ class ScheduleWidgetProvider : HomeWidgetProvider() {
             val cards = parseCards(widgetData)
             val hasCards = cards.isNotEmpty()
             val isLive = widgetData.getBoolean("schedule_is_live", false)
+            val showHeroProgress =
+                widgetData.getBoolean("schedule_hero_progress_visible", false)
+            val heroProgress = widgetData.getInt("schedule_hero_progress", 0)
 
             val views = RemoteViews(context.packageName, R.layout.schedule_widget_layout).apply {
                 setTextViewText(
@@ -162,6 +165,10 @@ class ScheduleWidgetProvider : HomeWidgetProvider() {
                 setTextViewText(
                     R.id.widget_title,
                     widgetData.getString("schedule_room_label", "Open Schedule"),
+                )
+                setTextViewText(
+                    R.id.widget_progress_label,
+                    widgetData.getString("schedule_progress_label", ""),
                 )
                 setTextViewText(
                     R.id.widget_empty_message,
@@ -181,6 +188,16 @@ class ScheduleWidgetProvider : HomeWidgetProvider() {
                     R.id.widget_live_dot,
                     if (isLive) View.VISIBLE else View.INVISIBLE,
                 )
+                setViewVisibility(
+                    R.id.widget_progress_section,
+                    if (showHeroProgress) View.VISIBLE else View.GONE,
+                )
+                setProgressBar(
+                    R.id.widget_hero_progress,
+                    100,
+                    heroProgress.coerceIn(0, 100),
+                    false,
+                )
                 setTextColor(
                     R.id.widget_chip,
                     ContextCompat.getColor(
@@ -199,6 +216,10 @@ class ScheduleWidgetProvider : HomeWidgetProvider() {
                 )
                 setViewVisibility(
                     R.id.widget_swipe_hint,
+                    if (hasCards) View.VISIBLE else View.GONE,
+                )
+                setViewVisibility(
+                    R.id.widget_footer_row,
                     if (hasCards) View.VISIBLE else View.GONE,
                 )
                 setOnClickPendingIntent(
