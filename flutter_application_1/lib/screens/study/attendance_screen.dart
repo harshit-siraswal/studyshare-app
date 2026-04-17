@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -566,12 +567,28 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     return counts;
   }
 
+  Map<String, int> _scheduledClassCountByComponent(AttendanceSnapshot snapshot) {
+    final counts = <String, int>{};
+    for (final entry in _upcomingScheduleEntries(
+      snapshot,
+    ).where(_isClassEntry)) {
+      final key = _projectionBucketKeyForEntry(entry);
+      counts.update(key, (value) => value + 1, ifAbsent: () => 1);
+    }
+    return counts;
+  }
+
   _AttendanceProjectionSummary _buildProjectedSummary(
     AttendanceComponent component, {
     int projectedMisses = 0,
+    int scheduledFutureClasses = 0,
   }) {
     final present = component.attendedClasses + component.extraAttendance;
-    final total = component.totalClasses + projectedMisses;
+    final projectedFutureClasses = math.max(
+      0,
+      scheduledFutureClasses - projectedMisses,
+    );
+    final total = math.max(present, component.totalClasses + projectedFutureClasses);
     final percentage = total <= 0 ? 0.0 : (present / total) * 100;
     final safe = percentage >= component.threshold;
     final classesToSafety = safe
@@ -1039,6 +1056,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                                                 _buildScheduleEntryCard(
                                                                   entry,
                                                                   isDark,
+                                                                  showDate: false,
                                                                 ),
                                                           );
                                                         })
@@ -1261,6 +1279,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       snapshot,
     ).where(_isClassEntry).toList(growable: false);
     final projectedMissCounts = _projectedMissCountByComponent(snapshot);
+    final scheduledClassCounts = _scheduledClassCountByComponent(snapshot);
 
     return RefreshIndicator(
       onRefresh: _syncWithSavedToken,
@@ -1301,6 +1320,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   isDark,
                   projectedMisses:
                       projectedMissCounts[_projectionBucketKeyForComponent(
+                        component,
+                      )] ??
+                      0,
+                  scheduledFutureClasses:
+                      scheduledClassCounts[_projectionBucketKeyForComponent(
                         component,
                       )] ??
                       0,
@@ -1876,10 +1900,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     AttendanceComponent component,
     bool isDark, {
     int projectedMisses = 0,
+    int scheduledFutureClasses = 0,
   }) {
     final summary = _buildProjectedSummary(
       component,
       projectedMisses: projectedMisses,
+      scheduledFutureClasses: scheduledFutureClasses,
     );
     final accent = summary.isSafe ? Colors.green : Colors.redAccent;
     final isProjected = projectedMisses > 0;
@@ -2111,7 +2137,11 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     );
   }
 
-  Widget _buildScheduleEntryCard(AttendanceScheduleEntry entry, bool isDark) {
+  Widget _buildScheduleEntryCard(
+    AttendanceScheduleEntry entry,
+    bool isDark, {
+    bool showDate = true,
+  }) {
     final now = DateTime.now();
     final entryDate = _attendanceService.tryParseDate(entry.lectureDate);
     final today = DateTime(now.year, now.month, now.day);
@@ -2332,17 +2362,19 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                 color: accentColor.withValues(alpha: 0.8),
                               ),
                             ),
-                            const SizedBox(height: 6),
-                            Text(
-                              _formatDate(entry.lectureDate),
-                              style: GoogleFonts.inter(
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.w600,
-                                color: isDark
-                                    ? AppTheme.darkTextSecondary
-                                    : AppTheme.lightTextSecondary,
+                            if (showDate) ...[
+                              const SizedBox(height: 6),
+                              Text(
+                                _formatDate(entry.lectureDate),
+                                style: GoogleFonts.inter(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark
+                                      ? AppTheme.darkTextSecondary
+                                      : AppTheme.lightTextSecondary,
+                                ),
                               ),
-                            ),
+                            ],
                           ],
                         ),
                       ),

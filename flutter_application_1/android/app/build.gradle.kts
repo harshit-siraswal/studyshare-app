@@ -20,6 +20,9 @@ configurations.all {
 android {
     namespace = "me.studyshare.android"
     compileSdk = 36
+    val isDebugVariantRequested = gradle.startParameter.taskNames.any {
+        it.contains("debug", ignoreCase = true)
+    }
     val disableMinify =
         project.findProperty("disableMinify")
             ?.toString()
@@ -64,10 +67,14 @@ android {
         versionName = flutter.versionName
         multiDexEnabled = true
         ndk {
-            // Keep distributed APK ABIs aligned with Flutter engine binaries.
-            // This prevents packaging x86/x64-only plugin libs without matching
-            // libflutter/libapp artifacts, which can cause launch-time crashes.
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+            // Keep release builds aligned with shipped mobile ABIs, but allow
+            // emulator-compatible x86/x86_64 Flutter engine binaries in debug.
+            abiFilters.clear()
+            abiFilters += if (isDebugVariantRequested) {
+                listOf("x86", "x86_64", "armeabi-v7a", "arm64-v8a")
+            } else {
+                listOf("armeabi-v7a", "arm64-v8a")
+            }
         }
     }
 
@@ -127,9 +134,10 @@ android {
 
     packaging {
         jniLibs {
-            // Drop desktop/emulator ABIs from transitive Android AARs so APK
-            // does not advertise unsupported x86/x86_64 native stacks.
-            excludes += setOf("**/x86/*.so", "**/x86_64/*.so")
+            if (!isDebugVariantRequested) {
+                // Keep release APKs lean and aligned with supported mobile ABIs.
+                excludes += setOf("**/x86/*.so", "**/x86_64/*.so")
+            }
         }
     }
 }

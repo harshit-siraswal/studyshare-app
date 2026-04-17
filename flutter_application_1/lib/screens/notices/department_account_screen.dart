@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
@@ -177,8 +179,15 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
 
     final email = _activeUserEmail;
     final wasFollowing = _isFollowing;
+    final previousCount = _followerCount;
 
-    setState(() => _isFollowLoading = true);
+    setState(() {
+      _isFollowLoading = true;
+      _isFollowing = !wasFollowing;
+      _followerCount = wasFollowing
+          ? math.max(0, _followerCount - 1)
+          : _followerCount + 1;
+    });
 
     try {
       if (wasFollowing) {
@@ -225,6 +234,10 @@ class _DepartmentAccountScreenState extends State<DepartmentAccountScreen> {
     } catch (e) {
       debugPrint('Department follow update failed: $e');
       if (!mounted) return;
+      setState(() {
+        _isFollowing = wasFollowing;
+        _followerCount = previousCount;
+      });
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(_followErrorMessage(e))));

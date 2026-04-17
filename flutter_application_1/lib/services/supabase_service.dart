@@ -5702,27 +5702,65 @@ class SupabaseService {
     return followedIds.contains(normalizedDepartmentId);
   }
 
-  /// Get department follower count
-  Future<int> getDepartmentFollowerCount(
-    String departmentId,
+  Future<Map<String, int>> getDepartmentFollowerCounts(
+    List<String> departmentIds,
     String collegeId,
   ) async {
-    final normalizedDepartmentId = normalizeDepartmentCode(departmentId);
+    final normalizedDepartmentIds = departmentIds
+        .map(normalizeDepartmentCode)
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+    if (normalizedDepartmentIds.isEmpty) {
+      return const <String, int>{};
+    }
+
     final normalizedCollegeId = await _resolveDepartmentCollegeScope(collegeId);
-    if (normalizedDepartmentId.isEmpty) return 0;
+    try {
+      final backendCounts = await _api.getDepartmentFollowerCounts(
+        normalizedDepartmentIds,
+        collegeId: normalizedCollegeId.isNotEmpty ? normalizedCollegeId : null,
+      );
+      if (backendCounts.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
+        return Map<String, int>.fromEntries(
+          normalizedDepartmentIds.map(
+            (id) => MapEntry(id, backendCounts[normalizeDepartmentCode(id)] ?? 0),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint(
+        'Backend department follower counts lookup failed, falling back to Supabase: $e',
+      );
+      if (!_hasConfiguredSupabaseAnonKey) {
+        return Map<String, int>.fromEntries(
+          normalizedDepartmentIds.map((id) => MapEntry(id, 0)),
+        );
+      }
+    }
+
+    final counts = <String, int>{
+      for (final departmentId in normalizedDepartmentIds) departmentId: 0,
+    };
 
     try {
       var uniqueQuery = _client
           .from('department_followers')
-          .select('user_id, follower_id, user_email, follower_email')
-          .ilike('department_id', normalizedDepartmentId);
+          .select('department_id, user_id, follower_id, user_email, follower_email')
+          .inFilter('department_id', normalizedDepartmentIds);
       if (normalizedCollegeId.isNotEmpty) {
-        uniqueQuery = uniqueQuery.ilike('college_id', normalizedCollegeId);
+        uniqueQuery = uniqueQuery.eq('college_id', normalizedCollegeId);
       }
       final uniqueResponse = await uniqueQuery;
-      final uniqueFollowerKeys = <String>{};
+      final uniqueFollowerKeysByDepartment = <String, Set<String>>{
+        for (final departmentId in normalizedDepartmentIds) departmentId: <String>{},
+      };
       for (final row in (uniqueResponse as List).whereType<Map>()) {
         final map = Map<String, dynamic>.from(row);
+        final departmentId = normalizeDepartmentCode(
+          map['department_id']?.toString(),
+        );
+        if (!uniqueFollowerKeysByDepartment.containsKey(departmentId)) continue;
         final keyCandidates = <String>[
           map['user_id']?.toString().trim() ?? '',
           map['follower_id']?.toString().trim() ?? '',
@@ -5734,40 +5772,73 @@ class SupabaseService {
           orElse: () => '',
         );
         if (key.isNotEmpty) {
-          uniqueFollowerKeys.add(key);
+          uniqueFollowerKeysByDepartment[departmentId]!.add(key);
         }
       }
-      if (uniqueFollowerKeys.isNotEmpty) {
-        return uniqueFollowerKeys.length;
+      for (final entry in uniqueFollowerKeysByDepartment.entries) {
+        counts[entry.key] = entry.value.length;
       }
-
-      var query = _client
-          .from('department_followers')
-          .count(CountOption.exact)
-          .ilike('department_id', normalizedDepartmentId);
-      if (normalizedCollegeId.isNotEmpty) {
-        query = query.ilike('college_id', normalizedCollegeId);
-      }
-      final response = await query;
-      return response;
     } catch (e) {
       if (_isMissingColumnError(e, 'college_id')) {
         try {
-          final response = await _client
+          final uniqueResponse = await _client
               .from('department_followers')
-              .count(CountOption.exact)
-              .eq('department_id', normalizedDepartmentId);
-          return response;
+              .select('department_id, user_id, follower_id, user_email, follower_email')
+              .inFilter('department_id', normalizedDepartmentIds);
+          final uniqueFollowerKeysByDepartment = <String, Set<String>>{
+            for (final departmentId in normalizedDepartmentIds)
+              departmentId: <String>{},
+          };
+          for (final row in (uniqueResponse as List).whereType<Map>()) {
+            final map = Map<String, dynamic>.from(row);
+            final departmentId = normalizeDepartmentCode(
+              map['department_id']?.toString(),
+            );
+            if (!uniqueFollowerKeysByDepartment.containsKey(departmentId)) {
+              continue;
+            }
+            final keyCandidates = <String>[
+              map['user_id']?.toString().trim() ?? '',
+              map['follower_id']?.toString().trim() ?? '',
+              _normalizeEmail(map['user_email']?.toString()),
+              _normalizeEmail(map['follower_email']?.toString()),
+            ];
+            final key = keyCandidates.firstWhere(
+              (value) => value.isNotEmpty,
+              orElse: () => '',
+            );
+            if (key.isNotEmpty) {
+              uniqueFollowerKeysByDepartment[departmentId]!.add(key);
+            }
+          }
+          for (final entry in uniqueFollowerKeysByDepartment.entries) {
+            counts[entry.key] = entry.value.length;
+          }
         } catch (fallbackError) {
           debugPrint(
-            'Error getting department follower count: $e | $fallbackError',
+            'Error getting department follower counts: $e | $fallbackError',
           );
-          return 0;
         }
+      } else {
+        debugPrint('Error getting department follower counts: $e');
       }
-      debugPrint('Error getting department follower count: $e');
-      return 0;
     }
+
+    return counts;
+  }
+
+  /// Get department follower count
+  Future<int> getDepartmentFollowerCount(
+    String departmentId,
+    String collegeId,
+  ) async {
+    final normalizedDepartmentId = normalizeDepartmentCode(departmentId);
+    if (normalizedDepartmentId.isEmpty) return 0;
+    final counts = await getDepartmentFollowerCounts(
+      <String>[normalizedDepartmentId],
+      collegeId,
+    );
+    return counts[normalizedDepartmentId] ?? 0;
   }
 
   /// Get followed department IDs

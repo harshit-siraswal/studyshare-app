@@ -146,6 +146,8 @@ flutter:
   # Assets for the application
   assets:
     - assets/images/
+    - assets/images/mini_games/flappy/
+    - assets/images/mini_games/dino/
     - assets/icon/
     - assets/sounds/
     - assets/videos/

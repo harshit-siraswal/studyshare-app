@@ -337,21 +337,16 @@ class _NoticesScreenState extends State<NoticesScreen>
 
   Future<void> _loadDepartmentFollowerCounts() async {
     try {
-      final entries = await Future.wait(
-        _departmentAccounts.map((account) async {
-          final count = await _supabaseService.getDepartmentFollowerCount(
-            account.id,
-            widget.collegeId,
-          );
-          return MapEntry(account.id, count);
-        }),
+      final counts = await _supabaseService.getDepartmentFollowerCounts(
+        _departmentAccounts.map((account) => account.id).toList(growable: false),
+        widget.collegeId,
       );
 
       if (!mounted) return;
       setState(() {
         _departmentFollowerCounts
           ..clear()
-          ..addEntries(entries);
+          ..addAll(counts);
       });
     } catch (e) {
       debugPrint('Error loading department follower counts: $e');

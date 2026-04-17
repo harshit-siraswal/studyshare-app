@@ -11,6 +11,7 @@ import '../models/ai_question_paper.dart';
 import '../screens/ai_chat_screen.dart';
 import '../screens/ai_question_paper_quiz_screen.dart';
 import '../services/analytics_service.dart';
+import '../services/ai_chat_notification_service.dart';
 import '../services/ai_output_local_service.dart';
 import '../services/backend_api_service.dart';
 import '../services/summary_pdf_service.dart';
@@ -100,12 +101,18 @@ class AiStudyToolsSheet extends StatefulWidget {
 }
 
 class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   final AnalyticsService _analytics = AnalyticsService.instance;
   final BackendApiService _api = BackendApiService();
   final SupabaseService _supabaseService = SupabaseService();
   static const Color _studioBlue = Color(0xFF2563EB);
   static const Color _studioBlueDark = Color(0xFF1D4ED8);
+  static const Duration _aiJobPollInterval = Duration(seconds: 3);
+  static const List<String> _backgroundGenerationTypes = <String>[
+    'summary',
+    'quiz',
+    'flashcards',
+  ];
 
   late TabController _tabController;
   bool _isLoading = false;
@@ -132,6 +139,11 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   final Map<String, bool> _savedLocallyMap = {};
 
   bool _isFullscreen = false;
+  Timer? _aiJobPollTimer;
+  bool _isPollingPendingJob = false;
+  String? _pendingJobType;
+  String? _pendingJobId;
+  bool _pendingJobRestored = false;
 
   // Multi-PDF question paper selection
   final Set<String> _extraPdfIds = {};
@@ -213,6 +225,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _flashcardPageController = PageController(viewportFraction: 0.9);
     final safeInitialIndex = widget.initialTabIndex.clamp(0, 3).toInt();
     _tabController = TabController(
@@ -233,8 +246,11 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
       );
       if (mounted) setState(() {});
     });
+    unawaited(AiChatNotificationService.instance.initialize());
     unawaited(_trackAiStudioOpened());
-    _loadSavedOutputs().then((_) {
+    _loadSavedOutputs().then((_) async {
+      if (!mounted) return;
+      await _restorePendingGeneration();
       if (!mounted) return;
       _handleInitialAutoGeneration();
     });
@@ -242,9 +258,19 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _stopPendingJobPolling();
     _flashcardPageController.dispose();
     _tabController.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    if (_pendingJobType == null || _pendingJobId == null) return;
+    unawaited(_pollPendingJob(force: true));
+    _ensurePendingJobPolling();
   }
 
   void _resetFlashcardDeckToStart() {
@@ -326,6 +352,332 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     } catch (e) {
       // Silently ignore load errors - user can regenerate content
       debugPrint('Failed to load saved outputs: $e');
+    }
+  }
+
+  String _buildAiClientRequestId(String type) {
+    return 'studio:${widget.resourceId}:$type:${DateTime.now().millisecondsSinceEpoch}';
+  }
+
+  Map<String, dynamic> _normalizeAiStudioResponse(Map<String, dynamic> raw) {
+    final outerData = raw['data'];
+    if (outerData is Map) {
+      final nested = outerData.map(
+        (key, value) => MapEntry(key.toString(), value),
+      );
+      return <String, dynamic>{
+        'data': nested.containsKey('data') ? nested['data'] : nested,
+        'cached': nested['cached'] == true || raw['cached'] == true,
+        'source': nested['source'] ?? raw['source'],
+        'studio_kind': nested['studio_kind'] ?? raw['studio_kind'],
+      };
+    }
+    return <String, dynamic>{
+      'data': outerData,
+      'cached': raw['cached'] == true,
+      'source': raw['source'],
+      'studio_kind': raw['studio_kind'],
+    };
+  }
+
+  Future<Map<String, dynamic>> _requestBackgroundGeneration({
+    required String type,
+    required bool regenerate,
+    required bool useOcr,
+    required bool forceOcr,
+    required String clientRequestId,
+  }) {
+    switch (type) {
+      case 'summary':
+        return _api.getAiSummary(
+          fileId: widget.resourceId,
+          collegeId: widget.collegeId,
+          useOcr: useOcr,
+          forceOcr: forceOcr,
+          force: regenerate,
+          includeSource: false,
+          videoUrl: widget.videoUrl,
+          asyncRequested: true,
+          clientRequestId: clientRequestId,
+        );
+      case 'quiz':
+        return _api.getAiQuiz(
+          fileId: widget.resourceId,
+          collegeId: widget.collegeId,
+          useOcr: useOcr,
+          forceOcr: forceOcr,
+          force: regenerate,
+          includeSource: false,
+          videoUrl: widget.videoUrl,
+          asyncRequested: true,
+          clientRequestId: clientRequestId,
+        );
+      default:
+        return _api.getAiFlashcards(
+          fileId: widget.resourceId,
+          collegeId: widget.collegeId,
+          useOcr: useOcr,
+          forceOcr: forceOcr,
+          force: regenerate,
+          includeSource: false,
+          videoUrl: widget.videoUrl,
+          asyncRequested: true,
+          clientRequestId: clientRequestId,
+        );
+    }
+  }
+
+  Future<void> _persistGeneratedOutput(
+    String type,
+    dynamic data,
+  ) async {
+    if (data == null) return;
+    await widget.localStore.saveOutput(
+      resourceId: widget.resourceId,
+      type: type,
+      data: data,
+    );
+  }
+
+  Future<int> _applyGeneratedResponse(
+    String type,
+    Map<String, dynamic> rawResponse, {
+    required bool regenerate,
+    required bool useOcr,
+    required bool forceOcr,
+    bool persistLocally = false,
+    bool notifyOnReady = false,
+  }) async {
+    final response = _normalizeAiStudioResponse(rawResponse);
+    final cached = response['cached'] == true;
+    late final int outputSize;
+    dynamic persistPayload;
+
+    if (type == 'summary') {
+      final data = response['data'];
+      final summaryText = data is String ? data.trim() : data?.toString().trim();
+      if (summaryText == null || summaryText.isEmpty) {
+        throw Exception('Could not create a valid summary. Please try again.');
+      }
+      outputSize = summaryText.length;
+      persistPayload = summaryText;
+      if (!mounted) return outputSize;
+      setState(() {
+        _summary = summaryText;
+        _cachedMap['summary'] = cached;
+        _savedLocallyMap['summary'] = persistLocally;
+        _isLoading = false;
+        _loadingType = null;
+        _error = null;
+      });
+    } else if (type == 'quiz') {
+      final parsed = _parseQuizPayload(response);
+      if (parsed.isEmpty) {
+        throw Exception(
+          'Could not create a valid quiz from the AI response. Please try again.',
+        );
+      }
+      outputSize = parsed.length;
+      persistPayload = parsed.map((q) => q.toJson()).toList();
+      if (!mounted) return outputSize;
+      setState(() {
+        _quiz = parsed;
+        _selectedAnswers.clear();
+        _showAnswers = false;
+        _cachedMap['quiz'] = cached;
+        _savedLocallyMap['quiz'] = persistLocally;
+        _isLoading = false;
+        _loadingType = null;
+        _error = null;
+      });
+    } else {
+      final parsed = _parseFlashcardPayload(response);
+      if (parsed.isEmpty) {
+        throw Exception(
+          'Could not create valid flashcards from the AI response. Please try again.',
+        );
+      }
+      outputSize = parsed.length;
+      persistPayload = parsed.map((card) => card.toJson()).toList();
+      if (!mounted) return outputSize;
+      setState(() {
+        _flashcards = parsed;
+        _flippedCardIndexes.clear();
+        _activeFlashcardIndex = 0;
+        _cachedMap['flashcards'] = cached;
+        _savedLocallyMap['flashcards'] = persistLocally;
+        _isLoading = false;
+        _loadingType = null;
+        _error = null;
+      });
+      _resetFlashcardDeckToStart();
+    }
+
+    if (persistLocally) {
+      try {
+        await _persistGeneratedOutput(type, persistPayload);
+      } catch (e) {
+        debugPrint('Failed to persist AI Studio output for $type: $e');
+      }
+    }
+
+    await _analytics.logEvent(
+      'ai_studio_generate_success',
+      parameters: <String, Object?>{
+        ..._baseAnalyticsParameters(),
+        'content_type': type,
+        'regenerate': regenerate,
+        'use_ocr': useOcr,
+        'force_ocr': forceOcr,
+        'cached': cached,
+        'output_size': outputSize,
+        'delivery': persistLocally ? 'background' : 'sync',
+      },
+    );
+    _supabaseService.markAiTokenBalanceStale();
+
+    if (notifyOnReady) {
+      await AiChatNotificationService.instance.notifyAnswerReady(
+        title: '${_labelForType(type)} ready',
+        body: '${widget.resourceTitle} is ready in AI Studio.',
+      );
+    }
+
+    return outputSize;
+  }
+
+  void _stopPendingJobPolling() {
+    _aiJobPollTimer?.cancel();
+    _aiJobPollTimer = null;
+  }
+
+  void _ensurePendingJobPolling() {
+    if (_pendingJobType == null || _pendingJobId == null) return;
+    _aiJobPollTimer ??= Timer.periodic(_aiJobPollInterval, (_) {
+      unawaited(_pollPendingJob());
+    });
+  }
+
+  Future<void> _clearPendingJob({
+    required String type,
+    bool clearLoadingState = true,
+  }) async {
+    _stopPendingJobPolling();
+    await widget.localStore.clearPendingJob(
+      resourceId: widget.resourceId,
+      type: type,
+    );
+    if (!mounted) return;
+    setState(() {
+      if (_pendingJobType == type) {
+        _pendingJobType = null;
+        _pendingJobId = null;
+        _pendingJobRestored = false;
+      }
+      if (clearLoadingState) {
+        _isLoading = false;
+        _loadingType = null;
+      }
+    });
+  }
+
+  Future<void> _trackPendingJob({
+    required String type,
+    required String jobId,
+    String? runId,
+    String? clientRequestId,
+    required bool restored,
+  }) async {
+    await widget.localStore.savePendingJob(
+      resourceId: widget.resourceId,
+      type: type,
+      jobId: jobId,
+      runId: runId,
+      clientRequestId: clientRequestId,
+    );
+    if (!mounted) return;
+    setState(() {
+      _pendingJobType = type;
+      _pendingJobId = jobId;
+      _pendingJobRestored = restored;
+      _isLoading = true;
+      _loadingType = type;
+      _error = null;
+    });
+  }
+
+  Future<bool> _pollPendingJob({bool force = false}) async {
+    final type = _pendingJobType;
+    final jobId = _pendingJobId;
+    if (type == null || jobId == null) return true;
+    if (_isPollingPendingJob && !force) return false;
+
+    _isPollingPendingJob = true;
+    try {
+      final response = await _api.getAiJobStatus(jobId);
+      final status = response['status']?.toString().trim().toLowerCase() ?? '';
+      if (status == 'completed') {
+        final restored = _pendingJobRestored;
+        await _applyGeneratedResponse(
+          type,
+          response,
+          regenerate: false,
+          useOcr: _supportsOcr && (_useOcr || _forceOcr),
+          forceOcr: _supportsOcr && _forceOcr,
+          persistLocally: true,
+          notifyOnReady: restored,
+        );
+        await _clearPendingJob(type: type);
+        return true;
+      }
+      if (status == 'failed' || status == 'blocked' || status == 'cancelled') {
+        final message =
+            response['error']?.toString().trim().isNotEmpty == true
+            ? response['error'].toString().trim()
+            : 'AI generation failed. Please try again.';
+        await _clearPendingJob(type: type);
+        if (mounted) {
+          setState(() {
+            _error = _presentGenerationError(message);
+          });
+        }
+        return true;
+      }
+      if (mounted) {
+        setState(() {
+          _isLoading = true;
+          _loadingType = type;
+        });
+      }
+      return false;
+    } catch (e) {
+      debugPrint('Failed to poll AI Studio job $_pendingJobId: $e');
+      return false;
+    } finally {
+      _isPollingPendingJob = false;
+    }
+  }
+
+  Future<void> _restorePendingGeneration() async {
+    for (final type in _backgroundGenerationTypes) {
+      final pending = await widget.localStore.loadPendingJob(
+        resourceId: widget.resourceId,
+        type: type,
+      );
+      final jobId = pending?['job_id']?.toString().trim() ?? '';
+      if (jobId.isEmpty) continue;
+      await _trackPendingJob(
+        type: type,
+        jobId: jobId,
+        runId: pending?['run_id']?.toString(),
+        clientRequestId: pending?['client_request_id']?.toString(),
+        restored: true,
+      );
+      final finished = await _pollPendingJob(force: true);
+      if (!finished) {
+        _ensurePendingJobPolling();
+      }
+      break;
     }
   }
 
@@ -839,91 +1191,62 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         },
       );
 
-      Map<String, dynamic> response;
-      var outputSize = 0;
-      if (type == 'summary') {
-        response = await _api.getAiSummary(
-          fileId: widget.resourceId,
-          collegeId: widget.collegeId,
-          useOcr: useOcr,
-          forceOcr: forceOcr,
-          force: regenerate,
-          includeSource: false,
-          videoUrl: widget.videoUrl,
-        );
-        final data = response['data'];
-        final summaryText = data is String ? data : data?.toString();
-        outputSize = summaryText?.length ?? 0;
-        setState(() {
-          _summary = summaryText;
-          _cachedMap['summary'] = response['cached'] == true;
-          _savedLocallyMap['summary'] = false;
-        });
-      } else if (type == 'quiz') {
-        response = await _api.getAiQuiz(
-          fileId: widget.resourceId,
-          collegeId: widget.collegeId,
-          useOcr: useOcr,
-          forceOcr: forceOcr,
-          force: regenerate,
-          includeSource: false,
-          videoUrl: widget.videoUrl,
-        );
-        final parsed = _parseQuizPayload(response);
-        if (parsed.isEmpty) {
-          throw Exception(
-            'Could not create a valid quiz from the AI response. Please try again.',
-          );
-        }
-        outputSize = parsed.length;
-
-        setState(() {
-          _quiz = parsed;
-          _selectedAnswers.clear();
-          _showAnswers = false;
-          _cachedMap['quiz'] = response['cached'] == true;
-          _savedLocallyMap['quiz'] = false;
-        });
-      } else {
-        response = await _api.getAiFlashcards(
-          fileId: widget.resourceId,
-          collegeId: widget.collegeId,
-          useOcr: useOcr,
-          forceOcr: forceOcr,
-          force: regenerate,
-          includeSource: false,
-          videoUrl: widget.videoUrl,
-        );
-        final parsed = _parseFlashcardPayload(response);
-        if (parsed.isEmpty) {
-          throw Exception(
-            'Could not create valid flashcards from the AI response. Please try again.',
-          );
-        }
-        outputSize = parsed.length;
-
-        setState(() {
-          _flashcards = parsed;
-          _flippedCardIndexes.clear();
-          _activeFlashcardIndex = 0;
-          _cachedMap['flashcards'] = response['cached'] == true;
-          _savedLocallyMap['flashcards'] = false;
-        });
-        _resetFlashcardDeckToStart();
-      }
-      await _analytics.logEvent(
-        'ai_studio_generate_success',
-        parameters: <String, Object?>{
-          ..._baseAnalyticsParameters(),
-          'content_type': type,
-          'regenerate': regenerate,
-          'use_ocr': useOcr,
-          'force_ocr': forceOcr,
-          'cached': response['cached'] == true,
-          'output_size': outputSize,
-        },
+      final clientRequestId = _buildAiClientRequestId(type);
+      final response = await _requestBackgroundGeneration(
+        type: type,
+        regenerate: regenerate,
+        useOcr: useOcr,
+        forceOcr: forceOcr,
+        clientRequestId: clientRequestId,
       );
-      _supabaseService.markAiTokenBalanceStale();
+      final jobId = response['job_id']?.toString().trim() ?? '';
+      final status = response['status']?.toString().trim().toLowerCase() ?? '';
+
+      if (jobId.isNotEmpty &&
+          (status == 'queued' || status == 'processing' || status.isEmpty)) {
+        await _trackPendingJob(
+          type: type,
+          jobId: jobId,
+          runId: response['run_id']?.toString(),
+          clientRequestId: clientRequestId,
+          restored: false,
+        );
+
+        final finished = await _pollPendingJob(force: true);
+        if (!finished) {
+          _ensurePendingJobPolling();
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  '${_labelForType(type)} is generating in the background. '
+                  'You can leave this screen and come back later.',
+                ),
+              ),
+            );
+          }
+          await _analytics.logEvent(
+            'ai_studio_generate_queued',
+            parameters: <String, Object?>{
+              ..._baseAnalyticsParameters(),
+              'content_type': type,
+              'regenerate': regenerate,
+              'use_ocr': useOcr,
+              'force_ocr': forceOcr,
+            },
+          );
+        }
+        return;
+      }
+
+      await _applyGeneratedResponse(
+        type,
+        response,
+        regenerate: regenerate,
+        useOcr: useOcr,
+        forceOcr: forceOcr,
+        persistLocally: false,
+      );
     } catch (e) {
       final message = e.toString().replaceFirst('Exception: ', '');
       await _analytics.logEvent(
@@ -939,14 +1262,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
       );
       setState(() {
         _error = _presentGenerationError(message);
+        _isLoading = false;
+        _loadingType = null;
       });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _loadingType = null;
-        });
-      }
     }
   }
 
@@ -2062,11 +2380,31 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   }
 
   Widget _buildLoadingArcade({required String loadingMessage}) {
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
-        child: AiLoadingGameCard(compact: true, loadingMessage: loadingMessage),
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width;
+        final minHeight = constraints.maxHeight.isFinite
+            ? math.max(0.0, constraints.maxHeight - 36).toDouble()
+            : 0.0;
+
+        return SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: minHeight),
+            child: Center(
+              child: SizedBox(
+                width: math.min(maxWidth - 32, 540).toDouble(),
+                child: AiLoadingGameCard(
+                  compact: true,
+                  loadingMessage: loadingMessage,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -2206,17 +2544,29 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
             const SizedBox(height: 12),
             // Multi-PDF question paper CTA
             if (_isMultiQuizLoading)
-              Center(
-                child: Padding(
-                  padding: EdgeInsets.all(16),
-                  child: AiLoadingGameCard(
-                    compact: true,
-                    loadingMessage: 'Building multi-PDF question paper...',
-                    headline: 'Beat the high score before the paper lands',
-                    subheadline:
-                        'Fast arcade rounds keep the wait from feeling idle.',
-                  ),
-                ),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final maxWidth = constraints.maxWidth.isFinite
+                      ? constraints.maxWidth
+                      : MediaQuery.sizeOf(context).width;
+                  return Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Center(
+                      child: SizedBox(
+                        width: math.min(maxWidth - 32, 540).toDouble(),
+                        child: AiLoadingGameCard(
+                          compact: true,
+                          loadingMessage:
+                              'Building multi-PDF question paper...',
+                          headline:
+                              'Beat the high score before the paper lands',
+                          subheadline:
+                              'Fast arcade rounds keep the wait from feeling idle.',
+                        ),
+                      ),
+                    ),
+                  );
+                },
               )
             else
               InkWell(

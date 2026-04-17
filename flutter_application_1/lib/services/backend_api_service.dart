@@ -267,6 +267,10 @@ class BackendApiService {
     return path.startsWith('/api/rag/') || path.startsWith('/api/ai/');
   }
 
+  bool _isAiJobStatusPath(String path, String method) {
+    return method.toUpperCase() == 'GET' && path.startsWith('/api/ai/jobs/');
+  }
+
   bool _shouldPreferFreshConnection(String path) {
     return _isAiOrRagPath(path);
   }
@@ -415,6 +419,14 @@ class BackendApiService {
     }
 
     if (_isAiOrRagPath(path)) {
+      if (_isAiJobStatusPath(path, normalizedMethod)) {
+        _enforceClientRateLimit(
+          bucket: 'ai_job_status',
+          maxRequests: 45,
+          window: const Duration(minutes: 1),
+        );
+        return;
+      }
       _enforceClientRateLimit(
         bucket: 'ai',
         maxRequests: 6,
@@ -2398,6 +2410,8 @@ class BackendApiService {
     bool? force,
     bool? includeSource,
     String? videoUrl,
+    bool? asyncRequested,
+    String? clientRequestId,
   }) async {
     return _requestJson(
       '/api/ai/summary',
@@ -2411,6 +2425,9 @@ class BackendApiService {
         'force': ?force,
         'include_source': ?includeSource,
         'video_url': ?videoUrl,
+        'async_requested': ?asyncRequested,
+        'delivery': asyncRequested == true ? 'background' : null,
+        'client_request_id': ?clientRequestId,
       },
     );
   }
@@ -2423,6 +2440,8 @@ class BackendApiService {
     bool? force,
     bool? includeSource,
     String? videoUrl,
+    bool? asyncRequested,
+    String? clientRequestId,
   }) async {
     return _requestJson(
       '/api/ai/quiz',
@@ -2436,6 +2455,9 @@ class BackendApiService {
         'force': ?force,
         'include_source': ?includeSource,
         'video_url': ?videoUrl,
+        'async_requested': ?asyncRequested,
+        'delivery': asyncRequested == true ? 'background' : null,
+        'client_request_id': ?clientRequestId,
       },
     );
   }
@@ -2480,6 +2502,8 @@ class BackendApiService {
     bool? force,
     bool? includeSource,
     String? videoUrl,
+    bool? asyncRequested,
+    String? clientRequestId,
   }) async {
     return _requestJson(
       '/api/ai/flashcards',
@@ -2493,8 +2517,15 @@ class BackendApiService {
         'force': ?force,
         'include_source': ?includeSource,
         'video_url': ?videoUrl,
+        'async_requested': ?asyncRequested,
+        'delivery': asyncRequested == true ? 'background' : null,
+        'client_request_id': ?clientRequestId,
       },
     );
+  }
+
+  Future<Map<String, dynamic>> getAiJobStatus(String jobId) async {
+    return _requestJson('/api/ai/jobs/$jobId', method: 'GET');
   }
 
   Future<Map<String, dynamic>> findInAiText({
@@ -3280,6 +3311,52 @@ class BackendApiService {
         .map((value) => value?.toString().trim() ?? '')
         .where((value) => value.isNotEmpty)
         .toList(growable: false);
+  }
+
+  Future<Map<String, int>> getDepartmentFollowerCounts(
+    List<String> departmentIds, {
+    String? collegeId,
+  }) async {
+    final normalizedIds = departmentIds
+        .map((value) => value.trim().toLowerCase())
+        .where((value) => value.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+    if (normalizedIds.isEmpty) {
+      return const <String, int>{};
+    }
+
+    final normalizedCollegeId = collegeId?.trim().toLowerCase();
+    final queryParameters = <String, String>{
+      'ids': normalizedIds.join(','),
+      if (normalizedCollegeId != null && normalizedCollegeId.isNotEmpty)
+        'collegeId': normalizedCollegeId,
+    };
+
+    final data = await _requestJson(
+      Uri(
+        path: '/api/departments/followers/counts',
+        queryParameters: queryParameters,
+      ).toString(),
+      method: 'GET',
+      requireAuthToken: true,
+    );
+
+    final rawCounts = Map<String, dynamic>.from(data['counts'] ?? const {});
+    final counts = <String, int>{};
+    for (final entry in rawCounts.entries) {
+      final key = entry.key.trim().toLowerCase();
+      if (key.isEmpty) continue;
+      final value = entry.value;
+      if (value is int) {
+        counts[key] = value;
+      } else if (value is num) {
+        counts[key] = value.toInt();
+      } else {
+        counts[key] = int.tryParse(value?.toString() ?? '') ?? 0;
+      }
+    }
+    return counts;
   }
 
   Future<void> followDepartment(
