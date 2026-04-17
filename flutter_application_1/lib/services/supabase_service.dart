@@ -201,32 +201,40 @@ class SupabaseService {
     final userCollegeId = _normalizeCollegeScopeValue(
       user['college_id']?.toString(),
     );
-    final userCollege = _normalizeCollegeScopeValue(
-      user['college']?.toString(),
-    );
+    final userCollegeRaw = user['college'];
+    // college may be stored as a JSON map or a plain string
+    String userCollegeName = '';
+    if (userCollegeRaw is Map) {
+      userCollegeName = _normalizeCollegeScopeValue(
+        (userCollegeRaw['name'] ?? userCollegeRaw['id'])?.toString(),
+      );
+    } else {
+      // Try to extract name from JSON-encoded string
+      final rawStr = _normalizeCollegeScopeValue(userCollegeRaw?.toString());
+      final nameMatch = RegExp(r'"name"\s*:\s*"([^"]+)"').firstMatch(rawStr);
+      userCollegeName = nameMatch != null ? nameMatch.group(1)!.toLowerCase() : rawStr;
+    }
     final userEmail = _normalizeEmail(user['email']?.toString());
 
-    if (normalizedCollegeId.isEmpty &&
-        _looksLikeDomainScope(normalizedCollege)) {
-      final scopeDomain = normalizedCollege.replaceAll('@', '');
-      // When domain filtering is active, enforce it strictly and don't fall through
-      final lowerDomain = scopeDomain.toLowerCase();
-      final isMatch =
-          userEmail.isNotEmpty && userEmail.endsWith('@$lowerDomain');
-      return isMatch;
-    }
-
+    // ① College-ID exact match (most authoritative)
     if (normalizedCollegeId.isNotEmpty &&
         userCollegeId.isNotEmpty &&
         userCollegeId == normalizedCollegeId) {
       return true;
     }
 
-    if (normalizedCollege.isNotEmpty &&
-        userCollege.isNotEmpty &&
-        (userCollege == normalizedCollege ||
-            userCollege.contains(normalizedCollege) ||
-            normalizedCollege.contains(userCollege))) {
+    // ② Domain-scope: check email domain only
+    if (normalizedCollegeId.isEmpty &&
+        _looksLikeDomainScope(normalizedCollege)) {
+      final scopeDomain = normalizedCollege.replaceAll('@', '');
+      return userEmail.isNotEmpty && userEmail.endsWith('@$scopeDomain');
+    }
+
+    // ③ College name fuzzy match (used when scope is name-based)
+    if (normalizedCollege.isNotEmpty && userCollegeName.isNotEmpty &&
+        (userCollegeName == normalizedCollege ||
+            userCollegeName.contains(normalizedCollege) ||
+            normalizedCollege.contains(userCollegeName))) {
       return true;
     }
 
@@ -2872,18 +2880,13 @@ class SupabaseService {
         collegeId: effectiveCollegeId,
         college: effectiveCollege,
       );
-      final scopedUsers = users
-          .map(_normalizeReadableUserRecord)
-          .where(
-            (user) => _matchesCollegeScope(
-              user,
-              collegeId: effectiveCollegeId,
-              college: effectiveCollege,
-            ),
-          )
-          .toList();
-      if (scopedUsers.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
-        return scopedUsers;
+      // Backend already scopes by college — trust its result.
+      // A second client-side filter caused false negatives when API responses
+      // didn't carry college_id in the exact shape _matchesCollegeScope needs.
+      final normalizedUsers =
+          users.map(_normalizeReadableUserRecord).toList();
+      if (normalizedUsers.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
+        return normalizedUsers;
       }
     } catch (e) {
       debugPrint('Error discovering users via backend: $e');
@@ -2893,51 +2896,91 @@ class SupabaseService {
     }
 
     try {
-      var dbQuery = _client
-          .from('users_safe')
-          .select(
-            'id, email, display_name, username, profile_photo_url, college, college_id, bio',
-          );
+      // Build a clean query. For college_id scope we also fetch users whose
+      // college JSON contains the same college but who may have college_id=null
+      // (legacy accounts). Both result sets are merged and deduplicated.
+      final List<Map<String, dynamic>> allRows = [];
+      final allEmails = <String>{};
 
+      Future<void> runAndMerge(
+          Future<List<dynamic>> Function() queryFn) async {
+        try {
+          final rows = await queryFn();
+          for (final r in rows) {
+            final rec = _normalizeReadableUserRecord(
+              Map<String, dynamic>.from(r as Map),
+            );
+            final email = _normalizeEmail(rec['email']?.toString());
+            if (email.isNotEmpty && !allEmails.contains(email)) {
+              allEmails.add(email);
+              allRows.add(rec);
+            }
+          }
+        } catch (e) {
+          debugPrint('discoverUsers sub-query failed: $e');
+        }
+      }
+
+      String? safeSearchFilter; // built once if there is a text query
       if (query != null && query.isNotEmpty) {
-        final normalizedQuery = query
+        final nq = query
             .replaceAll(RegExp(r'[^a-zA-Z0-9@\s._-]'), ' ')
             .trim()
             .replaceAll(RegExp(r'\s+'), ' ');
-        if (normalizedQuery.isNotEmpty) {
-          final safeQuery = _escapeLikePattern(normalizedQuery);
-          dbQuery = dbQuery.or(
-            'display_name.ilike.%$safeQuery%,username.ilike.%$safeQuery%,email.ilike.%$safeQuery%,college.ilike.%$safeQuery%',
-          );
+        if (nq.isNotEmpty) {
+          final sq = _escapeLikePattern(nq);
+          safeSearchFilter = sq;
         }
       }
 
       if (effectiveCollegeId.isNotEmpty) {
-        dbQuery = dbQuery.eq('college_id', effectiveCollegeId);
+        // Query 1: Users with exact college_id match
+        await runAndMerge(() async {
+          var q = _client
+              .from('users_safe')
+              .select(
+                'id, email, display_name, username, profile_photo_url, college, college_id, bio',
+              )
+              .eq('college_id', effectiveCollegeId);
+          if (safeSearchFilter != null) {
+            q = q.or(
+              'display_name.ilike.%$safeSearchFilter%,username.ilike.%$safeSearchFilter%,email.ilike.%$safeSearchFilter%',
+            );
+          }
+          return q.limit(limit.clamp(1, 100));
+        });
       } else if (effectiveCollege.isNotEmpty) {
-        if (scopeLooksLikeDomain) {
-          final safeDomain = normalizedScopeCollege
-              .replaceAll(RegExp(r'[%*,]'), '')
-              .replaceAll('_', r'\_')
-              .replaceAll('@', '');
-          dbQuery = dbQuery.ilike('email', '%@$safeDomain');
-        } else {
-          final safeCollegePattern =
-              '%${_escapeLikePattern(effectiveCollege)}%';
-          dbQuery = dbQuery.ilike('college', safeCollegePattern);
-        }
+        await runAndMerge(() async {
+          var q = _client
+              .from('users_safe')
+              .select(
+                'id, email, display_name, username, profile_photo_url, college, college_id, bio',
+              );
+          if (safeSearchFilter != null) {
+            q = q.or(
+              'display_name.ilike.%$safeSearchFilter%,username.ilike.%$safeSearchFilter%,email.ilike.%$safeSearchFilter%,college.ilike.%$safeSearchFilter%',
+            );
+          }
+          if (scopeLooksLikeDomain) {
+            final safeDomain = normalizedScopeCollege
+                .replaceAll(RegExp(r'[%*,]'), '')
+                .replaceAll('_', r'\_')
+                .replaceAll('@', '');
+            q = q.ilike('email', '%@$safeDomain');
+          } else {
+            q = q.ilike('college', '%${_escapeLikePattern(effectiveCollege)}%');
+          }
+          return q.limit(limit.clamp(1, 100));
+        });
       }
 
-      final response = await dbQuery.limit(limit.clamp(1, 100));
-      return List<Map<String, dynamic>>.from(
-        response,
-      ).map(_normalizeReadableUserRecord).where((user) {
-        return _matchesCollegeScope(
-          user,
-          collegeId: effectiveCollegeId,
-          college: effectiveCollege,
-        );
-      }).toList();
+      return allRows
+          .where((user) => _matchesCollegeScope(
+                user,
+                collegeId: effectiveCollegeId,
+                college: effectiveCollege,
+              ))
+          .toList();
     } catch (e) {
       debugPrint('Error discovering users: $e');
       return const <Map<String, dynamic>>[];

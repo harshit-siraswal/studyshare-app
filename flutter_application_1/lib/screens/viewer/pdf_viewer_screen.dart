@@ -1,12 +1,15 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+// share_plus removed — download saves in-app with a snackbar confirmation.
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../config/theme.dart';
@@ -374,24 +377,58 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     );
   }
 
+  /// Downloads the PDF into local storage and shares it within the app.
+  /// Never opens the system browser.
   Future<void> _performDownloadOrLaunch() async {
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Downloading PDF…'), duration: Duration(seconds: 30)),
+    );
     try {
-      final uri = Uri.parse(widget.pdfUrl);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Unable to open link. Please try again.'),
-          ),
-        );
+      // Ensure storage permission on Android < 13.
+      if (Platform.isAndroid) {
+        final status = await Permission.storage.request();
+        if (!status.isGranted && !status.isLimited) {
+          messenger.hideCurrentSnackBar();
+          if (mounted) {
+            messenger.showSnackBar(
+              const SnackBar(content: Text('Storage permission denied.')),
+            );
+          }
+          return;
+        }
       }
+
+      // Derive a sane filename from the URL.
+      final uri = Uri.parse(widget.pdfUrl);
+      final rawName = uri.pathSegments.isNotEmpty ? uri.pathSegments.last : 'document.pdf';
+      final filename = rawName.endsWith('.pdf') ? rawName : '$rawName.pdf';
+
+      // Save to the app's documents directory (always accessible, never opens browser).
+      final dir = await getApplicationDocumentsDirectory();
+      final savePath = '${dir.path}/$filename';
+
+      final dio = Dio();
+      await dio.download(widget.pdfUrl, savePath);
+
+      messenger.hideCurrentSnackBar();
+      if (!mounted) return;
+
+      // Show confirmation — no share sheet, no browser.
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('Saved: $filename'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
     } catch (e) {
-      debugPrint('Failed to launch URL: $e');
+      debugPrint('In-app download failed: $e');
+      messenger.hideCurrentSnackBar();
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Unable to open link.')));
+        messenger.showSnackBar(
+          SnackBar(content: Text('Download failed: ${e.toString().split('\n').first}')),
+        );
       }
     }
   }
@@ -408,7 +445,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
           onSuccess: () {
             if (!mounted) return;
             messenger.showSnackBar(
-              const SnackBar(content: Text('Premium unlocked! Downloading...')),
+              const SnackBar(content: Text('Premium unlocked! Downloading…')),
             );
             _performDownloadOrLaunch();
           },
@@ -821,14 +858,9 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   Widget _buildUnsupportedContent() {
     return Center(
       child: ElevatedButton.icon(
-        onPressed: () async {
-          final uri = Uri.parse(widget.pdfUrl);
-          if (await canLaunchUrl(uri)) {
-            await launchUrl(uri, mode: LaunchMode.externalApplication);
-          }
-        },
-        icon: const Icon(Icons.open_in_new),
-        label: const Text('Open External'),
+        onPressed: _handleDownload,
+        icon: const Icon(Icons.download_rounded),
+        label: const Text('Download & Open'),
       ),
     );
   }

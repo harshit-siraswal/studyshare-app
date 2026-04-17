@@ -107,7 +107,7 @@ class StickerService {
   static const String _stickerDirName = 'stickers';
   static const String _installedPacksKey = 'installed_sticker_packs_v1';
   static const String _autoInstallVersionKey = 'sticker_auto_install_version';
-  static const int _autoInstallVersion = 4;
+  static const int _autoInstallVersion = 5;
   static const Set<String> _supportedStickerExtensions = {
     '.png',
     '.jpg',

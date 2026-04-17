@@ -12,6 +12,7 @@ import '../services/supabase_service.dart';
 import '../services/auth_service.dart';
 import '../models/department_account.dart';
 import '../screens/notices/notice_detail_screen.dart';
+import '../screens/viewer/pdf_viewer_screen.dart';
 import 'notice_share_preview.dart';
 import '../utils/link_navigation_utils.dart';
 
@@ -1148,16 +1149,33 @@ class _NoticeCardState extends State<NoticeCard> {
   /// Opens the notice URL in a browser or in-app viewer.
   Future<void> _openNoticeLink(String rawUrl) async {
     final messenger = ScaffoldMessenger.of(context);
+    final trimmed = rawUrl.trim();
+    final lower = trimmed.toLowerCase();
+
+    // Route PDF URLs to the in-app viewer — never the system browser.
+    if (lower.endsWith('.pdf') || lower.contains('.pdf?') || lower.contains('/pdf')) {
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => PdfViewerScreen(
+            pdfUrl: trimmed,
+            title: widget.notice['title']?.toString() ?? 'Attachment',
+          ),
+        ),
+      );
+      return;
+    }
+
     try {
       final launched = await openStudyShareLink(
         context,
-        rawUrl: rawUrl,
+        rawUrl: trimmed,
         title: widget.notice['title']?.toString() ?? 'Notice link',
       );
       if (!mounted) return;
       if (!launched) {
         messenger.showSnackBar(
-          SnackBar(content: Text('Could not open: $rawUrl')),
+          SnackBar(content: Text('Could not open: $trimmed')),
         );
       }
     } catch (e) {
