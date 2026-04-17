@@ -1,11 +1,9 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../config/theme.dart';
 import '../../models/attendance_models.dart';
@@ -625,110 +623,200 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     );
   }
 
-  String _formatIcsDateTime(DateTime dateTime) {
-    final utc = dateTime.toUtc();
+  String _formatGoogleCalendarDateTime(DateTime dateTime) {
     String twoDigits(int value) => value.toString().padLeft(2, '0');
-    return '${utc.year}'
-        '${twoDigits(utc.month)}'
-        '${twoDigits(utc.day)}'
+    return '${dateTime.year}'
+        '${twoDigits(dateTime.month)}'
+        '${twoDigits(dateTime.day)}'
         'T'
-        '${twoDigits(utc.hour)}'
-        '${twoDigits(utc.minute)}'
-        '${twoDigits(utc.second)}'
-        'Z';
+        '${twoDigits(dateTime.hour)}'
+        '${twoDigits(dateTime.minute)}'
+        '${twoDigits(dateTime.second)}';
   }
 
-  String _escapeIcsText(String value) {
-    return value
-        .replaceAll('\\', r'\\')
-        .replaceAll(';', r'\;')
-        .replaceAll(',', r'\,')
-        .replaceAll('\n', r'\n');
+  String _googleCalendarByDay(DateTime date) {
+    const weekdays = <int, String>{
+      DateTime.monday: 'MO',
+      DateTime.tuesday: 'TU',
+      DateTime.wednesday: 'WE',
+      DateTime.thursday: 'TH',
+      DateTime.friday: 'FR',
+      DateTime.saturday: 'SA',
+      DateTime.sunday: 'SU',
+    };
+    return weekdays[date.weekday] ?? 'MO';
+  }
+
+  List<AttendanceScheduleEntry> _dedupeCalendarEntries(
+    List<AttendanceScheduleEntry> entries,
+  ) {
+    final seen = <String>{};
+    final unique = <AttendanceScheduleEntry>[];
+    for (final entry in entries.where(_isClassEntry)) {
+      final start = _parseEntryDateTime(entry.lectureDate, entry.start);
+      if (start == null) continue;
+      final key = [
+        entry.courseCode.trim().toLowerCase(),
+        entry.courseComponentName.trim().toLowerCase(),
+        entry.courseName.trim().toLowerCase(),
+        _googleCalendarByDay(start),
+        entry.start.trim(),
+        entry.end.trim(),
+      ].join('|');
+      if (!seen.add(key)) continue;
+      unique.add(entry);
+    }
+    return unique;
+  }
+
+  Uri? _buildGoogleCalendarUri(AttendanceScheduleEntry entry) {
+    final start = _parseEntryDateTime(entry.lectureDate, entry.start);
+    if (start == null) return null;
+    final end =
+        _parseEntryDateTime(entry.lectureDate, entry.end) ??
+        start.add(const Duration(hours: 1));
+    final safeEnd = end.isAfter(start)
+        ? end
+        : start.add(const Duration(hours: 1));
+    final title = entry.courseName.trim().isNotEmpty
+        ? entry.courseName.trim()
+        : (entry.title.trim().isNotEmpty ? entry.title.trim() : 'Class');
+    final details = <String>[
+      if (entry.courseCode.trim().isNotEmpty)
+        'Course Code: ${entry.courseCode.trim()}',
+      if (entry.courseComponentName.trim().isNotEmpty)
+        'Component: ${entry.courseComponentName.trim()}',
+      if (entry.facultyName.trim().isNotEmpty)
+        'Faculty: ${entry.facultyName.trim()}',
+      'Created from StudyShare weekly schedule',
+    ].join('\n');
+
+    return Uri.https('calendar.google.com', '/calendar/render', {
+      'action': 'TEMPLATE',
+      'text': title,
+      'dates':
+          '${_formatGoogleCalendarDateTime(start)}/${_formatGoogleCalendarDateTime(safeEnd)}',
+      'details': details,
+      'location': entry.classRoom.trim(),
+      'recur': 'RRULE:FREQ=WEEKLY;BYDAY=${_googleCalendarByDay(start)}',
+    });
   }
 
   Future<void> _addEntriesToCalendar(
     List<AttendanceScheduleEntry> entries,
   ) async {
-    final classes = entries.where(_isClassEntry).toList(growable: false);
+    final classes = _dedupeCalendarEntries(entries);
     if (classes.isEmpty) return;
-
-    final seenEntries = <String>{};
-    const eol = '\r\n';
-    final timestamp = _formatIcsDateTime(DateTime.now());
-    final lines = <String>[
-      'BEGIN:VCALENDAR',
-      'VERSION:2.0',
-      'PRODID:-//StudyShare//KIET Schedule//EN',
-      'CALSCALE:GREGORIAN',
-      'METHOD:PUBLISH',
-    ];
-
-    for (final entry in classes) {
-      final start = _parseEntryDateTime(entry.lectureDate, entry.start);
-      if (start == null) continue;
-      final end =
-          _parseEntryDateTime(entry.lectureDate, entry.end) ??
-          start.add(const Duration(hours: 1));
-      final safeEnd = end.isAfter(start)
-          ? end
-          : start.add(const Duration(hours: 1));
-      final key = [
-        entry.courseCode.trim(),
-        entry.courseComponentName.trim(),
-        entry.lectureDate.trim(),
-        entry.start.trim(),
-      ].join('|');
-      if (!seenEntries.add(key)) continue;
-
-      final summary = entry.courseName.trim().isNotEmpty
-          ? entry.courseName.trim()
-          : (entry.title.trim().isNotEmpty ? entry.title.trim() : 'Class');
-      final description = <String>[
-        if (entry.courseCode.trim().isNotEmpty)
-          'Course Code: ${entry.courseCode.trim()}',
-        if (entry.courseComponentName.trim().isNotEmpty)
-          'Component: ${entry.courseComponentName.trim()}',
-        if (entry.facultyName.trim().isNotEmpty)
-          'Faculty: ${entry.facultyName.trim()}',
-      ].join('\n');
-
-      lines.addAll(<String>[
-        'BEGIN:VEVENT',
-        'UID:${_escapeIcsText(key)}@studyshare',
-        'DTSTAMP:$timestamp',
-        'DTSTART:${_formatIcsDateTime(start)}',
-        'DTEND:${_formatIcsDateTime(safeEnd)}',
-        'SUMMARY:${_escapeIcsText(summary)}',
-        if (description.isNotEmpty)
-          'DESCRIPTION:${_escapeIcsText(description)}',
-        if (entry.classRoom.trim().isNotEmpty)
-          'LOCATION:${_escapeIcsText(entry.classRoom.trim())}',
-        'END:VEVENT',
-      ]);
-    }
-
-    lines.add('END:VCALENDAR');
-    final tempDir = await getTemporaryDirectory();
-    final file = File(
-      '${tempDir.path}/studyshare_schedule_${DateTime.now().millisecondsSinceEpoch}.ics',
-    );
-    await file.writeAsString(lines.join(eol));
-
     if (!mounted) return;
-    await SharePlus.instance.share(
-      ShareParams(
-        files: [XFile(file.path)],
-        text:
-            'StudyShare weekly schedule export. Import this .ics file into '
-            'Google Calendar or any calendar app.',
-      ),
-    );
-    unawaited(
-      Future.delayed(const Duration(seconds: 10), () async {
-        if (await file.exists()) {
-          await file.delete();
-        }
-      }),
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (context) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 18, 16, 22),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Add to Google Calendar',
+                  style: GoogleFonts.inter(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: isDark
+                        ? AppTheme.darkTextPrimary
+                        : AppTheme.lightTextPrimary,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Each class opens directly in Google Calendar as a recurring weekly event.',
+                  style: GoogleFonts.inter(
+                    fontSize: 12.5,
+                    height: 1.45,
+                    color: isDark
+                        ? AppTheme.darkTextSecondary
+                        : AppTheme.lightTextSecondary,
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: classes.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final entry = classes[index];
+                      return Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.04)
+                              : const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(
+                            color: isDark ? Colors.white10 : Colors.black12,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    entry.courseName.trim().isNotEmpty
+                                        ? entry.courseName.trim()
+                                        : entry.title.trim(),
+                                    style: GoogleFonts.inter(
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: isDark
+                                          ? AppTheme.darkTextPrimary
+                                          : AppTheme.lightTextPrimary,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    '${_formatDate(entry.lectureDate)} • ${entry.start} - ${entry.end}',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 12.2,
+                                      color: isDark
+                                          ? AppTheme.darkTextSecondary
+                                          : AppTheme.lightTextSecondary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: () async {
+                                final uri = _buildGoogleCalendarUri(entry);
+                                if (uri == null) return;
+                                await launchUrl(
+                                  uri,
+                                  mode: LaunchMode.externalApplication,
+                                );
+                              },
+                              child: Text(
+                                'Open',
+                                style: GoogleFonts.inter(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -913,6 +1001,17 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                           ),
                         ],
                       ),
+                      if (entries.isNotEmpty) ...[
+                        const SizedBox(height: 14),
+                        _buildProjectionPlanner(
+                          entries: entries,
+                          isDark: isDark,
+                          onStateChanged: () {
+                            if (!mounted) return;
+                            setModalState(() {});
+                          },
+                        ),
+                      ],
                       const SizedBox(height: 14),
                       Expanded(
                         child: entries.isEmpty
@@ -1295,10 +1394,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             _buildLowAttendanceCard(snapshot, isDark),
             const SizedBox(height: 16),
           ],
-          if (weeklyEntries.isNotEmpty) ...[
-            _buildProjectionPlanner(entries: weeklyEntries, isDark: isDark),
-            const SizedBox(height: 16),
-          ],
           const SizedBox(height: 4),
           Text(
             'Subjects',
@@ -1581,6 +1676,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   Widget _buildProjectionPlanner({
     required List<AttendanceScheduleEntry> entries,
     required bool isDark,
+    VoidCallback? onStateChanged,
   }) {
     final groupedEntries = _groupScheduleEntries(entries);
     final selectedCount = entries
@@ -1635,6 +1731,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 TextButton.icon(
                   onPressed: () {
                     setState(() => _projectedMissedEntries.clear());
+                    onStateChanged?.call();
                   },
                   icon: const Icon(Icons.restart_alt_rounded, size: 18),
                   label: Text(
@@ -1685,6 +1782,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                             _expandedProjectionDays.add(dayKey);
                           }
                         });
+                        onStateChanged?.call();
                       },
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
@@ -1758,10 +1856,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                             Row(
                               children: [
                                 TextButton.icon(
-                                  onPressed: () => _toggleProjectedDayEntries(
-                                    dayEntries,
-                                    shouldSelect: !allSelected,
-                                  ),
+                                  onPressed: () {
+                                    _toggleProjectedDayEntries(
+                                      dayEntries,
+                                      shouldSelect: !allSelected,
+                                    );
+                                    onStateChanged?.call();
+                                  },
                                   icon: Icon(
                                     allSelected
                                         ? Icons.check_box_rounded
@@ -1788,7 +1889,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                 padding: const EdgeInsets.only(bottom: 10),
                                 child: InkWell(
                                   borderRadius: BorderRadius.circular(16),
-                                  onTap: () => _toggleProjectedMiss(entry),
+                                  onTap: () {
+                                    _toggleProjectedMiss(entry);
+                                    onStateChanged?.call();
+                                  },
                                   child: Container(
                                     padding: const EdgeInsets.all(14),
                                     decoration: BoxDecoration(

@@ -33,6 +33,10 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
   static const _flappyKey = 'ai_loading_game_flappy_high_score';
   static const _brickKey = 'ai_loading_game_brick_high_score';
   static const _dinoKey = 'ai_loading_game_dino_high_score';
+  static const _flappyHintKey = 'ai_loading_game_flappy_hint_seen';
+  static const _brickHintKey = 'ai_loading_game_brick_hint_seen';
+  static const _dinoHintKey = 'ai_loading_game_dino_hint_seen';
+  static const _firstDinoObstacleDelayMs = 2800.0;
   static const _tick = Duration(milliseconds: 16);
   static const _flappyBackgroundAsset =
       'assets/images/mini_games/flappy/background-day.png';
@@ -64,6 +68,7 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
       'assets/images/mini_games/dino/dino-crash.png';
 
   final math.Random _random = math.Random();
+  final ValueNotifier<int> _overlayTick = ValueNotifier<int>(0);
   Timer? _loop;
   int _selected = 0;
   int _frameTick = 0;
@@ -80,6 +85,10 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
   int _dinoScore = 0, _dinoHigh = 0;
   bool _dinoStarted = false, _dinoOver = false;
   double _dinoLift = 0, _dinoVelocity = 0, _obstacleX = 1.1, _cloudX = 0.9;
+  double _dinoElapsedMs = 0;
+  bool _hasSeenFlappyHint = false;
+  bool _hasSeenBrickHint = false;
+  bool _hasSeenDinoHint = false;
 
   @override
   void initState() {
@@ -98,12 +107,14 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
         _advanceBrick(dt);
         _advanceDino(dt);
       });
+      _overlayTick.value += 1;
     });
   }
 
   @override
   void dispose() {
     _loop?.cancel();
+    _overlayTick.dispose();
     super.dispose();
   }
 
@@ -114,6 +125,9 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
       _flappyHigh = prefs.getInt(_flappyKey) ?? 0;
       _brickHigh = prefs.getInt(_brickKey) ?? 0;
       _dinoHigh = prefs.getInt(_dinoKey) ?? 0;
+      _hasSeenFlappyHint = prefs.getBool(_flappyHintKey) ?? false;
+      _hasSeenBrickHint = prefs.getBool(_brickHintKey) ?? false;
+      _hasSeenDinoHint = prefs.getBool(_dinoHintKey) ?? false;
     });
   }
 
@@ -122,6 +136,23 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setInt(key, score);
     }());
+  }
+
+  Future<void> _markHintSeen(int gameIndex) async {
+    final key = switch (gameIndex) {
+      0 => _flappyHintKey,
+      1 => _brickHintKey,
+      _ => _dinoHintKey,
+    };
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(key, true);
+    if (!mounted) return;
+    setState(() {
+      if (gameIndex == 0) _hasSeenFlappyHint = true;
+      if (gameIndex == 1) _hasSeenBrickHint = true;
+      if (gameIndex == 2) _hasSeenDinoHint = true;
+    });
+    _overlayTick.value += 1;
   }
 
   void _resetFlappy() {
@@ -244,21 +275,25 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
     _dinoOver = false;
     _dinoLift = 0;
     _dinoVelocity = 0;
-    _obstacleX = 1.1;
+    _obstacleX = 1.28;
     _cloudX = 0.9;
+    _dinoElapsedMs = 0;
   }
 
   void _advanceDino(double dt) {
     _cloudX -= dt * 0.12;
     if (_cloudX < -0.18) _cloudX = 1.08;
     if (!_dinoStarted || _dinoOver) return;
-    _obstacleX -= dt * (0.86 + (_dinoScore / 40));
-    if (_obstacleX < -0.12) {
-      _obstacleX = 1.08 + _random.nextDouble() * 0.22;
-      _dinoScore += 1;
-      if (_dinoScore > _dinoHigh) {
-        _dinoHigh = _dinoScore;
-        _persistHighScore(_dinoKey, _dinoHigh);
+    _dinoElapsedMs += dt * 1000;
+    if (_dinoElapsedMs >= _firstDinoObstacleDelayMs) {
+      _obstacleX -= dt * (0.86 + (_dinoScore / 40));
+      if (_obstacleX < -0.12) {
+        _obstacleX = 1.08 + _random.nextDouble() * 0.22;
+        _dinoScore += 1;
+        if (_dinoScore > _dinoHigh) {
+          _dinoHigh = _dinoScore;
+          _persistHighScore(_dinoKey, _dinoHigh);
+        }
       }
     }
     _dinoVelocity += 2.4 * dt;
@@ -287,6 +322,15 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
         if (_dinoLift == 0) _dinoVelocity = -1.08;
       }
     });
+    _overlayTick.value += 1;
+    final seen = switch (_selected) {
+      0 => _hasSeenFlappyHint,
+      1 => _hasSeenBrickHint,
+      _ => _hasSeenDinoHint,
+    };
+    if (!seen) {
+      unawaited(_markHintSeen(_selected));
+    }
   }
 
   Future<void> _openFullscreen() async {
@@ -299,43 +343,25 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
         return SafeArea(
           child: Material(
             color: Colors.transparent,
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: Center(
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 20,
-                        vertical: 28,
-                      ),
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 940),
-                        child: AiLoadingGameCard(
-                          compact: false,
-                          initialGame: _selected,
-                          loadingMessage: widget.loadingMessage,
-                          headline: widget.headline,
-                          subheadline: widget.subheadline,
-                          showFullscreenToggle: false,
-                        ),
+            child: ValueListenableBuilder<int>(
+              valueListenable: _overlayTick,
+              builder: (context, _, _) {
+                final isDark =
+                    Theme.of(context).brightness == Brightness.dark;
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 980),
+                      child: _buildShell(
+                        isDark: isDark,
+                        fullscreen: true,
+                        onClose: () => Navigator.of(context).pop(),
                       ),
                     ),
                   ),
-                ),
-                Positioned(
-                  top: 10,
-                  right: 10,
-                  child: IconButton.filledTonal(
-                    onPressed: () => Navigator.of(context).pop(),
-                    style: IconButton.styleFrom(
-                      backgroundColor: Colors.white.withValues(alpha: 0.12),
-                      foregroundColor: Colors.white,
-                    ),
-                    icon: const Icon(Icons.close_rounded),
-                    tooltip: 'Close game',
-                  ),
-                ),
-              ],
+                );
+              },
             ),
           ),
         );
@@ -343,67 +369,30 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
     );
   }
 
-  Widget _pill(String label, String value, bool isDark) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: isDark ? Colors.white.withValues(alpha: 0.08) : Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(label, style: GoogleFonts.inter(fontSize: 10.5, fontWeight: FontWeight.w600, color: isDark ? Colors.white60 : const Color(0xFF64748B))),
-            const SizedBox(height: 2),
-            Text(value, style: GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w800, color: isDark ? Colors.white : const Color(0xFF0F172A))),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _switch(int index, String label, bool isDark) {
-    final selected = _selected == index;
-    return Expanded(
-      child: InkWell(
-        onTap: () => setState(() => _selected = index),
-        borderRadius: BorderRadius.circular(14),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            gradient: selected ? const LinearGradient(colors: [Color(0xFF2563EB), Color(0xFFF97316)]) : null,
-            color: selected ? null : (isDark ? Colors.white.withValues(alpha: 0.06) : Colors.white.withValues(alpha: 0.78)),
-            border: Border.all(color: selected ? Colors.transparent : (isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05))),
-          ),
-          child: Center(
-            child: Text(label, style: GoogleFonts.inter(fontSize: 11.2, fontWeight: FontWeight.w700, color: selected ? Colors.white : (isDark ? Colors.white70 : const Color(0xFF334155)))),
-          ),
-        ),
-      ),
-    );
-  }
-
-  String get _title => _selected == 0
-      ? 'Flappy Flight'
-      : (_selected == 1 ? 'Brick Blitz' : 'Chrome Dash');
-  String get _instruction => _selected == 0
-      ? 'Tap to flap between the classic pipe gaps.'
-      : (_selected == 1
-            ? 'Tap to serve, drag to move the paddle.'
-            : 'Tap to jump the cactus line like the offline runner.');
+  bool get _hasSeenCurrentHint => _selected == 0
+      ? _hasSeenFlappyHint
+      : (_selected == 1 ? _hasSeenBrickHint : _hasSeenDinoHint);
   int get _score => _selected == 0 ? _flappyScore : (_selected == 1 ? _brickScore : _dinoScore);
   int get _high => _selected == 0 ? _flappyHigh : (_selected == 1 ? _brickHigh : _dinoHigh);
-  String get _thirdLabel => _selected == 0 ? 'Gap' : (_selected == 1 ? 'Level' : 'Speed');
-  String get _thirdValue => _selected == 0 ? '${(_pipeX * 10).clamp(0, 10).round()}m' : (_selected == 1 ? '$_brickLevel' : '${(1 + (_dinoScore / 6)).toStringAsFixed(1)}x');
   bool get _showOverlay => _selected == 0 ? (!_flappyStarted || _flappyOver) : (_selected == 1 ? (!_brickStarted || _brickOver) : (!_dinoStarted || _dinoOver));
   String get _overlayTitle => _selected == 0 ? (_flappyOver ? 'Run Over' : 'Tap To Fly') : (_selected == 1 ? (_brickOver ? 'Round Over' : 'Tap To Serve') : (_dinoOver ? 'You Crashed' : 'Tap To Run'));
-  String get _overlaySubtitle => _selected == 0 ? (_flappyOver ? 'Restart and chase a cleaner pipe line.' : 'Keep the bird centered in each gap.') : (_selected == 1 ? (_brickOver ? 'Reset and clear the wall again.' : 'Break every tile to climb levels.') : (_dinoOver ? 'Next jump needs to land earlier.' : 'One tap jumps. Time it against the cactus.'));
+  String get _overlaySubtitle => _selected == 0
+      ? (_flappyOver
+            ? 'Restart and chase a cleaner pipe line.'
+            : (_hasSeenCurrentHint
+                  ? 'Tap once to keep the bird centered.'
+                  : 'Tap to flap between the classic pipe gaps.'))
+      : (_selected == 1
+            ? (_brickOver
+                  ? 'Reset and clear the wall again.'
+                  : (_hasSeenCurrentHint
+                        ? 'Tap to serve, then drag the paddle.'
+                        : 'Tap to serve, drag to move the paddle.'))
+            : (_dinoOver
+                  ? 'Next jump needs to land earlier.'
+                  : (_hasSeenCurrentHint
+                        ? 'One tap jumps. Time it against the cactus.'
+                        : 'You get a short runway before the first cactus.')));
   String get _flappyBirdAsset {
     final frame = (_frameTick ~/ 6) % 3;
     switch (frame) {
@@ -423,11 +412,13 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
     return (_frameTick ~/ 8).isEven ? _dinoRunOneAsset : _dinoRunTwoAsset;
   }
 
-  Widget _scene(bool isDark) {
+  Widget _scene(bool isDark, {bool fullscreen = false}) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth.isFinite ? constraints.maxWidth : 320.0;
-        final targetHeight = widget.compact ? 208.0 : 228.0;
+        final targetHeight = fullscreen
+            ? math.min(560.0, width * 0.66)
+            : (widget.compact ? 208.0 : 228.0);
         final height = math.max(200.0, math.min(targetHeight, width * 0.78));
         return SizedBox(
           width: double.infinity,
@@ -455,12 +446,11 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
                             : _dinoScene(width, height)),
                   Positioned(
                     left: 14,
-                    right: 14,
                     top: 12,
                     child: Row(
                       children: [
-                        _hudChip(_title),
-                        const Spacer(),
+                        _hudChip('Score $_score'),
+                        const SizedBox(width: 8),
                         _hudChip('High $_high'),
                       ],
                     ),
@@ -507,9 +497,196 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
 
   Widget _hudChip(String text) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-    decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.34), borderRadius: BorderRadius.circular(999)),
-    child: Text(text, style: GoogleFonts.inter(fontSize: 10.8, fontWeight: FontWeight.w800, color: Colors.white)),
+    decoration: BoxDecoration(
+      color: Colors.black.withValues(alpha: 0.34),
+      borderRadius: BorderRadius.circular(999),
+    ),
+    child: Text(
+      text,
+      style: GoogleFonts.inter(
+        fontSize: 10.8,
+        fontWeight: FontWeight.w800,
+        color: Colors.white,
+      ),
+    ),
   );
+
+  Widget _iconTab(
+    int index,
+    IconData icon,
+    String tooltip, {
+    VoidCallback? onPressed,
+  }) {
+    final selected = _selected == index;
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onPressed ??
+              () {
+                setState(() => _selected = index);
+                _overlayTick.value += 1;
+              },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              gradient: selected
+                  ? const LinearGradient(
+                      colors: [Color(0xFF2563EB), Color(0xFFF97316)],
+                    )
+                  : null,
+              color: selected ? null : Colors.black.withValues(alpha: 0.22),
+              border: Border.all(
+                color: selected
+                    ? Colors.transparent
+                    : Colors.white.withValues(alpha: 0.14),
+              ),
+            ),
+            child: Icon(icon, size: 18, color: Colors.white),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildShell({
+    required bool isDark,
+    required bool fullscreen,
+    VoidCallback? onClose,
+  }) {
+    final overlay = isDark ? const Color(0xFF111827) : Colors.white;
+    final surface = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FBFF);
+    return Container(
+      width: double.infinity,
+      constraints: BoxConstraints(maxWidth: fullscreen ? 960 : 700),
+      padding: EdgeInsets.all(fullscreen ? 20 : (widget.compact ? 16 : 18)),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(fullscreen ? 30 : 26),
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0F172A), Color(0xFF1D4ED8), Color(0xFFF97316)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF2563EB).withValues(alpha: 0.22),
+            blurRadius: 30,
+            offset: const Offset(0, 18),
+          ),
+        ],
+      ),
+      child: Container(
+        padding: EdgeInsets.all(fullscreen ? 20 : 16),
+        decoration: BoxDecoration(
+          color: overlay.withValues(alpha: 0.95),
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: surface,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(
+                  color: isDark
+                      ? Colors.white10
+                      : Colors.black.withValues(alpha: 0.05),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.2,
+                      valueColor: AlwaysStoppedAnimation<Color>(
+                        AppTheme.primary,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      widget.loadingMessage,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: isDark
+                            ? Colors.white70
+                            : const Color(0xFF334155),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            Stack(
+              children: [
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: surface,
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(
+                      color: isDark
+                          ? Colors.white10
+                          : Colors.black.withValues(alpha: 0.05),
+                    ),
+                  ),
+                  child: _scene(isDark, fullscreen: fullscreen),
+                ),
+                Positioned(
+                  top: 18,
+                  right: 18,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      _iconTab(0, Icons.flight_rounded, 'Flappy'),
+                      const SizedBox(width: 8),
+                      _iconTab(1, Icons.grid_view_rounded, 'Brick Blitz'),
+                      const SizedBox(width: 8),
+                      _iconTab(2, Icons.terrain_rounded, 'Dino'),
+                      if (fullscreen && onClose != null) ...[
+                        const SizedBox(width: 8),
+                        _iconTab(
+                          _selected,
+                          Icons.close_rounded,
+                          'Close fullscreen',
+                          onPressed: onClose,
+                        ),
+                      ] else if (widget.showFullscreenToggle) ...[
+                        const SizedBox(width: 8),
+                        _iconTab(
+                          _selected,
+                          Icons.open_in_full_rounded,
+                          'Open fullscreen',
+                          onPressed: _openFullscreen,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _sprite(
     String asset, {
@@ -760,78 +937,7 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final surface = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FBFF);
-    final overlay = isDark ? const Color(0xFF111827) : Colors.white;
-    return Container(
-      width: double.infinity,
-      constraints: BoxConstraints(maxWidth: widget.compact ? 540 : 700),
-      padding: EdgeInsets.all(widget.compact ? 16 : 18),
-      decoration: BoxDecoration(borderRadius: BorderRadius.circular(26), gradient: const LinearGradient(colors: [Color(0xFF0F172A), Color(0xFF1D4ED8), Color(0xFFF97316)], begin: Alignment.topLeft, end: Alignment.bottomRight), boxShadow: [BoxShadow(color: const Color(0xFF2563EB).withValues(alpha: 0.22), blurRadius: 30, offset: const Offset(0, 18))]),
-      child: Container(
-        padding: EdgeInsets.all(widget.compact ? 14 : 16),
-        decoration: BoxDecoration(color: overlay.withValues(alpha: 0.92), borderRadius: BorderRadius.circular(22)),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(width: 42, height: 42, decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [Color(0xFF22D3EE), Color(0xFFF97316)])), child: const Icon(Icons.sports_esports_rounded, color: Colors.white, size: 22)),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(widget.headline, style: GoogleFonts.inter(fontSize: widget.compact ? 15 : 16, fontWeight: FontWeight.w800, color: isDark ? Colors.white : const Color(0xFF0F172A))),
-                    const SizedBox(height: 2),
-                    Text(widget.subheadline, style: GoogleFonts.inter(fontSize: 11.5, fontWeight: FontWeight.w500, color: isDark ? Colors.white70 : const Color(0xFF475569))),
-                  ]),
-                ),
-                if (widget.showFullscreenToggle) ...[
-                  const SizedBox(width: 12),
-                  IconButton(
-                    onPressed: _openFullscreen,
-                    tooltip: 'Open game fullscreen',
-                    style: IconButton.styleFrom(
-                      backgroundColor: surface,
-                      foregroundColor:
-                          isDark ? Colors.white : const Color(0xFF0F172A),
-                    ),
-                    icon: const Icon(Icons.fullscreen_rounded),
-                  ),
-                ],
-              ],
-            ),
-            const SizedBox(height: 14),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              decoration: BoxDecoration(color: surface, borderRadius: BorderRadius.circular(18), border: Border.all(color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05))),
-              child: Row(children: [
-                const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2.2, valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary))),
-                const SizedBox(width: 10),
-                Expanded(child: Text(widget.loadingMessage, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: isDark ? Colors.white70 : const Color(0xFF334155)))),
-              ]),
-            ),
-            const SizedBox(height: 14),
-            Row(children: [_switch(0, 'Flappy', isDark), const SizedBox(width: 10), _switch(1, 'Brick Blitz', isDark), const SizedBox(width: 10), _switch(2, 'Dino', isDark)]),
-            const SizedBox(height: 14),
-            Row(children: [_pill('Score', '$_score', isDark), const SizedBox(width: 10), _pill('High score', '$_high', isDark), const SizedBox(width: 10), _pill(_thirdLabel, _thirdValue, isDark)]),
-            const SizedBox(height: 14),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(color: surface, borderRadius: BorderRadius.circular(22), border: Border.all(color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05))),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(_instruction, style: GoogleFonts.inter(fontSize: 12.4, fontWeight: FontWeight.w700, color: isDark ? Colors.white : const Color(0xFF0F172A))),
-                const SizedBox(height: 4),
-                Text('Tap or drag inside the arena and try to beat your saved high score.', style: GoogleFonts.inter(fontSize: 11.4, fontWeight: FontWeight.w500, color: isDark ? Colors.white70 : const Color(0xFF475569))),
-                const SizedBox(height: 14),
-                _scene(isDark),
-              ]),
-            ),
-          ],
-        ),
-      ),
-    );
+    return _buildShell(isDark: isDark, fullscreen: false);
   }
 }
 

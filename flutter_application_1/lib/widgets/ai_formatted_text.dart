@@ -372,7 +372,12 @@ class AiFormattedText extends StatelessWidget {
       ),
       onErrorFallback: (FlutterMathException error) => Text(
         fallbackText,
-        style: style,
+        style: GoogleFonts.robotoMono(
+          fontSize: style.fontSize ?? 14,
+          height: style.height,
+          fontWeight: FontWeight.w600,
+          color: (style.color ?? Colors.black).withValues(alpha: 0.72),
+        ),
       ),
     );
   }

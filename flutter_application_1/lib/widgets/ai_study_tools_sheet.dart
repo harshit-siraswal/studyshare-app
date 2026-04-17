@@ -16,6 +16,7 @@ import '../services/ai_output_local_service.dart';
 import '../services/backend_api_service.dart';
 import '../services/summary_pdf_service.dart';
 import '../services/supabase_service.dart';
+import 'ai_formatted_text.dart';
 import 'ai_loading_game_card.dart';
 import 'ai_logo.dart';
 import 'paywall_dialog.dart';
@@ -2309,76 +2310,6 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         .trim();
   }
 
-  TextSpan _summaryTextSpan({
-    required String text,
-    required Color color,
-    required double fontSize,
-    FontWeight baseWeight = FontWeight.w500,
-  }) {
-    final regex = RegExp(r'(\*\*[^*]+\*\*|_[^_]+_|(?<!\*)\*[^*]+\*(?!\*))');
-    final matches = regex.allMatches(text);
-    if (matches.isEmpty) {
-      return TextSpan(
-        text: _summaryPlain(text),
-        style: GoogleFonts.inter(
-          fontSize: fontSize,
-          height: 1.55,
-          color: color,
-          fontWeight: baseWeight,
-        ),
-      );
-    }
-
-    final spans = <InlineSpan>[];
-    var last = 0;
-    for (final match in matches) {
-      if (match.start > last) {
-        spans.add(
-          TextSpan(
-            text: text.substring(last, match.start),
-            style: GoogleFonts.inter(
-              fontSize: fontSize,
-              height: 1.55,
-              color: color,
-              fontWeight: baseWeight,
-            ),
-          ),
-        );
-      }
-      final chunk = match.group(0) ?? '';
-      final isBold = chunk.startsWith('**') && chunk.endsWith('**');
-      spans.add(
-        TextSpan(
-          text: isBold
-              ? chunk.substring(2, chunk.length - 2)
-              : chunk.substring(1, chunk.length - 1),
-          style: GoogleFonts.inter(
-            fontSize: fontSize,
-            height: 1.55,
-            color: color,
-            fontWeight: isBold ? FontWeight.w800 : baseWeight,
-            fontStyle: isBold ? FontStyle.normal : FontStyle.italic,
-          ),
-        ),
-      );
-      last = match.end;
-    }
-    if (last < text.length) {
-      spans.add(
-        TextSpan(
-          text: text.substring(last),
-          style: GoogleFonts.inter(
-            fontSize: fontSize,
-            height: 1.55,
-            color: color,
-            fontWeight: baseWeight,
-          ),
-        ),
-      );
-    }
-    return TextSpan(children: spans);
-  }
-
   Widget _buildLoadingArcade({required String loadingMessage}) {
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -2480,25 +2411,37 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                       ),
                     ),
                     Expanded(
-                      child: SelectableText.rich(
-                        _summaryTextSpan(
-                          text: block.text,
+                      child: AiFormattedText(
+                        text: block.text,
+                        baseStyle: GoogleFonts.inter(
                           fontSize: 14.5,
+                          height: 1.55,
+                          fontWeight: FontWeight.w500,
                           color: isDark
                               ? Colors.white70
                               : const Color(0xFF334155),
                         ),
+                        bulletColor: AppTheme.primary,
+                        headingColor: isDark
+                            ? Colors.white
+                            : const Color(0xFF0F172A),
                       ),
                     ),
                   ],
                 );
               case _SummaryBlockKind.paragraph:
-                return SelectableText.rich(
-                  _summaryTextSpan(
-                    text: block.text,
+                return AiFormattedText(
+                  text: block.text,
+                  baseStyle: GoogleFonts.inter(
                     fontSize: 14.5,
+                    height: 1.55,
+                    fontWeight: FontWeight.w500,
                     color: isDark ? Colors.white70 : const Color(0xFF334155),
                   ),
+                  bulletColor: AppTheme.primary,
+                  headingColor: isDark
+                      ? Colors.white
+                      : const Color(0xFF0F172A),
                 );
             }
           },
@@ -3024,18 +2967,23 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                                   const SizedBox(height: 8),
                                   Expanded(
                                     child: Center(
-                                      child: Text(
-                                        isBackFace ? card.back : card.front,
-                                        key: ValueKey<String>(
-                                          'flashcard_text_${idx}_'
-                                          '${isBackFace ? 'back' : 'front'}',
-                                        ),
-                                        textAlign: TextAlign.center,
-                                        style: GoogleFonts.inter(
-                                          fontSize: 17,
-                                          height: 1.45,
-                                          fontWeight: FontWeight.w700,
-                                          color: Colors.white,
+                                      child: SingleChildScrollView(
+                                        child: AiFormattedText(
+                                          key: ValueKey<String>(
+                                            'flashcard_text_${idx}_'
+                                            '${isBackFace ? 'back' : 'front'}',
+                                          ),
+                                          text: isBackFace
+                                              ? card.back
+                                              : card.front,
+                                          baseStyle: GoogleFonts.inter(
+                                            fontSize: 17,
+                                            height: 1.45,
+                                            fontWeight: FontWeight.w700,
+                                            color: Colors.white,
+                                          ),
+                                          bulletColor: Colors.white,
+                                          headingColor: Colors.white,
                                         ),
                                       ),
                                     ),

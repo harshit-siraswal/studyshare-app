@@ -81,22 +81,11 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
       );
 
       final currentUserEmail = widget.userEmail.trim().toLowerCase();
-      final allowedDomain =
-          ((widget.collegeDomain?.trim().isNotEmpty ?? false)
-                  ? widget.collegeDomain!.trim()
-                  : (widget.userEmail.contains('@')
-                        ? widget.userEmail.split('@').last.trim()
-                        : ''))
-              .toLowerCase()
-              .replaceAll('@', '');
       final filtered = students.where((student) {
         final emailValue = student['email'];
         if (emailValue is! String) return false;
         final email = emailValue.trim().toLowerCase();
         if (email.isEmpty || email == currentUserEmail) return false;
-        if (allowedDomain.isNotEmpty && !email.endsWith('@$allowedDomain')) {
-          return false;
-        }
         return true;
       }).toList();
 
@@ -215,9 +204,13 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
                 ? const Center(child: CircularProgressIndicator())
                 : _students.isEmpty
                 ? Center(
-                    child: Text(
-                      'No students found',
-                      style: GoogleFonts.inter(color: Colors.grey),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Text(
+                        'No students found yet for your college. Be the first from your campus to show up here.',
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.inter(color: Colors.grey),
+                      ),
                     ),
                   )
                 : ListView.separated(

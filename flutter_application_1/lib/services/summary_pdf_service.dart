@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -81,6 +82,7 @@ class SummaryPdfService {
     String subtitle = 'AI Study Summary',
     String watermarkText = 'StudyShare',
   }) async {
+    final fonts = await _loadPdfFonts();
     final palette = _PdfPalette.summary();
     final doc = pw.Document();
     final data = _parseSummary(summary);
@@ -91,6 +93,7 @@ class SummaryPdfService {
 
     doc.addPage(
       _multiPage(
+        fonts: fonts,
         palette: palette,
         documentLabel: subtitle,
         shortTitle: displayTitle,
@@ -126,6 +129,7 @@ class SummaryPdfService {
     String subtitle = 'AI Test Paper',
     String watermarkText = 'StudyShare Test',
   }) async {
+    final fonts = await _loadPdfFonts();
     final palette = _PdfPalette.quiz();
     final doc = pw.Document();
     final subject = paper.subject.trim();
@@ -143,6 +147,7 @@ class SummaryPdfService {
 
     doc.addPage(
       _multiPage(
+        fonts: fonts,
         palette: palette,
         documentLabel: subtitle,
         shortTitle: subject.isEmpty ? displayTitle : subject,
@@ -212,12 +217,14 @@ class SummaryPdfService {
     String subtitle = 'AI Flashcards',
     String watermarkText = 'StudyShare Cards',
   }) async {
+    final fonts = await _loadPdfFonts();
     final palette = _PdfPalette.flashcards();
     final doc = pw.Document();
     final displayTitle = _safeTitle(title, 'Study Flashcards');
 
     doc.addPage(
       _multiPage(
+        fonts: fonts,
         palette: palette,
         documentLabel: subtitle,
         shortTitle: displayTitle,
@@ -258,17 +265,19 @@ class SummaryPdfService {
     if (paper.instructions.isNotEmpty) {
       buffer.writeln('Instructions:');
       for (final instruction in paper.instructions) {
-        buffer.writeln('- ${_pdfSafeText(instruction)}');
+        buffer.writeln('- ${_renderablePdfText(instruction)}');
       }
       buffer.writeln('');
     }
 
     for (final entry in paper.questions.asMap().entries) {
       final question = entry.value;
-      buffer.writeln('Q${entry.key + 1}. ${_pdfSafeText(question.question)}');
+      buffer.writeln(
+        'Q${entry.key + 1}. ${_renderablePdfText(question.question)}',
+      );
       for (final option in question.options.asMap().entries) {
         buffer.writeln(
-          '${_optionLabel(option.key)}. ${_pdfSafeText(option.value)}',
+          '${_optionLabel(option.key)}. ${_renderablePdfText(option.value)}',
         );
       }
       buffer.writeln('');
@@ -282,7 +291,9 @@ class SummaryPdfService {
         'Q${entry.key + 1}: ${_optionLabel(question.correctIndex)}',
       );
       if (question.explanation.trim().isNotEmpty) {
-        buffer.writeln('Explanation: ${_pdfSafeText(question.explanation)}');
+        buffer.writeln(
+          'Explanation: ${_renderablePdfText(question.explanation)}',
+        );
       }
       buffer.writeln('');
     }
@@ -290,6 +301,7 @@ class SummaryPdfService {
   }
 
   pw.MultiPage _multiPage({
+    required _PdfFonts fonts,
     required _PdfPalette palette,
     required String documentLabel,
     required String shortTitle,
@@ -300,6 +312,13 @@ class SummaryPdfService {
       pageTheme: const pw.PageTheme(
         pageFormat: PdfPageFormat.a4,
         margin: pw.EdgeInsets.zero,
+      ).copyWith(
+        theme: pw.ThemeData.withFont(
+          base: fonts.base,
+          bold: fonts.bold,
+          italic: fonts.italic,
+          boldItalic: fonts.boldItalic,
+        ),
       ),
       header: (context) => _header(documentLabel, shortTitle, palette),
       footer: (context) => _footer(generatedOn, context.pageNumber, palette),
@@ -324,7 +343,7 @@ class SummaryPdfService {
             ),
           ),
           pw.Text(
-            '${_pdfSafeText(label.trim())}  |  ${_ellipsize(_pdfSafeText(title), 32)}',
+            '${_renderablePdfText(label.trim())}  |  ${_ellipsize(_renderablePdfText(title), 32)}',
             style: pw.TextStyle(color: PdfColors.white, fontSize: 10),
           ),
         ],
@@ -367,7 +386,7 @@ class SummaryPdfService {
           padding: const pw.EdgeInsets.symmetric(horizontal: 18, vertical: 16),
           color: palette.hero,
           child: pw.Text(
-            _pdfSafeText(title),
+            _renderablePdfText(title),
             style: pw.TextStyle(
               color: palette.heading,
               fontSize: 23,
@@ -377,7 +396,7 @@ class SummaryPdfService {
         ),
         pw.SizedBox(height: 10),
         pw.Text(
-          _pdfSafeText(metaLine),
+          _renderablePdfText(metaLine),
           style: pw.TextStyle(color: palette.mutedText, fontSize: 9),
         ),
         pw.SizedBox(height: 22),
@@ -404,7 +423,7 @@ class SummaryPdfService {
   }
 
   pw.Widget _eyebrow(String label, _PdfPalette palette) => pw.Text(
-    _pdfSafeText(label.toUpperCase()),
+    _renderablePdfText(label.toUpperCase()),
     style: pw.TextStyle(
       color: palette.mutedText,
       fontSize: 8.5,
@@ -415,7 +434,7 @@ class SummaryPdfService {
   pw.Widget _bodyText(String text) => pw.Padding(
     padding: const pw.EdgeInsets.only(bottom: 8),
     child: pw.Text(
-      _pdfSafeText(text),
+      _renderablePdfText(text),
       style: const pw.TextStyle(fontSize: 11, lineSpacing: 3),
     ),
   );
@@ -450,7 +469,11 @@ class SummaryPdfService {
                   pw.SizedBox(width: 10),
                   pw.Expanded(
                     child: pw.Text(
-                      '${point.label}: ${point.body}',
+                      point.body.toLowerCase().startsWith(
+                            point.label.toLowerCase(),
+                          )
+                          ? point.body
+                          : '${point.label}: ${point.body}',
                       style: const pw.TextStyle(
                         fontSize: 10.5,
                         lineSpacing: 2.5,
@@ -570,7 +593,7 @@ class SummaryPdfService {
                   ),
                   color: palette.surface,
                   child: pw.Text(
-                    _pdfSafeText(question.question),
+                    _renderablePdfText(question.question),
                     style: pw.TextStyle(
                       fontSize: 11,
                       fontWeight: pw.FontWeight.bold,
@@ -597,7 +620,7 @@ class SummaryPdfService {
                   if ((figureNote.caption ?? '').trim().isNotEmpty) ...[
                     pw.SizedBox(height: 8),
                     pw.Text(
-                      'Figure: ${_pdfSafeText((figureNote.caption ?? '').trim())}',
+                      'Figure: ${_renderablePdfText((figureNote.caption ?? '').trim())}',
                       style: pw.TextStyle(
                         fontSize: 9,
                         color: palette.mutedText,
@@ -623,7 +646,7 @@ class SummaryPdfService {
                 ),
               ),
               child: pw.Text(
-                '${_optionLabel(option.key)}. ${_pdfSafeText(option.value)}',
+                '${_optionLabel(option.key)}. ${_renderablePdfText(option.value)}',
                 style: pw.TextStyle(fontSize: 10.5, color: palette.body),
               ),
             );
@@ -688,7 +711,7 @@ class SummaryPdfService {
                     ),
                     pw.SizedBox(height: 4),
                     pw.Text(
-                      _pdfSafeText(question.question),
+                      _renderablePdfText(question.question),
                       style: pw.TextStyle(
                         fontSize: 10,
                         color: palette.heading,
@@ -703,21 +726,21 @@ class SummaryPdfService {
           if (question.explanation.trim().isNotEmpty) ...[
             pw.SizedBox(height: 10),
             pw.Text(
-              'Explanation: ${_pdfSafeText(question.explanation.trim())}',
+                'Explanation: ${_renderablePdfText(question.explanation.trim())}',
               style: const pw.TextStyle(fontSize: 9.5, lineSpacing: 2),
             ),
           ],
           if ((figureNote.caption ?? '').trim().isNotEmpty) ...[
             pw.SizedBox(height: 8),
             pw.Text(
-              'Figure context: ${_pdfSafeText((figureNote.caption ?? '').trim())}',
+              'Figure context: ${_renderablePdfText((figureNote.caption ?? '').trim())}',
               style: pw.TextStyle(fontSize: 8.8, color: palette.mutedText),
             ),
           ],
           if (sourceParts.isNotEmpty) ...[
             pw.SizedBox(height: 8),
             pw.Text(
-              'Source: ${_pdfSafeText(sourceParts.join(' | '))}',
+              'Source: ${_renderablePdfText(sourceParts.join(' | '))}',
               style: pw.TextStyle(fontSize: 8.5, color: palette.mutedText),
             ),
           ],
@@ -771,9 +794,9 @@ class SummaryPdfService {
     required _PdfPalette palette,
   }) {
     final metaItems = <MapEntry<String, String>>[
-      MapEntry('Subject', _pdfSafeText(paper.subject)),
-      MapEntry('Semester', _pdfSafeText(paper.semester)),
-      MapEntry('Branch', _pdfSafeText(paper.branch)),
+      MapEntry('Subject', _renderablePdfText(paper.subject)),
+      MapEntry('Semester', _renderablePdfText(paper.semester)),
+      MapEntry('Branch', _renderablePdfText(paper.branch)),
       MapEntry('Questions', paper.questions.length.toString()),
       MapEntry('Marks', '${paper.questions.length}'),
       MapEntry('Suggested Time', '$suggestedMinutes min'),
@@ -849,7 +872,7 @@ class SummaryPdfService {
             (entry) => pw.Padding(
               padding: const pw.EdgeInsets.only(bottom: 4),
               child: pw.Text(
-                '${entry.key + 1}. ${_pdfSafeText(entry.value)}',
+                '${entry.key + 1}. ${_renderablePdfText(entry.value)}',
                 style: const pw.TextStyle(fontSize: 9.5, lineSpacing: 2),
               ),
             ),
@@ -1037,7 +1060,7 @@ class SummaryPdfService {
   }) {
     return pw.Padding(
       padding: padding,
-      child: pw.Text(_pdfSafeText(value), style: style),
+      child: pw.Text(_renderablePdfText(value), style: style),
     );
   }
 
@@ -1108,7 +1131,7 @@ class SummaryPdfService {
   }
 
   String _safeTitle(String value, String fallback) {
-    final trimmed = _pdfSafeText(value).trim();
+    final trimmed = _renderablePdfText(value).trim();
     return trimmed.isEmpty ? fallback : trimmed;
   }
 
@@ -1122,6 +1145,150 @@ class SummaryPdfService {
     return index < 26 ? String.fromCharCode(65 + index) : '${index + 1}';
   }
 
+  Future<_PdfFonts> _loadPdfFonts() async {
+    final regular = await rootBundle.load(
+      'packages/flutter_math_fork/lib/katex_fonts/fonts/KaTeX_Main-Regular.ttf',
+    );
+    final bold = await rootBundle.load(
+      'packages/flutter_math_fork/lib/katex_fonts/fonts/KaTeX_Main-Bold.ttf',
+    );
+    final italic = await rootBundle.load(
+      'packages/flutter_math_fork/lib/katex_fonts/fonts/KaTeX_Main-Italic.ttf',
+    );
+    final boldItalic = await rootBundle.load(
+      'packages/flutter_math_fork/lib/katex_fonts/fonts/KaTeX_Main-BoldItalic.ttf',
+    );
+
+    return _PdfFonts(
+      base: pw.Font.ttf(regular),
+      bold: pw.Font.ttf(bold),
+      italic: pw.Font.ttf(italic),
+      boldItalic: pw.Font.ttf(boldItalic),
+    );
+  }
+
+  String _renderablePdfText(String value) {
+    var text = value
+        .replaceAll('\r\n', '\n')
+        .replaceAll('–', '-')
+        .replaceAll('—', '-')
+        .replaceAll('−', '-')
+        .replaceAll('“', '"')
+        .replaceAll('”', '"')
+        .replaceAll('’', "'")
+        .replaceAll('‘', "'")
+        .replaceAllMapped(
+          RegExp(r'\\begin\{vmatrix\}([\s\S]*?)\\end\{vmatrix\}'),
+          (match) {
+            final body = (match.group(1) ?? '')
+                .replaceAll(RegExp(r'\\\\'), ' ; ')
+                .replaceAll('&', ', ')
+                .replaceAll(RegExp(r'\s+'), ' ')
+                .trim();
+            return body.isEmpty ? 'determinant' : 'det($body)';
+          },
+        )
+        .replaceAllMapped(
+          RegExp(r'\\frac\{([^{}]+)\}\{([^{}]+)\}'),
+          (match) => '(${match.group(1)})/(${match.group(2)})',
+        )
+        .replaceAllMapped(
+          RegExp(r'\\sqrt\{([^{}]+)\}'),
+          (match) => '√(${match.group(1)})',
+        )
+        .replaceAllMapped(
+          RegExp(r'\\vec\{([^{}]+)\}'),
+          (match) => '${match.group(1)}⃗',
+        )
+        .replaceAllMapped(
+          RegExp(r'\\text\{([^{}]+)\}'),
+          (match) => match.group(1) ?? '',
+        )
+        .replaceAll(RegExp(r'\\left|\\right'), '')
+        .replaceAll(RegExp(r'\\\(|\\\)'), '')
+        .replaceAll(RegExp(r'\\\[|\\\]'), '\n')
+        .replaceAll(r'$$', '\n')
+        .replaceAll(RegExp(r'\\\\'), ' ; ')
+        .replaceAll('&', ', ');
+
+    const latexReplacements = <String, String>{
+      r'\nabla': '∇',
+      r'\partial': '∂',
+      r'\cdot': '·',
+      r'\times': '×',
+      r'\to': '→',
+      r'\rightarrow': '→',
+      r'\leftarrow': '←',
+      r'\leftrightarrow': '↔',
+      r'\pm': '±',
+      r'\mp': '∓',
+      r'\neq': '≠',
+      r'\ne': '≠',
+      r'\leq': '≤',
+      r'\geq': '≥',
+      r'\approx': '≈',
+      r'\infty': '∞',
+      r'\sum': 'Σ',
+      r'\int': '∫',
+      r'\oint': '∮',
+      r'\alpha': 'α',
+      r'\beta': 'β',
+      r'\gamma': 'γ',
+      r'\delta': 'δ',
+      r'\epsilon': 'ε',
+      r'\theta': 'θ',
+      r'\lambda': 'λ',
+      r'\mu': 'μ',
+      r'\pi': 'π',
+      r'\rho': 'ρ',
+      r'\sigma': 'σ',
+      r'\phi': 'φ',
+      r'\omega': 'ω',
+      r'\Gamma': 'Γ',
+      r'\Delta': 'Δ',
+      r'\Theta': 'Θ',
+      r'\Lambda': 'Λ',
+      r'\Pi': 'Π',
+      r'\Sigma': 'Σ',
+      r'\Phi': 'Φ',
+      r'\Omega': 'Ω',
+    };
+    latexReplacements.forEach((pattern, replacement) {
+      text = text.replaceAll(pattern, replacement);
+    });
+
+    return text
+        .replaceAllMapped(
+          RegExp(r'([A-Za-z0-9)\]])\^\{([^{}]+)\}'),
+          (match) => '${match.group(1)}^${match.group(2)}',
+        )
+        .replaceAllMapped(
+          RegExp(r'([A-Za-z0-9)\]])_\{([^{}]+)\}'),
+          (match) => '${match.group(1)}_${match.group(2)}',
+        )
+        .replaceAllMapped(
+          RegExp(r'([A-Za-z0-9)\]])\^([A-Za-z0-9+\-]+)'),
+          (match) => '${match.group(1)}^${match.group(2)}',
+        )
+        .replaceAllMapped(
+          RegExp(r'([A-Za-z0-9)\]])_([A-Za-z0-9+\-]+)'),
+          (match) => '${match.group(1)}_${match.group(2)}',
+        )
+        .replaceAll('**', '')
+        .replaceAll('`', '')
+        .replaceAll(RegExp(r'\bL-?\d+[A-Za-z0-9/\- ]{4,}\b'), ' ')
+        .replaceAll(
+          RegExp(r'\b\d{1,2}no-\d+(?:st|nd|rd|th)?\b', caseSensitive: false),
+          ' ',
+        )
+        .replaceAll(RegExp(r'\/[A-Za-z]{3,}\/\d{2,4}'), ' ')
+        .replaceAll(RegExp(r'[^\S\n]+'), ' ')
+        .replaceAll(RegExp(r' *\n *'), '\n')
+        .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+        .trimRight();
+  }
+
+  // ignore: unused_element
   String _pdfSafeText(String value) {
     return value
         .replaceAll('–', '-')
@@ -1145,76 +1312,50 @@ class SummaryPdfService {
 }
 
 _SummaryDocument _parseSummary(String raw) {
-  final normalized = raw.replaceAll('\r\n', '\n').trim();
+  final normalized = _normalizeSummaryExportText(raw);
   final fallback = normalized.isEmpty
       ? 'No summary content was available for export.'
       : normalized;
-  final paragraphs = fallback
-      .split(RegExp(r'\n\s*\n'))
-      .map((item) => item.replaceAll(RegExp(r'\s+'), ' ').trim())
-      .where((item) => item.isNotEmpty)
-      .toList(growable: false);
-
-  final sentences = RegExp(r'[^.!?]+[.!?]?')
-      .allMatches(fallback)
-      .map((match) => match.group(0)?.trim() ?? '')
-      .where((item) => item.isNotEmpty)
-      .toList(growable: false);
-
-  final bulletLines = fallback
+  final cleanedLines = fallback
       .split('\n')
-      .map((line) => line.trim())
-      .where((line) => RegExp(r'^([-*]|[0-9]+\.)\s+').hasMatch(line))
-      .map(
-        (line) => line.replaceFirst(RegExp(r'^([-*]|[0-9]+\.)\s+'), '').trim(),
-      )
+      .map(_cleanSummaryLine)
+      .where((line) => line.isNotEmpty)
       .toList(growable: false);
-
-  final sourcePoints = bulletLines.isNotEmpty
-      ? bulletLines
-      : sentences.take(6).toList();
-  final points = sourcePoints
+  final paragraphs = _collectSummaryParagraphs(cleanedLines);
+  final pointCandidates = _collectSummaryBullets(cleanedLines).isNotEmpty
+      ? _collectSummaryBullets(cleanedLines)
+      : _collectSummarySentences(
+          paragraphs.isEmpty ? fallback : paragraphs.join(' '),
+        );
+  final points = pointCandidates
+      .take(6)
+      .toList(growable: false)
       .asMap()
       .entries
       .map((entry) {
-        final chunks = entry.value.split(RegExp(r'\s+-\s+|:\s+'));
-        final fallbackWords = entry.value
-            .trim()
-            .split(RegExp(r'\s+'))
-            .where((word) => word.isNotEmpty)
-            .toList(growable: false);
-        final fallbackLabel = fallbackWords.take(4).join(' ');
-        final fallbackBody = fallbackWords.skip(4).join(' ').trim();
-        final firstChunk = chunks.first.trim();
-        final useExplicitLabel =
-            chunks.length > 1 && firstChunk.split(RegExp(r'\s+')).length <= 5;
-        final label = useExplicitLabel
-            ? firstChunk
-            : (fallbackLabel.isEmpty
-                  ? 'Point ${entry.key + 1}'
-                  : fallbackLabel);
-        final body = chunks.length > 1 && useExplicitLabel
-            ? chunks.sublist(1).join(' - ').trim()
-            : (fallbackBody.isEmpty ? entry.value.trim() : fallbackBody);
-        return _SummaryPoint(index: entry.key + 1, label: label, body: body);
+        final text = entry.value;
+        final label = _deriveReviewTopic(text, entry.key);
+        final body = _trimTopicPrefix(text, label);
+        return _SummaryPoint(
+          index: entry.key + 1,
+          label: label,
+          body: body.isEmpty ? text : body,
+        );
       })
       .toList(growable: false);
 
   final reviewRows = points.isEmpty
       ? <_ReviewRow>[
           _ReviewRow(
-            topic: 'Summary',
+            topic: 'Overview',
             takeaway: paragraphs.isEmpty ? fallback : paragraphs.first,
           ),
         ]
       : points
-            .take(6)
-            .map(
-              (point) => _ReviewRow(topic: point.label, takeaway: point.body),
-            )
+            .map((point) => _ReviewRow(topic: point.label, takeaway: point.body))
             .toList(growable: false);
 
-  final wordCount = fallback
+  final wordCount = (paragraphs.isEmpty ? fallback : paragraphs.join(' '))
       .split(RegExp(r'\s+'))
       .where((word) => word.isNotEmpty)
       .length;
@@ -1234,6 +1375,150 @@ _SummaryDocument _parseSummary(String raw) {
         ? paragraphs.first.split(' ').take(4).join(' ')
         : '',
   );
+}
+
+final RegExp _summaryScaffoldHeadingPattern = RegExp(
+  r'^(key concepts?|key points?|quick review|quick revision|summary|overview|main ideas?|revision notes?)$',
+  caseSensitive: false,
+);
+final RegExp _summaryNoisePattern = RegExp(
+  r'^(?:note|for ex|for example|example|page\s+\d+|l-\d+|figure\s+\d+|table\s+\d+)\b',
+  caseSensitive: false,
+);
+
+String _normalizeSummaryExportText(String raw) {
+  return raw
+      .replaceAll('\r\n', '\n')
+      .replaceAll('**NOTE:**', ' ')
+      .replaceAll('**For ex:**', ' ')
+      .replaceAll('**For example:**', ' ')
+      .replaceAll(
+        RegExp(r'\bL-?\d+[A-Za-z0-9/\- ]{4,}\b', caseSensitive: false),
+        ' ',
+      )
+      .replaceAll(RegExp(r'/[A-Za-z]{3,}/\d{2,4}'), ' ')
+      .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+      .trim();
+}
+
+String _cleanSummaryLine(String raw) {
+  var line = raw.trim();
+  if (line.isEmpty) return '';
+  line = line
+      .replaceAll(RegExp(r'^#+\s*'), '')
+      .replaceAll(RegExp(r'^\*\*(.+?)\*\*$'), r'$1')
+      .replaceAll(RegExp(r'^\*\*(NOTE|For ex\.?|For example)\s*:?\*\*', caseSensitive: false), '')
+      .replaceAll(RegExp(r'^(NOTE|For ex\.?|For example)\s*:?\s*', caseSensitive: false), '')
+      .replaceAll(RegExp(r'^[-*•]\s*'), '')
+      .replaceAll(RegExp(r'^\d+[.)]\s*'), '')
+      .replaceAll(RegExp(r'[ \t]+'), ' ')
+      .trim();
+  if (line.isEmpty) return '';
+  if (_summaryScaffoldHeadingPattern.hasMatch(line)) return '';
+  if (_summaryNoisePattern.hasMatch(line)) return '';
+  return line;
+}
+
+List<String> _dedupeSummaryItems(Iterable<String> values) {
+  final seen = <String>{};
+  final items = <String>[];
+  for (final value in values) {
+    final normalized = value
+        .toLowerCase()
+        .replaceAll(
+          RegExp(r'[^a-z0-9α-ωΑ-Ω∇∂·×→←↔∞σπλμβγδθφΩΣΔ_^\s-]'),
+          ' ',
+        )
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (normalized.isEmpty || seen.contains(normalized)) continue;
+    seen.add(normalized);
+    items.add(value.trim());
+  }
+  return items;
+}
+
+List<String> _collectSummaryParagraphs(List<String> lines) {
+  final buffer = <String>[];
+  final paragraphs = <String>[];
+
+  void flush() {
+    if (buffer.isEmpty) return;
+    paragraphs.add(buffer.join(' ').replaceAll(RegExp(r'\s+'), ' ').trim());
+    buffer.clear();
+  }
+
+  for (final line in lines) {
+    if (line.isEmpty) {
+      flush();
+      continue;
+    }
+    buffer.add(line);
+  }
+  flush();
+
+  return _dedupeSummaryItems(
+    paragraphs.where((paragraph) => paragraph.split(RegExp(r'\s+')).length >= 8),
+  ).take(5).toList(growable: false);
+}
+
+List<String> _collectSummaryBullets(List<String> lines) {
+  return _dedupeSummaryItems(
+    lines.where((line) => line.split(RegExp(r'\s+')).length >= 5),
+  );
+}
+
+List<String> _collectSummarySentences(String raw) {
+  final matches = RegExp(r'[^.!?\n]+[.!?]?')
+      .allMatches(raw)
+      .map((match) => match.group(0)?.trim() ?? '')
+      .where((sentence) => sentence.split(RegExp(r'\s+')).length >= 7);
+  return _dedupeSummaryItems(matches);
+}
+
+String _deriveReviewTopic(String value, int index) {
+  final split = value.split(RegExp(r'\s*:\s*'));
+  final first = split.first.trim();
+  if (split.length > 1 &&
+      first.isNotEmpty &&
+      first.split(RegExp(r'\s+')).length <= 4 &&
+      !_summaryNoisePattern.hasMatch(first) &&
+      !_summaryScaffoldHeadingPattern.hasMatch(first)) {
+    return first;
+  }
+
+  final words = value
+      .replaceAll(RegExp(r'[^A-Za-z0-9α-ωΑ-Ω∇∂·×→←↔∞σπλμβγδθφΩΣΔ_^\s-]'), ' ')
+      .split(RegExp(r'\s+'))
+      .where((word) => word.isNotEmpty)
+      .take(4)
+      .toList(growable: false);
+  if (words.isEmpty) return 'Point ${index + 1}';
+  return words.join(' ');
+}
+
+String _trimTopicPrefix(String value, String label) {
+  final split = value.split(RegExp(r'\s*:\s*'));
+  if (split.length > 1 &&
+      split.first.trim().toLowerCase() == label.toLowerCase() &&
+      split.sublist(1).join(':').trim().isNotEmpty) {
+    return split.sublist(1).join(':').trim();
+  }
+  return value.trim();
+}
+
+class _PdfFonts {
+  const _PdfFonts({
+    required this.base,
+    required this.bold,
+    required this.italic,
+    required this.boldItalic,
+  });
+
+  final pw.Font base;
+  final pw.Font bold;
+  final pw.Font italic;
+  final pw.Font boldItalic;
 }
 
 class _SummaryDocument {
