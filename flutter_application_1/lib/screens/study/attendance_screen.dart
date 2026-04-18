@@ -371,21 +371,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       );
       return;
     }
-    if (studentId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Student ID unavailable. Please sync again.'),
-        ),
-      );
-      return;
-    }
 
     setState(() => _isLoadingDaywise = true);
     try {
       final lectures = await _attendanceService.getDaywiseAttendance(
         collegeId: widget.collegeId,
         component: component,
-        studentId: studentId,
+        studentId: studentId ?? 0,
       );
       if (!mounted) return;
       await showModalBottomSheet<void>(
