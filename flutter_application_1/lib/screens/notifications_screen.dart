@@ -20,6 +20,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   bool _isLoading = true;
   List<Map<String, dynamic>> _notifications = [];
   List<Map<String, dynamic>> _followRequests = [];
+  final Set<int> _processingFollowRequestIds = <int>{};
 
   @override
   void initState() {
@@ -61,12 +62,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       }
     }
   }
+
   Future<void> _handleFollowRequest(int requestId, bool accept) async {
     try {
-      // Optimistic update
-      setState(() {
-        _followRequests.removeWhere((r) => r['id'] == requestId);
-      });
+      setState(() => _processingFollowRequestIds.add(requestId));
 
       if (accept) {
         await _supabaseService.acceptFollowRequest(requestId);
@@ -88,9 +87,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       debugPrint('Error handling follow request: $e');
       _fetchData(); // Revert/Refresh
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _processingFollowRequestIds.remove(requestId));
       }
     }
   }
@@ -140,23 +143,26 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           ),
         ],
       ),
-    body: _isLoading
-        ? const Center(child: CircularProgressIndicator())
-        : RefreshIndicator(
-            onRefresh: _fetchData,
-            child: (_notifications.isEmpty && _followRequests.isEmpty)
-                ? ListView(
-                    physics: const AlwaysScrollableScrollPhysics(),
-                    children: [
-                      SizedBox(
-                        height: MediaQuery.of(context).size.height * 0.7,
-                        child: _buildEmptyState(theme),
-                      ),
-                    ],
-                  )
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _fetchData,
+              child: (_notifications.isEmpty && _followRequests.isEmpty)
+                  ? ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      children: [
+                        SizedBox(
+                          height: MediaQuery.of(context).size.height * 0.7,
+                          child: _buildEmptyState(theme),
+                        ),
+                      ],
+                    )
                   : ListView(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 8,
+                      ),
                       children: [
                         if (_followRequests.isNotEmpty) ...[
                           Text(
@@ -168,12 +174,15 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                             ),
                           ),
                           const SizedBox(height: 12),
-                          ..._followRequests.map((req) => _buildFollowRequestItem(req, theme, isDark)),
+                          ..._followRequests.map(
+                            (req) =>
+                                _buildFollowRequestItem(req, theme, isDark),
+                          ),
                           const Divider(height: 32),
                         ],
-                        
+
                         if (_notifications.isNotEmpty) ...[
-                           Text(
+                          Text(
                             'Recent',
                             style: GoogleFonts.inter(
                               fontSize: 14,
@@ -182,16 +191,20 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                             ),
                           ),
                           const SizedBox(height: 12),
-                          ..._notifications.map((n) => _buildNotificationItem(n, theme)),
+                          ..._notifications.map(
+                            (n) => _buildNotificationItem(n, theme),
+                          ),
                         ] else if (_followRequests.isNotEmpty) ...[
-                           // If only requests and no other notifications
-                           const SizedBox(height: 24),
-                           Center(
-                             child: Text(
-                               'No other notifications',
-                               style: GoogleFonts.inter(color: theme.secondaryTextColor),
-                             ),
-                           ),
+                          // If only requests and no other notifications
+                          const SizedBox(height: 24),
+                          Center(
+                            child: Text(
+                              'No other notifications',
+                              style: GoogleFonts.inter(
+                                color: theme.secondaryTextColor,
+                              ),
+                            ),
+                          ),
                         ],
                       ],
                     ),
@@ -199,13 +212,23 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     );
   }
 
-  Widget _buildFollowRequestItem(Map<String, dynamic> request, _NotificationThemeStyles theme, bool isDark) {
+  Widget _buildFollowRequestItem(
+    Map<String, dynamic> request,
+    _NotificationThemeStyles theme,
+    bool isDark,
+  ) {
     final requester = request['requester'];
-    final requesterName = requester != null ? (requester['display_name'] ?? 'User') : 'Unknown User';
-    final requesterUsername = requester != null ? (requester['username'] ?? '') : '';
+    final requesterName = requester != null
+        ? (requester['display_name'] ?? 'User')
+        : 'Unknown User';
+    final requesterUsername = requester != null
+        ? (requester['username'] ?? '')
+        : '';
     final requesterPhoto = requester?['photo_url'];
     final requestId = request['id'] as int?;
-    
+    final isProcessing =
+        requestId != null && _processingFollowRequestIds.contains(requestId);
+
     if (requestId == null) return const SizedBox.shrink();
 
     return Container(
@@ -303,14 +326,20 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             children: [
               Expanded(
                 child: OutlinedButton(
-                  onPressed: () => _handleFollowRequest(requestId, false),
+                  onPressed: isProcessing
+                      ? null
+                      : () => _handleFollowRequest(requestId, false),
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    side: BorderSide(color: theme.secondaryTextColor.withValues(alpha: 0.3)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    side: BorderSide(
+                      color: theme.secondaryTextColor.withValues(alpha: 0.3),
+                    ),
                   ),
                   child: Text(
-                    'Delete',
+                    isProcessing ? 'Working...' : 'Delete',
                     style: GoogleFonts.inter(
                       color: theme.textColor,
                       fontWeight: FontWeight.w600,
@@ -321,20 +350,35 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
               const SizedBox(width: 12),
               Expanded(
                 child: ElevatedButton(
-                  onPressed: () => _handleFollowRequest(requestId, true),
+                  onPressed: isProcessing
+                      ? null
+                      : () => _handleFollowRequest(requestId, true),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppTheme.primary,
                     padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
                     elevation: 0,
                   ),
-                  child: Text(
-                    'Confirm',
-                    style: GoogleFonts.inter(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                  child: isProcessing
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Colors.white,
+                            ),
+                          ),
+                        )
+                      : Text(
+                          'Confirm',
+                          style: GoogleFonts.inter(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                 ),
               ),
             ],
@@ -344,10 +388,13 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     );
   }
 
-  Widget _buildNotificationItem(Map<String, dynamic> notification, _NotificationThemeStyles theme) {
+  Widget _buildNotificationItem(
+    Map<String, dynamic> notification,
+    _NotificationThemeStyles theme,
+  ) {
     final type = notification['type'];
     final isRead = notification['is_read'] ?? false;
-    
+
     IconData icon;
     Color iconColor;
     Color iconBg;
@@ -383,17 +430,16 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: isRead ? Colors.transparent : theme.secondaryTextColor.withValues(alpha: 0.05),
+        color: isRead
+            ? Colors.transparent
+            : theme.secondaryTextColor.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(12),
       ),
       child: ListTile(
         contentPadding: const EdgeInsets.all(12),
         leading: Container(
           padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: iconBg,
-            shape: BoxShape.circle,
-          ),
+          decoration: BoxDecoration(color: iconBg, shape: BoxShape.circle),
           child: Icon(icon, color: iconColor, size: 24),
         ),
         title: Text(
@@ -420,7 +466,10 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             const SizedBox(height: 6),
             Text(
               timeago.format(
-                DateTime.tryParse(notification['created_at']?.toString() ?? '') ?? DateTime.now()
+                DateTime.tryParse(
+                      notification['created_at']?.toString() ?? '',
+                    ) ??
+                    DateTime.now(),
               ),
               style: GoogleFonts.inter(
                 color: theme.secondaryTextColor.withValues(alpha: 0.7),
@@ -436,7 +485,9 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             setState(() {
               notification['is_read'] = true;
             });
-            _supabaseService.markNotificationRead(notificationId).catchError((e) {
+            _supabaseService.markNotificationRead(notificationId).catchError((
+              e,
+            ) {
               debugPrint('Failed to mark notification as read: $e');
               // Revert on error
               if (mounted) {
@@ -478,10 +529,16 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
   _NotificationThemeStyles _resolveThemeStyles(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     return _NotificationThemeStyles(
-      backgroundColor: isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
+      backgroundColor: isDark
+          ? AppTheme.darkBackground
+          : AppTheme.lightBackground,
       textColor: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
-      secondaryTextColor: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
-      iconColor: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+      secondaryTextColor: isDark
+          ? AppTheme.darkTextSecondary
+          : AppTheme.lightTextSecondary,
+      iconColor: isDark
+          ? AppTheme.darkTextSecondary
+          : AppTheme.lightTextSecondary,
     );
   }
 }

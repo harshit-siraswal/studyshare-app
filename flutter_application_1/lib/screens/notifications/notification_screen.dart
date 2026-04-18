@@ -33,6 +33,7 @@ class _NotificationScreenState extends State<NotificationScreen>
   bool _isLoadingMore = false;
   int _offset = 0;
   final int _limit = 20;
+  final Set<int> _pendingFollowActionIds = <int>{};
 
   List<NotificationModel> get _filteredNotifications {
     if (_tabController.index == 1) {
@@ -61,7 +62,9 @@ class _NotificationScreenState extends State<NotificationScreen>
     NotificationModel original,
     NotificationModel updated,
   ) {
-    final index = _notifications.indexWhere((element) => element.id == original.id);
+    final index = _notifications.indexWhere(
+      (element) => element.id == original.id,
+    );
     if (index == -1) return;
     _notifications[index] = updated;
   }
@@ -446,6 +449,7 @@ class _NotificationScreenState extends State<NotificationScreen>
     final directCandidates = [
       n.actorEmail,
       n.actorId,
+      _extractEmailFromActionUrl(n.actionUrl),
     ];
 
     for (final candidate in directCandidates) {
@@ -483,11 +487,57 @@ class _NotificationScreenState extends State<NotificationScreen>
     return null;
   }
 
+  String? _extractEmailFromActionUrl(String? actionUrl) {
+    final normalized = actionUrl?.trim() ?? '';
+    if (normalized.isEmpty) return null;
+
+    final uri = Uri.tryParse(normalized);
+    if (uri == null) return null;
+
+    final candidates = <String>[
+      if (uri.pathSegments.isNotEmpty)
+        Uri.decodeComponent(uri.pathSegments.last),
+      Uri.decodeComponent(uri.queryParameters['email'] ?? ''),
+      Uri.decodeComponent(uri.queryParameters['userEmail'] ?? ''),
+    ];
+
+    for (final candidate in candidates) {
+      if (candidate.contains('@')) return candidate;
+    }
+    return null;
+  }
+
   String? _extractEmailCandidate(Object? value) {
     if (value is! String) return null;
     final normalized = value.trim();
     if (!normalized.contains('@')) return null;
     return normalized;
+  }
+
+  Future<String?> _resolveActorEmailForNavigation(NotificationModel n) async {
+    final directEmail = _resolveActorEmail(n);
+    if (directEmail != null) return directEmail;
+
+    if (n.type != 'follow_request') return null;
+    final requestId = int.tryParse(n.followRequestId?.trim() ?? '');
+    if (requestId == null) return null;
+
+    try {
+      final pendingRequests = await _supabaseService.getPendingFollowRequests();
+      for (final request in pendingRequests) {
+        final currentId = int.tryParse(request['id']?.toString() ?? '');
+        if (currentId != requestId) continue;
+        final requester = request['requester'];
+        if (requester is Map) {
+          final requesterMap = Map<String, dynamic>.from(requester);
+          return _extractEmailCandidate(requesterMap['email']);
+        }
+      }
+    } catch (error) {
+      debugPrint('Failed to resolve follow notification actor email: $error');
+    }
+
+    return null;
   }
 
   Future<void> _handleTap(NotificationModel n) async {
@@ -497,7 +547,8 @@ class _NotificationScreenState extends State<NotificationScreen>
 
     // 1. Follow Request Navigation
     if (_isFollowNotificationType(n.type)) {
-      final actorEmail = _resolveActorEmail(n);
+      final actorEmail = await _resolveActorEmailForNavigation(n);
+      if (!mounted) return;
       if (actorEmail != null) {
         Navigator.push(
           context,
@@ -730,11 +781,16 @@ class _NotificationScreenState extends State<NotificationScreen>
   }
 
   Widget _buildFollowActions(NotificationModel n) {
+    final requestId = int.tryParse(n.followRequestId?.trim() ?? '');
+    final isProcessing =
+        requestId != null && _pendingFollowActionIds.contains(requestId);
     return Row(
       children: [
         Expanded(
           child: OutlinedButton(
-            onPressed: () => _handleFollowAction(n, false),
+            onPressed: isProcessing
+                ? null
+                : () => _handleFollowAction(n, false),
             style: OutlinedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 10),
               side: BorderSide(color: Colors.grey.shade300),
@@ -743,7 +799,7 @@ class _NotificationScreenState extends State<NotificationScreen>
               ),
             ),
             child: Text(
-              'Decline',
+              isProcessing ? 'Working...' : 'Decline',
               style: GoogleFonts.inter(
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
@@ -754,7 +810,7 @@ class _NotificationScreenState extends State<NotificationScreen>
         const SizedBox(width: 10),
         Expanded(
           child: ElevatedButton(
-            onPressed: () => _handleFollowAction(n, true),
+            onPressed: isProcessing ? null : () => _handleFollowAction(n, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.primary,
               foregroundColor: Colors.white,
@@ -764,13 +820,22 @@ class _NotificationScreenState extends State<NotificationScreen>
               ),
               elevation: 0,
             ),
-            child: Text(
-              'Accept',
-              style: GoogleFonts.inter(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            child: isProcessing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : Text(
+                    'Accept',
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
           ),
         ),
       ],
@@ -791,11 +856,9 @@ class _NotificationScreenState extends State<NotificationScreen>
       return;
     }
 
-    final updated = n.copyWith(actionTaken: true, isRead: true);
-
     try {
       setState(() {
-        _replaceNotification(n, updated);
+        _pendingFollowActionIds.add(requestId);
       });
 
       if (accept) {
@@ -819,15 +882,23 @@ class _NotificationScreenState extends State<NotificationScreen>
           ),
         );
       }
+
+      if (!mounted) return;
+      setState(() {
+        _replaceNotification(n, n.copyWith(actionTaken: true, isRead: true));
+      });
       await _loadNotifications();
     } catch (e) {
       if (mounted) {
-        setState(() {
-          _replaceNotification(updated, n);
-        });
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Action failed: $e')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _pendingFollowActionIds.remove(requestId);
+        });
       }
     }
   }

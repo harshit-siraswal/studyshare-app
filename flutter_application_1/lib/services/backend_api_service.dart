@@ -2363,27 +2363,23 @@ class BackendApiService {
 
   Future<void> acceptFollowRequest(
     int requestId, {
-    required BuildContext context,
+    BuildContext? context,
   }) async {
     await _requestJson(
       '/api/follow/approve/${requestId.toString()}', // Corrected endpoint
       method: 'POST',
-      securityContext: context,
-      includeRecaptchaToken: true,
-      recaptchaAction: 'follow_approve',
+      requireAuthToken: true,
     );
   }
 
   Future<void> rejectFollowRequest(
     int requestId, {
-    required BuildContext context,
+    BuildContext? context,
   }) async {
     await _requestJson(
       '/api/follow/reject/${requestId.toString()}', // Corrected endpoint
       method: 'POST',
-      securityContext: context,
-      includeRecaptchaToken: true,
-      recaptchaAction: 'follow_reject',
+      requireAuthToken: true,
     );
   }
 
