@@ -546,8 +546,13 @@ class _StickerPickerState extends State<StickerPicker>
     );
     if (!mounted) return;
     if (savedFile != null) {
+      // Deliver the sticker — do NOT call navigator.pop() here.
+      // The sticker sheet is already dismissed by the caller after
+      // onStickerSelected fires; an extra pop would eject the chatroom.
       widget.onStickerSelected(savedFile);
-      navigator.pop();
+      if (navigator.canPop()) {
+        navigator.pop();
+      }
     }
   }
 

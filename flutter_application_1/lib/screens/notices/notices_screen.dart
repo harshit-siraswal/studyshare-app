@@ -627,13 +627,6 @@ class _NoticesScreenState extends State<NoticesScreen>
                         ),
                         onPressed: _showDateFilter,
                       ),
-                      IconButton(
-                        icon: Icon(
-                          Icons.search_rounded,
-                          color: isDark ? Colors.white : Colors.black,
-                        ),
-                        onPressed: () => _showNoticeSearch(isDark),
-                      ),
                     ],
                   ),
                   const SizedBox(height: 12),

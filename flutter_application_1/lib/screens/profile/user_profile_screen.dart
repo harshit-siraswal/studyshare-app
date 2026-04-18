@@ -237,11 +237,6 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           fillColor: isDark
               ? Colors.white10
               : Colors.black.withValues(alpha: 0.04),
-          prefixIcon: Icon(
-            Icons.search_rounded,
-            size: 20,
-            color: secondaryColor,
-          ),
           suffixIcon: _contributionSearchQuery.isEmpty
               ? null
               : IconButton(
@@ -490,28 +485,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           icon: Icon(Icons.arrow_back, color: textColor),
           onPressed: () => Navigator.pop(context),
         ),
-        actions: [
-          IconButton(
-            tooltip: _showContributionSearch
-                ? 'Hide contribution search'
-                : 'Search contributions',
-            icon: Icon(
-              _showContributionSearch
-                  ? Icons.close_rounded
-                  : Icons.search_rounded,
-              color: textColor,
-            ),
-            onPressed: () {
-              setState(() {
-                _showContributionSearch = !_showContributionSearch;
-                if (!_showContributionSearch) {
-                  _contributionSearchController.clear();
-                  _contributionSearchQuery = '';
-                }
-              });
-            },
-          ),
-        ],
+        actions: const [],
       ),
       body: _isLoading
           ? Center(child: CircularProgressIndicator(color: AppTheme.primary))

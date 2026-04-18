@@ -486,6 +486,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       entry.courseCode.trim(),
       entry.courseComponentName.trim(),
       entry.classRoom.trim(),
+      entry.title.trim(),
+      entry.type.trim(),
+      entry.facultyName.trim(),
     ].join('|');
   }
 
@@ -581,22 +584,26 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     int projectedMisses = 0,
     int scheduledFutureClasses = 0,
   }) {
-    final present = component.attendedClasses + component.extraAttendance;
-    final projectedFutureClasses = math.max(
+    final present = component.attendedClasses;
+    final plannedAttendances = math.max(
       0,
       scheduledFutureClasses - projectedMisses,
     );
-    final total = math.max(present, component.totalClasses + projectedFutureClasses);
-    final percentage = total <= 0 ? 0.0 : (present / total) * 100;
+    final total = math.max(
+      component.totalClasses,
+      component.totalClasses + scheduledFutureClasses,
+    );
+    final projectedPresent = math.min(total, present + plannedAttendances);
+    final percentage = total <= 0 ? 0.0 : (projectedPresent / total) * 100;
     final safe = percentage >= component.threshold;
     final classesToSafety = safe
         ? _additionalClassesCanMiss(
-            present: present,
+            present: projectedPresent,
             total: total,
             threshold: component.threshold,
           )
         : _classesNeededToRecover(
-            present: present,
+            present: projectedPresent,
             total: total,
             threshold: component.threshold,
           );
@@ -616,7 +623,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     return _AttendanceProjectionSummary(
       percentage: percentage,
       projectedTotal: total,
-      projectedPresent: present,
+      projectedPresent: projectedPresent,
       projectedMisses: projectedMisses,
       isSafe: safe,
       message: message,
@@ -890,7 +897,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       final dayDate = DateTime(parsed.year, parsed.month, parsed.day);
       if (weekStart != null && dayDate.isBefore(weekStart)) return false;
       if (weekEnd != null && dayDate.isAfter(weekEnd)) return false;
-      return !dayDate.isBefore(startOfToday);
+      if (dayDate.isBefore(startOfToday)) return false;
+
+      final entryEnd = _parseEntryDateTime(entry.lectureDate, entry.end);
+      if (entryEnd != null) {
+        return !entryEnd.isBefore(today);
+      }
+
+      return true;
     }).toList();
 
     return upcoming;
@@ -934,10 +948,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final snapshot = _snapshot;
     if (snapshot == null) return;
 
-    final entries = _weeklyScheduleEntries(
+    final entries = _upcomingScheduleEntries(
       snapshot,
     ).where(_isClassEntry).toList();
     final groupedEntries = _groupScheduleEntries(entries);
+    final allEntries = _weeklyScheduleEntries(
+      snapshot,
+    ).where(_isClassEntry).toList(growable: false);
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -985,9 +1002,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                             ),
                           ),
                           TextButton.icon(
-                            onPressed: entries.isEmpty
+                            onPressed: allEntries.isEmpty
                                 ? null
-                                : () => _addEntriesToCalendar(entries),
+                                : () => _addEntriesToCalendar(allEntries),
                             icon: const Icon(
                               Icons.event_available_rounded,
                               size: 18,
@@ -1001,33 +1018,47 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                           ),
                         ],
                       ),
-                      if (entries.isNotEmpty) ...[
-                        const SizedBox(height: 14),
-                        _buildProjectionPlanner(
-                          entries: entries,
-                          isDark: isDark,
-                          onStateChanged: () {
-                            if (!mounted) return;
-                            setModalState(() {});
-                          },
-                        ),
-                      ],
                       const SizedBox(height: 14),
                       Expanded(
-                        child: entries.isEmpty
-                            ? Center(
-                                child: Text(
-                                  'No classes in this week schedule.',
+                        child: SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              if (entries.isNotEmpty) ...[
+                                _buildProjectionPlanner(
+                                  entries: entries,
+                                  isDark: isDark,
+                                  onStateChanged: () {
+                                    if (!mounted) return;
+                                    setModalState(() {});
+                                  },
+                                ),
+                                const SizedBox(height: 16),
+                                Text(
+                                  'Upcoming Classes This Week',
                                   style: GoogleFonts.inter(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
                                     color: isDark
-                                        ? AppTheme.darkTextSecondary
-                                        : AppTheme.lightTextSecondary,
+                                        ? AppTheme.darkTextPrimary
+                                        : AppTheme.lightTextPrimary,
                                   ),
                                 ),
-                              )
-                            : ListView(
-                                children: groupedEntries.entries
-                                    .map((group) {
+                                const SizedBox(height: 10),
+                              ],
+                              if (entries.isEmpty)
+                                Center(
+                                  child: Text(
+                                    'No upcoming classes this week.',
+                                    style: GoogleFonts.inter(
+                                      color: isDark
+                                          ? AppTheme.darkTextSecondary
+                                          : AppTheme.lightTextSecondary,
+                                    ),
+                                  ),
+                                )
+                              else
+                                ...groupedEntries.entries.map((group) {
                                       final dayKey = group.key;
                                       final dayEntries = group.value
                                           .where(_isClassEntry)
@@ -1168,9 +1199,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                           ),
                                         ),
                                       );
-                                    })
-                                    .toList(growable: false),
-                              ),
+                                    }),
+                            ],
+                          ),
+                        ),
                       ),
                     ],
                   );
@@ -1373,7 +1405,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
     final upcomingEntries = _upcomingScheduleEntries(
       snapshot,
-    ).where(_isClassEntry).take(5).toList();
+    ).where(_isClassEntry).toList();
     final weeklyEntries = _weeklyScheduleEntries(
       snapshot,
     ).where(_isClassEntry).toList(growable: false);
@@ -1742,7 +1774,25 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             ],
           ),
           const SizedBox(height: 14),
-          ...groupedEntries.entries.map((group) {
+          if (groupedEntries.isEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(
+                'No upcoming classes are available for projection right now.',
+                style: GoogleFonts.inter(
+                  fontSize: 12.6,
+                  color: isDark
+                      ? AppTheme.darkTextSecondary
+                      : AppTheme.lightTextSecondary,
+                ),
+              ),
+            )
+          else
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 420),
+              child: SingleChildScrollView(
+                child: Column(
+                  children: groupedEntries.entries.map((group) {
             final dayEntries = group.value.where(_isClassEntry).toList();
             if (dayEntries.isEmpty) {
               return const SizedBox.shrink();
@@ -1994,7 +2044,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 ),
               ),
             );
-          }),
+                  }).toList(growable: false),
+                ),
+              ),
+            ),
         ],
       ),
     );

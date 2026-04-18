@@ -77,7 +77,6 @@ class _CommentInputBoxState extends State<CommentInputBox> {
         ),
         child: StickerPicker(
           onStickerSelected: (file) {
-            Navigator.pop(context);
             if (widget.onStickerSelected != null) {
               widget.onStickerSelected!(file);
             }

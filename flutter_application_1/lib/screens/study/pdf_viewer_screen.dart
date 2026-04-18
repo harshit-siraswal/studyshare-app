@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:syncfusion_flutter_pdfviewer/pdfviewer.dart';
 import '../../config/theme.dart';
 
@@ -31,7 +32,8 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
   File? _cachedPdfFile;
   bool _isWarmingPdfCache = false;
   bool _isPdfCacheLookupComplete = true;
-  
+  bool _isDownloading = false;
+
   // Search state
   PdfTextSearchResult _searchResult = PdfTextSearchResult();
   final TextEditingController _searchController = TextEditingController();
@@ -60,15 +62,11 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
 
   void _handleSearch(String query) {
     if (query.isEmpty) return;
-
-    // Remove previous listener to prevent duplicate setState calls.
     if (_searchListener != null) {
       _searchResult.removeListener(_searchListener!);
       _searchListener = null;
     }
-
     _searchResult = _pdfViewerController.searchText(query);
-
     _searchListener = () {
       if (mounted) setState(() {});
     };
@@ -109,22 +107,81 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
       final cached = await DefaultCacheManager().getFileFromCache(widget.url);
       if (cached != null && await cached.file.exists()) {
         if (!mounted) return;
-        setState(() {
-          _cachedPdfFile = cached.file;
-        });
+        setState(() => _cachedPdfFile = cached.file);
         return;
       }
       final downloaded = await DefaultCacheManager().downloadFile(widget.url);
       if (!mounted) return;
       if (await downloaded.file.exists()) {
-        setState(() {
-          _cachedPdfFile = downloaded.file;
-        });
+        setState(() => _cachedPdfFile = downloaded.file);
       }
     } catch (e) {
       debugPrint('Failed to warm study PDF cache: $e');
     } finally {
       _isWarmingPdfCache = false;
+    }
+  }
+
+  /// Downloads the PDF to the device's Downloads directory.
+  /// Never opens an external browser.
+  Future<void> _downloadPdf() async {
+    if (_isDownloading) return;
+    setState(() => _isDownloading = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      File sourceFile;
+      if (_cachedPdfFile != null && _cachedPdfFile!.existsSync()) {
+        sourceFile = _cachedPdfFile!;
+      } else {
+        final info = await DefaultCacheManager().downloadFile(widget.url);
+        sourceFile = info.file;
+        if (mounted) setState(() => _cachedPdfFile = sourceFile);
+      }
+
+      Directory? saveDir;
+      if (Platform.isAndroid) {
+        saveDir = Directory('/storage/emulated/0/Download');
+        if (!await saveDir.exists()) {
+          saveDir = await getExternalStorageDirectory();
+        }
+      } else {
+        saveDir = await getApplicationDocumentsDirectory();
+      }
+      if (saveDir == null) throw Exception('Cannot determine save directory');
+
+      final safeName = widget.title
+          .replaceAll(RegExp(r'[^\w\s\-]'), '')
+          .trim()
+          .replaceAll(RegExp(r'\s+'), '_');
+      final ts = DateTime.now().millisecondsSinceEpoch;
+      final destPath = '${saveDir.path}/${safeName}_$ts.pdf';
+      await sourceFile.copy(destPath);
+
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Saved to Downloads: $safeName.pdf',
+            style: GoogleFonts.inter(fontSize: 13),
+          ),
+          backgroundColor: AppTheme.primary,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    } catch (e) {
+      debugPrint('PDF download failed: $e');
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            'Download failed. Please try again.',
+            style: GoogleFonts.inter(fontSize: 13),
+          ),
+          backgroundColor: AppTheme.error,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isDownloading = false);
     }
   }
 
@@ -171,33 +228,49 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
             ),
             IconButton(
               icon: Icon(Icons.keyboard_arrow_up_rounded, color: textColor),
-              onPressed: () {
-                _searchResult.previousInstance();
-              },
+              onPressed: () => _searchResult.previousInstance(),
             ),
             IconButton(
               icon: Icon(Icons.keyboard_arrow_down_rounded, color: textColor),
-              onPressed: () {
-                _searchResult.nextInstance();
-              },
+              onPressed: () => _searchResult.nextInstance(),
             ),
             IconButton(
               icon: Icon(Icons.close_rounded, color: textColor),
               onPressed: _clearSearch,
             ),
-          ] else
+          ] else ...[
             IconButton(
               icon: Icon(Icons.search_rounded, color: textColor),
-              onPressed: () {
-                setState(() => _showSearchBar = true);
-              },
+              onPressed: () => setState(() => _showSearchBar = true),
             ),
+            // In-app download — never opens a browser
+            if (!kIsWeb && widget.url.startsWith('http'))
+              _isDownloading
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: textColor,
+                        ),
+                      ),
+                    )
+                  : IconButton(
+                      tooltip: 'Download PDF',
+                      icon: Icon(Icons.download_rounded, color: textColor),
+                      onPressed: _downloadPdf,
+                    ),
+          ],
         ],
       ),
       body: Stack(
         children: [
           Hero(
-            tag: widget.resourceId != null ? 'resource_card_${widget.resourceId}' : 'pdf_viewer_${widget.url}',
+            tag: widget.resourceId != null
+                ? 'resource_card_${widget.resourceId}'
+                : 'pdf_viewer_${widget.url}',
             flightShuttleBuilder: (
               flightContext,
               animation,
@@ -237,12 +310,18 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               key: _pdfViewerKey,
               controller: _pdfViewerController,
               onDocumentLoaded: (PdfDocumentLoadedDetails details) {
-                debugPrint('PDF Loaded from cache: ${details.document.pages.count} pages');
+                debugPrint(
+                  'PDF Loaded from cache: ${details.document.pages.count} pages',
+                );
               },
               onDocumentLoadFailed: (PdfDocumentLoadFailedDetails details) {
                 debugPrint('Cached PDF Load Failed: ${details.error}');
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Failed to load PDF: ${details.description}')),
+                  SnackBar(
+                    content: Text(
+                      'Failed to load PDF: ${details.description}',
+                    ),
+                  ),
                 );
               },
             )
@@ -252,13 +331,19 @@ class _PDFViewerScreenState extends State<PDFViewerScreen> {
               key: _pdfViewerKey,
               controller: _pdfViewerController,
               onDocumentLoaded: (PdfDocumentLoadedDetails details) {
-                debugPrint('PDF Loaded: ${details.document.pages.count} pages');
+                debugPrint(
+                  'PDF Loaded: ${details.document.pages.count} pages',
+                );
                 unawaited(_warmPdfCache());
               },
               onDocumentLoadFailed: (PdfDocumentLoadFailedDetails details) {
                 debugPrint('PDF Load Failed: ${details.error}');
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Failed to load PDF: ${details.description}')),
+                  SnackBar(
+                    content: Text(
+                      'Failed to load PDF: ${details.description}',
+                    ),
+                  ),
                 );
               },
             ),
