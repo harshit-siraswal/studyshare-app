@@ -15,7 +15,8 @@ class AiLoadingGameCard extends StatefulWidget {
     this.initialGame = 0,
     this.showFullscreenToggle = true,
     this.headline = 'Beat the high score while AI works',
-    this.subheadline = 'Arcade-style distractions run while your answer renders.',
+    this.subheadline =
+        'Arcade-style distractions run while your answer renders.',
   });
 
   final String loadingMessage;
@@ -40,8 +41,7 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
   static const _tick = Duration(milliseconds: 16);
   static const _flappyBackgroundAsset =
       'assets/images/mini_games/flappy/background-day.png';
-  static const _flappyBaseAsset =
-      'assets/images/mini_games/flappy/base.png';
+  static const _flappyBaseAsset = 'assets/images/mini_games/flappy/base.png';
   static const _flappyPipeAsset =
       'assets/images/mini_games/flappy/pipe-green.png';
   static const _flappyBirdDownAsset =
@@ -50,22 +50,17 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
       'assets/images/mini_games/flappy/bird-mid.png';
   static const _flappyBirdUpAsset =
       'assets/images/mini_games/flappy/bird-up.png';
-  static const _dinoCloudAsset =
-      'assets/images/mini_games/dino/cloud.png';
-  static const _dinoHorizonAsset =
-      'assets/images/mini_games/dino/horizon.png';
+  static const _dinoCloudAsset = 'assets/images/mini_games/dino/cloud.png';
+  static const _dinoHorizonAsset = 'assets/images/mini_games/dino/horizon.png';
   static const _dinoCactusAsset =
       'assets/images/mini_games/dino/cactus-small.png';
-  static const _dinoWaitAsset =
-      'assets/images/mini_games/dino/dino-wait.png';
+  static const _dinoWaitAsset = 'assets/images/mini_games/dino/dino-wait.png';
   static const _dinoRunOneAsset =
       'assets/images/mini_games/dino/dino-run-1.png';
   static const _dinoRunTwoAsset =
       'assets/images/mini_games/dino/dino-run-2.png';
-  static const _dinoJumpAsset =
-      'assets/images/mini_games/dino/dino-jump.png';
-  static const _dinoCrashAsset =
-      'assets/images/mini_games/dino/dino-crash.png';
+  static const _dinoJumpAsset = 'assets/images/mini_games/dino/dino-jump.png';
+  static const _dinoCrashAsset = 'assets/images/mini_games/dino/dino-crash.png';
 
   final math.Random _random = math.Random();
   final ValueNotifier<int> _overlayTick = ValueNotifier<int>(0);
@@ -79,7 +74,11 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
 
   int _brickScore = 0, _brickHigh = 0, _brickLevel = 1;
   bool _brickStarted = false, _brickOver = false;
-  double _paddleX = 0.5, _ballX = 0.5, _ballY = 0.72, _ballVX = 0.58, _ballVY = -0.74;
+  double _paddleX = 0.5,
+      _ballX = 0.5,
+      _ballY = 0.72,
+      _ballVX = 0.58,
+      _ballVY = -0.74;
   final List<_BrickTile> _bricks = <_BrickTile>[];
 
   int _dinoScore = 0, _dinoHigh = 0;
@@ -346,16 +345,14 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
             child: ValueListenableBuilder<int>(
               valueListenable: _overlayTick,
               builder: (context, _, _) {
-                final isDark =
-                    Theme.of(context).brightness == Brightness.dark;
+                final isDark = Theme.of(context).brightness == Brightness.dark;
                 return Center(
                   child: Padding(
                     padding: const EdgeInsets.all(20),
                     child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 980),
-                      child: _buildShell(
+                      constraints: const BoxConstraints(maxWidth: 1040),
+                      child: _buildFullscreenWindow(
                         isDark: isDark,
-                        fullscreen: true,
                         onClose: () => Navigator.of(context).pop(),
                       ),
                     ),
@@ -369,13 +366,60 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
     );
   }
 
+  Widget _buildArcadeControls({
+    required bool fullscreen,
+    required bool showModeTabs,
+    VoidCallback? onClose,
+  }) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (showModeTabs) ...[
+          _iconTab(0, Icons.flight_rounded, 'Flappy'),
+          const SizedBox(width: 8),
+          _iconTab(1, Icons.grid_view_rounded, 'Brick Blitz'),
+          const SizedBox(width: 8),
+          _iconTab(2, Icons.terrain_rounded, 'Dino'),
+        ],
+        if (fullscreen && onClose != null) ...[
+          if (showModeTabs) const SizedBox(width: 8),
+          _iconTab(
+            _selected,
+            Icons.close_rounded,
+            'Close fullscreen',
+            onPressed: onClose,
+          ),
+        ] else if (widget.showFullscreenToggle) ...[
+          if (showModeTabs) const SizedBox(width: 8),
+          _iconTab(
+            _selected,
+            Icons.open_in_full_rounded,
+            'Open fullscreen',
+            onPressed: _openFullscreen,
+          ),
+        ],
+      ],
+    );
+  }
+
   bool get _hasSeenCurrentHint => _selected == 0
       ? _hasSeenFlappyHint
       : (_selected == 1 ? _hasSeenBrickHint : _hasSeenDinoHint);
-  int get _score => _selected == 0 ? _flappyScore : (_selected == 1 ? _brickScore : _dinoScore);
-  int get _high => _selected == 0 ? _flappyHigh : (_selected == 1 ? _brickHigh : _dinoHigh);
-  bool get _showOverlay => _selected == 0 ? (!_flappyStarted || _flappyOver) : (_selected == 1 ? (!_brickStarted || _brickOver) : (!_dinoStarted || _dinoOver));
-  String get _overlayTitle => _selected == 0 ? (_flappyOver ? 'Run Over' : 'Tap To Fly') : (_selected == 1 ? (_brickOver ? 'Round Over' : 'Tap To Serve') : (_dinoOver ? 'You Crashed' : 'Tap To Run'));
+  int get _score => _selected == 0
+      ? _flappyScore
+      : (_selected == 1 ? _brickScore : _dinoScore);
+  int get _high =>
+      _selected == 0 ? _flappyHigh : (_selected == 1 ? _brickHigh : _dinoHigh);
+  bool get _showOverlay => _selected == 0
+      ? (!_flappyStarted || _flappyOver)
+      : (_selected == 1
+            ? (!_brickStarted || _brickOver)
+            : (!_dinoStarted || _dinoOver));
+  String get _overlayTitle => _selected == 0
+      ? (_flappyOver ? 'Run Over' : 'Tap To Fly')
+      : (_selected == 1
+            ? (_brickOver ? 'Round Over' : 'Tap To Serve')
+            : (_dinoOver ? 'You Crashed' : 'Tap To Run'));
   String get _overlaySubtitle => _selected == 0
       ? (_flappyOver
             ? 'Restart and chase a cleaner pipe line.'
@@ -415,7 +459,9 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
   Widget _scene(bool isDark, {bool fullscreen = false}) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final width = constraints.maxWidth.isFinite ? constraints.maxWidth : 320.0;
+        final width = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : 320.0;
         final targetHeight = fullscreen
             ? math.min(560.0, width * 0.66)
             : (widget.compact ? 208.0 : 228.0);
@@ -428,17 +474,17 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
             onTap: _primaryAction,
             onHorizontalDragUpdate: _selected == 1
                 ? (d) => setState(
-                      () => _paddleX = (d.localPosition.dx / width).clamp(
-                        0.16,
-                        0.84,
-                      ),
-                    )
+                    () => _paddleX = (d.localPosition.dx / width).clamp(
+                      0.16,
+                      0.84,
+                    ),
+                  )
                 : null,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(22),
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
                   _selected == 0
                       ? _flappyScene(width, height)
                       : (_selected == 1
@@ -524,7 +570,8 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
-          onTap: onPressed ??
+          onTap:
+              onPressed ??
               () {
                 setState(() => _selected = index);
                 _overlayTick.value += 1;
@@ -633,57 +680,80 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
               ),
             ),
             const SizedBox(height: 14),
-            Stack(
-              children: [
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: surface,
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(
-                      color: isDark
-                          ? Colors.white10
-                          : Colors.black.withValues(alpha: 0.05),
-                    ),
-                  ),
-                  child: _scene(isDark, fullscreen: fullscreen),
-                ),
-                Positioned(
-                  top: 18,
-                  right: 18,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _iconTab(0, Icons.flight_rounded, 'Flappy'),
-                      const SizedBox(width: 8),
-                      _iconTab(1, Icons.grid_view_rounded, 'Brick Blitz'),
-                      const SizedBox(width: 8),
-                      _iconTab(2, Icons.terrain_rounded, 'Dino'),
-                      if (fullscreen && onClose != null) ...[
-                        const SizedBox(width: 8),
-                        _iconTab(
-                          _selected,
-                          Icons.close_rounded,
-                          'Close fullscreen',
-                          onPressed: onClose,
-                        ),
-                      ] else if (widget.showFullscreenToggle) ...[
-                        const SizedBox(width: 8),
-                        _iconTab(
-                          _selected,
-                          Icons.open_in_full_rounded,
-                          'Open fullscreen',
-                          onPressed: _openFullscreen,
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
+            _buildGameWindow(
+              isDark: isDark,
+              fullscreen: fullscreen,
+              showModeTabs: true,
+              onClose: onClose,
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildGameWindow({
+    required bool isDark,
+    required bool fullscreen,
+    required bool showModeTabs,
+    VoidCallback? onClose,
+  }) {
+    final surface = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FBFF);
+    return Stack(
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: surface,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: isDark
+                  ? Colors.white10
+                  : Colors.black.withValues(alpha: 0.05),
+            ),
+          ),
+          child: _scene(isDark, fullscreen: fullscreen),
+        ),
+        Positioned(
+          top: 18,
+          right: 18,
+          child: _buildArcadeControls(
+            fullscreen: fullscreen,
+            showModeTabs: showModeTabs,
+            onClose: onClose,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFullscreenWindow({
+    required bool isDark,
+    required VoidCallback onClose,
+  }) {
+    final frameColor = isDark
+        ? const Color(0xFF020617)
+        : const Color(0xFF0F172A);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: frameColor.withValues(alpha: 0.96),
+        borderRadius: BorderRadius.circular(28),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.32),
+            blurRadius: 32,
+            offset: const Offset(0, 18),
+          ),
+        ],
+      ),
+      child: _buildGameWindow(
+        isDark: isDark,
+        fullscreen: true,
+        showModeTabs: false,
+        onClose: onClose,
       ),
     );
   }
@@ -702,10 +772,8 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
       filterQuality: FilterQuality.none,
       gaplessPlayback: true,
       isAntiAlias: false,
-      errorBuilder: (context, error, stackTrace) => _spriteFallback(
-        width: width,
-        height: height,
-      ),
+      errorBuilder: (context, error, stackTrace) =>
+          _spriteFallback(width: width, height: height),
     );
   }
 
@@ -753,10 +821,7 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
       child: Stack(
         children: [
           Positioned.fill(
-            child: _sprite(
-              _flappyBackgroundAsset,
-              fit: BoxFit.cover,
-            ),
+            child: _sprite(_flappyBackgroundAsset, fit: BoxFit.cover),
           ),
           Positioned(
             left: pipeLeft,
@@ -812,17 +877,60 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
 
   Widget _brickScene(double width, double height) {
     return Container(
-      decoration: const BoxDecoration(gradient: LinearGradient(colors: [Color(0xFF020617), Color(0xFF111827), Color(0xFF1E1B4B)], begin: Alignment.topCenter, end: Alignment.bottomCenter)),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFF020617), Color(0xFF111827), Color(0xFF1E1B4B)],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+      ),
       child: Stack(
         children: [
           for (final brick in _bricks.where((b) => b.active))
             Positioned(
               left: brick.x * width,
               top: brick.y * height,
-              child: Container(width: 40, height: 14, decoration: BoxDecoration(color: brick.color, borderRadius: BorderRadius.circular(10), boxShadow: [BoxShadow(color: brick.color.withValues(alpha: 0.35), blurRadius: 12)])),
+              child: Container(
+                width: 40,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: brick.color,
+                  borderRadius: BorderRadius.circular(10),
+                  boxShadow: [
+                    BoxShadow(
+                      color: brick.color.withValues(alpha: 0.35),
+                      blurRadius: 12,
+                    ),
+                  ],
+                ),
+              ),
             ),
-          Positioned(left: (_ballX * width) - 6, top: (_ballY * height) - 6, child: Container(width: 12, height: 12, decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.white))),
-          Positioned(left: (_paddleX * width) - 44, bottom: 16, child: Container(width: 88, height: 12, decoration: BoxDecoration(borderRadius: BorderRadius.circular(999), gradient: const LinearGradient(colors: [Color(0xFF38BDF8), Color(0xFFF8FAFC)])))),
+          Positioned(
+            left: (_ballX * width) - 6,
+            top: (_ballY * height) - 6,
+            child: Container(
+              width: 12,
+              height: 12,
+              decoration: const BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white,
+              ),
+            ),
+          ),
+          Positioned(
+            left: (_paddleX * width) - 44,
+            bottom: 16,
+            child: Container(
+              width: 88,
+              height: 12,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(999),
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF38BDF8), Color(0xFFF8FAFC)],
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -832,8 +940,7 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
     final groundTop = height * 0.82;
     final dinoHeight = math.max(46.0, height * 0.24);
     final dinoWidth = dinoHeight * (44 / 47);
-    final dinoTop =
-        (groundTop - dinoHeight + 2) + (_dinoLift * height);
+    final dinoTop = (groundTop - dinoHeight + 2) + (_dinoLift * height);
     final cactusHeight = dinoHeight * 0.78;
     final cactusWidth = cactusHeight * (17 / 35);
     final cactusTop = groundTop - cactusHeight + 6;
@@ -864,11 +971,7 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
           Positioned(
             left: _cloudX * width,
             top: height * 0.12,
-            child: _sprite(
-              _dinoCloudAsset,
-              width: 46,
-              height: 14,
-            ),
+            child: _sprite(_dinoCloudAsset, width: 46, height: 14),
           ),
           for (var i = 0; i < 3; i++)
             Positioned(
@@ -884,11 +987,7 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
           Positioned(
             left: width * 0.16,
             top: dinoTop,
-            child: _sprite(
-              _dinoAsset,
-              width: dinoWidth,
-              height: dinoHeight,
-            ),
+            child: _sprite(_dinoAsset, width: dinoWidth, height: dinoHeight),
           ),
           Positioned(
             left: _obstacleX * width,
@@ -904,18 +1003,13 @@ class _AiLoadingGameCardState extends State<AiLoadingGameCard> {
             right: 0,
             top: groundTop,
             bottom: 0,
-            child: Container(
-              color: const Color(0xFFF7F7F7),
-            ),
+            child: Container(color: const Color(0xFFF7F7F7)),
           ),
           Positioned(
             left: 0,
             right: 0,
             top: groundTop - 1.2,
-            child: Container(
-              height: 2.4,
-              color: const Color(0xFF4B5563),
-            ),
+            child: Container(height: 2.4, color: const Color(0xFF4B5563)),
           ),
           Positioned(
             right: 14,

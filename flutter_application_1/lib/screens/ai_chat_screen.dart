@@ -842,8 +842,9 @@ class _AIChatScreenState extends State<AIChatScreen>
     if (_shouldSearchAllPdfsForPrompt(normalized)) return false;
     if (_referencesCurrentStudyMaterial(normalized)) return false;
     if ((widget.resourceContext?.fileId ?? '').trim().isNotEmpty) return false;
-    if ((widget.resourceContext?.videoUrl ?? '').trim().isNotEmpty)
+    if ((widget.resourceContext?.videoUrl ?? '').trim().isNotEmpty) {
       return false;
+    }
 
     final topicHint = _extractAcademicTopicHint(normalized);
     if (topicHint.isEmpty) return false;
@@ -3299,6 +3300,9 @@ class _AIChatScreenState extends State<AIChatScreen>
   }) {
     final trimmed = message.trim();
     if (trimmed.isEmpty) return fallback;
+    if (_looksLikeTokenLimitError(trimmed)) {
+      return _buildAiTokenShortageMessage();
+    }
     if (_looksLikeHighTrafficError(trimmed)) {
       return 'StudyShare is seeing high traffic right now. Please try again in a moment.';
     }
@@ -3397,7 +3401,7 @@ class _AIChatScreenState extends State<AIChatScreen>
       SnackBar(
         content: Text(message),
         action: SnackBarAction(
-          label: 'Buy Tokens',
+          label: 'Recharge',
           onPressed: _openAiTopUpDialog,
         ),
       ),
@@ -3511,10 +3515,28 @@ class _AIChatScreenState extends State<AIChatScreen>
     );
 
     if (remaining <= 0) {
-      return 'You have 0 AI tokens left. Add at least $shortBy more token${shortBy == 1 ? '' : 's'} to continue.';
+      return 'You do not have enough AI tokens to continue. Recharge at least $shortBy more token${shortBy == 1 ? '' : 's'} to keep using AI chat.';
     }
 
-    return 'You have $remaining AI token${remaining == 1 ? '' : 's'} left. Add $shortBy more token${shortBy == 1 ? '' : 's'} if generation stops.';
+    return 'You only have $remaining AI token${remaining == 1 ? '' : 's'} left. Recharge at least $shortBy more token${shortBy == 1 ? '' : 's'} to finish this request.';
+  }
+
+  void _applyAiTokenShortageState(AIChatMessage message) {
+    message.content = _buildAiTokenShortageMessage();
+    message.primarySource = null;
+    message.sources = const <RagSource>[];
+    message.cached = false;
+    message.noLocal = false;
+    message.retrievalScore = null;
+    message.llmConfidenceScore = null;
+    message.combinedConfidence = null;
+    message.ocrFailureAffectsRetrieval = false;
+    message.ocrErrors = const <OcrErrorInfo>[];
+    message.quizActionPaper = null;
+    message.answerOrigin = null;
+    message.liveSteps = const <AiLiveActivityStep>[];
+    message.liveTitle = null;
+    message.showLiveExport = false;
   }
 
   String? _normalizeAcademicFilterValue(
@@ -5128,20 +5150,29 @@ class _AIChatScreenState extends State<AIChatScreen>
           );
         } catch (e) {
           final errorMessage = _cleanUserVisibleErrorMessage(e);
+          final presentedErrorMessage = _presentAiErrorMessage(errorMessage);
+          final isTokenLimitError = _looksLikeTokenLimitError(errorMessage);
           _handlePotentialTokenLimitError(errorMessage);
           _streamTypingDone = true;
           _completeTypingDrainIfDrained();
           await _waitForTypingDrain();
           if (mounted) {
             setState(() {
-              if (aiMessageForError.liveSteps.isNotEmpty) {
+              if (aiMessageForError.liveSteps.isNotEmpty &&
+                  !isTokenLimitError) {
                 aiMessageForError.liveSteps = _markLiveAnswerStatus(
                   aiMessageForError.liveSteps,
                   AiLiveActivityStatus.failed,
                 );
               }
-              final separator = aiMessageForError.content.isEmpty ? '' : '\n\n';
-              aiMessageForError.content += '$separator$errorMessage';
+              if (isTokenLimitError) {
+                _applyAiTokenShortageState(aiMessageForError);
+              } else {
+                final separator = aiMessageForError.content.isEmpty
+                    ? ''
+                    : '\n\n';
+                aiMessageForError.content += '$separator$presentedErrorMessage';
+              }
             });
             await _persistCurrentSession();
           }
@@ -5334,7 +5365,7 @@ class _AIChatScreenState extends State<AIChatScreen>
               ),
             ),
             child: Text(
-              'Buy Tokens',
+              'Recharge',
               style: GoogleFonts.inter(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
