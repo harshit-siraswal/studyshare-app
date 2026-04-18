@@ -72,6 +72,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     'odp',
     'txt',
   ];
+  static const int _maxUploadBytes = 50 * 1024 * 1024;
   static const int _premiumUnlockThreshold = 10;
   static final Map<String, String> branches = <String, String>{
     for (final option in branchOptions) option.shortLabel: option.value,
@@ -210,8 +211,8 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
 
       if (result != null && result.files.isNotEmpty) {
         final file = result.files.first;
-        if (file.size > 10 * 1024 * 1024) {
-          if (mounted) _showError('File must be under 10MB');
+        if (file.size > _maxUploadBytes) {
+          if (mounted) _showError('File must be under 50MB');
           return;
         }
         setState(() => _selectedFile = file);
@@ -1369,7 +1370,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                         ),
                       ),
                       Text(
-                        'PDF, DOC, PPT, TXT up to 10MB',
+                        'PDF, DOC, PPT, TXT up to 50MB',
                         style: GoogleFonts.inter(
                           fontSize: 11,
                           color: AppTheme.textMuted,

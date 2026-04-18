@@ -30,6 +30,9 @@ class AttendanceService {
     : _apiService = apiService ?? BackendApiService();
 
   static const int lowAttendanceThreshold = 75;
+  static const String _snapshotKeyPrefix = 'attendance_snapshot_';
+  static const String _tokenKeyPrefix = 'attendance_token_';
+  static const String _syncCooldownKeyPrefix = 'attendance_sync_cooldown_until_';
   final BackendApiService _apiService;
 
   String _normalizeKeyPart(String value) => value
@@ -45,29 +48,27 @@ class AttendanceService {
   }
 
   String _snapshotKey(String collegeId, {String? userEmail}) =>
-      'attendance_snapshot_${_normalizeKeyPart(collegeId)}'
+      '$_snapshotKeyPrefix${_normalizeKeyPart(collegeId)}'
       '${_cacheSuffix(userEmail: userEmail)}';
 
   String _tokenKey(String collegeId, {String? userEmail}) =>
-      'attendance_token_${_normalizeKeyPart(collegeId)}'
+      '$_tokenKeyPrefix${_normalizeKeyPart(collegeId)}'
       '${_cacheSuffix(userEmail: userEmail)}';
 
   List<String> _snapshotKeyCandidates(String collegeId, {String? userEmail}) {
-    final keys = <String>[];
-    if (userEmail != null && userEmail.trim().isNotEmpty) {
-      keys.add(_snapshotKey(collegeId, userEmail: userEmail));
+    final normalizedEmail = userEmail?.trim();
+    if (normalizedEmail != null && normalizedEmail.isNotEmpty) {
+      return <String>[_snapshotKey(collegeId, userEmail: normalizedEmail)];
     }
-    keys.add(_snapshotKey(collegeId));
-    return keys;
+    return <String>[_snapshotKey(collegeId)];
   }
 
   List<String> _tokenKeyCandidates(String collegeId, {String? userEmail}) {
-    final keys = <String>[];
-    if (userEmail != null && userEmail.trim().isNotEmpty) {
-      keys.add(_tokenKey(collegeId, userEmail: userEmail));
+    final normalizedEmail = userEmail?.trim();
+    if (normalizedEmail != null && normalizedEmail.isNotEmpty) {
+      return <String>[_tokenKey(collegeId, userEmail: normalizedEmail)];
     }
-    keys.add(_tokenKey(collegeId));
-    return keys;
+    return <String>[_tokenKey(collegeId)];
   }
 
   bool isKietCollege({
@@ -117,8 +118,23 @@ class AttendanceService {
     final keys = <String>{
       ..._tokenKeyCandidates(collegeId, userEmail: userEmail),
       ..._snapshotKeyCandidates(collegeId, userEmail: userEmail),
+      _tokenKey(collegeId),
+      _snapshotKey(collegeId),
     };
     for (final key in keys) {
+      await prefs.remove(key);
+    }
+  }
+
+  Future<void> clearAllSavedSessions() async {
+    final prefs = await SharedPreferences.getInstance();
+    final keysToRemove = prefs.getKeys().where((key) {
+      return key.startsWith(_tokenKeyPrefix) ||
+          key.startsWith(_snapshotKeyPrefix) ||
+          key.startsWith(_syncCooldownKeyPrefix);
+    }).toList(growable: false);
+
+    for (final key in keysToRemove) {
       await prefs.remove(key);
     }
   }
@@ -148,17 +164,19 @@ class AttendanceService {
 
       final prefs = await SharedPreferences.getInstance();
       final snapshotJson = jsonEncode(snapshot.toJson());
-      await prefs.setString(_tokenKey(collegeId), cybervidyaToken);
-      await prefs.setString(_snapshotKey(collegeId), snapshotJson);
-      if (userEmail != null && userEmail.trim().isNotEmpty) {
+      final normalizedEmail = userEmail?.trim();
+      if (normalizedEmail != null && normalizedEmail.isNotEmpty) {
         await prefs.setString(
-          _tokenKey(collegeId, userEmail: userEmail),
+          _tokenKey(collegeId, userEmail: normalizedEmail),
           cybervidyaToken,
         );
         await prefs.setString(
-          _snapshotKey(collegeId, userEmail: userEmail),
+          _snapshotKey(collegeId, userEmail: normalizedEmail),
           snapshotJson,
         );
+      } else {
+        await prefs.setString(_tokenKey(collegeId), cybervidyaToken);
+        await prefs.setString(_snapshotKey(collegeId), snapshotJson);
       }
 
       unawaited(
@@ -192,9 +210,10 @@ class AttendanceService {
     required String collegeId,
     required AttendanceComponent component,
     required int studentId,
+    String? userEmail,
   }) async {
     try {
-      final token = await loadSavedToken(collegeId);
+      final token = await loadSavedToken(collegeId, userEmail: userEmail);
       if (token == null || token.isEmpty) {
         throw const AttendanceSyncException(
           code: 'session_expired',

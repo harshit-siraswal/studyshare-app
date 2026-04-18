@@ -32,6 +32,7 @@ import 'screens/auth/login_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/notices/notice_detail_screen.dart';
 import 'services/analytics_service.dart';
+import 'services/attendance_service.dart';
 import 'services/auth_service.dart';
 import 'services/download_service.dart';
 import 'services/push_notification_service.dart';
@@ -268,6 +269,7 @@ class _AppRootState extends State<AppRoot> {
         await AnalyticsService.instance.clearUserContext();
         _authService.clearIdentity();
         SupabaseService().clearSessionCachesOnSignOut();
+        await AttendanceService().clearAllSavedSessions();
         await _handleSignedOutFcmState();
         return;
       }

@@ -8,6 +8,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../config/theme.dart';
 import '../../models/attendance_models.dart';
 import '../../services/attendance_service.dart';
+import '../../services/auth_service.dart';
 import '../../services/home_widget_service.dart';
 import 'attendance_web_login_screen.dart';
 
@@ -27,6 +28,7 @@ class AttendanceScreen extends StatefulWidget {
 
 class _AttendanceScreenState extends State<AttendanceScreen> {
   final AttendanceService _attendanceService = AttendanceService();
+  final AuthService _authService = AuthService();
 
   AttendanceSnapshot? _snapshot;
   bool _isLoading = true;
@@ -50,6 +52,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   String get _syncCooldownUntilKey =>
       'attendance_sync_cooldown_until_${widget.collegeId}';
+
+  String? get _currentUserEmail {
+    final email = _authService.userEmail?.trim().toLowerCase();
+    if (email == null || email.isEmpty) return null;
+    return email;
+  }
 
   Future<void> _syncScheduleWidget([AttendanceSnapshot? snapshot]) async {
     final effectiveSnapshot = snapshot ?? _snapshot;
@@ -143,8 +151,14 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       return;
     }
     final results = await Future.wait<Object?>([
-      _attendanceService.loadSavedToken(widget.collegeId),
-      _attendanceService.loadCachedSnapshot(widget.collegeId),
+      _attendanceService.loadSavedToken(
+        widget.collegeId,
+        userEmail: _currentUserEmail,
+      ),
+      _attendanceService.loadCachedSnapshot(
+        widget.collegeId,
+        userEmail: _currentUserEmail,
+      ),
     ]);
     final token = results[0] as String?;
     final snapshot = results[1] as AttendanceSnapshot?;
@@ -249,7 +263,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   Future<void> _syncWithSavedToken({bool promptIfMissingToken = true}) async {
     if (_isSyncing) return;
     if (!await _ensureSyncAllowed(showMessage: promptIfMissingToken)) return;
-    final token = await _attendanceService.loadSavedToken(widget.collegeId);
+    final token = await _attendanceService.loadSavedToken(
+      widget.collegeId,
+      userEmail: _currentUserEmail,
+    );
     if (!mounted) return;
     if (token == null || token.isEmpty) {
       setState(() => _hasSavedSession = false);
@@ -263,7 +280,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       await _syncWithToken(token, isManualSync: true);
     } catch (error) {
       if (_isLikelyExpiredSessionError(error)) {
-        await _attendanceService.clearSavedSession(widget.collegeId);
+        await _attendanceService.clearSavedSession(
+          widget.collegeId,
+          userEmail: _currentUserEmail,
+        );
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -282,7 +302,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   }
 
   Future<void> _logoutKietSession() async {
-    await _attendanceService.clearSavedSession(widget.collegeId);
+    await _attendanceService.clearSavedSession(
+      widget.collegeId,
+      userEmail: _currentUserEmail,
+    );
     await _clearSyncCooldown();
     if (!mounted) return;
     setState(() {
@@ -316,6 +339,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           collegeId: widget.collegeId,
           collegeName: widget.collegeName,
           cybervidyaToken: token,
+          userEmail: _currentUserEmail,
         );
       }
 
@@ -378,6 +402,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         collegeId: widget.collegeId,
         component: component,
         studentId: studentId ?? 0,
+        userEmail: _currentUserEmail,
       );
       if (!mounted) return;
       await showModalBottomSheet<void>(

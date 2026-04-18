@@ -76,6 +76,7 @@ class _PaywallDialogState extends State<PaywallDialog> {
 
   @override
   void dispose() {
+    _subService.dispose();
     _customRechargeController.dispose();
     super.dispose();
   }
@@ -129,10 +130,10 @@ class _PaywallDialogState extends State<PaywallDialog> {
 
   List<String> _benefitsWithTokenLine(_PlanUiData plan) {
     final tokenLine =
-        '${_formatTokenCount(_premiumMonthlyTokens)} AI tokens every 30 days '
+        '${_formatTokenCount(_premiumMonthlyTokens)} AI credits every 30 days '
         '(${_premiumTokenMultiplier}x the free plan)';
     final rechargeLine =
-        'Recharge rate: \u20b91 = $kVisibleAiRechargeTokensPerRupee AI tokens';
+        'Recharge rate: \u20b91 = $kVisibleAiRechargeTokensPerRupee AI credits';
     return <String>[tokenLine, rechargeLine, ...plan.benefits];
   }
 
@@ -265,10 +266,10 @@ class _PaywallDialogState extends State<PaywallDialog> {
         barrierDismissible: false,
         builder: (context) => SuccessOverlay(
           variant: SuccessOverlayVariant.premiumUpgrade,
-          title: 'AI Tokens Added',
+          title: 'AI Credits Added',
           message:
-              'Recharge successful. ${_formatTokenCount(_estimatedRechargeTokens(rechargeRupees))} AI tokens credited.',
-          badgeLabel: 'AI Recharge',
+              'Recharge successful. ${_formatTokenCount(_estimatedRechargeTokens(rechargeRupees))} AI credits added.',
+          badgeLabel: 'AI Credits',
           onDismiss: () {
             Navigator.pop(context);
             widget.onSuccess();
@@ -301,8 +302,8 @@ class _PaywallDialogState extends State<PaywallDialog> {
         ? 'Buy \u20b9149 Plan'
         : 'Buy \u20b949 Plan';
     final helperText = _isPurchaseEnabled
-        ? 'Free users get $freePlanTokenLabel AI tokens every 30 days. '
-              'Premium includes $premiumTokenLabel AI tokens every 30 days.'
+        ? 'Free users get $freePlanTokenLabel AI credits every 30 days. '
+              'Premium includes $premiumTokenLabel AI credits every 30 days.'
         : 'Select a plan to continue.';
 
     return Dialog(
@@ -376,8 +377,8 @@ class _PaywallDialogState extends State<PaywallDialog> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Free plan: $freePlanTokenLabel AI tokens every 30 days.\n'
-                      'Premium: $premiumTokenLabel AI tokens every 30 days. Need more? Use micro top-ups from \u20b910.',
+                      'Free plan: $freePlanTokenLabel AI credits every 30 days.\n'
+                      'Premium: $premiumTokenLabel AI credits every 30 days. Need more? Use micro top-ups from \u20b910.',
                       style: GoogleFonts.inter(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -506,7 +507,7 @@ class _PaywallDialogState extends State<PaywallDialog> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : Text(
-                          'Recharge AI Tokens',
+                          'Recharge AI Credits',
                           style: GoogleFonts.inter(
                             fontSize: 15,
                             fontWeight: FontWeight.w700,
@@ -578,7 +579,7 @@ class _PaywallDialogState extends State<PaywallDialog> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Low-cost micro top-ups for students. Pick a pack below to see the AI tokens you will receive.',
+            'Low-cost micro top-ups for students. Pick a pack below to see the AI credits you will receive.',
             style: GoogleFonts.inter(
               fontSize: 12,
               fontWeight: FontWeight.w600,
@@ -621,7 +622,7 @@ class _PaywallDialogState extends State<PaywallDialog> {
           ),
           const SizedBox(height: 8),
           Text(
-            'You will receive about ${_formatTokenCount(estimatedTokens)} AI tokens.',
+            'You will receive about ${_formatTokenCount(estimatedTokens)} AI credits.',
             style: GoogleFonts.inter(
               fontSize: 12,
               fontWeight: FontWeight.w700,

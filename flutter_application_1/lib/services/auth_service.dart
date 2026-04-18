@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_config.dart';
 import '../models/user_identity.dart' as app_identity;
 import 'analytics_service.dart';
+import 'attendance_service.dart';
 import 'backend_api_service.dart';
 import 'push_notification_service.dart';
 import 'supabase_service.dart';
@@ -928,6 +929,7 @@ class AuthService {
         await prefs.remove('premium_until');
         await prefs.remove('premium_tier');
         await prefs.remove('premium_email');
+        await AttendanceService().clearAllSavedSessions();
       } catch (e) {
         debugPrint('Failed to clear sign-out caches: $e');
       }

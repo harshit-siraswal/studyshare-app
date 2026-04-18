@@ -14,6 +14,7 @@ import '../services/analytics_service.dart';
 import '../services/ai_chat_notification_service.dart';
 import '../services/ai_output_local_service.dart';
 import '../services/backend_api_service.dart';
+import '../services/subscription_service.dart';
 import '../services/summary_pdf_service.dart';
 import '../services/supabase_service.dart';
 import 'ai_formatted_text.dart';
@@ -106,6 +107,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   final AnalyticsService _analytics = AnalyticsService.instance;
   final BackendApiService _api = BackendApiService();
   final SupabaseService _supabaseService = SupabaseService();
+  final SubscriptionService _subscriptionService = SubscriptionService();
   static const Color _studioBlue = Color(0xFF2563EB);
   static const Color _studioBlueDark = Color(0xFF1D4ED8);
   static const Duration _aiJobPollInterval = Duration(seconds: 3);
@@ -215,7 +217,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
   String _presentGenerationError(String message) {
     if (_looksLikeTokenLimitError(message)) {
-      return 'Your AI tokens are exhausted for this cycle. Buy more AI tokens to continue.';
+      return 'Your AI tokens are too low for this request. Recharge AI tokens to continue generating content.';
     }
     if (_looksLikeHighTrafficError(message)) {
       return 'StudyShare is seeing high traffic right now. Please try again in a moment.';
@@ -261,6 +263,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _stopPendingJobPolling();
+    _subscriptionService.dispose();
     _flashcardPageController.dispose();
     _tabController.dispose();
     super.dispose();
@@ -1581,10 +1584,87 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
       builder: (_) => PaywallDialog(
         onSuccess: () {
           if (!mounted) return;
+          setState(() {
+            _error = null;
+            _multiQuizError = null;
+          });
+        },
+      ),
+    );
+  }
+
+  Widget _buildGenerationErrorBanner(
+    String message, {
+    EdgeInsetsGeometry padding = const EdgeInsets.fromLTRB(12, 4, 12, 0),
+  }) {
+    final isTokenError = _looksLikeTokenLimitError(message);
+    return Padding(
+      padding: padding,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppTheme.error.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.warning_rounded,
+              color: AppTheme.error,
+              size: 16,
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              child: Text(
+                message,
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  color: AppTheme.error,
+                ),
+              ),
+            ),
+            if (isTokenError) ...[
+              const SizedBox(width: 8),
+              TextButton(
+                onPressed: _openAiTokenPaywall,
+                style: TextButton.styleFrom(
+                  foregroundColor: AppTheme.error,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  backgroundColor: Colors.white.withValues(alpha: 0.45),
+                ),
+                child: Text(
+                  'Recharge AI Tokens',
+                  style: GoogleFonts.inter(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<bool> _ensurePremiumForPdfExport() async {
+    final isPremium = await _subscriptionService.isPremium();
+    if (isPremium) return true;
+    if (!mounted) return false;
+
+    await showDialog<void>(
+      context: context,
+      builder: (_) => PaywallDialog(
+        onSuccess: () {
+          if (!mounted) return;
           setState(() => _error = null);
         },
       ),
     );
+    return false;
   }
 
   Future<void> _saveActiveOutput() async {
@@ -1620,6 +1700,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   Future<void> _downloadSummaryPdf() async {
     final summary = _summary;
     if (summary == null || summary.trim().isEmpty) return;
+    if (!await _ensurePremiumForPdfExport()) return;
 
     setState(() => _isDownloadingSummary = true);
     try {
@@ -1655,6 +1736,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   Future<void> _downloadFlashcardsPdf() async {
     final cards = _flashcards;
     if (cards == null || cards.isEmpty) return;
+    if (!await _ensurePremiumForPdfExport()) return;
 
     setState(() => _isDownloadingFlashcards = true);
     try {
@@ -2583,13 +2665,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                 ),
               ),
             if (_multiQuizError != null)
-              Padding(
+              _buildGenerationErrorBanner(
+                _multiQuizError!,
                 padding: const EdgeInsets.only(top: 10),
-                child: Text(
-                  _multiQuizError!,
-                  style: GoogleFonts.inter(fontSize: 12, color: AppTheme.error),
-                  textAlign: TextAlign.center,
-                ),
               ),
           ],
         ),
@@ -3304,59 +3382,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
           ),
           _buildStudioHeader(isDark),
           if (_error != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: AppTheme.error.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.warning_rounded,
-                      color: AppTheme.error,
-                      size: 16,
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        _error!,
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          color: AppTheme.error,
-                        ),
-                      ),
-                    ),
-                    if (_looksLikeTokenLimitError(_error!)) ...[
-                      const SizedBox(width: 8),
-                      TextButton(
-                        onPressed: _openAiTokenPaywall,
-                        style: TextButton.styleFrom(
-                          foregroundColor: AppTheme.error,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 6,
-                          ),
-                          backgroundColor: Colors.white.withValues(alpha: 0.45),
-                        ),
-                        child: Text(
-                          'Buy Tokens',
-                          style: GoogleFonts.inter(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ),
+            _buildGenerationErrorBanner(_error!),
           _buildControlsPanel(isDark),
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
