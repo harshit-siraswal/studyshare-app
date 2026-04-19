@@ -146,6 +146,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   bool _isPollingPendingJob = false;
   String? _pendingJobType;
   String? _pendingJobId;
+  String? _pendingJobStage;
+  String? _pendingJobStatusReason;
+  int? _pendingJobProgress;
   bool _pendingJobRestored = false;
 
   // Multi-PDF question paper selection
@@ -576,6 +579,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
       if (_pendingJobType == type) {
         _pendingJobType = null;
         _pendingJobId = null;
+        _pendingJobStage = null;
+        _pendingJobStatusReason = null;
+        _pendingJobProgress = null;
         _pendingJobRestored = false;
       }
       if (clearLoadingState) {
@@ -603,6 +609,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     setState(() {
       _pendingJobType = type;
       _pendingJobId = jobId;
+      _pendingJobStage = 'queued';
+      _pendingJobStatusReason = 'queued_for_background_generation';
+      _pendingJobProgress = 0;
       _pendingJobRestored = restored;
       _isLoading = true;
       _loadingType = type;
@@ -620,6 +629,20 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     try {
       final response = await _api.getAiJobStatus(jobId);
       final status = response['status']?.toString().trim().toLowerCase() ?? '';
+      final stage = response['stage']?.toString().trim();
+      final statusReason = response['status_reason']?.toString().trim();
+      final progressRaw = response['progress'];
+      final progress = progressRaw is num ? progressRaw.toInt() : null;
+      if (mounted) {
+        setState(() {
+          _pendingJobStage = stage?.isNotEmpty == true ? stage : _pendingJobStage;
+          _pendingJobStatusReason =
+              statusReason?.isNotEmpty == true
+              ? statusReason
+              : _pendingJobStatusReason;
+          _pendingJobProgress = progress ?? _pendingJobProgress;
+        });
+      }
       if (status == 'completed') {
         final restored = _pendingJobRestored;
         await _applyGeneratedResponse(
@@ -651,6 +674,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         setState(() {
           _isLoading = true;
           _loadingType = type;
+          _pendingJobProgress = progress ?? _pendingJobProgress;
         });
       }
       return false;
@@ -1125,6 +1149,32 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     }
   }
 
+  String _loadingMessageForType(String type) {
+    final fallback = switch (type) {
+      'summary' => 'Generating summary...',
+      'quiz' => 'Building quiz...',
+      'flashcards' => 'Creating flashcards...',
+      _ => 'Generating content...',
+    };
+
+    final stage = (_pendingJobStage ?? '').trim().toLowerCase();
+    final stageMessage = switch (stage) {
+      'queued' => 'Queued in background...',
+      'extraction' => 'Extracting study material...',
+      'inventory' => 'Mapping document topics...',
+      'generation' => fallback,
+      'validation' => 'Validating generated content...',
+      'completed' => 'Finalizing output...',
+      _ => fallback,
+    };
+
+    final progress = _pendingJobProgress;
+    if (progress == null || progress <= 0 || progress >= 100) {
+      return stageMessage;
+    }
+    return '$stageMessage ($progress%)';
+  }
+
   int get _readyOutputCount {
     var count = 0;
     if (_isNonEmptyOutput(_summary)) count++;
@@ -1215,6 +1265,21 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
           clientRequestId: clientRequestId,
           restored: false,
         );
+        if (mounted) {
+          final progressRaw = response['progress'];
+          setState(() {
+            _pendingJobStage =
+                response['stage']?.toString().trim().isNotEmpty == true
+                ? response['stage'].toString().trim()
+                : _pendingJobStage;
+            _pendingJobStatusReason =
+                response['status_reason']?.toString().trim().isNotEmpty == true
+                ? response['status_reason'].toString().trim()
+                : _pendingJobStatusReason;
+            _pendingJobProgress =
+                progressRaw is num ? progressRaw.toInt() : _pendingJobProgress;
+          });
+        }
 
         final finished = await _pollPendingJob(force: true);
         if (!finished) {
@@ -2423,7 +2488,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
   Widget _buildSummaryTab(bool isDark) {
     if (_isLoading && _loadingType == 'summary') {
-      return _buildLoadingArcade(loadingMessage: 'Generating summary...');
+      return _buildLoadingArcade(
+        loadingMessage: _loadingMessageForType('summary'),
+      );
     }
 
     if (_summary == null || _summary!.trim().isEmpty) {
@@ -2552,7 +2619,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
   Widget _buildQuizTab(bool isDark) {
     if (_isLoading && _loadingType == 'quiz') {
-      return _buildLoadingArcade(loadingMessage: 'Building quiz...');
+      return _buildLoadingArcade(
+        loadingMessage: _loadingMessageForType('quiz'),
+      );
     }
 
     if (_quiz == null || _quiz!.isEmpty) {
@@ -2851,7 +2920,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
   Widget _buildFlashcardsTab(bool isDark) {
     if (_isLoading && _loadingType == 'flashcards') {
-      return _buildLoadingArcade(loadingMessage: 'Creating flashcards...');
+      return _buildLoadingArcade(
+        loadingMessage: _loadingMessageForType('flashcards'),
+      );
     }
 
     if (_flashcards == null || _flashcards!.isEmpty) {

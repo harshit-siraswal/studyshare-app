@@ -836,9 +836,9 @@ class BackendApiService {
         'name': name,
         'isPrivate': isPrivate,
         'collegeId': collegeId,
-        'description': ?description,
-        'durationInDays': ?durationInDays,
-        'tags': ?tags,
+        'description': description,
+        'durationInDays': durationInDays,
+        'tags': tags,
       },
     );
   }
@@ -902,9 +902,9 @@ class BackendApiService {
       body: <String, dynamic>{
         'roomId': roomId,
         'content': content,
-        'imageUrl': ?imageUrl,
-        'imageFileId': ?imageFileId,
-        'authorName': ?authorName,
+        'imageUrl': imageUrl,
+        'imageFileId': imageFileId,
+        'authorName': authorName,
       },
     );
   }
@@ -1092,7 +1092,7 @@ class BackendApiService {
     return _requestJson(
       '/api/chat/messages/${Uri.encodeComponent(messageId)}',
       method: 'PUT',
-      body: <String, dynamic>{'content': content, 'imageUrl': ?imageUrl},
+      body: <String, dynamic>{'content': content, 'imageUrl': imageUrl},
     );
   }
 
@@ -1162,8 +1162,8 @@ class BackendApiService {
       body: <String, dynamic>{
         'messageId': messageId,
         'content': content,
-        'authorName': ?authorName,
-        'parentId': ?parentId,
+        'authorName': authorName,
+        'parentId': parentId,
       },
     );
   }
@@ -1285,7 +1285,7 @@ class BackendApiService {
         'cybervidyaToken': cybervidyaToken,
         'courseId': courseId,
         'courseComponentId': courseComponentId,
-        'studentId': ?studentId,
+        'studentId': studentId,
       },
       requireAuthToken: true,
     );
@@ -1320,8 +1320,8 @@ class BackendApiService {
         'fileSha256': fileSha256,
         'type': type,
         'selectedScope': selectedScope,
-        'collegeId': ?collegeId,
-        'college_id': ?collegeId,
+        'collegeId': collegeId,
+        'college_id': collegeId,
       },
     );
   }
@@ -1541,9 +1541,9 @@ class BackendApiService {
         'department': department,
         // Both keys sent for backend compat: older endpoints read 'imageUrl',
         // newer ones read 'fileUrl'.
-        'imageUrl': ?effectiveAttachmentUrl,
-        'fileUrl': ?effectiveAttachmentUrl,
-        'fileType': ?normalizedFileType,
+        'imageUrl': effectiveAttachmentUrl,
+        'fileUrl': effectiveAttachmentUrl,
+        'fileType': normalizedFileType,
       },
     );
   }
@@ -1585,7 +1585,7 @@ class BackendApiService {
     return _requestJson(
       '${_noticePath(noticeId)}/comments',
       method: 'POST',
-      body: <String, dynamic>{'content': content, 'parentId': ?parentId},
+      body: <String, dynamic>{'content': content, 'parentId': parentId},
     );
   }
 
@@ -1743,9 +1743,9 @@ class BackendApiService {
       method: 'POST',
       body: <String, dynamic>{
         'purchaseType': purchaseType,
-        'planId': ?planId,
-        'rechargeRupees': ?rechargeRupees,
-        'amount': ?amount,
+        'planId': planId,
+        'rechargeRupees': rechargeRupees,
+        'amount': amount,
       },
     );
   }
@@ -2195,8 +2195,8 @@ class BackendApiService {
       method: 'POST',
       body: <String, dynamic>{
         'email': email.trim().toLowerCase(),
-        'reason': ?reason,
-        'collegeId': ?collegeId,
+        'reason': reason,
+        'collegeId': collegeId,
       },
       bearerOverride: bearerToken,
       requireAuthToken: true,
@@ -2321,7 +2321,7 @@ class BackendApiService {
         'subject': subject,
         'title': title,
         'pdfUrl': pdfUrl,
-        'academicYear': ?academicYear,
+        'academicYear': academicYear,
       },
       bearerOverride: bearerToken,
       requireAuthToken: true,
@@ -2415,15 +2415,15 @@ class BackendApiService {
       timeout: _aiRequestTimeout,
       body: <String, dynamic>{
         'file_id': fileId,
-        'college_id': ?collegeId,
-        'use_ocr': ?useOcr,
-        'force_ocr': ?forceOcr,
-        'force': ?force,
-        'include_source': ?includeSource,
-        'video_url': ?videoUrl,
-        'async_requested': ?asyncRequested,
+        'college_id': collegeId,
+        'use_ocr': useOcr,
+        'force_ocr': forceOcr,
+        'force': force,
+        'include_source': includeSource,
+        'video_url': videoUrl,
+        'async_requested': asyncRequested,
         'delivery': asyncRequested == true ? 'background' : null,
-        'client_request_id': ?clientRequestId,
+        'client_request_id': clientRequestId,
       },
     );
   }
@@ -2445,15 +2445,15 @@ class BackendApiService {
       timeout: _aiRequestTimeout,
       body: <String, dynamic>{
         'file_id': fileId,
-        'college_id': ?collegeId,
-        'use_ocr': ?useOcr,
-        'force_ocr': ?forceOcr,
-        'force': ?force,
-        'include_source': ?includeSource,
-        'video_url': ?videoUrl,
-        'async_requested': ?asyncRequested,
+        'college_id': collegeId,
+        'use_ocr': useOcr,
+        'force_ocr': forceOcr,
+        'force': force,
+        'include_source': includeSource,
+        'video_url': videoUrl,
+        'async_requested': asyncRequested,
         'delivery': asyncRequested == true ? 'background' : null,
-        'client_request_id': ?clientRequestId,
+        'client_request_id': clientRequestId,
       },
     );
   }
@@ -2483,9 +2483,9 @@ class BackendApiService {
       timeout: _aiRequestTimeout,
       body: <String, dynamic>{
         'file_ids': sanitizedFileIds,
-        'use_ocr': ?useOcr,
-        'force_ocr': ?forceOcr,
-        'include_source': ?includeSource,
+        'use_ocr': useOcr,
+        'force_ocr': forceOcr,
+        'include_source': includeSource,
       },
     );
   }
@@ -2507,15 +2507,15 @@ class BackendApiService {
       timeout: _aiRequestTimeout,
       body: <String, dynamic>{
         'file_id': fileId,
-        'college_id': ?collegeId,
-        'use_ocr': ?useOcr,
-        'force_ocr': ?forceOcr,
-        'force': ?force,
-        'include_source': ?includeSource,
-        'video_url': ?videoUrl,
-        'async_requested': ?asyncRequested,
+        'college_id': collegeId,
+        'use_ocr': useOcr,
+        'force_ocr': forceOcr,
+        'force': force,
+        'include_source': includeSource,
+        'video_url': videoUrl,
+        'async_requested': asyncRequested,
         'delivery': asyncRequested == true ? 'background' : null,
-        'client_request_id': ?clientRequestId,
+        'client_request_id': clientRequestId,
       },
     );
   }
@@ -2538,9 +2538,9 @@ class BackendApiService {
       body: <String, dynamic>{
         'file_id': fileId,
         'query': query,
-        'college_id': ?collegeId,
-        'use_ocr': ?useOcr,
-        'force_ocr': ?forceOcr,
+        'college_id': collegeId,
+        'use_ocr': useOcr,
+        'force_ocr': forceOcr,
       },
     );
   }
@@ -2571,26 +2571,26 @@ class BackendApiService {
       timeout: _aiRequestTimeout,
       body: <String, dynamic>{
         'question': question,
-        'college_id': ?collegeId,
-        'session_id': ?sessionId,
-        'top_k': ?topK,
-        'min_score': ?minScore,
+        'college_id': collegeId,
+        'session_id': sessionId,
+        'top_k': topK,
+        'min_score': minScore,
         'allow_web': allowWeb == true,
         // Keep only one retrieval selector to avoid duplicated semantics.
         'retrieval_mode': allowWeb == true ? 'web' : 'local',
         'strict_notes_mode': allowWeb != true,
-        'file_id': ?fileId,
-        'video_url': ?videoUrl,
-        'use_ocr': ?useOcr,
-        'force_ocr': ?forceOcr,
-        'attachments': ?attachments,
-        'history': ?history,
-        'filters': ?filters,
-        'source_switch_for_turn': ?sourceSwitchForTurn,
-        'exclude_file_ids': ?excludeFileIds,
-        'dialect_intensity': ?dialectIntensity,
-        'language_hint': ?languageHint,
-        'generation_mode': ?generationMode,
+        'file_id': fileId,
+        'video_url': videoUrl,
+        'use_ocr': useOcr,
+        'force_ocr': forceOcr,
+        'attachments': attachments,
+        'history': history,
+        'filters': filters,
+        'source_switch_for_turn': sourceSwitchForTurn,
+        'exclude_file_ids': excludeFileIds,
+        'dialect_intensity': dialectIntensity,
+        'language_hint': languageHint,
+        'generation_mode': generationMode,
       },
     );
     return _normalizeRagResponse(response);
@@ -2928,21 +2928,21 @@ class BackendApiService {
         'type': 'metadata',
         'data': <String, dynamic>{
           'sources': normalizedSources,
-          'primary_source': ?primarySource,
-          'primary_source_file_id': ?primarySourceFileId,
+          'primary_source': primarySource,
+          'primary_source_file_id': primarySourceFileId,
           'no_local': noLocal,
-          'retrieval_score': ?retrievalScore,
-          'llm_confidence_score': ?llmConfidenceScore,
-          'combined_confidence': ?combinedConfidence,
-          'source_switch_applied': ?sourceSwitchApplied,
-          'retrieval_mode': ?retrievalMode,
-          'dialect_intensity_used': ?dialectIntensityUsed,
-          'tone_profile_used': ?toneProfileUsed,
-          'answer_origin': ?answerOrigin,
-          'strict_notes_mode': ?strictNotesMode,
+          'retrieval_score': retrievalScore,
+          'llm_confidence_score': llmConfidenceScore,
+          'combined_confidence': combinedConfidence,
+          'source_switch_applied': sourceSwitchApplied,
+          'retrieval_mode': retrievalMode,
+          'dialect_intensity_used': dialectIntensityUsed,
+          'tone_profile_used': toneProfileUsed,
+          'answer_origin': answerOrigin,
+          'strict_notes_mode': strictNotesMode,
           'insufficient_grounding': insufficientGrounding,
-          'ocr_failure_affects_retrieval': ?ocrFailureAffectsRetrieval,
-          'ocr_errors': ?ocrErrors,
+          'ocr_failure_affects_retrieval': ocrFailureAffectsRetrieval,
+          'ocr_errors': ocrErrors,
         },
       });
     }
@@ -3038,26 +3038,26 @@ class BackendApiService {
     };
     final requestBody = <String, dynamic>{
       'question': question,
-      'college_id': ?collegeId,
-      'session_id': ?sessionId,
-      'top_k': ?topK,
-      'min_score': ?minScore,
+      'college_id': collegeId,
+      'session_id': sessionId,
+      'top_k': topK,
+      'min_score': minScore,
       'allow_web': allowWeb == true,
       // Keep only one retrieval selector to avoid duplicated semantics.
       'retrieval_mode': allowWeb == true ? 'web' : 'local',
       'strict_notes_mode': allowWeb != true,
-      'file_id': ?fileId,
-      'video_url': ?videoUrl,
-      'use_ocr': ?useOcr,
-      'force_ocr': ?forceOcr,
-      'attachments': ?attachments,
-      'history': ?history,
-      'filters': ?filters,
-      'source_switch_for_turn': ?sourceSwitchForTurn,
-      'exclude_file_ids': ?excludeFileIds,
-      'dialect_intensity': ?dialectIntensity,
-      'language_hint': ?languageHint,
-      'generation_mode': ?generationMode,
+      'file_id': fileId,
+      'video_url': videoUrl,
+      'use_ocr': useOcr,
+      'force_ocr': forceOcr,
+      'attachments': attachments,
+      'history': history,
+      'filters': filters,
+      'source_switch_for_turn': sourceSwitchForTurn,
+      'exclude_file_ids': excludeFileIds,
+      'dialect_intensity': dialectIntensity,
+      'language_hint': languageHint,
+      'generation_mode': generationMode,
     };
 
     http.StreamedResponse? response;
@@ -3262,8 +3262,8 @@ class BackendApiService {
       method: 'POST',
       body: {
         'roomId': roomId,
-        'collegeId': ?collegeId,
-        'college_id': ?collegeId,
+        'collegeId': collegeId,
+        'college_id': collegeId,
       },
     );
   }
