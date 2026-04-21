@@ -230,6 +230,7 @@ class _ChatAttachment {
   final bool isPdf;
   final String? fileId;
   final String? resourceId;
+  final String? noticeId;
   final String? subject;
   final String? semester;
   final String? branch;
@@ -240,6 +241,7 @@ class _ChatAttachment {
     required this.isPdf,
     this.fileId,
     this.resourceId,
+    this.noticeId,
     this.subject,
     this.semester,
     this.branch,
@@ -265,6 +267,16 @@ class _PendingQuestionPaperRequest {
     required this.originalPrompt,
     this.subject,
     this.semester,
+  });
+}
+
+class _NoticeRequestContext {
+  final List<String> noticeIds;
+  final bool preferNoticeSources;
+
+  const _NoticeRequestContext({
+    this.noticeIds = const <String>[],
+    this.preferNoticeSources = false,
   });
 }
 
@@ -698,35 +710,150 @@ class _AIChatScreenState extends State<AIChatScreen>
     return history.sublist(history.length - maxMessages);
   }
 
+  bool _promptLooksNoticeFocused(String prompt) {
+    final normalized = prompt
+        .toLowerCase()
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (normalized.isEmpty) return false;
+    if (RegExp(
+      r'\b(notice|notices|announcement|announcements|notification|notifications|circular|deadline|last date|mock test|codetantra|code clash|winner|winners|registration|rank list|complete before|event|workshop|seminar|competition|quiz from notice|questions from notice)\b',
+    ).hasMatch(normalized)) {
+      return true;
+    }
+    return RegExp(
+          r'\b(platform|portal|attempt|completion|schedule)\b',
+        ).hasMatch(normalized) &&
+        RegExp(
+          r'\b(mock test|test|exam|notice|announcement|event|codetantra)\b',
+        ).hasMatch(normalized);
+  }
+
+  bool _promptLooksLikeNoticeCarryForward(String prompt) {
+    final normalized = prompt
+        .toLowerCase()
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (normalized.isEmpty) return false;
+
+    final hasReference = RegExp(
+      r'\b(it|that|this|those|them|same|previous|above|again|more)\b',
+    ).hasMatch(normalized);
+    final looksLikeFollowUpQuestion =
+        RegExp(r'^(what|when|why|how|where|which)\b').hasMatch(normalized) ||
+        normalized.contains('?');
+    final looksLikeCarryForwardQuiz =
+        _isQuestionPaperContinuationIntent(prompt) ||
+        RegExp(
+          r'\b(generate|create|make|give|prepare)\b.*\b(more|another|next|same)\b',
+        ).hasMatch(normalized);
+
+    return looksLikeCarryForwardQuiz ||
+        (hasReference &&
+            (looksLikeFollowUpQuestion || normalized.length <= 120));
+  }
+
+  List<String> _collectRecentNoticeIds({
+    int? beforeMessageIndex,
+    int maxAssistantMessages = 6,
+    int maxIds = 6,
+  }) {
+    final seen = <String>{};
+    final ids = <String>[];
+    final startIndex = beforeMessageIndex == null
+        ? _messages.length - 1
+        : math.min(beforeMessageIndex - 1, _messages.length - 1);
+    var assistantMessagesScanned = 0;
+
+    for (var index = startIndex; index >= 0; index--) {
+      final message = _messages[index];
+      if (message.isUser) continue;
+      assistantMessagesScanned++;
+
+      for (final source in message.sources) {
+        final noticeId = source.isNoticeSource
+            ? source.sourceId?.trim() ?? ''
+            : '';
+        if (noticeId.isEmpty || !seen.add(noticeId)) continue;
+        ids.add(noticeId);
+        if (ids.length >= maxIds) {
+          return ids;
+        }
+      }
+
+      if (assistantMessagesScanned >= maxAssistantMessages && ids.isNotEmpty) {
+        break;
+      }
+    }
+
+    return ids;
+  }
+
+  _NoticeRequestContext _buildNoticeRequestContext({
+    required String prompt,
+    int? beforeMessageIndex,
+    bool forQuestionPaper = false,
+  }) {
+    final recentNoticeIds = _collectRecentNoticeIds(
+      beforeMessageIndex: beforeMessageIndex,
+    );
+    final explicitNoticePrompt = _promptLooksNoticeFocused(prompt);
+    final carryForwardPrompt =
+        recentNoticeIds.isNotEmpty &&
+        _promptLooksLikeNoticeCarryForward(prompt);
+    final questionPaperFollowUp =
+        forQuestionPaper &&
+        recentNoticeIds.isNotEmpty &&
+        (_isQuestionPaperIntent(prompt: prompt, hasAttachments: false) ||
+            _isQuestionPaperContinuationIntent(prompt) ||
+            prompt.toLowerCase().contains('same notice'));
+    final preferNoticeSources =
+        explicitNoticePrompt || carryForwardPrompt || questionPaperFollowUp;
+
+    if (!preferNoticeSources) {
+      return const _NoticeRequestContext();
+    }
+
+    return _NoticeRequestContext(
+      noticeIds: recentNoticeIds,
+      preferNoticeSources: true,
+    );
+  }
+
   String _buildRagPrompt({
     required String userPrompt,
     required bool hasAttachments,
     bool preferLocalOnly = false,
     bool searchAllPdfs = false,
+    bool preferNoticeSources = false,
   }) {
     final cleaned = userPrompt.trim();
     final hasVideoTranscriptContext = (widget.resourceContext?.videoUrl ?? '')
         .trim()
         .isNotEmpty;
     if (cleaned.isNotEmpty && preferLocalOnly) {
+      final localScope = preferNoticeSources
+          ? 'the local StudyShare context, including relevant notices/announcements and uploaded or pinned study material'
+          : 'the local StudyShare context, including uploaded or pinned study material';
       if (searchAllPdfs) {
         return '$cleaned\n\n'
-            'Important: Search across all available study materials '
-            '(PDFs/notes) in your subject or semester, not just the pinned '
-            'file. Do not add outside web/general info. If nothing relevant '
-            'is found, say that clearly and ask what to upload.';
+            'Important: Search only within $localScope. Search across all '
+            'available study materials in your subject or semester instead of '
+            'staying pinned to one file when needed. Do not add outside '
+            'web/general info. If nothing relevant is found locally, say that '
+            'clearly.';
       }
       if (hasVideoTranscriptContext) {
         return '$cleaned\n\n'
-            'Important: Use only the currently open video transcript and any '
-            'attached study material context. Do not add outside web/general '
-            'info. If the transcript does not contain the answer, say that '
+            'Important: Use only the currently open video transcript plus any '
+            'relevant local StudyShare context. Do not add outside web/general '
+            'info. If the local context does not contain the answer, say that '
             'clearly.';
       }
       return '$cleaned\n\n'
-          'Important: Use only the uploaded/pinned study material context. '
-          'Do not add outside web/general info. If the notes do not contain '
-          'the answer, say that clearly and ask what to upload.';
+          'Important: Use only $localScope. Do not add outside web/general '
+          'info. If the local context does not contain the answer, say that '
+          'clearly.';
     }
     if (cleaned.isNotEmpty && hasVideoTranscriptContext) {
       return '$cleaned\n\n'
@@ -1183,23 +1310,7 @@ class _AIChatScreenState extends State<AIChatScreen>
     }
 
     if (resolvedSubject.isEmpty && effectiveAttachments.isNotEmpty) {
-      final attachmentPayload = effectiveAttachments
-          .map(
-            (item) => <String, dynamic>{
-              'name': item.name,
-              'url': item.url,
-              'type': item.isPdf ? 'pdf' : 'image',
-              if ((item.fileId ?? '').trim().isNotEmpty) 'file_id': item.fileId,
-              if ((item.resourceId ?? '').trim().isNotEmpty)
-                'resource_id': item.resourceId,
-              if ((item.subject ?? '').trim().isNotEmpty)
-                'subject': item.subject,
-              if ((item.semester ?? '').trim().isNotEmpty)
-                'semester': item.semester,
-              if ((item.branch ?? '').trim().isNotEmpty) 'branch': item.branch,
-            },
-          )
-          .toList(growable: false);
+      final attachmentPayload = _toAttachmentPayload(effectiveAttachments);
       final inferred = await _inferSubjectFromAttachments(
         attachments: attachmentPayload,
       );
@@ -1590,12 +1701,23 @@ class _AIChatScreenState extends State<AIChatScreen>
       !isStreamingAssistantMessage;
 
   String _buildCollapsedLiveTraceLabel(AIChatMessage message) {
+    final usesNoticeSources = message.sources.any(
+      (source) => source.isNoticeSource,
+    );
     final prefix = switch (message.answerOrigin) {
       AiAnswerOrigin.webOnly => 'Used web results from',
-      AiAnswerOrigin.notesPlusWeb => 'Used notes and web results from',
+      AiAnswerOrigin.notesPlusWeb =>
+        usesNoticeSources
+            ? 'Used local StudyShare and web results from'
+            : 'Used notes and web results from',
       AiAnswerOrigin.insufficientNotes =>
-        'Used the closest matching notes from',
-      AiAnswerOrigin.notesOnly || null => 'Used notes from',
+        usesNoticeSources
+            ? 'Used the closest matching local sources from'
+            : 'Used the closest matching notes from',
+      AiAnswerOrigin.notesOnly || null =>
+        usesNoticeSources
+            ? 'Used local StudyShare sources from'
+            : 'Used notes from',
     };
     final sourceTitles =
         _activitySourcesFromRagSources(message.sources, limit: 2)
@@ -1705,12 +1827,12 @@ class _AIChatScreenState extends State<AIChatScreen>
       case AiAnswerOrigin.webOnly:
         return 'Web search completed';
       case AiAnswerOrigin.notesPlusWeb:
-        return 'Merged notes with web context';
+        return 'Merged local sources with web context';
       case AiAnswerOrigin.insufficientNotes:
-        return 'Notes scan completed';
+        return 'Local source scan completed';
       case AiAnswerOrigin.notesOnly:
       case null:
-        return 'Notes retrieval completed';
+        return 'Local retrieval completed';
     }
   }
 
@@ -1754,7 +1876,7 @@ class _AIChatScreenState extends State<AIChatScreen>
         title: _activityTitleForAnswerOrigin(answerOrigin),
         status: retrievalStatus,
         description: answerOrigin == AiAnswerOrigin.insufficientNotes
-            ? 'Only a partial grounding match was found in the current notes.'
+            ? 'Only a partial grounding match was found in the current local sources.'
             : null,
         sources: activitySources,
       ),
@@ -1864,7 +1986,10 @@ class _AIChatScreenState extends State<AIChatScreen>
       return;
     }
 
-    final notice = await _supabase.getNotice(normalizedNoticeId);
+    final notice = await _supabase.getNotice(
+      normalizedNoticeId,
+      collegeId: widget.collegeId,
+    );
     if (!mounted) return;
     if (notice == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2022,7 +2147,7 @@ class _AIChatScreenState extends State<AIChatScreen>
       ),
       AiLiveActivityStep(
         id: 'qp_notes',
-        title: 'Loaded supporting notes',
+        title: 'Loaded supporting sources',
         status: AiLiveActivityStatus.pending,
         description: notesDescription,
         sources: noteSources,
@@ -3571,12 +3696,36 @@ class _AIChatScreenState extends State<AIChatScreen>
             'is_pdf': attachment.isPdf,
             'file_id': attachment.fileId,
             'resource_id': attachment.resourceId,
+            'notice_id': attachment.noticeId,
             'subject': attachment.subject,
             'semester': attachment.semester,
             'branch': attachment.branch,
           },
         )
         .toList();
+  }
+
+  List<Map<String, dynamic>> _toAttachmentPayload(
+    List<_ChatAttachment> attachments,
+  ) {
+    return attachments
+        .map(
+          (item) => <String, dynamic>{
+            'name': item.name,
+            'url': item.url,
+            'type': item.isPdf ? 'pdf' : 'image',
+            if ((item.fileId ?? '').trim().isNotEmpty) 'file_id': item.fileId,
+            if ((item.resourceId ?? '').trim().isNotEmpty)
+              'resource_id': item.resourceId,
+            if ((item.noticeId ?? '').trim().isNotEmpty)
+              'notice_id': item.noticeId,
+            if ((item.subject ?? '').trim().isNotEmpty) 'subject': item.subject,
+            if ((item.semester ?? '').trim().isNotEmpty)
+              'semester': item.semester,
+            if ((item.branch ?? '').trim().isNotEmpty) 'branch': item.branch,
+          },
+        )
+        .toList(growable: false);
   }
 
   List<_ChatAttachment> _deserializeStickyAttachments(
@@ -3596,6 +3745,9 @@ class _AIChatScreenState extends State<AIChatScreen>
             resourceId:
                 item['resource_id']?.toString().trim().isNotEmpty == true
                 ? item['resource_id']!.toString().trim()
+                : null,
+            noticeId: item['notice_id']?.toString().trim().isNotEmpty == true
+                ? item['notice_id']!.toString().trim()
                 : null,
             subject: item['subject']?.toString().trim().isNotEmpty == true
                 ? item['subject']!.toString().trim()
@@ -3747,6 +3899,7 @@ class _AIChatScreenState extends State<AIChatScreen>
     required String semester,
     required String branch,
     required String inferredSubject,
+    bool preferNoticeSources = false,
     bool strictAntiPlaceholder = false,
     _QuestionPaperRetryReason? strictRetryReason,
   }) {
@@ -3762,8 +3915,10 @@ class _AIChatScreenState extends State<AIChatScreen>
     return [
       userPrompt.trim(),
       if (scopeHints.isNotEmpty) 'Scope hints: ${scopeHints.join(', ')}.',
+      if (preferNoticeSources)
+        'Grounding rule: if the retrieved source is a notice or announcement, create factual MCQs only from that notice content. Use its exact dates, timings, platform instructions, completion rules, stated purpose, and named details. Do not turn a notice into generic theory questions.',
       if (strictAntiPlaceholder)
-        'Retry guidance: return a clean, exam-like MCQ paper grounded only in the selected PDF. '
+        'Retry guidance: return a clean, exam-like MCQ paper grounded only in the selected local source material. '
             'Use complete question stems, 4 complete options, and valid JSON only. '
             '$strictRetryMessage',
     ].join('\n\n');
@@ -3949,7 +4104,7 @@ class _AIChatScreenState extends State<AIChatScreen>
   String _buildQuestionPaperSummary(AiQuestionPaper paper) {
     return 'Question paper generated for ${paper.subject} '
         '(Sem ${paper.semester}, ${paper.branch}).\n'
-        'Questions: ${paper.questions.length} | Context docs analyzed: ${paper.pyqCount}\n\n'
+        'Questions: ${paper.questions.length} | Context sources analyzed: ${paper.pyqCount}\n\n'
         'Tap "Start Quiz" to attempt the full-screen quiz.';
   }
 
@@ -4010,7 +4165,8 @@ class _AIChatScreenState extends State<AIChatScreen>
       content: '',
       liveTitle: 'Generating your question paper',
       liveSteps: _buildQuestionPaperLiveSteps(
-        notesDescription: 'Collecting the most relevant notes for this paper.',
+        notesDescription:
+            'Collecting the most relevant local sources for this paper.',
       ),
     );
 
@@ -4031,6 +4187,10 @@ class _AIChatScreenState extends State<AIChatScreen>
 
     try {
       final searchAllForPrompt = _shouldSearchAllPdfsForPrompt(userPrompt);
+      final noticeRequestContext = _buildNoticeRequestContext(
+        prompt: userPrompt,
+        forQuestionPaper: true,
+      );
       final contextFilters = await _buildContextFiltersForRequest(
         ignoreSubject: searchAllForPrompt,
         prompt: userPrompt,
@@ -4083,8 +4243,10 @@ class _AIChatScreenState extends State<AIChatScreen>
         displayAttachments,
       );
       final notesDescription = noteSources.isNotEmpty
-          ? 'Using ${noteSources.length} note source'
+          ? 'Using ${noteSources.length} grounded source'
                 '${noteSources.length == 1 ? '' : 's'} for grounding.'
+          : noticeRequestContext.preferNoticeSources
+          ? 'Searching StudyShare for the matching notice content or study material.'
           : 'Searching the available study material for this paper.';
       if (mounted) {
         setState(() {
@@ -4154,18 +4316,26 @@ class _AIChatScreenState extends State<AIChatScreen>
           semester: config.semester,
           branch: config.branch,
           inferredSubject: inferredSubject,
+          preferNoticeSources: noticeRequestContext.preferNoticeSources,
           strictAntiPlaceholder: strictMode,
           strictRetryReason: strictRetryReason,
         );
-        final allowWeb = _allowWebMode && groundingAttachments.isEmpty;
+        final allowWeb =
+            _allowWebMode &&
+            groundingAttachments.isEmpty &&
+            !noticeRequestContext.preferNoticeSources;
         final response = await _api.queryRag(
           question: prompt,
           collegeId: widget.collegeId,
           sessionId: _activeSessionId,
           topK: 15,
           minScore: 0.32,
-          fileId: searchAllForPrompt ? null : widget.resourceContext?.fileId,
-          videoUrl: widget.resourceContext?.videoUrl,
+          fileId: searchAllForPrompt || noticeRequestContext.preferNoticeSources
+              ? null
+              : widget.resourceContext?.fileId,
+          videoUrl: noticeRequestContext.preferNoticeSources
+              ? null
+              : widget.resourceContext?.videoUrl,
           allowWeb: allowWeb,
           useOcr: hasImageAttachments || forceOcr,
           forceOcr: forceOcr,
@@ -4173,7 +4343,13 @@ class _AIChatScreenState extends State<AIChatScreen>
           history: history,
           filters: effectiveQuestionPaperFilters,
           sourceSwitchForTurn: sourceSwitchForTurn,
-          excludeFileIds: excludeFileIds,
+          excludeFileIds: noticeRequestContext.preferNoticeSources
+              ? null
+              : excludeFileIds,
+          noticeIds: noticeRequestContext.noticeIds,
+          sourceHint: noticeRequestContext.preferNoticeSources
+              ? 'notice'
+              : null,
           dialectIntensity: dialectIntensity,
           languageHint: languageHint,
           generationMode: 'question_paper',
@@ -4201,7 +4377,7 @@ class _AIChatScreenState extends State<AIChatScreen>
             (preParsedGroundedCandidate == null ||
                 _isLowQualityQuestionPaper(preParsedGroundedCandidate))) {
           const noNotesMessage =
-              'No related notes were found for this paper yet. Upload matching study material and try again.';
+              'No related local study material or notice content was found for this paper yet. Add a matching source and try again.';
           if (mounted) {
             setState(() {
               aiMessage.content = noNotesMessage;
@@ -4212,14 +4388,14 @@ class _AIChatScreenState extends State<AIChatScreen>
                 'qp_generate',
                 status: AiLiveActivityStatus.failed,
                 description:
-                    'Question paper generation stopped because the notes were not grounded enough.',
+                    'Question paper generation stopped because the local grounding was not strong enough.',
               );
               aiMessage.liveSteps = _updateLiveStepList(
                 aiMessage.liveSteps,
                 'qp_validate',
                 status: AiLiveActivityStatus.failed,
                 description:
-                    'A paper cannot be validated without grounded notes.',
+                    'A paper cannot be validated without grounded local sources.',
               );
               aiMessage.liveSteps = _updateLiveStepList(
                 aiMessage.liveSteps,
@@ -4719,6 +4895,9 @@ class _AIChatScreenState extends State<AIChatScreen>
         )) {
           return;
         }
+        final noticeRequestContext = _buildNoticeRequestContext(
+          prompt: userPrompt,
+        );
         final searchAllForPrompt = _shouldSearchAllPdfsForPrompt(userPrompt);
         final isPdfOverviewPrompt = _isPdfOverviewPrompt(userPrompt);
         final localContextRequired =
@@ -4737,30 +4916,14 @@ class _AIChatScreenState extends State<AIChatScreen>
             (_lastPrimarySourceFileId ?? '').trim().isNotEmpty
             ? <String>[_lastPrimarySourceFileId!.trim()]
             : null;
-        final attachmentPayload = effectiveAttachments
-            .map(
-              (item) => <String, dynamic>{
-                'name': item.name,
-                'url': item.url,
-                'type': item.isPdf ? 'pdf' : 'image',
-                if ((item.fileId ?? '').trim().isNotEmpty)
-                  'file_id': item.fileId,
-                if ((item.resourceId ?? '').trim().isNotEmpty)
-                  'resource_id': item.resourceId,
-                if ((item.subject ?? '').trim().isNotEmpty)
-                  'subject': item.subject,
-                if ((item.semester ?? '').trim().isNotEmpty)
-                  'semester': item.semester,
-                if ((item.branch ?? '').trim().isNotEmpty)
-                  'branch': item.branch,
-              },
-            )
-            .toList();
+        final attachmentPayload = _toAttachmentPayload(effectiveAttachments);
         final sendPrompt = _buildRagPrompt(
           userPrompt: userPrompt,
           hasAttachments: hasAttachments,
-          preferLocalOnly: localContextRequired && !_allowWebMode,
+          preferLocalOnly:
+              localContextRequired || noticeRequestContext.preferNoticeSources,
           searchAllPdfs: searchAllForPrompt,
+          preferNoticeSources: noticeRequestContext.preferNoticeSources,
         );
         final history = _buildStructuredHistory(pendingUserPrompt: userPrompt);
         final contextFilters = await _buildContextFiltersForRequest(
@@ -4795,12 +4958,17 @@ class _AIChatScreenState extends State<AIChatScreen>
         final mustUseGroundedLocalContext =
             localContextRequired ||
             hasOcrEligibleAttachments ||
-            shouldGenerateQuestionPaper;
+            shouldGenerateQuestionPaper ||
+            noticeRequestContext.preferNoticeSources;
         final effectiveAllowWeb = _allowWebMode && !mustUseGroundedLocalContext;
-        final effectiveFileId = effectiveAllowWeb
+        final releasePinnedResourceForNotice =
+            noticeRequestContext.preferNoticeSources;
+        final effectiveFileId =
+            effectiveAllowWeb || releasePinnedResourceForNotice
             ? null
             : (searchAllForPrompt ? null : widget.resourceContext?.fileId);
-        final effectiveVideoUrl = effectiveAllowWeb
+        final effectiveVideoUrl =
+            effectiveAllowWeb || releasePinnedResourceForNotice
             ? null
             : widget.resourceContext?.videoUrl;
         final effectiveAttachmentPayload = effectiveAllowWeb
@@ -4812,7 +4980,7 @@ class _AIChatScreenState extends State<AIChatScreen>
             : sourceSwitchForTurn;
         final effectiveExcludeFileIds = effectiveAllowWeb
             ? null
-            : excludeFileIds;
+            : (releasePinnedResourceForNotice ? null : excludeFileIds);
         final effectiveUseOcr = effectiveAllowWeb
             ? false
             : hasOcrEligibleAttachments;
@@ -4821,6 +4989,9 @@ class _AIChatScreenState extends State<AIChatScreen>
             ? (isPdfOverviewPrompt ? 0.16 : 0.08)
             : null;
         final effectiveMinScore = effectiveAllowWeb ? null : minScore;
+        final effectiveSourceHint = noticeRequestContext.preferNoticeSources
+            ? 'notice'
+            : null;
         final userVisible = turnAttachments.isEmpty
             ? userPrompt
             : '$userPrompt\n\n${turnAttachments.length} attachments added.';
@@ -4838,6 +5009,7 @@ class _AIChatScreenState extends State<AIChatScreen>
           'force_ocr': effectiveForceOcr,
           'summary_export': isSummaryExportRequest,
           'question_paper': shouldGenerateQuestionPaper,
+          'prefer_notice_sources': noticeRequestContext.preferNoticeSources,
         };
 
         await _analytics.logEvent(
@@ -4914,6 +5086,8 @@ class _AIChatScreenState extends State<AIChatScreen>
             filters: effectiveFilters,
             sourceSwitchForTurn: effectiveSourceSwitchForTurn,
             excludeFileIds: effectiveExcludeFileIds,
+            noticeIds: noticeRequestContext.noticeIds,
+            sourceHint: effectiveSourceHint,
             dialectIntensity: dialectIntensity,
             languageHint: languageHint,
           );
@@ -5127,7 +5301,7 @@ class _AIChatScreenState extends State<AIChatScreen>
             setState(() {
               aiMessage.content = effectiveAllowWeb
                   ? 'The AI connection was interrupted before a full answer arrived. Please try again.'
-                  : 'I could not complete a notes-based answer this time. Please try again.';
+                  : 'I could not complete a local StudyShare answer this time. Please try again.';
             });
           }
 
@@ -5274,6 +5448,74 @@ class _AIChatScreenState extends State<AIChatScreen>
       return raw.substring(0, legacyIndex).trim();
     }
     return raw.trim();
+  }
+
+  String _buildGenerateMoreQuestionPaperPrompt({
+    required String basePrompt,
+    required AiQuestionPaper paper,
+  }) {
+    final originalPrompt = _sanitizePromptFragment(
+      _extractPromptFromUserVisible(basePrompt),
+      maxLength: 320,
+    );
+    final previousQuestions = paper.questions
+        .take(5)
+        .map((item) => '- ${item.question.trim()}')
+        .join('\n');
+
+    return [
+      if (originalPrompt.isNotEmpty) 'Original request: $originalPrompt',
+      'Generate 5 more multiple-choice quiz questions from the same notice or study material.',
+      'Do not repeat any of the earlier questions.',
+      'Ground every question only in the same retrieved source content.',
+      if (previousQuestions.isNotEmpty)
+        'Previously used questions:\n$previousQuestions',
+    ].join('\n\n');
+  }
+
+  Future<void> _generateMoreQuestionPaperFromMessage(int messageIndex) async {
+    if (_isLoading || messageIndex < 0 || messageIndex >= _messages.length) {
+      return;
+    }
+
+    final message = _messages[messageIndex];
+    final paper = message.quizActionPaper;
+    if (paper == null) return;
+
+    var basePrompt = '';
+    for (var i = messageIndex - 1; i >= 0; i--) {
+      final candidate = _messages[i];
+      if (!candidate.isUser) continue;
+      basePrompt = _extractPromptFromUserVisible(candidate.content);
+      if (basePrompt.trim().isNotEmpty) break;
+    }
+    if (basePrompt.trim().isEmpty) {
+      basePrompt = 'Generate a quiz from the same notice or study material.';
+    }
+
+    final effectiveAttachments = List<_ChatAttachment>.from(_stickyAttachments);
+    final attachmentPayload = _toAttachmentPayload(effectiveAttachments);
+    final resolvedSubject = paper.subject.trim().toLowerCase() == 'general'
+        ? ''
+        : _normalizeQuestionPaperSubjectHint(paper.subject);
+    final pinnedScopeOnly =
+        widget.resourceContext != null || effectiveAttachments.isNotEmpty;
+
+    await _handleQuestionPaperGeneration(
+      userPrompt: _buildGenerateMoreQuestionPaperPrompt(
+        basePrompt: basePrompt,
+        paper: paper,
+      ),
+      userVisible: 'Generate 5 more questions',
+      attachmentPayload: attachmentPayload,
+      config: _QuestionPaperRequestConfig(
+        semester: pinnedScopeOnly ? paper.semester.trim() : '',
+        branch: pinnedScopeOnly ? paper.branch.trim() : '',
+      ),
+      resolvedSubject: resolvedSubject,
+      pinnedScopeOnly: pinnedScopeOnly,
+      preferTopicOnlyScope: resolvedSubject.isNotEmpty && !pinnedScopeOnly,
+    );
   }
 
   Future<void> _regenerateFromMessage(int messageIndex) async {
@@ -5860,25 +6102,58 @@ class _AIChatScreenState extends State<AIChatScreen>
         ],
         if (!msg.isUser && msg.quizActionPaper != null) ...[
           const SizedBox(height: 10),
-          SizedBox(
-            height: 36,
-            child: ElevatedButton.icon(
-              onPressed: () => _openQuizPaper(msg.quizActionPaper!),
-              icon: const Icon(Icons.quiz_rounded, size: 16),
-              label: const Text('Start Quiz'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 14),
-                textStyle: GoogleFonts.inter(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              SizedBox(
+                height: 36,
+                child: ElevatedButton.icon(
+                  onPressed: () => _openQuizPaper(msg.quizActionPaper!),
+                  icon: const Icon(Icons.quiz_rounded, size: 16),
+                  label: const Text('Start Quiz'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    textStyle: GoogleFonts.inter(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
                 ),
               ),
-            ),
+              if (!_isLoading && index == _messages.length - 1)
+                SizedBox(
+                  height: 36,
+                  child: OutlinedButton.icon(
+                    onPressed: () =>
+                        _generateMoreQuestionPaperFromMessage(index),
+                    icon: const Icon(
+                      Icons.add_circle_outline_rounded,
+                      size: 16,
+                    ),
+                    label: const Text('Generate More'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: isDark ? Colors.white : Colors.black87,
+                      side: BorderSide(
+                        color: isDark ? Colors.white24 : Colors.black12,
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      textStyle: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ],
         if (msg.content.trim().isNotEmpty) ...[

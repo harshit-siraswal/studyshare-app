@@ -1305,11 +1305,12 @@ class BackendApiService {
     required String filename,
     required String contentType,
     required int sizeBytes,
-    required String fileSha256,
+    String? fileSha256,
     required String type,
     required Map<String, dynamic> selectedScope,
     String? collegeId,
   }) async {
+    final normalizedFileSha256 = fileSha256?.trim();
     return _requestJson(
       '/api/resources/upload-plan',
       method: 'POST',
@@ -1317,7 +1318,8 @@ class BackendApiService {
         'filename': filename,
         'contentType': contentType,
         'sizeBytes': sizeBytes,
-        'fileSha256': fileSha256,
+        if (normalizedFileSha256 != null && normalizedFileSha256.isNotEmpty)
+          'fileSha256': normalizedFileSha256,
         'type': type,
         'selectedScope': selectedScope,
         'collegeId': collegeId,
@@ -1511,6 +1513,31 @@ class BackendApiService {
     final data = await _requestJson(query.toString(), method: 'GET');
     final list = (data['notices'] as List?) ?? const [];
     return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+  }
+
+  Future<Map<String, dynamic>?> getNoticeById(
+    String noticeId, {
+    String? collegeId,
+  }) async {
+    final normalizedNoticeId = noticeId.trim();
+    if (normalizedNoticeId.isEmpty) return null;
+
+    final query = StringBuffer(
+      '/api/notices/${Uri.encodeComponent(normalizedNoticeId)}',
+    );
+    final normalizedCollegeId = collegeId?.trim();
+    if (normalizedCollegeId != null && normalizedCollegeId.isNotEmpty) {
+      query.write(
+        '?college_id=${Uri.encodeQueryComponent(normalizedCollegeId)}',
+      );
+    }
+
+    final data = await _requestJson(query.toString(), method: 'GET');
+    final rawNotice = data['notice'];
+    if (rawNotice is Map) {
+      return Map<String, dynamic>.from(rawNotice);
+    }
+    return null;
   }
 
   Future<Map<String, dynamic>> createNotice({
@@ -2561,6 +2588,8 @@ class BackendApiService {
     Map<String, dynamic>? filters,
     bool? sourceSwitchForTurn,
     List<String>? excludeFileIds,
+    List<String>? noticeIds,
+    String? sourceHint,
     String? dialectIntensity,
     String? languageHint,
     String? generationMode,
@@ -2588,6 +2617,8 @@ class BackendApiService {
         'filters': filters,
         'source_switch_for_turn': sourceSwitchForTurn,
         'exclude_file_ids': excludeFileIds,
+        'notice_ids': noticeIds,
+        'source_hint': sourceHint,
         'dialect_intensity': dialectIntensity,
         'language_hint': languageHint,
         'generation_mode': generationMode,
@@ -2834,6 +2865,8 @@ class BackendApiService {
     Map<String, dynamic>? filters,
     bool? sourceSwitchForTurn,
     List<String>? excludeFileIds,
+    List<String>? noticeIds,
+    String? sourceHint,
     String? dialectIntensity,
     String? languageHint,
     String? generationMode,
@@ -2854,6 +2887,8 @@ class BackendApiService {
       filters: filters,
       sourceSwitchForTurn: sourceSwitchForTurn,
       excludeFileIds: excludeFileIds,
+      noticeIds: noticeIds,
+      sourceHint: sourceHint,
       dialectIntensity: dialectIntensity,
       languageHint: languageHint,
       generationMode: generationMode,
@@ -2974,6 +3009,8 @@ class BackendApiService {
     Map<String, dynamic>? filters,
     bool? sourceSwitchForTurn,
     List<String>? excludeFileIds,
+    List<String>? noticeIds,
+    String? sourceHint,
     String? dialectIntensity,
     String? languageHint,
     String? generationMode,
@@ -2998,6 +3035,8 @@ class BackendApiService {
         filters: filters,
         sourceSwitchForTurn: sourceSwitchForTurn,
         excludeFileIds: excludeFileIds,
+        noticeIds: noticeIds,
+        sourceHint: sourceHint,
         dialectIntensity: dialectIntensity,
         languageHint: languageHint,
         generationMode: generationMode,
@@ -3055,6 +3094,8 @@ class BackendApiService {
       'filters': filters,
       'source_switch_for_turn': sourceSwitchForTurn,
       'exclude_file_ids': excludeFileIds,
+      'notice_ids': noticeIds,
+      'source_hint': sourceHint,
       'dialect_intensity': dialectIntensity,
       'language_hint': languageHint,
       'generation_mode': generationMode,
@@ -3260,11 +3301,7 @@ class BackendApiService {
     return _requestJson(
       '/api/chat/join-room',
       method: 'POST',
-      body: {
-        'roomId': roomId,
-        'collegeId': collegeId,
-        'college_id': collegeId,
-      },
+      body: {'roomId': roomId, 'collegeId': collegeId, 'college_id': collegeId},
     );
   }
 

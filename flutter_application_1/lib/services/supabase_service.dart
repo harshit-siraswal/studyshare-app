@@ -30,11 +30,14 @@ class SupabaseService {
 
   static const int kUnlimitedDuration = -1;
   static const int kDefaultExpiryDays = 7;
+  static const Duration _currentUserProfileCacheTtl = Duration(minutes: 2);
   static const Duration _resourcesCacheTtl = Duration(seconds: 20);
   static const Duration _filterValuesCacheTtl = Duration(minutes: 5);
   static const Duration _noticeDepartmentsCacheTtl = Duration(minutes: 10);
+  static const Duration _userInfoCacheTtl = Duration(minutes: 5);
   static const int _maxResourceListCacheEntries = 24;
   static const int _maxFilterValuesCacheEntries = 24;
+  static const int _maxUserInfoCacheEntries = 256;
   static final ValueNotifier<int> aiTokenRefreshNotifier = ValueNotifier<int>(
     0,
   );
@@ -60,6 +63,10 @@ class SupabaseService {
       <String, Future<List<Resource>>>{};
   static final Map<String, ({DateTime cachedAt, List<String> data})>
   _uniqueValuesCache = <String, ({DateTime cachedAt, List<String> data})>{};
+  static final Map<String, ({DateTime cachedAt, Map<String, dynamic> data})>
+  _userInfoCache = <String, ({DateTime cachedAt, Map<String, dynamic> data})>{};
+  static final Map<String, Future<Map<String, dynamic>?>> _userInfoInFlight =
+      <String, Future<Map<String, dynamic>?>>{};
   static final Map<String, bool> _bookmarkStateCache = <String, bool>{};
   static final Map<String, Future<bool>> _bookmarkStateInFlight =
       <String, Future<bool>>{};
@@ -212,7 +219,9 @@ class SupabaseService {
       // Try to extract name from JSON-encoded string
       final rawStr = _normalizeCollegeScopeValue(userCollegeRaw?.toString());
       final nameMatch = RegExp(r'"name"\s*:\s*"([^"]+)"').firstMatch(rawStr);
-      userCollegeName = nameMatch != null ? nameMatch.group(1)!.toLowerCase() : rawStr;
+      userCollegeName = nameMatch != null
+          ? nameMatch.group(1)!.toLowerCase()
+          : rawStr;
     }
     final userEmail = _normalizeEmail(user['email']?.toString());
 
@@ -231,7 +240,8 @@ class SupabaseService {
     }
 
     // ③ College name fuzzy match (used when scope is name-based)
-    if (normalizedCollege.isNotEmpty && userCollegeName.isNotEmpty &&
+    if (normalizedCollege.isNotEmpty &&
+        userCollegeName.isNotEmpty &&
         (userCollegeName == normalizedCollege ||
             userCollegeName.contains(normalizedCollege) ||
             normalizedCollege.contains(userCollegeName))) {
@@ -252,7 +262,10 @@ class SupabaseService {
   bool _hasFreshCurrentUserProfileCacheFor(String email) {
     if (email.isEmpty) return false;
     return _cachedCurrentUserProfile != null &&
-      _cachedCurrentUserProfileEmail == email;
+        _cachedCurrentUserProfileEmail == email &&
+        _cachedCurrentUserProfileAt != null &&
+        DateTime.now().difference(_cachedCurrentUserProfileAt!) <
+            _currentUserProfileCacheTtl;
   }
 
   void _cacheCurrentUserProfile(String email, Map<String, dynamic> profile) {
@@ -260,6 +273,13 @@ class SupabaseService {
     _cachedCurrentUserProfile = Map<String, dynamic>.from(profile);
     _cachedCurrentUserProfileEmail = email;
     _cachedCurrentUserProfileAt = DateTime.now();
+    _cacheUserInfo(
+      email,
+      _normalizeReadableUserRecord(<String, dynamic>{
+        ...profile,
+        'email': email,
+      }),
+    );
 
     final identity = _mapProfileToIdentity(profile);
     if (identity.isNotEmpty) {
@@ -276,10 +296,15 @@ class SupabaseService {
   }
 
   void invalidateCurrentUserProfileCache() {
+    final cachedEmail = _cachedCurrentUserProfileEmail;
     _cachedCurrentUserProfile = null;
     _cachedCurrentUserProfileEmail = null;
     _cachedCurrentUserProfileAt = null;
     _currentUserProfileFetchFuture = null;
+    if (cachedEmail != null && cachedEmail.isNotEmpty) {
+      _userInfoCache.remove(cachedEmail);
+      _userInfoInFlight.remove(cachedEmail);
+    }
   }
 
   void invalidateCurrentUserIdentityCache() {
@@ -293,6 +318,8 @@ class SupabaseService {
   void clearSessionCachesOnSignOut() {
     invalidateCurrentUserProfileCache();
     invalidateCurrentUserIdentityCache();
+    _userInfoCache.clear();
+    _userInfoInFlight.clear();
   }
 
   Map<String, dynamic>? get cachedCurrentUserIdentity {
@@ -323,7 +350,8 @@ class SupabaseService {
     }
 
     final role = identity['user_role']?.toString().trim() ?? '';
-    if (role.isEmpty && (identity['role']?.toString().trim().isNotEmpty ?? false)) {
+    if (role.isEmpty &&
+        (identity['role']?.toString().trim().isNotEmpty ?? false)) {
       identity['user_role'] = identity['role'];
     }
 
@@ -358,10 +386,14 @@ class SupabaseService {
           normalized['premium_until'] ?? normalized['subscription_end_date'],
       'college_name': normalized['college_name'] ?? normalized['college'],
       'college_domain': normalized['college_domain'],
-      'college_logo': normalized['college_logo'] ?? normalized['college_logo_url'],
-      'admin_role': normalized['admin_role'] ?? (hasElevatedRole ? resolvedRole : null),
-      'admin_department': normalized['admin_department'] ?? normalized['department'],
-      'admin_capabilities': normalized['admin_capabilities'] ?? const <String, dynamic>{},
+      'college_logo':
+          normalized['college_logo'] ?? normalized['college_logo_url'],
+      'admin_role':
+          normalized['admin_role'] ?? (hasElevatedRole ? resolvedRole : null),
+      'admin_department':
+          normalized['admin_department'] ?? normalized['department'],
+      'admin_capabilities':
+          normalized['admin_capabilities'] ?? const <String, dynamic>{},
     });
   }
 
@@ -549,6 +581,34 @@ class SupabaseService {
       );
       _uniqueValuesCache.remove(oldest.key);
     }
+  }
+
+  void _pruneUserInfoCacheIfNeeded() {
+    while (_userInfoCache.length > _maxUserInfoCacheEntries) {
+      final oldest = _userInfoCache.entries.reduce(
+        (a, b) => a.value.cachedAt.isBefore(b.value.cachedAt) ? a : b,
+      );
+      _userInfoCache.remove(oldest.key);
+    }
+  }
+
+  Map<String, dynamic>? _getCachedUserInfo(String email) {
+    final cached = _userInfoCache[email];
+    if (cached == null) return null;
+    if (DateTime.now().difference(cached.cachedAt) >= _userInfoCacheTtl) {
+      _userInfoCache.remove(email);
+      return null;
+    }
+    return Map<String, dynamic>.from(cached.data);
+  }
+
+  void _cacheUserInfo(String email, Map<String, dynamic> userInfo) {
+    if (email.isEmpty || userInfo.isEmpty) return;
+    _userInfoCache[email] = (
+      cachedAt: DateTime.now(),
+      data: Map<String, dynamic>.from(userInfo),
+    );
+    _pruneUserInfoCacheIfNeeded();
   }
 
   String _normalizeRoleValue(String? role) {
@@ -1037,7 +1097,9 @@ class SupabaseService {
       normalized['email'] = resolvedEmail;
     }
 
-    final existingUsername = _firstNonEmptyValue(normalized, const ['username']);
+    final existingUsername = _firstNonEmptyValue(normalized, const [
+      'username',
+    ]);
     if (existingUsername.isNotEmpty) {
       normalized['username'] = existingUsername;
     } else if (resolvedEmail.contains('@')) {
@@ -1076,35 +1138,39 @@ class SupabaseService {
         .toList();
     if (emails.isEmpty) return const {};
 
-    if (!_hasConfiguredSupabaseAnonKey) {
-      final usersByEmail = <String, Map<String, dynamic>>{};
-      final currentEmail = _currentSessionEmail();
-      for (final email in emails) {
-        try {
-          Map<String, dynamic> profile;
-          if (email == currentEmail) {
-            profile = await getCurrentUserProfile(maxAttempts: 1);
-          } else {
-            final payload = await _api.getPublicProfile(email: email);
-            final profilePayload = payload['profile'];
-            profile = profilePayload is Map
-                ? Map<String, dynamic>.from(profilePayload)
-                : Map<String, dynamic>.from(payload);
-          }
-          if (profile.isNotEmpty) {
-            usersByEmail[email] = _normalizeReadableUserRecord(
-              <String, dynamic>{...profile, 'email': email},
-            );
-          }
-        } catch (e) {
-          debugPrint('Backend user lookup failed for $email: $e');
-        }
+    final usersByEmail = <String, Map<String, dynamic>>{};
+    final missingEmails = <String>[];
+    for (final email in emails) {
+      final cached = _getCachedUserInfo(email);
+      if (cached != null) {
+        usersByEmail[email] = cached;
+      } else {
+        missingEmails.add(email);
       }
+    }
+
+    if (missingEmails.isEmpty) {
+      return usersByEmail;
+    }
+
+    if (!_hasConfiguredSupabaseAnonKey) {
+      await Future.wait(
+        missingEmails.map((email) async {
+          try {
+            final userInfo = await getUserInfo(email);
+            if (userInfo != null && userInfo.isNotEmpty) {
+              usersByEmail[email] = userInfo;
+            }
+          } catch (e) {
+            debugPrint('Backend user lookup failed for $email: $e');
+          }
+        }),
+      );
       return usersByEmail;
     }
 
     try {
-      final filters = emails
+      final filters = missingEmails
           .map(
             (email) =>
                 'email.ilike.${email.replaceAll('%', '\\%').replaceAll('_', '\\_')}',
@@ -1123,12 +1189,13 @@ class SupabaseService {
         );
         final email = _normalizeEmail(entry['email']?.toString());
         if (email.isEmpty) continue;
+        _cacheUserInfo(email, entry);
         map[email] = entry;
       }
-      return map;
+      return <String, Map<String, dynamic>>{...usersByEmail, ...map};
     } catch (e) {
       debugPrint('Error fetching users by emails: $e');
-      return const {};
+      return usersByEmail;
     }
   }
 
@@ -2161,49 +2228,77 @@ class SupabaseService {
     final normalizedEmail = _normalizeEmail(email);
     if (normalizedEmail.isEmpty) return null;
 
-    final currentEmail = _currentSessionEmail();
-    if (normalizedEmail == currentEmail) {
-      try {
-        final profile = await getCurrentUserProfile(maxAttempts: 1);
-        if (profile.isNotEmpty) {
-          return _normalizeReadableUserRecord(<String, dynamic>{
-            ...profile,
-            'email': normalizedEmail,
-          });
-        }
-      } catch (_) {}
+    final cached = _getCachedUserInfo(normalizedEmail);
+    if (cached != null) {
+      return cached;
     }
 
-    try {
-      final payload = await _api.getPublicProfile(email: normalizedEmail);
-      final profilePayload = payload['profile'];
-      final profile = profilePayload is Map
-          ? Map<String, dynamic>.from(profilePayload)
-          : Map<String, dynamic>.from(payload);
-      if (profile.isNotEmpty) {
-        return _normalizeReadableUserRecord(profile);
+    final inFlight = _userInfoInFlight[normalizedEmail];
+    if (inFlight != null) {
+      return inFlight;
+    }
+
+    final future = () async {
+      final currentEmail = _currentSessionEmail();
+      if (normalizedEmail == currentEmail) {
+        try {
+          final profile = await getCurrentUserProfile(maxAttempts: 1);
+          if (profile.isNotEmpty) {
+            final normalized = _normalizeReadableUserRecord(<String, dynamic>{
+              ...profile,
+              'email': normalizedEmail,
+            });
+            _cacheUserInfo(normalizedEmail, normalized);
+            return normalized;
+          }
+        } catch (_) {}
       }
-    } catch (e) {
-      debugPrint('Backend public profile lookup failed: $e');
-      if (!_hasConfiguredSupabaseAnonKey) {
+
+      try {
+        final payload = await _api.getPublicProfile(email: normalizedEmail);
+        final profilePayload = payload['profile'];
+        final profile = profilePayload is Map
+            ? Map<String, dynamic>.from(profilePayload)
+            : Map<String, dynamic>.from(payload);
+        if (profile.isNotEmpty) {
+          final normalized = _normalizeReadableUserRecord(profile);
+          _cacheUserInfo(normalizedEmail, normalized);
+          return normalized;
+        }
+      } catch (e) {
+        debugPrint('Backend public profile lookup failed: $e');
+        if (!_hasConfiguredSupabaseAnonKey) {
+          return null;
+        }
+      }
+
+      try {
+        final res = await _client
+            .from('users_safe')
+            .select(
+              'id, email, display_name, profile_photo_url, username, bio, semester, branch, subject, role, admin_capabilities, scope_all_colleges, admin_college_id',
+            )
+            .eq('email', normalizedEmail)
+            .maybeSingle();
+        if (res == null) {
+          return null;
+        }
+        final normalized = _normalizeReadableUserRecord(
+          Map<String, dynamic>.from(res),
+        );
+        _cacheUserInfo(normalizedEmail, normalized);
+        return normalized;
+      } catch (e) {
+        debugPrint('Error fetching user info: $e');
         return null;
       }
-    }
+    }();
 
+    _userInfoInFlight[normalizedEmail] = future;
     try {
-      final res = await _client
-          .from('users_safe')
-          .select(
-            'id, email, display_name, profile_photo_url, username, bio, semester, branch, subject, role, admin_capabilities, scope_all_colleges, admin_college_id',
-          )
-          .eq('email', normalizedEmail)
-          .maybeSingle();
-      return res == null
-          ? null
-          : _normalizeReadableUserRecord(Map<String, dynamic>.from(res));
-    } catch (e) {
-      debugPrint('Error fetching user info: $e');
-      return null;
+      return await future;
+    } finally {
+      _userInfoInFlight.remove(normalizedEmail);
     }
   }
 
@@ -2483,7 +2578,9 @@ class SupabaseService {
       final identity = await getCurrentUserIdentity();
       if (identity.isNotEmpty) {
         final identityRole =
-            (identity['user_role'] ?? identity['role'] ?? identity['admin_role'])
+            (identity['user_role'] ??
+                    identity['role'] ??
+                    identity['admin_role'])
                 ?.toString()
                 .trim();
         if (identityRole != null && identityRole.isNotEmpty) {
@@ -2883,8 +2980,7 @@ class SupabaseService {
       // Backend already scopes by college — trust its result.
       // A second client-side filter caused false negatives when API responses
       // didn't carry college_id in the exact shape _matchesCollegeScope needs.
-      final normalizedUsers =
-          users.map(_normalizeReadableUserRecord).toList();
+      final normalizedUsers = users.map(_normalizeReadableUserRecord).toList();
       if (normalizedUsers.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
         return normalizedUsers;
       }
@@ -2902,8 +2998,7 @@ class SupabaseService {
       final List<Map<String, dynamic>> allRows = [];
       final allEmails = <String>{};
 
-      Future<void> runAndMerge(
-          Future<List<dynamic>> Function() queryFn) async {
+      Future<void> runAndMerge(Future<List<dynamic>> Function() queryFn) async {
         try {
           final rows = await queryFn();
           for (final r in rows) {
@@ -2975,11 +3070,13 @@ class SupabaseService {
       }
 
       return allRows
-          .where((user) => _matchesCollegeScope(
-                user,
-                collegeId: effectiveCollegeId,
-                college: effectiveCollege,
-              ))
+          .where(
+            (user) => _matchesCollegeScope(
+              user,
+              collegeId: effectiveCollegeId,
+              college: effectiveCollege,
+            ),
+          )
           .toList();
     } catch (e) {
       debugPrint('Error discovering users: $e');
@@ -3946,7 +4043,10 @@ class SupabaseService {
           .select('*, comment_count:room_post_comments(count)')
           .eq('room_id', roomId)
           .order(orderColumn, ascending: false)
-          .range(offset < 0 ? 0 : offset, (offset < 0 ? 0 : offset) + limit - 1);
+          .range(
+            offset < 0 ? 0 : offset,
+            (offset < 0 ? 0 : offset) + limit - 1,
+          );
       return normalizePosts(
         (response as List)
             .map((entry) => Map<String, dynamic>.from(entry as Map))
@@ -5741,7 +5841,10 @@ class SupabaseService {
   }) async {
     final normalizedDepartmentId = normalizeDepartmentCode(departmentId);
     if (normalizedDepartmentId.isEmpty) return false;
-    final followedIds = await getFollowedDepartmentIds(collegeId ?? '', userEmail);
+    final followedIds = await getFollowedDepartmentIds(
+      collegeId ?? '',
+      userEmail,
+    );
     return followedIds.contains(normalizedDepartmentId);
   }
 
@@ -5767,7 +5870,8 @@ class SupabaseService {
       if (backendCounts.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
         return Map<String, int>.fromEntries(
           normalizedDepartmentIds.map(
-            (id) => MapEntry(id, backendCounts[normalizeDepartmentCode(id)] ?? 0),
+            (id) =>
+                MapEntry(id, backendCounts[normalizeDepartmentCode(id)] ?? 0),
           ),
         );
       }
@@ -5789,14 +5893,17 @@ class SupabaseService {
     try {
       var uniqueQuery = _client
           .from('department_followers')
-          .select('department_id, user_id, follower_id, user_email, follower_email')
+          .select(
+            'department_id, user_id, follower_id, user_email, follower_email',
+          )
           .inFilter('department_id', normalizedDepartmentIds);
       if (normalizedCollegeId.isNotEmpty) {
         uniqueQuery = uniqueQuery.eq('college_id', normalizedCollegeId);
       }
       final uniqueResponse = await uniqueQuery;
       final uniqueFollowerKeysByDepartment = <String, Set<String>>{
-        for (final departmentId in normalizedDepartmentIds) departmentId: <String>{},
+        for (final departmentId in normalizedDepartmentIds)
+          departmentId: <String>{},
       };
       for (final row in (uniqueResponse as List).whereType<Map>()) {
         final map = Map<String, dynamic>.from(row);
@@ -5826,7 +5933,9 @@ class SupabaseService {
         try {
           final uniqueResponse = await _client
               .from('department_followers')
-              .select('department_id, user_id, follower_id, user_email, follower_email')
+              .select(
+                'department_id, user_id, follower_id, user_email, follower_email',
+              )
               .inFilter('department_id', normalizedDepartmentIds);
           final uniqueFollowerKeysByDepartment = <String, Set<String>>{
             for (final departmentId in normalizedDepartmentIds)
@@ -5877,10 +5986,9 @@ class SupabaseService {
   ) async {
     final normalizedDepartmentId = normalizeDepartmentCode(departmentId);
     if (normalizedDepartmentId.isEmpty) return 0;
-    final counts = await getDepartmentFollowerCounts(
-      <String>[normalizedDepartmentId],
-      collegeId,
-    );
+    final counts = await getDepartmentFollowerCounts(<String>[
+      normalizedDepartmentId,
+    ], collegeId);
     return counts[normalizedDepartmentId] ?? 0;
   }
 
@@ -5945,7 +6053,9 @@ class SupabaseService {
       final value = attempt['value'] as String;
       final useCollegeFilter = attempt['useCollegeFilter'] == true;
       try {
-        var query = _client.from('department_followers').select('department_id');
+        var query = _client
+            .from('department_followers')
+            .select('department_id');
         query = column.contains('email')
             ? query.ilike(column, value)
             : query.eq(column, value);
@@ -5954,8 +6064,8 @@ class SupabaseService {
         }
         final response = await query;
         final fetchedIds = (response as List)
-          .map((e) => normalizeDepartmentCode(e['department_id']?.toString()))
-          .where((id) => id.isNotEmpty)
+            .map((e) => normalizeDepartmentCode(e['department_id']?.toString()))
+            .where((id) => id.isNotEmpty)
             .toList();
         finalSet.addAll(fetchedIds);
         if (fetchedIds.isNotEmpty) {
@@ -6545,16 +6655,30 @@ class SupabaseService {
 
   // ============ NOTICES ============
 
-  Future<Map<String, dynamic>?> getNotice(String id) async {
+  Future<Map<String, dynamic>?> getNotice(
+    String id, {
+    String? collegeId,
+  }) async {
+    final normalizedId = id.trim();
+    if (normalizedId.isEmpty) return null;
+
     try {
       final response = await _client
           .from('notices')
           .select()
-          .eq('id', id)
+          .eq('id', normalizedId)
           .maybeSingle();
-      return response;
+      if (response != null) {
+        return response;
+      }
     } catch (e) {
       debugPrint('Error fetching notice: $e');
+    }
+
+    try {
+      return await _api.getNoticeById(normalizedId, collegeId: collegeId);
+    } catch (e) {
+      debugPrint('Backend notice lookup failed: $e');
       return null;
     }
   }

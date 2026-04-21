@@ -3,8 +3,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:lottie/lottie.dart';
 import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
-import 'dart:typed_data';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import '../config/theme.dart';
 import '../models/resource.dart';
@@ -73,6 +73,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     'txt',
   ];
   static const int _maxUploadBytes = 50 * 1024 * 1024;
+  static const int _skipHashThresholdBytes = 8 * 1024 * 1024;
   static const int _premiumUnlockThreshold = 10;
   static final Map<String, String> branches = <String, String>{
     for (final option in branchOptions) option.shortLabel: option.value,
@@ -185,6 +186,86 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
 
   static String _sha256Sync(List<int> bytes) {
     return sha256.convert(bytes).toString();
+  }
+
+  bool _shouldSkipPreUploadHash(PlatformFile file) {
+    return !kIsWeb &&
+        (file.path?.trim().isNotEmpty ?? false) &&
+        file.size > _skipHashThresholdBytes;
+  }
+
+  void _updateTransferProgress(double fraction) {
+    if (!mounted) return;
+    final bounded = fraction.clamp(0.0, 1.0);
+    final nextProgress = 0.4 + (bounded * 0.3);
+    if ((_uploadProgress - nextProgress).abs() < 0.02 && bounded < 1.0) {
+      return;
+    }
+    setState(() => _uploadProgress = nextProgress);
+  }
+
+  Future<void> _uploadToPresignedUrl({
+    required PlatformFile file,
+    required String uploadUrl,
+    required String contentType,
+    List<int>? bytes,
+  }) async {
+    final uri = Uri.parse(uploadUrl);
+
+    if (bytes != null) {
+      final response = await http.put(
+        uri,
+        headers: {
+          'Content-Type': contentType,
+          'Cache-Control': 'max-age=31536000',
+          'Content-Length': bytes.length.toString(),
+        },
+        body: bytes,
+      );
+      _updateTransferProgress(1.0);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception('Upload failed: ${response.statusCode}');
+      }
+      return;
+    }
+
+    final filePath = file.path?.trim() ?? '';
+    if (filePath.isEmpty) {
+      throw Exception('File path is unavailable for upload.');
+    }
+
+    final request = http.StreamedRequest('PUT', uri);
+    request.headers['Content-Type'] = contentType;
+    request.headers['Cache-Control'] = 'max-age=31536000';
+    request.contentLength = file.size;
+
+    final source = File(filePath).openRead();
+    var uploadedBytes = 0;
+    var lastProgressUpdate = DateTime.fromMillisecondsSinceEpoch(0);
+
+    await request.sink.addStream(
+      source.map((chunk) {
+        uploadedBytes += chunk.length;
+        final now = DateTime.now();
+        final shouldRefresh =
+            uploadedBytes >= file.size ||
+            now.difference(lastProgressUpdate).inMilliseconds >= 80;
+        if (shouldRefresh && file.size > 0) {
+          lastProgressUpdate = now;
+          _updateTransferProgress(uploadedBytes / file.size);
+        }
+        return chunk;
+      }),
+    );
+    await request.sink.close();
+
+    final response = await request.send();
+    final responseBody = await response.stream.bytesToString();
+    _updateTransferProgress(1.0);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final suffix = responseBody.trim().isEmpty ? '' : ': $responseBody';
+      throw Exception('Upload failed: ${response.statusCode}$suffix');
+    }
   }
 
   void _setSubjectValue(String value) {
@@ -338,9 +419,10 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
         setState(() => _uploadProgress = 0.4);
         try {
           final file = _selectedFile!;
+          final shouldSkipHash = _shouldSkipPreUploadHash(file);
 
           List<int>? bytes;
-          if (kIsWeb) {
+          if (!shouldSkipHash && kIsWeb) {
             if (file.bytes != null) {
               bytes = file.bytes!;
             } else if (file.readStream != null) {
@@ -350,17 +432,19 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
               }
               bytes = buffer.takeBytes();
             }
-          } else if (file.path != null) {
+          } else if (!shouldSkipHash && file.path != null) {
             bytes = await File(file.path!).readAsBytes();
           }
 
-          if (bytes == null || bytes.isEmpty) {
+          if (!shouldSkipHash && (bytes == null || bytes.isEmpty)) {
             throw Exception(
               'File bytes are empty or could not be read. Please try again.',
             );
           }
 
-          fileSha256 = await _computeSha256Hex(bytes);
+          if (!shouldSkipHash && bytes != null) {
+            fileSha256 = await _computeSha256Hex(bytes);
+          }
 
           final uploadPlan = await backendApi.planResourceUpload(
             filename: file.name,
@@ -385,19 +469,12 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
               throw Exception('Failed to get upload URL');
             }
 
-            final response = await http.put(
-              Uri.parse(uploadUrl),
-              headers: {
-                'Content-Type': _getContentType(file.name),
-                'Cache-Control': 'max-age=31536000',
-                'Content-Length': bytes.length.toString(),
-              },
-              body: bytes,
+            await _uploadToPresignedUrl(
+              file: file,
+              uploadUrl: uploadUrl,
+              contentType: _getContentType(file.name),
+              bytes: bytes,
             );
-
-            if (response.statusCode < 200 || response.statusCode >= 300) {
-              throw Exception('Upload failed: ${response.statusCode}');
-            }
 
             filePath = publicUrl;
           }
