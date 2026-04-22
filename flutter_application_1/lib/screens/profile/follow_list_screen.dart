@@ -21,10 +21,11 @@ class FollowListScreen extends StatefulWidget {
   State<FollowListScreen> createState() => _FollowListScreenState();
 }
 
-class _FollowListScreenState extends State<FollowListScreen> with SingleTickerProviderStateMixin {
+class _FollowListScreenState extends State<FollowListScreen>
+    with SingleTickerProviderStateMixin {
   final BackendApiService _api = BackendApiService();
   late TabController _tabController;
-  
+
   List<dynamic> _followers = [];
   List<dynamic> _following = [];
   bool _isLoading = true;
@@ -54,16 +55,16 @@ class _FollowListScreenState extends State<FollowListScreen> with SingleTickerPr
       _isLoading = true;
       _errorMessage = null;
     });
-    
+
     try {
       final results = await Future.wait([
-        _api.getFollowers(),
-        _api.getFollowing(),
+        _api.getFollowers(email: widget.userEmail, limit: 100),
+        _api.getFollowing(email: widget.userEmail, limit: 100),
       ]);
-      
+
       final followersRes = results[0];
       final followingRes = results[1];
-      
+
       if (mounted) {
         setState(() {
           _followers = followersRes['followers'] ?? [];
@@ -89,8 +90,9 @@ class _FollowListScreenState extends State<FollowListScreen> with SingleTickerPr
     return Scaffold(
       backgroundColor: isDark ? Colors.black : AppTheme.lightBackground,
       appBar: AppBar(
-        title: Text(_auth.currentUserEmail == widget.userEmail ? 'My Network' : 'Network', 
-          style: GoogleFonts.outfit(fontWeight: FontWeight.bold)
+        title: Text(
+          _auth.currentUserEmail == widget.userEmail ? 'My Network' : 'Network',
+          style: GoogleFonts.outfit(fontWeight: FontWeight.bold),
         ),
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -108,26 +110,29 @@ class _FollowListScreenState extends State<FollowListScreen> with SingleTickerPr
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _errorMessage != null
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(_errorMessage!, style: const TextStyle(color: Colors.red)),
-                      const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: _fetchData,
-                        child: const Text('Retry'),
-                      ),
-                    ],
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    _errorMessage!,
+                    style: const TextStyle(color: Colors.red),
                   ),
-                )
-              : TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _buildList(_followers, 'No followers yet'),
-                    _buildList(_following, 'Not following anyone yet'),
-                  ],
-                ),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: _fetchData,
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            )
+          : TabBarView(
+              controller: _tabController,
+              children: [
+                _buildList(_followers, 'No followers yet'),
+                _buildList(_following, 'Not following anyone yet'),
+              ],
+            ),
     );
   }
 
@@ -144,7 +149,7 @@ class _FollowListScreenState extends State<FollowListScreen> with SingleTickerPr
         ),
       );
     }
-    
+
     return ListView.builder(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       itemCount: users.length,
@@ -153,7 +158,7 @@ class _FollowListScreenState extends State<FollowListScreen> with SingleTickerPr
         final email = user['email'] as String?;
         if (email == null) return const SizedBox.shrink();
         final photoUrl = user['profile_photo_url'] ?? user['photo_url'];
-        
+
         return ListTile(
           onTap: () {
             Navigator.push(

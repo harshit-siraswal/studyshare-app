@@ -109,6 +109,7 @@ class _StudyScreenState extends State<StudyScreen>
   String? _followingSelectedType;
   String _followingSelectedSort = 'Recent';
   List<String> _followingSubjects = [];
+  bool _hasLoadedUserProfile = false;
 
   void _invalidateFollowingFilterCache() {
     // Following filters are lightweight enough to compute on demand.
@@ -226,12 +227,17 @@ class _StudyScreenState extends State<StudyScreen>
     _departmentsFuture = DepartmentsProvider.getDepartments();
     _scrollController.addListener(_onScroll);
 
-    _loadUserProfile().whenComplete(() {
+    _ensureUserProfileLoaded().whenComplete(() {
       if (!mounted) return;
       _loadResources();
       _loadFollowingFeed();
       _loadUnreadNotificationCount();
     });
+  }
+
+  Future<void> _ensureUserProfileLoaded({bool forceRefresh = false}) async {
+    if (!forceRefresh && _hasLoadedUserProfile) return;
+    await _loadUserProfile(forceRefresh: forceRefresh);
   }
 
   Future<void> _loadUserProfile({bool forceRefresh = false}) async {
@@ -254,6 +260,7 @@ class _StudyScreenState extends State<StudyScreen>
           _canManageAdminResources = false;
           _canUploadSyllabus = false;
           _hasAttendanceFeature = collegeHasAttendance;
+          _hasLoadedUserProfile = true;
         });
         _notifySyllabusContextChanged();
         return;
@@ -290,6 +297,7 @@ class _StudyScreenState extends State<StudyScreen>
           _canManageAdminResources = canManageAdminResources;
           _canUploadSyllabus = canUploadSyllabus;
           _hasAttendanceFeature = hasAttendanceFeature;
+          _hasLoadedUserProfile = true;
         });
         _notifySyllabusContextChanged();
       }
@@ -303,6 +311,7 @@ class _StudyScreenState extends State<StudyScreen>
         _canManageAdminResources = false;
         _canUploadSyllabus = false;
         _hasAttendanceFeature = collegeHasAttendance;
+        _hasLoadedUserProfile = true;
       });
       _notifySyllabusContextChanged();
     }
@@ -384,55 +393,34 @@ class _StudyScreenState extends State<StudyScreen>
     }
 
     try {
-      await _loadUserProfile();
+      await _ensureUserProfileLoaded();
 
       if (_canManageAdminResources) {
         const requestPage = 1;
-        var selectedScope = (
+        final defaultScope = (
           semester: _resolvedFollowingSemesterFilter(),
           branch: _resolvedFollowingBranchFilter(),
           subject: _resolvedFollowingSubjectFilter(),
         );
-        List<Resource> resources = const <Resource>[];
-
-        if (_moderationRelevantOnly) {
-          final scopeCandidates = _buildModerationScopeCandidates();
-          selectedScope = scopeCandidates.first;
-
-          for (final scope in scopeCandidates) {
-            try {
-              final scopedResources = await _loadAdminResourcesForScope(
-                page: requestPage,
-                semester: scope.semester,
-                branch: scope.branch,
-                subject: scope.subject,
-              );
-              selectedScope = scope;
-              resources = scopedResources;
-              if (scopedResources.isNotEmpty) {
-                break;
-              }
-            } catch (scopeError) {
-              debugPrint(
-                'Skipping moderation scope after load failure '
-                '(${scope.semester}/${scope.branch}/${scope.subject}): '
-                '$scopeError',
-              );
-            }
-          }
-        } else {
-          try {
-            resources = await _loadAdminResourcesForScope(
-              page: requestPage,
-              semester: selectedScope.semester,
-              branch: selectedScope.branch,
-              subject: selectedScope.subject,
-            );
-          } catch (scopeError) {
-            debugPrint('Error loading moderation feed: $scopeError');
-            resources = const <Resource>[];
-          }
-        }
+        final moderationResponse = await _loadAdminResourcesPage(
+          page: requestPage,
+          semester: defaultScope.semester,
+          branch: defaultScope.branch,
+          subject: defaultScope.subject,
+          scopeCandidates: _moderationRelevantOnly
+              ? _buildModerationScopeCandidates()
+                    .map(
+                      (scope) => <String, String?>{
+                        'semester': scope.semester,
+                        'branch': scope.branch,
+                        'subject': scope.subject,
+                      },
+                    )
+                    .toList(growable: false)
+              : null,
+        );
+        final selectedScope = moderationResponse.selectedScope;
+        final resources = moderationResponse.resources;
 
         final activeEmail = _effectiveUserEmail;
         if (activeEmail.isNotEmpty && resources.isNotEmpty) {
@@ -655,6 +643,58 @@ class _StudyScreenState extends State<StudyScreen>
         .enrichResourceRowsWithUploaderProfiles(resourcesPayload);
 
     return enrichedPayload.map((json) => Resource.fromJson(json)).toList();
+  }
+
+  Future<
+    ({
+      List<Resource> resources,
+      ({String? semester, String? branch, String? subject}) selectedScope,
+    })
+  >
+  _loadAdminResourcesPage({
+    required int page,
+    String? semester,
+    String? branch,
+    String? subject,
+    List<Map<String, String?>>? scopeCandidates,
+  }) async {
+    final payload = await _apiService.listModerationResourcesPayload(
+      collegeId: widget.collegeId,
+      status: _moderationStatusFilter == 'all' ? null : _moderationStatusFilter,
+      semester: semester,
+      branch: branch,
+      subject: subject,
+      scopeCandidates: scopeCandidates,
+      page: page,
+      pageSize: _moderationPageSize,
+    );
+
+    final enrichedPayload = await _supabaseService
+        .enrichResourceRowsWithUploaderProfiles(
+          List<Map<String, dynamic>>.from(payload['resources'] ?? const []),
+        );
+
+    final selectedScopeRaw = payload['selectedScope'];
+    final selectedScopeMap = selectedScopeRaw is Map
+        ? Map<String, dynamic>.from(selectedScopeRaw)
+        : const <String, dynamic>{};
+
+    return (
+      resources: enrichedPayload
+          .map((json) => Resource.fromJson(json))
+          .toList(growable: false),
+      selectedScope: (
+        semester: _normalizeFilterValue(
+          selectedScopeMap['semester']?.toString() ?? semester,
+        ),
+        branch: _normalizeFilterValue(
+          selectedScopeMap['branch']?.toString() ?? branch,
+        ),
+        subject: _normalizeFilterValue(
+          selectedScopeMap['subject']?.toString() ?? subject,
+        ),
+      ),
+    );
   }
 
   String? _resolvedResourceSemesterFilter() {
@@ -1171,7 +1211,7 @@ class _StudyScreenState extends State<StudyScreen>
 
     try {
       if (relevantOnly) {
-        await _loadUserProfile();
+        await _ensureUserProfileLoaded();
         if (!mounted) return;
         await _loadResources(refresh: true);
         return;
@@ -2102,7 +2142,9 @@ class _StudyScreenState extends State<StudyScreen>
             style: GoogleFonts.inter(
               fontSize: 18,
               fontWeight: FontWeight.bold,
-              color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+              color: isDark
+                  ? AppTheme.darkTextPrimary
+                  : AppTheme.lightTextPrimary,
             ),
           ),
           const SizedBox(height: 8),

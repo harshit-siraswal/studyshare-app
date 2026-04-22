@@ -105,22 +105,15 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
       setState(() => _isLoading = true);
     }
     try {
-      final results = await Future.wait<Object?>([
-        _supabaseService.getChatRooms(widget.userEmail, widget.collegeId),
-        _supabaseService.getUserRoomIds(widget.userEmail),
-      ]);
-      final rooms = (results[0] as List).cast<Map<String, dynamic>>();
-      final joinedIds = results[1] as List;
-      final joinedIdSet = joinedIds
-          .map((id) => id.toString().trim())
+      final joinedRooms = await _supabaseService.getChatRooms(
+        widget.userEmail,
+        widget.collegeId,
+        filter: 'joined',
+      );
+      final joinedIdSet = joinedRooms
+          .map((room) => room['id']?.toString().trim() ?? '')
           .where((id) => id.isNotEmpty)
           .toSet();
-
-      // Filter to show only joined rooms
-      final joinedRooms = rooms.where((r) {
-        final roomId = r['id']?.toString().trim() ?? '';
-        return roomId.isNotEmpty && joinedIdSet.contains(roomId);
-      }).toList();
 
       if (mounted) {
         setState(() {

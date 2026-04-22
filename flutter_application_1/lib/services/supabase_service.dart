@@ -1869,7 +1869,29 @@ class SupabaseService {
         : _currentSessionEmail();
     if (activeUserEmail.isEmpty) return [];
 
-    // Primary path: backend endpoint already handles follow schema variants.
+    final page = ((offset ~/ limit) + 1).clamp(1, 100000);
+
+    // Primary path: aggregated backend endpoint already handles follow schema
+    // variants and uploader metadata in one pass.
+    try {
+      final feedPayload = await _api.getFollowingFeed(
+        collegeId: collegeId,
+        page: page,
+        limit: limit,
+      );
+      final rawResources = List<Map<String, dynamic>>.from(
+        feedPayload['resources'] ?? const [],
+      );
+      if (rawResources.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
+        return rawResources
+            .map((row) => Resource.fromJson(Map<String, dynamic>.from(row)))
+            .toList();
+      }
+    } catch (e) {
+      debugPrint('Error fetching aggregated following feed via backend: $e');
+    }
+
+    // Compatibility fallback for older backends.
     try {
       final followingPayload = await _api.getFollowing(email: activeUserEmail);
       final followingRows = List<Map<String, dynamic>>.from(
@@ -6196,8 +6218,9 @@ class SupabaseService {
   /// Get chat rooms for a college (with member count)
   Future<List<Map<String, dynamic>>> getChatRooms(
     String userEmail,
-    String collegeId,
-  ) async {
+    String collegeId, {
+    String? filter,
+  }) async {
     List<Map<String, dynamic>> filterActiveRooms(
       List<Map<String, dynamic>> rooms,
     ) {
@@ -6216,6 +6239,16 @@ class SupabaseService {
     }
 
     try {
+      if (filter != null && filter.trim().isNotEmpty) {
+        final backendRooms = await _api.listChatRooms(
+          collegeId: collegeId,
+          filter: filter.trim(),
+        );
+        return filterActiveRooms(
+          backendRooms.map((entry) => _normalizeChatRoomRecord(entry)).toList(),
+        );
+      }
+
       if (!_hasConfiguredSupabaseAnonKey) {
         debugPrint(
           'Supabase anon key missing; using backend room discovery directly.',

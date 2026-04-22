@@ -42,6 +42,8 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
   bool _isSaving = false;
   bool _canRemoveBg = false;
   bool _isWarmingUp = false;
+  String _removeBgUnavailableMessage =
+      'Background removal is currently unavailable.';
 
   static const List<Color> _textColors = [
     Colors.white,
@@ -216,6 +218,13 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
   }
 
   Future<void> _removeBackground() async {
+    if (!_canRemoveBg) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_removeBgUnavailableMessage)));
+      return;
+    }
     if (_isRemovingBg) return;
     setState(() => _isRemovingBg = true);
 
@@ -244,9 +253,14 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
     try {
       await _stickerService.warmUpCapabilities();
       final canRemoveBg = await _stickerService.canRemoveBackground();
+      final unavailableReason = await _stickerService
+          .removeBackgroundUnavailableReason();
       if (!mounted) return;
       setState(() {
         _canRemoveBg = canRemoveBg;
+        if (unavailableReason != null && unavailableReason.trim().isNotEmpty) {
+          _removeBgUnavailableMessage = unavailableReason;
+        }
         _isWarmingUp = false;
       });
     } catch (e, st) {
@@ -458,8 +472,7 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
                           image: FileImage(_workingFile),
                           fit: BoxFit.contain,
                           key: ValueKey(
-                            _workingFile.path +
-                                _workingFileModified.toString(),
+                            _workingFile.path + _workingFileModified.toString(),
                           ),
                         ),
                         for (final layer in _layers)
@@ -889,7 +902,7 @@ class _StickerEditorScreenState extends State<StickerEditorScreen> {
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: Text(
-                'Background removal is currently unavailable.',
+                _removeBgUnavailableMessage,
                 style: GoogleFonts.inter(
                   fontSize: 12,
                   color: textColor.withValues(alpha: 0.62),

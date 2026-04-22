@@ -149,6 +149,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   String? _pendingJobStage;
   String? _pendingJobStatusReason;
   int? _pendingJobProgress;
+  int? _pendingJobElapsedMs;
+  int? _pendingJobEstimatedTotalMs;
+  int? _pendingJobEstimatedRemainingMs;
   bool _pendingJobRestored = false;
 
   // Multi-PDF question paper selection
@@ -434,10 +437,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     }
   }
 
-  Future<void> _persistGeneratedOutput(
-    String type,
-    dynamic data,
-  ) async {
+  Future<void> _persistGeneratedOutput(String type, dynamic data) async {
     if (data == null) return;
     await widget.localStore.saveOutput(
       resourceId: widget.resourceId,
@@ -462,7 +462,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
 
     if (type == 'summary') {
       final data = response['data'];
-      final summaryText = data is String ? data.trim() : data?.toString().trim();
+      final summaryText = data is String
+          ? data.trim()
+          : data?.toString().trim();
       if (summaryText == null || summaryText.isEmpty) {
         throw Exception('Could not create a valid summary. Please try again.');
       }
@@ -582,6 +584,9 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         _pendingJobStage = null;
         _pendingJobStatusReason = null;
         _pendingJobProgress = null;
+        _pendingJobElapsedMs = null;
+        _pendingJobEstimatedTotalMs = null;
+        _pendingJobEstimatedRemainingMs = null;
         _pendingJobRestored = false;
       }
       if (clearLoadingState) {
@@ -612,11 +617,42 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
       _pendingJobStage = 'queued';
       _pendingJobStatusReason = 'queued_for_background_generation';
       _pendingJobProgress = 0;
+      _pendingJobElapsedMs = null;
+      _pendingJobEstimatedTotalMs = null;
+      _pendingJobEstimatedRemainingMs = null;
       _pendingJobRestored = restored;
       _isLoading = true;
       _loadingType = type;
       _error = null;
     });
+  }
+
+  int? _readJobDurationMs(
+    Map<String, dynamic> response,
+    String snakeKey,
+    String camelKey,
+  ) {
+    final raw = response[snakeKey] ?? response[camelKey];
+    if (raw is num) return raw.toInt();
+    return int.tryParse(raw?.toString() ?? '');
+  }
+
+  String? _etaLabel() {
+    final remainingMs = _pendingJobEstimatedRemainingMs;
+    if (remainingMs != null && remainingMs > 0) {
+      final seconds = math.max(1, (remainingMs / 1000).ceil());
+      return 'About ${seconds}s remaining';
+    }
+
+    final totalMs = _pendingJobEstimatedTotalMs;
+    if (totalMs != null && totalMs > 0) {
+      final totalSeconds = math.max(1, (totalMs / 1000).round());
+      final lower = math.max(1, totalSeconds - 3);
+      final upper = totalSeconds + 3;
+      return 'Usually $lower-${upper}s';
+    }
+
+    return null;
   }
 
   Future<bool> _pollPendingJob({bool force = false}) async {
@@ -633,14 +669,31 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
       final statusReason = response['status_reason']?.toString().trim();
       final progressRaw = response['progress'];
       final progress = progressRaw is num ? progressRaw.toInt() : null;
+      final elapsedMs = _readJobDurationMs(response, 'elapsed_ms', 'elapsedMs');
+      final estimatedTotalMs = _readJobDurationMs(
+        response,
+        'estimated_total_ms',
+        'estimatedTotalMs',
+      );
+      final estimatedRemainingMs = _readJobDurationMs(
+        response,
+        'estimated_remaining_ms',
+        'estimatedRemainingMs',
+      );
       if (mounted) {
         setState(() {
-          _pendingJobStage = stage?.isNotEmpty == true ? stage : _pendingJobStage;
-          _pendingJobStatusReason =
-              statusReason?.isNotEmpty == true
+          _pendingJobStage = stage?.isNotEmpty == true
+              ? stage
+              : _pendingJobStage;
+          _pendingJobStatusReason = statusReason?.isNotEmpty == true
               ? statusReason
               : _pendingJobStatusReason;
           _pendingJobProgress = progress ?? _pendingJobProgress;
+          _pendingJobElapsedMs = elapsedMs ?? _pendingJobElapsedMs;
+          _pendingJobEstimatedTotalMs =
+              estimatedTotalMs ?? _pendingJobEstimatedTotalMs;
+          _pendingJobEstimatedRemainingMs =
+              estimatedRemainingMs ?? _pendingJobEstimatedRemainingMs;
         });
       }
       if (status == 'completed') {
@@ -658,8 +711,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         return true;
       }
       if (status == 'failed' || status == 'blocked' || status == 'cancelled') {
-        final message =
-            response['error']?.toString().trim().isNotEmpty == true
+        final message = response['error']?.toString().trim().isNotEmpty == true
             ? response['error'].toString().trim()
             : 'AI generation failed. Please try again.';
         await _clearPendingJob(type: type);
@@ -675,6 +727,11 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
           _isLoading = true;
           _loadingType = type;
           _pendingJobProgress = progress ?? _pendingJobProgress;
+          _pendingJobElapsedMs = elapsedMs ?? _pendingJobElapsedMs;
+          _pendingJobEstimatedTotalMs =
+              estimatedTotalMs ?? _pendingJobEstimatedTotalMs;
+          _pendingJobEstimatedRemainingMs =
+              estimatedRemainingMs ?? _pendingJobEstimatedRemainingMs;
         });
       }
       return false;
@@ -1169,10 +1226,12 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     };
 
     final progress = _pendingJobProgress;
+    final etaLabel = _etaLabel();
     if (progress == null || progress <= 0 || progress >= 100) {
-      return stageMessage;
+      return etaLabel == null ? stageMessage : '$stageMessage • $etaLabel';
     }
-    return '$stageMessage ($progress%)';
+    final progressLabel = '$stageMessage ($progress%)';
+    return etaLabel == null ? progressLabel : '$progressLabel • $etaLabel';
   }
 
   int get _readyOutputCount {
@@ -1267,6 +1326,21 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         );
         if (mounted) {
           final progressRaw = response['progress'];
+          final elapsedMs = _readJobDurationMs(
+            response,
+            'elapsed_ms',
+            'elapsedMs',
+          );
+          final estimatedTotalMs = _readJobDurationMs(
+            response,
+            'estimated_total_ms',
+            'estimatedTotalMs',
+          );
+          final estimatedRemainingMs = _readJobDurationMs(
+            response,
+            'estimated_remaining_ms',
+            'estimatedRemainingMs',
+          );
           setState(() {
             _pendingJobStage =
                 response['stage']?.toString().trim().isNotEmpty == true
@@ -1276,8 +1350,14 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                 response['status_reason']?.toString().trim().isNotEmpty == true
                 ? response['status_reason'].toString().trim()
                 : _pendingJobStatusReason;
-            _pendingJobProgress =
-                progressRaw is num ? progressRaw.toInt() : _pendingJobProgress;
+            _pendingJobProgress = progressRaw is num
+                ? progressRaw.toInt()
+                : _pendingJobProgress;
+            _pendingJobElapsedMs = elapsedMs ?? _pendingJobElapsedMs;
+            _pendingJobEstimatedTotalMs =
+                estimatedTotalMs ?? _pendingJobEstimatedTotalMs;
+            _pendingJobEstimatedRemainingMs =
+                estimatedRemainingMs ?? _pendingJobEstimatedRemainingMs;
           });
         }
 
@@ -1673,19 +1753,12 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         ),
         child: Row(
           children: [
-            const Icon(
-              Icons.warning_rounded,
-              color: AppTheme.error,
-              size: 16,
-            ),
+            const Icon(Icons.warning_rounded, color: AppTheme.error, size: 16),
             const SizedBox(width: 6),
             Expanded(
               child: Text(
                 message,
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  color: AppTheme.error,
-                ),
+                style: GoogleFonts.inter(fontSize: 12, color: AppTheme.error),
               ),
             ),
             if (isTokenError) ...[
@@ -2588,9 +2661,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
                     color: isDark ? Colors.white70 : const Color(0xFF334155),
                   ),
                   bulletColor: AppTheme.primary,
-                  headingColor: isDark
-                      ? Colors.white
-                      : const Color(0xFF0F172A),
+                  headingColor: isDark ? Colors.white : const Color(0xFF0F172A),
                 );
             }
           },
@@ -3452,8 +3523,7 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
             ),
           ),
           _buildStudioHeader(isDark),
-          if (_error != null)
-            _buildGenerationErrorBanner(_error!),
+          if (_error != null) _buildGenerationErrorBanner(_error!),
           _buildControlsPanel(isDark),
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),

@@ -50,12 +50,19 @@ class _ExploreStudentsScreenState extends State<ExploreStudentsScreen> {
     setState(() => _isLoading = true);
     try {
       Map<String, dynamic> profile = const <String, dynamic>{};
-      try {
-        profile = await _supabaseService.getCurrentUserProfile(maxAttempts: 1);
-      } catch (e) {
-        debugPrint(
-          'Failed to resolve current profile for student discovery: $e',
-        );
+      final hasCollegeScopeFromWidget =
+          (widget.collegeId?.trim().isNotEmpty ?? false) ||
+          (widget.collegeName?.trim().isNotEmpty ?? false);
+      if (!hasCollegeScopeFromWidget) {
+        try {
+          profile = await _supabaseService.getCurrentUserProfile(
+            maxAttempts: 1,
+          );
+        } catch (e) {
+          debugPrint(
+            'Failed to resolve current profile for student discovery: $e',
+          );
+        }
       }
 
       final resolvedCollegeId = (widget.collegeId?.trim().isNotEmpty ?? false)

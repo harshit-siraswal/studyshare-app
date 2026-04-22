@@ -218,6 +218,33 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     ).showSnackBar(SnackBar(content: Text(message)));
   }
 
+  String _daywiseErrorMessage(Object error) {
+    if (error is! AttendanceSyncException) {
+      return error.toString().replaceFirst('Exception: ', '');
+    }
+
+    return switch (error.code) {
+      'session_expired' =>
+        'Your KIET session expired. Reconnect and sync attendance to load day-wise records.',
+      'invalid_payload' =>
+        'Day-wise attendance is temporarily unavailable because KIET returned an invalid subject payload.',
+      _ => error.message,
+    };
+  }
+
+  String _daywiseAttendanceLabel(AttendanceLecture lecture) {
+    final normalized = lecture.attendanceStatus.trim();
+    if (normalized.isNotEmpty) return normalized;
+    return 'Unknown';
+  }
+
+  Color _daywiseAttendanceColor(String status) {
+    final normalized = status.trim().toLowerCase();
+    if (normalized.contains('present')) return Colors.green;
+    if (normalized.contains('absent')) return Colors.redAccent;
+    return AppTheme.primary;
+  }
+
   Future<DateTime?> _loadSyncCooldownUntil() async {
     final prefs = await SharedPreferences.getInstance();
     final millis = prefs.getInt(_syncCooldownUntilKey);
@@ -433,7 +460,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                       child: lectures.isEmpty
                           ? Center(
                               child: Text(
-                                'No daywise attendance available yet.',
+                                'No day-wise attendance records were returned for this subject yet.',
                                 style: GoogleFonts.inter(
                                   color: isDark
                                       ? AppTheme.darkTextSecondary
@@ -460,17 +487,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                     style: GoogleFonts.inter(),
                                   ),
                                   trailing: Text(
-                                    lecture.attendanceStatus.isEmpty
-                                        ? 'N/A'
-                                        : lecture.attendanceStatus,
+                                    _daywiseAttendanceLabel(lecture),
                                     style: GoogleFonts.inter(
                                       fontWeight: FontWeight.w700,
-                                      color:
-                                          lecture.attendanceStatus
-                                              .toLowerCase()
-                                              .contains('present')
-                                          ? Colors.green
-                                          : Colors.redAccent,
+                                      color: _daywiseAttendanceColor(
+                                        _daywiseAttendanceLabel(lecture),
+                                      ),
                                     ),
                                   ),
                                 );
@@ -485,7 +507,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         },
       );
     } catch (error) {
-      _showSyncError(error);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_daywiseErrorMessage(error))));
     } finally {
       if (mounted) setState(() => _isLoadingDaywise = false);
     }
@@ -585,7 +610,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     return counts;
   }
 
-  Map<String, int> _scheduledClassCountByComponent(AttendanceSnapshot snapshot) {
+  Map<String, int> _scheduledClassCountByComponent(
+    AttendanceSnapshot snapshot,
+  ) {
     final counts = <String, int>{};
     for (final entry in _upcomingScheduleEntries(
       snapshot,
@@ -1076,147 +1103,139 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                 )
                               else
                                 ...groupedEntries.entries.map((group) {
-                                      final dayKey = group.key;
-                                      final dayEntries = group.value
-                                          .where(_isClassEntry)
-                                          .toList();
-                                      final expanded = expandedDays.contains(
-                                        dayKey,
-                                      );
-                                      return Padding(
-                                        padding: const EdgeInsets.only(
-                                          bottom: 12,
+                                  final dayKey = group.key;
+                                  final dayEntries = group.value
+                                      .where(_isClassEntry)
+                                      .toList();
+                                  final expanded = expandedDays.contains(
+                                    dayKey,
+                                  );
+                                  return Padding(
+                                    padding: const EdgeInsets.only(bottom: 12),
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: isDark
+                                            ? Colors.white.withValues(
+                                                alpha: 0.04,
+                                              )
+                                            : const Color(0xFFF8FAFC),
+                                        borderRadius: BorderRadius.circular(20),
+                                        border: Border.all(
+                                          color: isDark
+                                              ? Colors.white10
+                                              : Colors.black12,
                                         ),
-                                        child: Container(
-                                          decoration: BoxDecoration(
-                                            color: isDark
-                                                ? Colors.white.withValues(
-                                                    alpha: 0.04,
-                                                  )
-                                                : const Color(0xFFF8FAFC),
+                                      ),
+                                      child: Column(
+                                        children: [
+                                          InkWell(
                                             borderRadius: BorderRadius.circular(
                                               20,
                                             ),
-                                            border: Border.all(
-                                              color: isDark
-                                                  ? Colors.white10
-                                                  : Colors.black12,
+                                            onTap: () {
+                                              setModalState(() {
+                                                if (expanded) {
+                                                  expandedDays.remove(dayKey);
+                                                } else {
+                                                  expandedDays.add(dayKey);
+                                                }
+                                              });
+                                            },
+                                            child: Padding(
+                                              padding:
+                                                  const EdgeInsets.fromLTRB(
+                                                    16,
+                                                    14,
+                                                    16,
+                                                    14,
+                                                  ),
+                                              child: Row(
+                                                children: [
+                                                  Expanded(
+                                                    child: Column(
+                                                      crossAxisAlignment:
+                                                          CrossAxisAlignment
+                                                              .start,
+                                                      children: [
+                                                        Text(
+                                                          dayKey,
+                                                          style: GoogleFonts.inter(
+                                                            fontSize: 15,
+                                                            fontWeight:
+                                                                FontWeight.w700,
+                                                            color: isDark
+                                                                ? AppTheme
+                                                                      .darkTextPrimary
+                                                                : AppTheme
+                                                                      .lightTextPrimary,
+                                                          ),
+                                                        ),
+                                                        const SizedBox(
+                                                          height: 4,
+                                                        ),
+                                                        Text(
+                                                          '${dayEntries.length} class${dayEntries.length == 1 ? '' : 'es'} • ${dayEntries.first.start} - ${dayEntries.last.end}',
+                                                          style: GoogleFonts.inter(
+                                                            fontSize: 12.4,
+                                                            color: isDark
+                                                                ? AppTheme
+                                                                      .darkTextSecondary
+                                                                : AppTheme
+                                                                      .lightTextSecondary,
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                  Icon(
+                                                    expanded
+                                                        ? Icons
+                                                              .keyboard_arrow_up_rounded
+                                                        : Icons
+                                                              .keyboard_arrow_down_rounded,
+                                                    color: isDark
+                                                        ? AppTheme
+                                                              .darkTextSecondary
+                                                        : AppTheme
+                                                              .lightTextSecondary,
+                                                  ),
+                                                ],
+                                              ),
                                             ),
                                           ),
-                                          child: Column(
-                                            children: [
-                                              InkWell(
-                                                borderRadius:
-                                                    BorderRadius.circular(20),
-                                                onTap: () {
-                                                  setModalState(() {
-                                                    if (expanded) {
-                                                      expandedDays.remove(
-                                                        dayKey,
+                                          if (expanded)
+                                            Padding(
+                                              padding:
+                                                  const EdgeInsets.fromLTRB(
+                                                    12,
+                                                    0,
+                                                    12,
+                                                    12,
+                                                  ),
+                                              child: Column(
+                                                children: dayEntries
+                                                    .map((entry) {
+                                                      return Padding(
+                                                        padding:
+                                                            const EdgeInsets.only(
+                                                              bottom: 10,
+                                                            ),
+                                                        child:
+                                                            _buildScheduleEntryCard(
+                                                              entry,
+                                                              isDark,
+                                                              showDate: false,
+                                                            ),
                                                       );
-                                                    } else {
-                                                      expandedDays.add(dayKey);
-                                                    }
-                                                  });
-                                                },
-                                                child: Padding(
-                                                  padding:
-                                                      const EdgeInsets.fromLTRB(
-                                                        16,
-                                                        14,
-                                                        16,
-                                                        14,
-                                                      ),
-                                                  child: Row(
-                                                    children: [
-                                                      Expanded(
-                                                        child: Column(
-                                                          crossAxisAlignment:
-                                                              CrossAxisAlignment
-                                                                  .start,
-                                                          children: [
-                                                            Text(
-                                                              dayKey,
-                                                              style: GoogleFonts.inter(
-                                                                fontSize: 15,
-                                                                fontWeight:
-                                                                    FontWeight
-                                                                        .w700,
-                                                                color: isDark
-                                                                    ? AppTheme
-                                                                          .darkTextPrimary
-                                                                    : AppTheme
-                                                                          .lightTextPrimary,
-                                                              ),
-                                                            ),
-                                                            const SizedBox(
-                                                              height: 4,
-                                                            ),
-                                                            Text(
-                                                              '${dayEntries.length} class${dayEntries.length == 1 ? '' : 'es'} • ${dayEntries.first.start} - ${dayEntries.last.end}',
-                                                              style: GoogleFonts.inter(
-                                                                fontSize: 12.4,
-                                                                color: isDark
-                                                                    ? AppTheme
-                                                                          .darkTextSecondary
-                                                                    : AppTheme
-                                                                          .lightTextSecondary,
-                                                              ),
-                                                            ),
-                                                          ],
-                                                        ),
-                                                      ),
-                                                      Icon(
-                                                        expanded
-                                                            ? Icons
-                                                                  .keyboard_arrow_up_rounded
-                                                            : Icons
-                                                                  .keyboard_arrow_down_rounded,
-                                                        color: isDark
-                                                            ? AppTheme
-                                                                  .darkTextSecondary
-                                                            : AppTheme
-                                                                  .lightTextSecondary,
-                                                      ),
-                                                    ],
-                                                  ),
-                                                ),
+                                                    })
+                                                    .toList(growable: false),
                                               ),
-                                              if (expanded)
-                                                Padding(
-                                                  padding:
-                                                      const EdgeInsets.fromLTRB(
-                                                        12,
-                                                        0,
-                                                        12,
-                                                        12,
-                                                      ),
-                                                  child: Column(
-                                                    children: dayEntries
-                                                        .map((entry) {
-                                                          return Padding(
-                                                            padding:
-                                                                const EdgeInsets.only(
-                                                                  bottom: 10,
-                                                                ),
-                                                            child:
-                                                                _buildScheduleEntryCard(
-                                                                  entry,
-                                                                  isDark,
-                                                                  showDate: false,
-                                                                ),
-                                                          );
-                                                        })
-                                                        .toList(
-                                                          growable: false,
-                                                        ),
-                                                  ),
-                                                ),
-                                            ],
-                                          ),
-                                        ),
-                                      );
-                                    }),
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                }),
                             ],
                           ),
                         ),
@@ -1809,208 +1828,71 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               constraints: const BoxConstraints(maxHeight: 420),
               child: SingleChildScrollView(
                 child: Column(
-                  children: groupedEntries.entries.map((group) {
-            final dayEntries = group.value.where(_isClassEntry).toList();
-            if (dayEntries.isEmpty) {
-              return const SizedBox.shrink();
-            }
-            final dayKey = group.key;
-            final expanded = _expandedProjectionDays.contains(dayKey);
-            final selectedForDay = dayEntries
-                .where(
-                  (entry) => _projectedMissedEntries.contains(
-                    _scheduleEntryIdentity(entry),
-                  ),
-                )
-                .length;
-            final allSelected = selectedForDay == dayEntries.length;
+                  children: groupedEntries.entries
+                      .map((group) {
+                        final dayEntries = group.value
+                            .where(_isClassEntry)
+                            .toList();
+                        if (dayEntries.isEmpty) {
+                          return const SizedBox.shrink();
+                        }
+                        final dayKey = group.key;
+                        final expanded = _expandedProjectionDays.contains(
+                          dayKey,
+                        );
+                        final selectedForDay = dayEntries
+                            .where(
+                              (entry) => _projectedMissedEntries.contains(
+                                _scheduleEntryIdentity(entry),
+                              ),
+                            )
+                            .length;
+                        final allSelected = selectedForDay == dayEntries.length;
 
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Container(
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? Colors.white.withValues(alpha: 0.04)
-                      : const Color(0xFFF8FAFC),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: isDark ? Colors.white10 : Colors.black12,
-                  ),
-                ),
-                child: Column(
-                  children: [
-                    InkWell(
-                      borderRadius: BorderRadius.circular(20),
-                      onTap: () {
-                        setState(() {
-                          if (expanded) {
-                            _expandedProjectionDays.remove(dayKey);
-                          } else {
-                            _expandedProjectionDays.add(dayKey);
-                          }
-                        });
-                        onStateChanged?.call();
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    dayKey,
-                                    style: GoogleFonts.inter(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w700,
-                                      color: isDark
-                                          ? AppTheme.darkTextPrimary
-                                          : AppTheme.lightTextPrimary,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '${dayEntries.length} class${dayEntries.length == 1 ? '' : 'es'} • '
-                                    '${dayEntries.first.start} - ${dayEntries.last.end}',
-                                    style: GoogleFonts.inter(
-                                      fontSize: 12.4,
-                                      color: isDark
-                                          ? AppTheme.darkTextSecondary
-                                          : AppTheme.lightTextSecondary,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            if (selectedForDay > 0)
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 6,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: Colors.orange.withValues(alpha: 0.14),
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                                child: Text(
-                                  '$selectedForDay skipped',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 11.2,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.orange.shade700,
-                                  ),
-                                ),
-                              ),
-                            const SizedBox(width: 10),
-                            Icon(
-                              expanded
-                                  ? Icons.keyboard_arrow_up_rounded
-                                  : Icons.keyboard_arrow_down_rounded,
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: Container(
+                            decoration: BoxDecoration(
                               color: isDark
-                                  ? AppTheme.darkTextSecondary
-                                  : AppTheme.lightTextSecondary,
+                                  ? Colors.white.withValues(alpha: 0.04)
+                                  : const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(
+                                color: isDark ? Colors.white10 : Colors.black12,
+                              ),
                             ),
-                          ],
-                        ),
-                      ),
-                    ),
-                    if (expanded)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                        child: Column(
-                          children: [
-                            Row(
+                            child: Column(
                               children: [
-                                TextButton.icon(
-                                  onPressed: () {
-                                    _toggleProjectedDayEntries(
-                                      dayEntries,
-                                      shouldSelect: !allSelected,
-                                    );
-                                    onStateChanged?.call();
-                                  },
-                                  icon: Icon(
-                                    allSelected
-                                        ? Icons.check_box_rounded
-                                        : Icons.check_box_outline_blank_rounded,
-                                    size: 18,
-                                  ),
-                                  label: Text(
-                                    allSelected
-                                        ? 'Unmark day'
-                                        : 'Mark day as skipped',
-                                    style: GoogleFonts.inter(
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                            ...dayEntries.map((entry) {
-                              final identity = _scheduleEntryIdentity(entry);
-                              final isSelected = _projectedMissedEntries
-                                  .contains(identity);
-                              return Padding(
-                                padding: const EdgeInsets.only(bottom: 10),
-                                child: InkWell(
-                                  borderRadius: BorderRadius.circular(16),
+                                InkWell(
+                                  borderRadius: BorderRadius.circular(20),
                                   onTap: () {
-                                    _toggleProjectedMiss(entry);
+                                    setState(() {
+                                      if (expanded) {
+                                        _expandedProjectionDays.remove(dayKey);
+                                      } else {
+                                        _expandedProjectionDays.add(dayKey);
+                                      }
+                                    });
                                     onStateChanged?.call();
                                   },
-                                  child: Container(
-                                    padding: const EdgeInsets.all(14),
-                                    decoration: BoxDecoration(
-                                      color: isSelected
-                                          ? Colors.orange.withValues(
-                                              alpha: isDark ? 0.16 : 0.10,
-                                            )
-                                          : (isDark
-                                                ? Colors.white.withValues(
-                                                    alpha: 0.03,
-                                                  )
-                                                : Colors.white),
-                                      borderRadius: BorderRadius.circular(16),
-                                      border: Border.all(
-                                        color: isSelected
-                                            ? Colors.orange.withValues(
-                                                alpha: 0.3,
-                                              )
-                                            : (isDark
-                                                  ? Colors.white10
-                                                  : Colors.black12),
-                                      ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      16,
+                                      14,
+                                      16,
+                                      14,
                                     ),
                                     child: Row(
                                       children: [
-                                        Icon(
-                                          isSelected
-                                              ? Icons.check_circle_rounded
-                                              : Icons
-                                                    .radio_button_unchecked_rounded,
-                                          color: isSelected
-                                              ? Colors.orange.shade700
-                                              : (isDark
-                                                    ? AppTheme.darkTextSecondary
-                                                    : AppTheme
-                                                          .lightTextSecondary),
-                                        ),
-                                        const SizedBox(width: 12),
                                         Expanded(
                                           child: Column(
                                             crossAxisAlignment:
                                                 CrossAxisAlignment.start,
                                             children: [
                                               Text(
-                                                entry.courseName
-                                                        .trim()
-                                                        .isNotEmpty
-                                                    ? entry.courseName.trim()
-                                                    : entry.title.trim(),
+                                                dayKey,
                                                 style: GoogleFonts.inter(
-                                                  fontSize: 13.8,
+                                                  fontSize: 15,
                                                   fontWeight: FontWeight.w700,
                                                   color: isDark
                                                       ? AppTheme.darkTextPrimary
@@ -2020,10 +1902,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                               ),
                                               const SizedBox(height: 4),
                                               Text(
-                                                '${entry.start} - ${entry.end}'
-                                                '${entry.classRoom.trim().isEmpty ? '' : ' • Room ${entry.classRoom.trim()}'}',
+                                                '${dayEntries.length} class${dayEntries.length == 1 ? '' : 'es'} • '
+                                                '${dayEntries.first.start} - ${dayEntries.last.end}',
                                                 style: GoogleFonts.inter(
-                                                  fontSize: 12.2,
+                                                  fontSize: 12.4,
                                                   color: isDark
                                                       ? AppTheme
                                                             .darkTextSecondary
@@ -2031,37 +1913,233 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                                             .lightTextSecondary,
                                                 ),
                                               ),
-                                              if (entry.courseComponentName
-                                                  .trim()
-                                                  .isNotEmpty) ...[
-                                                const SizedBox(height: 2),
-                                                Text(
-                                                  entry.courseComponentName
-                                                      .trim(),
-                                                  style: GoogleFonts.inter(
-                                                    fontSize: 11.8,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: AppTheme.primary,
-                                                  ),
-                                                ),
-                                              ],
                                             ],
                                           ),
+                                        ),
+                                        if (selectedForDay > 0)
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 10,
+                                              vertical: 6,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.orange.withValues(
+                                                alpha: 0.14,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(999),
+                                            ),
+                                            child: Text(
+                                              '$selectedForDay skipped',
+                                              style: GoogleFonts.inter(
+                                                fontSize: 11.2,
+                                                fontWeight: FontWeight.w700,
+                                                color: Colors.orange.shade700,
+                                              ),
+                                            ),
+                                          ),
+                                        const SizedBox(width: 10),
+                                        Icon(
+                                          expanded
+                                              ? Icons.keyboard_arrow_up_rounded
+                                              : Icons
+                                                    .keyboard_arrow_down_rounded,
+                                          color: isDark
+                                              ? AppTheme.darkTextSecondary
+                                              : AppTheme.lightTextSecondary,
                                         ),
                                       ],
                                     ),
                                   ),
                                 ),
-                              );
-                            }),
-                          ],
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            );
-                  }).toList(growable: false),
+                                if (expanded)
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                      16,
+                                      0,
+                                      16,
+                                      16,
+                                    ),
+                                    child: Column(
+                                      children: [
+                                        Row(
+                                          children: [
+                                            TextButton.icon(
+                                              onPressed: () {
+                                                _toggleProjectedDayEntries(
+                                                  dayEntries,
+                                                  shouldSelect: !allSelected,
+                                                );
+                                                onStateChanged?.call();
+                                              },
+                                              icon: Icon(
+                                                allSelected
+                                                    ? Icons.check_box_rounded
+                                                    : Icons
+                                                          .check_box_outline_blank_rounded,
+                                                size: 18,
+                                              ),
+                                              label: Text(
+                                                allSelected
+                                                    ? 'Unmark day'
+                                                    : 'Mark day as skipped',
+                                                style: GoogleFonts.inter(
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 4),
+                                        ...dayEntries.map((entry) {
+                                          final identity =
+                                              _scheduleEntryIdentity(entry);
+                                          final isSelected =
+                                              _projectedMissedEntries.contains(
+                                                identity,
+                                              );
+                                          return Padding(
+                                            padding: const EdgeInsets.only(
+                                              bottom: 10,
+                                            ),
+                                            child: InkWell(
+                                              borderRadius:
+                                                  BorderRadius.circular(16),
+                                              onTap: () {
+                                                _toggleProjectedMiss(entry);
+                                                onStateChanged?.call();
+                                              },
+                                              child: Container(
+                                                padding: const EdgeInsets.all(
+                                                  14,
+                                                ),
+                                                decoration: BoxDecoration(
+                                                  color: isSelected
+                                                      ? Colors.orange
+                                                            .withValues(
+                                                              alpha: isDark
+                                                                  ? 0.16
+                                                                  : 0.10,
+                                                            )
+                                                      : (isDark
+                                                            ? Colors.white
+                                                                  .withValues(
+                                                                    alpha: 0.03,
+                                                                  )
+                                                            : Colors.white),
+                                                  borderRadius:
+                                                      BorderRadius.circular(16),
+                                                  border: Border.all(
+                                                    color: isSelected
+                                                        ? Colors.orange
+                                                              .withValues(
+                                                                alpha: 0.3,
+                                                              )
+                                                        : (isDark
+                                                              ? Colors.white10
+                                                              : Colors.black12),
+                                                  ),
+                                                ),
+                                                child: Row(
+                                                  children: [
+                                                    Icon(
+                                                      isSelected
+                                                          ? Icons
+                                                                .check_circle_rounded
+                                                          : Icons
+                                                                .radio_button_unchecked_rounded,
+                                                      color: isSelected
+                                                          ? Colors
+                                                                .orange
+                                                                .shade700
+                                                          : (isDark
+                                                                ? AppTheme
+                                                                      .darkTextSecondary
+                                                                : AppTheme
+                                                                      .lightTextSecondary),
+                                                    ),
+                                                    const SizedBox(width: 12),
+                                                    Expanded(
+                                                      child: Column(
+                                                        crossAxisAlignment:
+                                                            CrossAxisAlignment
+                                                                .start,
+                                                        children: [
+                                                          Text(
+                                                            entry.courseName
+                                                                    .trim()
+                                                                    .isNotEmpty
+                                                                ? entry
+                                                                      .courseName
+                                                                      .trim()
+                                                                : entry.title
+                                                                      .trim(),
+                                                            style: GoogleFonts.inter(
+                                                              fontSize: 13.8,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w700,
+                                                              color: isDark
+                                                                  ? AppTheme
+                                                                        .darkTextPrimary
+                                                                  : AppTheme
+                                                                        .lightTextPrimary,
+                                                            ),
+                                                          ),
+                                                          const SizedBox(
+                                                            height: 4,
+                                                          ),
+                                                          Text(
+                                                            '${entry.start} - ${entry.end}'
+                                                            '${entry.classRoom.trim().isEmpty ? '' : ' • Room ${entry.classRoom.trim()}'}',
+                                                            style: GoogleFonts.inter(
+                                                              fontSize: 12.2,
+                                                              color: isDark
+                                                                  ? AppTheme
+                                                                        .darkTextSecondary
+                                                                  : AppTheme
+                                                                        .lightTextSecondary,
+                                                            ),
+                                                          ),
+                                                          if (entry
+                                                              .courseComponentName
+                                                              .trim()
+                                                              .isNotEmpty) ...[
+                                                            const SizedBox(
+                                                              height: 2,
+                                                            ),
+                                                            Text(
+                                                              entry
+                                                                  .courseComponentName
+                                                                  .trim(),
+                                                              style: GoogleFonts.inter(
+                                                                fontSize: 11.8,
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w600,
+                                                                color: AppTheme
+                                                                    .primary,
+                                                              ),
+                                                            ),
+                                                          ],
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          );
+                                        }),
+                                      ],
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        );
+                      })
+                      .toList(growable: false),
                 ),
               ),
             ),

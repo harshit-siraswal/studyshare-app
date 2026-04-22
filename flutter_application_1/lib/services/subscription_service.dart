@@ -52,6 +52,42 @@ class SubscriptionService {
     _cachedPremiumStatusAt = DateTime.now();
   }
 
+  Future<bool?> peekCachedPremiumStatus() async {
+    final email = _firebaseAuth.currentUser?.email;
+    if (email == null) return null;
+    final normalizedEmail = email.trim().toLowerCase();
+    final prefs = await SharedPreferences.getInstance();
+    final cachedEmail =
+        prefs.getString('premium_email')?.trim().toLowerCase() ?? '';
+
+    if (cachedEmail.isNotEmpty && cachedEmail != normalizedEmail) {
+      return null;
+    }
+
+    if (_hasFreshPremiumCache(normalizedEmail) &&
+        _cachedPremiumStatus != null) {
+      return _cachedPremiumStatus!;
+    }
+
+    final localPremiumUntilStr = prefs.getString('premium_until');
+    if (_isFutureDate(localPremiumUntilStr)) {
+      _cachePremiumStatus(normalizedEmail, true);
+      return true;
+    }
+
+    if (_cachedPremiumEmail == normalizedEmail &&
+        _cachedPremiumStatus != null) {
+      return _cachedPremiumStatus!;
+    }
+
+    if (cachedEmail == normalizedEmail) {
+      _cachePremiumStatus(normalizedEmail, false);
+      return false;
+    }
+
+    return null;
+  }
+
   void dispose() {
     _razorpay.clear();
   }

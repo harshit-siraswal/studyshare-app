@@ -73,6 +73,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   bool _canUploadResources = false;
   bool _roleLoading = true;
   int _noticesRefreshToken = 0;
+  int _roomsRefreshToken = 0;
   StreamSubscription<IncomingSharePayload>? _shareSubscription;
   StreamSubscription<Uri?>? _homeWidgetSubscription;
   bool _isHandlingIncomingShare = false;
@@ -82,6 +83,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   List<Widget> _screens = <Widget>[];
   String _screensUserEmail = '';
   int _screensNoticesToken = -1;
+  int _screensRoomsToken = -1;
 
   String get _effectiveUserEmail {
     final authEmail = (_authService.userEmail ?? '').trim();
@@ -126,6 +128,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       _screens = <Widget>[];
       _screensUserEmail = '';
       _screensNoticesToken = -1;
+      _screensRoomsToken = -1;
     }
   }
 
@@ -198,12 +201,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     applyResolvedUserType(_supabaseService.cachedResolvedUserType);
 
     try {
-      final identity = await _supabaseService
-          .getCurrentUserIdentity()
-          .timeout(
-            const Duration(seconds: 4),
-            onTimeout: () => <String, dynamic>{},
-          );
+      final identity = await _supabaseService.getCurrentUserIdentity().timeout(
+        const Duration(seconds: 4),
+        onTimeout: () => <String, dynamic>{},
+      );
 
       if (identity.isNotEmpty) {
         applyResolvedUserType(resolveUserType(identity));
@@ -274,9 +275,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   Future<void> _showUpload({PlatformFile? prefilledFile}) async {
     if (!_canUploadResourcesNow) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text(_uploadReadOnlyMessage)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text(_uploadReadOnlyMessage)));
     }
     await showUploadDialog(
       context,
@@ -671,11 +672,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final email = _effectiveUserEmail;
     if (_screens.isNotEmpty &&
         _screensUserEmail == email &&
-        _screensNoticesToken == _noticesRefreshToken) {
+        _screensNoticesToken == _noticesRefreshToken &&
+        _screensRoomsToken == _roomsRefreshToken) {
       return;
     }
     _screensUserEmail = email;
     _screensNoticesToken = _noticesRefreshToken;
+    _screensRoomsToken = _roomsRefreshToken;
     _screens = <Widget>[
       StudyScreen(
         key: ValueKey<String>('study:$email'),
@@ -687,7 +690,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         onSyllabusContextChanged: _onStudySyllabusContextChanged,
       ),
       ChatroomListScreen(
-        key: ValueKey<String>('chat:$email'),
+        key: ValueKey<String>('chat:$email:$_roomsRefreshToken'),
         collegeId: widget.collegeId,
         collegeDomain: widget.collegeDomain,
         userEmail: email,
@@ -947,9 +950,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
     if (_currentIndex == 0 && !_isStudySyllabusTab && !_canUploadResourcesNow) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text(_uploadReadOnlyMessage)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text(_uploadReadOnlyMessage)));
     }
     if (_currentIndex == 0 && _isStudySyllabusTab) {
       if (!_canUploadSyllabusFromStudy) {
@@ -982,7 +985,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     }
 
     if (_currentIndex == 1) {
-      await Navigator.push(
+      final shouldRefreshRooms = await Navigator.push<bool>(
         context,
         MaterialPageRoute(
           builder: (_) => DiscoverRoomsScreen(
@@ -992,6 +995,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           ),
         ),
       );
+      if (shouldRefreshRooms == true && mounted) {
+        setState(() => _roomsRefreshToken++);
+      }
       return;
     }
 
@@ -1034,6 +1040,39 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     final left = (screenWidth - fabWidth) / 2;
     final bottom = bottomPadding + 26.0;
     final fabIcon = _getFabIcon();
+    final fabBody = Material(
+      color: Colors.transparent,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+        width: fabWidth,
+        height: fabHeight,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: gradientColors,
+          ),
+          boxShadow: <BoxShadow>[
+            BoxShadow(
+              color: shadowColor,
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Center(child: Icon(fabIcon, color: Colors.white, size: 28)),
+      ),
+    );
+    final fabChild = _currentIndex == 1
+        ? Hero(
+            tag: 'fab_main',
+            createRectTween: (begin, end) =>
+                MaterialRectCenterArcTween(begin: begin, end: end),
+            child: fabBody,
+          )
+        : fabBody;
 
     return Positioned(
       left: left,
@@ -1047,33 +1086,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               HapticFeedback.mediumImpact();
               await _handleFabTap();
             },
-            child: Material(
-              color: Colors.transparent,
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 260),
-                curve: Curves.easeOutCubic,
-                width: fabWidth,
-                height: fabHeight,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: gradientColors,
-                  ),
-                  boxShadow: <BoxShadow>[
-                    BoxShadow(
-                      color: shadowColor,
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Center(
-                  child: Icon(fabIcon, color: Colors.white, size: 28),
-                ),
-              ),
-            ),
+            child: fabChild,
           ),
         ),
       ),

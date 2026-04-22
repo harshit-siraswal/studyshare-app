@@ -843,7 +843,10 @@ class BackendApiService {
     );
   }
 
-  Future<List<Map<String, dynamic>>> listChatRooms({String? collegeId}) async {
+  Future<List<Map<String, dynamic>>> listChatRooms({
+    String? collegeId,
+    String? filter,
+  }) async {
     final normalizedCollegeId = collegeId?.trim() ?? '';
 
     Future<List<Map<String, dynamic>>> fetchWithQuery(
@@ -866,6 +869,10 @@ class BackendApiService {
     final primaryQuery = <String, String>{};
     if (normalizedCollegeId.isNotEmpty) {
       primaryQuery['collegeId'] = normalizedCollegeId;
+    }
+    final normalizedFilter = filter?.trim().toLowerCase();
+    if (normalizedFilter == 'joined' || normalizedFilter == 'discover') {
+      primaryQuery['filter'] = normalizedFilter!;
     }
 
     final primaryRooms = await fetchWithQuery(primaryQuery);
@@ -2271,13 +2278,14 @@ class BackendApiService {
         .toList();
   }
 
-  Future<List<Map<String, dynamic>>> listModerationResources({
+  Future<Map<String, dynamic>> listModerationResourcesPayload({
     String? bearerToken,
     String? collegeId,
     String? status,
     String? semester,
     String? branch,
     String? subject,
+    List<Map<String, String?>>? scopeCandidates,
     int page = 1,
     int pageSize = 100,
   }) async {
@@ -2292,11 +2300,12 @@ class BackendApiService {
       if (branch != null && branch.trim().isNotEmpty) 'branch': branch.trim(),
       if (subject != null && subject.trim().isNotEmpty)
         'subject': subject.trim(),
+      if (scopeCandidates != null && scopeCandidates.isNotEmpty)
+        'scopeCandidates': jsonEncode(scopeCandidates),
     };
 
-    Map<String, dynamic> data;
     try {
-      data = await _requestJson(
+      return await _requestJson(
         Uri(
           path: '/api/resources/moderation',
           queryParameters: queryParams,
@@ -2307,7 +2316,7 @@ class BackendApiService {
       );
     } on BackendApiHttpException catch (error) {
       if (!isBackendCompatibilityFallbackError(error)) rethrow;
-      return listAdminResources(
+      final resources = await listAdminResources(
         bearerToken: bearerToken,
         collegeId: collegeId,
         status: status,
@@ -2317,14 +2326,54 @@ class BackendApiService {
         page: page,
         pageSize: pageSize,
       );
+      return <String, dynamic>{'resources': resources};
     }
+  }
 
+  Future<List<Map<String, dynamic>>> listModerationResources({
+    String? bearerToken,
+    String? collegeId,
+    String? status,
+    String? semester,
+    String? branch,
+    String? subject,
+    List<Map<String, String?>>? scopeCandidates,
+    int page = 1,
+    int pageSize = 100,
+  }) async {
+    final data = await listModerationResourcesPayload(
+      bearerToken: bearerToken,
+      collegeId: collegeId,
+      status: status,
+      semester: semester,
+      branch: branch,
+      subject: subject,
+      scopeCandidates: scopeCandidates,
+      page: page,
+      pageSize: pageSize,
+    );
     final resourcesRaw = data['resources'];
     if (resourcesRaw is! List) return const [];
     return resourcesRaw
         .whereType<Map>()
         .map((row) => Map<String, dynamic>.from(row))
         .toList();
+  }
+
+  Future<Map<String, dynamic>> getFollowingFeed({
+    required String collegeId,
+    int page = 1,
+    int limit = 20,
+  }) async {
+    final uri = Uri(
+      path: '/api/resources/following-feed',
+      queryParameters: <String, String>{
+        'page': page.toString(),
+        'limit': limit.toString(),
+        if (collegeId.trim().isNotEmpty) 'collegeId': collegeId.trim(),
+      },
+    );
+    return _requestJson(uri.toString(), method: 'GET', requireAuthToken: true);
   }
 
   Future<Map<String, dynamic>> uploadSyllabusAsAdmin({
@@ -3424,25 +3473,41 @@ class BackendApiService {
     await _requestJson(path, method: 'DELETE', requireAuthToken: true);
   }
 
-  Future<Map<String, dynamic>> getFollowers({String? email}) async {
+  Future<Map<String, dynamic>> getFollowers({
+    String? email,
+    int? page,
+    int? limit,
+  }) async {
     final normalizedEmail = email?.trim();
-    final uri = normalizedEmail != null && normalizedEmail.isNotEmpty
-        ? Uri(
-            path: '/api/follow/followers',
-            queryParameters: <String, String>{'email': normalizedEmail},
-          )
-        : Uri(path: '/api/follow/followers');
+    final queryParameters = <String, String>{
+      if (normalizedEmail != null && normalizedEmail.isNotEmpty)
+        'email': normalizedEmail,
+      if (page != null && page > 0) 'page': page.toString(),
+      if (limit != null && limit > 0) 'limit': limit.toString(),
+    };
+    final uri = Uri(
+      path: '/api/follow/followers',
+      queryParameters: queryParameters.isEmpty ? null : queryParameters,
+    );
     return _requestJson(uri.toString(), method: 'GET');
   }
 
-  Future<Map<String, dynamic>> getFollowing({String? email}) async {
+  Future<Map<String, dynamic>> getFollowing({
+    String? email,
+    int? page,
+    int? limit,
+  }) async {
     final normalizedEmail = email?.trim();
-    final uri = normalizedEmail != null && normalizedEmail.isNotEmpty
-        ? Uri(
-            path: '/api/follow/following',
-            queryParameters: <String, String>{'email': normalizedEmail},
-          )
-        : Uri(path: '/api/follow/following');
+    final queryParameters = <String, String>{
+      if (normalizedEmail != null && normalizedEmail.isNotEmpty)
+        'email': normalizedEmail,
+      if (page != null && page > 0) 'page': page.toString(),
+      if (limit != null && limit > 0) 'limit': limit.toString(),
+    };
+    final uri = Uri(
+      path: '/api/follow/following',
+      queryParameters: queryParameters.isEmpty ? null : queryParameters,
+    );
     return _requestJson(uri.toString(), method: 'GET');
   }
 

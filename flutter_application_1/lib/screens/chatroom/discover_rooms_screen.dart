@@ -63,24 +63,11 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
 
   Future<void> _loadRooms() async {
     try {
-      final results = await Future.wait<Object?>([
-        _supabaseService.getChatRooms(widget.userEmail, widget.collegeId),
-        _supabaseService.getUserRoomIds(widget.userEmail),
-      ]);
-      final rooms = (results[0] as List).cast<Map<String, dynamic>>();
-      final joinedIds = (results[1] as List)
-          .map((id) => id.toString().trim())
-          .where((id) => id.isNotEmpty)
-          .toSet();
-
-      // Show only public rooms that the user hasn't joined yet
-      final publicRooms = rooms.where((r) {
-        final isPrivate = r['is_private'] == true;
-        final roomId = r['id'];
-        return !isPrivate &&
-            roomId != null &&
-            !joinedIds.contains(roomId.toString().trim());
-      }).toList();
+      final publicRooms = await _supabaseService.getChatRooms(
+        widget.userEmail,
+        widget.collegeId,
+        filter: 'discover',
+      );
 
       if (mounted) {
         setState(() {

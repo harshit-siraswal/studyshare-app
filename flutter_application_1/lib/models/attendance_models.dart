@@ -360,11 +360,15 @@ class AttendanceLecture {
   });
 
   factory AttendanceLecture.fromJson(Map<String, dynamic> json) {
+    final normalizedStatus =
+        json['attendanceStatus']?.toString().trim() ??
+        json['attendance']?.toString().trim() ??
+        '';
     return AttendanceLecture(
       lectureDate: json['planLecDate']?.toString() ?? '',
       dayName: json['dayName']?.toString() ?? '',
       timeSlot: json['timeSlot']?.toString() ?? '',
-      attendanceStatus: json['attendanceStatus']?.toString() ?? '',
+      attendanceStatus: normalizedStatus,
       facultyName: json['facultyName']?.toString() ?? '',
       courseName: json['courseName']?.toString() ?? '',
       courseComponentName: json['courseCompName']?.toString() ?? '',

@@ -101,6 +101,7 @@ class _StickerPickerState extends State<StickerPicker>
   final TextEditingController _stickerSearchController =
       TextEditingController();
   final TextEditingController _gifSearchController = TextEditingController();
+  final TextEditingController _memeSearchController = TextEditingController();
 
   List<File> _stickers = [];
   Set<String> _installedPackIds = {};
@@ -126,6 +127,7 @@ class _StickerPickerState extends State<StickerPicker>
   List<TenorGifItem> _tenorGifs = [];
   bool _memesLoading = false;
   String? _memeError;
+  String _memeQuery = '';
   String? _tenorNextPos;
   bool _tenorLoadingMore = false;
   final ScrollController _tenorScrollController = ScrollController();
@@ -150,6 +152,7 @@ class _StickerPickerState extends State<StickerPicker>
     _tabController.dispose();
     _stickerSearchController.dispose();
     _gifSearchController.dispose();
+    _memeSearchController.dispose();
     _gifScrollController.dispose();
     _tenorScrollController.dispose();
     _stickerSearchDebounce?.cancel();
@@ -246,6 +249,19 @@ class _StickerPickerState extends State<StickerPicker>
     }
 
     try {
+      final giphyUnavailableReason = await _stickerService
+          .giphyUnavailableReason();
+      if (giphyUnavailableReason != null) {
+        if (!mounted) return;
+        setState(() {
+          _gifError = giphyUnavailableReason;
+          _gifLoading = false;
+          _gifLoadingMore = false;
+          _gifHasMore = false;
+        });
+        return;
+      }
+
       final trimmedQuery = query?.trim();
       final key = AppConfig.giphyApiKey.trim();
       final items = key.isNotEmpty
@@ -272,10 +288,10 @@ class _StickerPickerState extends State<StickerPicker>
           _gifHasMore = false;
         }
       });
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
       setState(() {
-        _gifError = 'Failed to load GIFs';
+        _gifError = error.toString().replaceFirst('Exception: ', '');
         _gifLoading = false;
         _gifLoadingMore = false;
       });
@@ -374,12 +390,16 @@ class _StickerPickerState extends State<StickerPicker>
   }
 
   Future<(List<TenorGifItem>, String?)> _fetchTenorMemesPage({
+    String? query,
     int limit = 20,
     String? pos,
   }) async {
+    final normalizedQuery = Uri.encodeQueryComponent(
+      _effectiveMemeQuery(query),
+    );
     try {
       final queryParams = [
-        'q=meme',
+        'q=$normalizedQuery',
         'key=${AppConfig.tenorApiKey}',
         'limit=$limit',
         'media_filter=gif',
@@ -403,7 +423,7 @@ class _StickerPickerState extends State<StickerPicker>
     }
     try {
       final legacyUri = Uri.parse(
-        'https://g.tenor.com/v1/search?q=meme&key=LIVDSRZULELA&limit=$limit',
+        'https://g.tenor.com/v1/search?q=$normalizedQuery&key=LIVDSRZULELA&limit=$limit',
       );
       final res = await http
           .get(legacyUri)
@@ -433,8 +453,36 @@ class _StickerPickerState extends State<StickerPicker>
     }
   }
 
-  Future<void> _loadMemes() async {
+  String _effectiveMemeQuery([String? query]) {
+    final trimmed = (query ?? _memeQuery).trim();
+    return trimmed.isEmpty ? 'meme' : trimmed;
+  }
+
+  List<ImgflipTemplate> get _filteredImgflipTemplates {
+    final query = _memeQuery.trim().toLowerCase();
+    if (query.isEmpty) return _imgflipTemplates;
+    return _imgflipTemplates
+        .where((template) => template.name.toLowerCase().contains(query))
+        .toList();
+  }
+
+  Future<void> _submitMemeSearch() async {
+    final nextQuery = _memeSearchController.text.trim();
+    if (mounted) {
+      setState(() => _memeQuery = nextQuery);
+    } else {
+      _memeQuery = nextQuery;
+    }
+    if (_tenorScrollController.hasClients) {
+      _tenorScrollController.jumpTo(0);
+    }
+    await _loadMemes(query: nextQuery);
+  }
+
+  Future<void> _loadMemes({String? query}) async {
+    final activeQuery = query ?? _memeQuery;
     setState(() {
+      _memeQuery = activeQuery.trim();
       _memesLoading = true;
       _memeError = null;
     });
@@ -449,7 +497,10 @@ class _StickerPickerState extends State<StickerPicker>
           .map((e) => ImgflipTemplate.fromJson(e as Map<String, dynamic>))
           .toList();
 
-      final tenorPage = await _fetchTenorMemesPage(limit: 20);
+      final tenorPage = await _fetchTenorMemesPage(
+        query: activeQuery,
+        limit: 20,
+      );
 
       if (!mounted) return;
       setState(() {
@@ -471,7 +522,11 @@ class _StickerPickerState extends State<StickerPicker>
     if (_tenorLoadingMore || _tenorNextPos == null) return;
     setState(() => _tenorLoadingMore = true);
     try {
-      final page = await _fetchTenorMemesPage(limit: 20, pos: _tenorNextPos);
+      final page = await _fetchTenorMemesPage(
+        query: _memeQuery,
+        limit: 20,
+        pos: _tenorNextPos,
+      );
       if (!mounted) return;
       setState(() {
         _tenorGifs.addAll(page.$1);
@@ -874,16 +929,16 @@ class _StickerPickerState extends State<StickerPicker>
     return LayoutBuilder(
       builder: (context, constraints) {
         final segmentCount = labels.length;
-        final segmentWidth = (constraints.maxWidth - 6) / segmentCount;
+        final segmentWidth = (constraints.maxWidth - 4) / segmentCount;
 
         Widget childForValue(double value) {
           final clampedValue = value.clamp(0.0, (segmentCount - 1).toDouble());
           return Container(
             decoration: BoxDecoration(
               color: isDark ? Colors.white10 : Colors.black12,
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(18),
             ),
-            padding: const EdgeInsets.all(3),
+            padding: const EdgeInsets.all(2),
             child: Stack(
               children: [
                 Positioned(
@@ -894,7 +949,7 @@ class _StickerPickerState extends State<StickerPicker>
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       color: AppTheme.primary,
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(16),
                     ),
                   ),
                 ),
@@ -905,14 +960,14 @@ class _StickerPickerState extends State<StickerPicker>
                       child: Material(
                         color: Colors.transparent,
                         child: InkWell(
-                          borderRadius: BorderRadius.circular(20),
+                          borderRadius: BorderRadius.circular(16),
                           onTap: () => _tabController.animateTo(entry.key),
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            padding: const EdgeInsets.symmetric(vertical: 7),
                             child: AnimatedDefaultTextStyle(
                               duration: const Duration(milliseconds: 160),
                               style: TextStyle(
-                                fontSize: 13,
+                                fontSize: 12,
                                 fontWeight: FontWeight.w600,
                                 color: selected
                                     ? Colors.white
@@ -952,9 +1007,12 @@ class _StickerPickerState extends State<StickerPicker>
     required bool isDark,
     required String hint,
     required ValueChanged<String> onChanged,
+    ValueChanged<String>? onSubmitted,
+    VoidCallback? onSearchTap,
   }) {
     return TextField(
       controller: controller,
+      textInputAction: TextInputAction.search,
       style: TextStyle(
         color: isDark ? Colors.white : Colors.black87,
         fontSize: 14,
@@ -967,6 +1025,17 @@ class _StickerPickerState extends State<StickerPicker>
           size: 18,
           color: isDark ? Colors.white54 : Colors.black45,
         ),
+        suffixIcon: onSearchTap == null
+            ? null
+            : IconButton(
+                onPressed: onSearchTap,
+                icon: Icon(
+                  Icons.search_rounded,
+                  size: 18,
+                  color: isDark ? Colors.white70 : Colors.black54,
+                ),
+                tooltip: 'Search',
+              ),
         filled: true,
         fillColor: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
         border: OutlineInputBorder(
@@ -985,6 +1054,7 @@ class _StickerPickerState extends State<StickerPicker>
         isDense: true,
       ),
       onChanged: onChanged,
+      onSubmitted: onSubmitted,
     );
   }
 
@@ -1178,9 +1248,25 @@ class _StickerPickerState extends State<StickerPicker>
           },
           child: ClipRRect(
             borderRadius: BorderRadius.circular(12),
-            child: CachedNetworkImage(
-              imageUrl: item.fixedWidthUrl,
+            child: Image.network(
+              item.fixedWidthUrl,
               fit: BoxFit.cover,
+              gaplessPlayback: true,
+              filterQuality: FilterQuality.low,
+              loadingBuilder: (context, child, loadingProgress) {
+                if (loadingProgress == null) return child;
+                return ColoredBox(
+                  color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                  child: const Center(child: CircularProgressIndicator()),
+                );
+              },
+              errorBuilder: (context, error, stackTrace) => ColoredBox(
+                color: isDark ? const Color(0xFF1C1C1E) : Colors.white,
+                child: Icon(
+                  Icons.gif_box_outlined,
+                  color: isDark ? Colors.white54 : Colors.black38,
+                ),
+              ),
             ),
           ),
         );
@@ -1206,12 +1292,24 @@ class _StickerPickerState extends State<StickerPicker>
     return ListView(
       controller: _tenorScrollController,
       children: [
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: _buildSearchBar(
+            controller: _memeSearchController,
+            isDark: isDark,
+            hint: 'Search memes',
+            onChanged: (_) {},
+            onSubmitted: (_) => _submitMemeSearch(),
+            onSearchTap: _submitMemeSearch,
+          ),
+        ),
         const SizedBox(height: 10),
-        if (_imgflipTemplates.isNotEmpty) ...[
+        if (_filteredImgflipTemplates.isNotEmpty) ...[
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Text(
-              'Templates',
+              _memeQuery.trim().isEmpty ? 'Templates' : 'Matching Templates',
               style: GoogleFonts.inter(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
@@ -1225,10 +1323,10 @@ class _StickerPickerState extends State<StickerPicker>
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 12),
-              itemCount: _imgflipTemplates.length,
+              itemCount: _filteredImgflipTemplates.length,
               separatorBuilder: (context, index) => const SizedBox(width: 8),
               itemBuilder: (context, index) {
-                final template = _imgflipTemplates[index];
+                final template = _filteredImgflipTemplates[index];
                 return GestureDetector(
                   onTap: () => _openMemeEditor(template),
                   child: ClipRRect(
@@ -1250,7 +1348,9 @@ class _StickerPickerState extends State<StickerPicker>
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             child: Text(
-              'Trending Memes',
+              _memeQuery.trim().isEmpty
+                  ? 'Trending Memes'
+                  : 'Results for "${_memeQuery.trim()}"',
               style: GoogleFonts.inter(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
@@ -1303,6 +1403,19 @@ class _StickerPickerState extends State<StickerPicker>
               ),
             ),
           ),
+        if (_filteredImgflipTemplates.isEmpty && _tenorGifs.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 32),
+            child: Text(
+              _memeQuery.trim().isEmpty
+                  ? 'No memes available right now'
+                  : 'No memes found for "${_memeQuery.trim()}"',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.inter(
+                color: isDark ? Colors.white54 : Colors.black45,
+              ),
+            ),
+          ),
         const SizedBox(height: 20),
       ],
     );
@@ -1351,7 +1464,7 @@ class _StickerPickerState extends State<StickerPicker>
       ),
       child: Column(
         children: [
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Container(
             width: 44,
             height: 5,
@@ -1361,14 +1474,14 @@ class _StickerPickerState extends State<StickerPicker>
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 2),
             child: Row(
               children: [
                 Text(
                   'Stickers',
                   style: GoogleFonts.inter(
                     fontWeight: FontWeight.w700,
-                    fontSize: 18,
+                    fontSize: 17,
                     color: isDark ? Colors.white : Colors.black87,
                   ),
                 ),
@@ -1384,7 +1497,7 @@ class _StickerPickerState extends State<StickerPicker>
             ),
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 4),
             child: _buildSegmentedTabs(isDark),
           ),
           Expanded(

@@ -243,6 +243,24 @@ class StickerService {
     await _ensureCapabilities();
   }
 
+  Future<String?> giphyUnavailableReason() async {
+    await _ensureCapabilities();
+    if (_giphyKey.isNotEmpty || _giphyAvailable) return null;
+    if (!_hasSignedInUser) {
+      return 'GIF search is unavailable until you sign in again.';
+    }
+    return 'GIF search is unavailable right now. Configure GIPHY_API_KEY on the backend or in the app build.';
+  }
+
+  Future<String?> removeBackgroundUnavailableReason() async {
+    await _ensureCapabilities();
+    if (_removeBgKey.isNotEmpty || _removeBgAvailable) return null;
+    if (!_hasSignedInUser) {
+      return 'Background removal is unavailable until you sign in again.';
+    }
+    return 'Background removal is unavailable right now. Configure REMOVE_BG_API_KEY on the backend or in the app build.';
+  }
+
   bool get _hasSignedInUser {
     try {
       return firebase_auth.FirebaseAuth.instance.currentUser != null;

@@ -230,12 +230,37 @@ class AttendanceService {
       );
 
       final lecturesRaw = (response['lectures'] as List?) ?? const [];
+      if (response['success'] == true && response.containsKey('lectures')) {
+        for (final item in lecturesRaw) {
+          if (item is! Map) {
+            throw const AttendanceSyncException(
+              code: 'invalid_payload',
+              message:
+                  'Attendance data for this subject is malformed. Please try syncing again.',
+              retryable: false,
+            );
+          }
+        }
+      }
       return lecturesRaw
           .whereType<Map>()
-          .map(
-            (item) =>
-                AttendanceLecture.fromJson(Map<String, dynamic>.from(item)),
-          )
+          .map((item) {
+            final lecture = AttendanceLecture.fromJson(
+              Map<String, dynamic>.from(item),
+            );
+            if (lecture.lectureDate.trim().isEmpty &&
+                lecture.dayName.trim().isEmpty &&
+                lecture.timeSlot.trim().isEmpty &&
+                lecture.attendanceStatus.trim().isEmpty) {
+              throw const AttendanceSyncException(
+                code: 'invalid_payload',
+                message:
+                    'Attendance data for this subject is malformed. Please try syncing again.',
+                retryable: false,
+              );
+            }
+            return lecture;
+          })
           .toList();
     } on AttendanceSyncException {
       rethrow;
@@ -440,6 +465,15 @@ class AttendanceService {
           cause: error,
         );
       }
+      if (statusCode == 422 || message.toLowerCase().contains('invalid daywise')) {
+        return AttendanceSyncException(
+          code: 'invalid_payload',
+          message:
+              'Attendance data for this subject came back malformed. Try syncing again later.',
+          retryable: false,
+          cause: error,
+        );
+      }
       if (statusCode >= 500) {
         return AttendanceSyncException(
           code: 'backend_unavailable',
@@ -470,6 +504,17 @@ class AttendanceService {
         code: 'timeout',
         message: 'Attendance request timed out. Please try again.',
         retryable: true,
+        cause: error,
+      );
+    }
+    if (lowered.contains('invalid payload') ||
+        lowered.contains('malformed') ||
+        lowered.contains('invalid daywise')) {
+      return AttendanceSyncException(
+        code: 'invalid_payload',
+        message:
+            'Attendance data for this subject is malformed. Please try syncing again later.',
+        retryable: false,
         cause: error,
       );
     }

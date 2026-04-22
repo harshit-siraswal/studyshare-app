@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -83,20 +84,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSettings() async {
     try {
-      final (prefs, isPremium, packageInfo) = await (
+      final (prefs, packageInfo, cachedPremium) = await (
         SharedPreferences.getInstance()
             .then<SharedPreferences?>((v) => v)
             .catchError((e, st) {
               debugPrint('Error loading SharedPreferences: $e\n$st');
               return null;
             }),
-        _subscriptionService.isPremium().then<bool?>((v) => v).catchError((
-          e,
-          st,
-        ) {
-          debugPrint('Error loading premium status: $e\n$st');
-          return null;
-        }),
         PackageInfo.fromPlatform().then<PackageInfo?>((v) => v).catchError((
           e,
           st,
@@ -104,6 +98,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           debugPrint('Error loading package info: $e\n$st');
           return null;
         }),
+        _subscriptionService
+            .peekCachedPremiumStatus()
+            .then<bool?>((v) => v)
+            .catchError((e, st) {
+              debugPrint('Error loading cached premium status: $e\n$st');
+              return null;
+            }),
       ).wait;
 
       if (mounted) {
@@ -112,14 +113,29 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _notificationsEnabled =
                 prefs.getBool('notifications_enabled') ?? true;
           }
-          if (isPremium != null) _isPremium = isPremium;
+          if (cachedPremium != null) _isPremium = cachedPremium;
           if (packageInfo != null) _appVersion = packageInfo.version;
+          _isLoading = false;
         });
       }
+
+      unawaited(_refreshPremiumStatusInBackground());
     } finally {
-      if (mounted) {
+      if (mounted && _isLoading) {
         setState(() => _isLoading = false);
       }
+    }
+  }
+
+  Future<void> _refreshPremiumStatusInBackground() async {
+    try {
+      final isPremium = await _subscriptionService.isPremium();
+      if (!mounted) return;
+      setState(() {
+        _isPremium = isPremium;
+      });
+    } catch (e, st) {
+      debugPrint('Background premium refresh failed: $e\n$st');
     }
   }
 
@@ -357,11 +373,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  void _showLegalDialog(
-    String title,
-    String content, {
-    String? onlineUrl,
-  }) {
+  void _showLegalDialog(String title, String content, {String? onlineUrl}) {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
