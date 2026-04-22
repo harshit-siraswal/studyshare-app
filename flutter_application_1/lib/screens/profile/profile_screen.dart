@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../config/theme.dart';
 import '../../services/auth_service.dart';
@@ -502,9 +503,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       padding: EdgeInsets.fromLTRB(20, 12, 20, bottomPadding),
                       child: Column(
                         children: [
-                          _buildBadgeStickerRow(textColor, subTextColor, isDark),
+                          _buildBadgeStickerRow(
+                            textColor,
+                            subTextColor,
+                            isDark,
+                          ),
                           const SizedBox(height: 24),
-                          _buildAiTokenUsageCard(textColor, subTextColor, isDark),
+                          _buildAiTokenUsageCard(
+                            textColor,
+                            subTextColor,
+                            isDark,
+                          ),
                           const SizedBox(height: 24),
                           FutureBuilder<bool>(
                             future: _isPremiumFuture ??= _subscriptionService
@@ -517,7 +526,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               return isPremium
                                   ? const SizedBox.shrink()
                                   : Padding(
-                                      padding: const EdgeInsets.only(bottom: 24),
+                                      padding: const EdgeInsets.only(
+                                        bottom: 24,
+                                      ),
                                       child: _buildUpgradeCard(),
                                     );
                             },
@@ -574,9 +585,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFFFFD700).withValues(
-                              alpha: 0.5,
-                            ),
+                            color: const Color(
+                              0xFFFFD700,
+                            ).withValues(alpha: 0.5),
                             blurRadius: 20,
                             spreadRadius: 2,
                           ),
@@ -616,11 +627,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     child: ClipOval(
                       child: _photoUrl != null
-                          ? Image.network(
-                              _photoUrl!,
-                              cacheWidth: 320,
+                          ? CachedNetworkImage(
+                              imageUrl: _photoUrl!,
+                              memCacheWidth: 320,
                               fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) {
+                              errorWidget: (context, url, error) {
                                 return Center(
                                   child: Text(
                                     getInitials(_displayName),
@@ -770,7 +781,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             if ((_profileSemester != null && _profileSemester!.isNotEmpty) ||
                 (_profileBranch != null && _profileBranch!.isNotEmpty))
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 margin: const EdgeInsets.only(bottom: 8),
                 decoration: BoxDecoration(
                   color: AppTheme.primary.withValues(alpha: 0.1),
@@ -790,7 +804,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     const SizedBox(width: 6),
                     Text(
                       [
-                        if (_profileBranch != null && _profileBranch!.isNotEmpty)
+                        if (_profileBranch != null &&
+                            _profileBranch!.isNotEmpty)
                           _profileBranchLabel(),
                         if (_profileSemester != null &&
                             _profileSemester!.isNotEmpty)
@@ -899,8 +914,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildProfileSkeleton(bool isDark) {
-    final blockColor = isDark ? const Color(0xFF2A2A2E) : const Color(0xFFE8ECF3);
-    final lineColor = isDark ? const Color(0xFF3A3A40) : const Color(0xFFF3F6FC);
+    final blockColor = isDark
+        ? const Color(0xFF2A2A2E)
+        : const Color(0xFFE8ECF3);
+    final lineColor = isDark
+        ? const Color(0xFF3A3A40)
+        : const Color(0xFFF3F6FC);
 
     return ListView(
       physics: const NeverScrollableScrollPhysics(),
@@ -910,7 +929,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: Container(
             width: 92,
             height: 92,
-            decoration: BoxDecoration(color: blockColor, shape: BoxShape.circle),
+            decoration: BoxDecoration(
+              color: blockColor,
+              shape: BoxShape.circle,
+            ),
           ),
         ),
         const SizedBox(height: 18),
@@ -985,12 +1007,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildCollapsedAvatar(Color textColor) {
     if (_photoUrl != null && _photoUrl!.isNotEmpty) {
       return ClipOval(
-        child: Image.network(
-          _photoUrl!,
+        child: CachedNetworkImage(
+          imageUrl: _photoUrl!,
           width: 40,
           height: 40,
           fit: BoxFit.cover,
-          errorBuilder: (context, error, stackTrace) {
+          errorWidget: (context, url, error) {
             return Container(
               width: 40,
               height: 40,
@@ -1094,11 +1116,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     child: ClipOval(
                       child: _photoUrl != null
-                          ? Image.network(
-                              _photoUrl!,
-                              cacheWidth: 400,
+                          ? CachedNetworkImage(
+                              imageUrl: _photoUrl!,
+                              memCacheWidth: 400,
                               fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) {
+                              errorWidget: (context, url, error) {
                                 return Center(
                                   child: Text(
                                     getInitials(_displayName),
@@ -1493,8 +1515,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     Color subTextColor,
     VoidCallback onTap, {
     bool isLoading = false,
-  }
-  ) {
+  }) {
     return GestureDetector(
       onTap: onTap,
       child: Column(

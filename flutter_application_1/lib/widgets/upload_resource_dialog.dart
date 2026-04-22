@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:lottie/lottie.dart';
 import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
 import 'dart:io';
@@ -13,7 +12,6 @@ import '../services/auth_service.dart';
 import '../services/backend_api_service.dart';
 import 'package:http/http.dart' as http;
 import 'success_overlay.dart';
-import '../utils/contribution_badge.dart';
 import '../utils/youtube_link_utils.dart';
 import '../utils/admin_access.dart';
 import '../data/academic_subjects_data.dart';
@@ -74,7 +72,6 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
   ];
   static const int _maxUploadBytes = 50 * 1024 * 1024;
   static const int _skipHashThresholdBytes = 8 * 1024 * 1024;
-  static const int _premiumUnlockThreshold = 10;
   static final Map<String, String> branches = <String, String>{
     for (final option in branchOptions) option.shortLabel: option.value,
   };
@@ -365,7 +362,6 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     try {
       fetchedProfile = await SupabaseService().getCurrentUserProfile(
         maxAttempts: 1,
-        forceRefresh: true,
       );
       if (fetchedProfile.isNotEmpty &&
           resolveEffectiveProfileRole(fetchedProfile) == appRoleReadOnly &&
@@ -384,24 +380,8 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
         hasAdminCapability(fetchedProfile, 'upload_resource');
 
     try {
-      final supabaseService = SupabaseService();
       final authService = AuthService();
       final backendApi = BackendApiService();
-      int? previousContributionCount;
-      ContributionBadge? previousBadge;
-      try {
-        final previousStats = await supabaseService.getUserStats(
-          widget.userEmail,
-        );
-        final dynamic rawPreviousCount =
-            previousStats['contributions'] ?? previousStats['uploads'];
-        if (rawPreviousCount is int) {
-          previousContributionCount = rawPreviousCount;
-          previousBadge = ContributionBadgeCatalog.resolve(rawPreviousCount);
-        }
-      } catch (_) {
-        // Keep flow resilient if pre-fetch fails.
-      }
 
       // Progress: preparing
       setState(() => _uploadProgress = 0.2);
@@ -533,25 +513,6 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
         await backendApi.createResource(resourcePayload, context: context);
       }
 
-      int? contributionCount;
-      ContributionBadge? contributionBadge;
-      bool badgeUnlocked = false;
-      try {
-        final stats = await supabaseService.getUserStats(widget.userEmail);
-        final dynamic rawCount = stats['contributions'] ?? stats['uploads'];
-        if (rawCount is int) {
-          contributionCount = rawCount;
-          contributionBadge = ContributionBadgeCatalog.resolve(rawCount);
-          if (previousBadge != null &&
-              contributionBadge.id != previousBadge.id &&
-              contributionCount > (previousContributionCount ?? -1)) {
-            badgeUnlocked = true;
-          }
-        }
-      } catch (_) {
-        // Keep success flow resilient even if stats refresh fails.
-      }
-
       setState(() => _uploadProgress = 1.0);
       await Future.delayed(const Duration(milliseconds: 200));
 
@@ -563,58 +524,25 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
 
         // Show non-blocking success overlay
         late OverlayEntry overlayEntry;
-        OverlayEntry? confettiEntry;
         bool isRemoved = false;
-
-        bool isPremiumUnlock =
-            contributionCount == _premiumUnlockThreshold ||
-            (badgeUnlocked && contributionBadge?.id == 'pro');
-
-        if (isPremiumUnlock) {
-          confettiEntry = OverlayEntry(
-            builder: (context) => Positioned.fill(
-              child: IgnorePointer(
-                child: Lottie.asset(
-                  'assets/animations/premium_reward.json',
-                  fit: BoxFit.cover,
-                  repeat: false,
-                ),
-              ),
-            ),
-          );
-        }
 
         overlayEntry = OverlayEntry(
           builder: (context) => SuccessOverlay(
-            variant: badgeUnlocked
-                ? SuccessOverlayVariant.badgeUnlocked
-                : SuccessOverlayVariant.contribution,
-            title: badgeUnlocked ? 'Badge Unlocked' : 'Contribution Added',
-            message: badgeUnlocked
-                ? '${contributionBadge?.label ?? 'New'} badge unlocked with $contributionCount contribution${contributionCount == 1 ? '' : 's'}!'
-                : (contributionCount == null
-                      ? 'Resource submitted successfully!'
-                      : 'Resource submitted. You now have $contributionCount contribution${contributionCount == 1 ? '' : 's'}.'),
-            badgeLabel: contributionBadge == null
-                ? null
-                : '${contributionBadge.label} Badge',
-            autoDismissDelay: badgeUnlocked
-                ? const Duration(milliseconds: 4000)
-                : const Duration(milliseconds: 3000),
+            variant: SuccessOverlayVariant.contribution,
+            title: 'Contribution Added',
+            message: 'Resource submitted successfully!',
+            badgeLabel: null,
+            autoDismissDelay: const Duration(milliseconds: 3000),
             onDismiss: () {
               if (!isRemoved) {
                 isRemoved = true;
                 overlayEntry.remove();
-                confettiEntry?.remove();
                 onComplete?.call();
               }
             },
           ),
         );
 
-        if (confettiEntry != null) {
-          overlayState.insert(confettiEntry);
-        }
         overlayState.insert(overlayEntry);
       }
     } catch (e) {

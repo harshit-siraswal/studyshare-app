@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'dart:io';
@@ -201,14 +202,15 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
   Future<void> _loadData() async {
     try {
-      // Use backend-driven comments to match website schema (message_id instead of post_id)
-      final comments = await _supabaseService.getPostComments(
-        widget.post['id'].toString(),
-      );
-      final isSaved = await _supabaseService.isPostSaved(
-        widget.post['id'].toString(),
-        widget.userEmail,
-      );
+      final results = await Future.wait<Object?>([
+        _supabaseService.getPostComments(widget.post['id'].toString()),
+        _supabaseService.isPostSaved(
+          widget.post['id'].toString(),
+          widget.userEmail,
+        ),
+      ]);
+      final comments = (results[0] as List).cast<Map<String, dynamic>>();
+      final isSaved = results[1] as bool;
       _primePhotoCacheFromComments(comments);
 
       if (mounted) {
@@ -227,6 +229,116 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         ),
       );
       setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _refreshCommentsOnly() async {
+    try {
+      final comments = await _supabaseService.getPostComments(
+        widget.post['id'].toString(),
+      );
+      _primePhotoCacheFromComments(comments);
+      if (!mounted) return;
+      setState(() => _comments = comments);
+    } catch (e, stackTrace) {
+      debugPrint(
+        'PostDetailScreen._refreshCommentsOnly error: $e\n$stackTrace',
+      );
+    }
+  }
+
+  Map<String, dynamic> _buildOptimisticComment(
+    String content, {
+    String? parentId,
+  }) {
+    final authorEmail = widget.userEmail.trim();
+    final authorName = (_authService.displayName?.trim().isNotEmpty ?? false)
+        ? _authService.displayName!.trim()
+        : (authorEmail.contains('@') ? authorEmail.split('@').first : 'You');
+    final normalizedEmail = _normalizeEmail(authorEmail);
+    final cachedPhoto = _profilePhotoCache[normalizedEmail];
+    return <String, dynamic>{
+      'id': 'temp_${DateTime.now().microsecondsSinceEpoch}',
+      'content': content,
+      'author_name': authorName,
+      'author_email': authorEmail,
+      'author_photo_url': cachedPhoto,
+      'profile_photo_url': cachedPhoto,
+      'created_at': DateTime.now().toIso8601String(),
+      'parent_id': parentId,
+      'parentId': parentId,
+      'replies': <Map<String, dynamic>>[],
+    };
+  }
+
+  bool _insertReplyIntoTree(
+    List<Map<String, dynamic>> comments,
+    String parentId,
+    Map<String, dynamic> comment,
+  ) {
+    for (final entry in comments) {
+      final entryId = entry['id']?.toString();
+      if (entryId == parentId) {
+        final replies = _safeReplyList(entry['replies']);
+        replies.add(comment);
+        entry['replies'] = replies;
+        _expandedCommentIds.add(parentId);
+        return true;
+      }
+      if (_insertReplyIntoTree(
+        _safeReplyList(entry['replies']),
+        parentId,
+        comment,
+      )) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void _insertCommentLocally(Map<String, dynamic> comment) {
+    final nextComments = _comments
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .toList(growable: true);
+    final parentId =
+        comment['parent_id']?.toString() ?? comment['parentId']?.toString();
+    if (parentId == null || parentId.isEmpty) {
+      nextComments.add(comment);
+    } else if (!_insertReplyIntoTree(nextComments, parentId, comment)) {
+      nextComments.add(comment);
+    }
+    _primePhotoCacheFromComments([comment]);
+    setState(() => _comments = nextComments);
+  }
+
+  bool _removeCommentFromTree(
+    List<Map<String, dynamic>> comments,
+    String commentId,
+  ) {
+    final directIndex = comments.indexWhere(
+      (entry) => entry['id']?.toString() == commentId,
+    );
+    if (directIndex != -1) {
+      comments.removeAt(directIndex);
+      return true;
+    }
+
+    for (final entry in comments) {
+      final replies = _safeReplyList(entry['replies']);
+      if (_removeCommentFromTree(replies, commentId)) {
+        entry['replies'] = replies;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  void _removeCommentLocally(String commentId) {
+    final nextComments = _comments
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .toList(growable: true);
+    if (_removeCommentFromTree(nextComments, commentId)) {
+      setState(() => _comments = nextComments);
     }
   }
 
@@ -305,6 +417,20 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     }
 
     setState(() => _isSubmitting = true);
+    final replyTargetId = _replyToId;
+    final optimisticComment = _buildOptimisticComment(
+      content,
+      parentId: replyTargetId,
+    );
+    final optimisticCommentId = optimisticComment['id']?.toString() ?? '';
+
+    _commentController.clear();
+    setState(() {
+      _replyToId = null;
+      _replyToName = null;
+    });
+    _commentFocusNode.unfocus();
+    _insertCommentLocally(optimisticComment);
 
     try {
       await _supabaseService.addPostComment(
@@ -312,16 +438,13 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         content: content,
         userEmail: widget.userEmail,
         userName: _authService.displayName ?? widget.userEmail.split('@')[0],
-        parentId: _replyToId,
+        parentId: replyTargetId,
       );
-      _commentController.clear();
-      setState(() {
-        _replyToId = null;
-        _replyToName = null;
-      });
-      _commentFocusNode.unfocus();
-      await _loadData(); // Refresh comments
+      unawaited(_refreshCommentsOnly());
     } catch (e) {
+      if (optimisticCommentId.isNotEmpty) {
+        _removeCommentLocally(optimisticCommentId);
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -1331,7 +1454,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       itemCount: _comments.length,
-      separatorBuilder: (_, index) => const SizedBox(height: 12),
+      separatorBuilder: (_, index) => const SizedBox(height: 6),
       itemBuilder: (context, index) {
         return _buildCommentCard(_comments[index], isDark);
       },
@@ -1389,7 +1512,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         return false;
       },
       background: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
         padding: const EdgeInsets.symmetric(horizontal: 16),
         alignment: Alignment.centerLeft,
         decoration: BoxDecoration(
@@ -1421,7 +1544,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         },
         behavior: HitTestBehavior.opaque,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1662,7 +1785,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                           physics: const NeverScrollableScrollPhysics(),
                           itemCount: replies.length,
                           separatorBuilder: (_, index) =>
-                              const SizedBox(height: 12),
+                              const SizedBox(height: 6),
                           itemBuilder: (context, index) => _buildCommentCard(
                             replies[index],
                             isDark,
@@ -1830,6 +1953,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     // For stickers, we would upload to cloudinary or storage and get URL
     // For now, show a placeholder message
     setState(() => _isSubmitting = true);
+    String optimisticCommentId = '';
     try {
       final length = await stickerFile.length();
       if (length > kMaxStickerSizeBytes) {
@@ -1843,21 +1967,31 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       final filename = 'sticker_${DateTime.now().millisecondsSinceEpoch}$ext';
 
       final url = await CloudinaryService.uploadBytes(bytes, filename);
+      final replyTargetId = _replyToId;
+      final optimisticComment = _buildOptimisticComment(
+        StickerCommentCodec.encode(url),
+        parentId: replyTargetId,
+      );
+      optimisticCommentId = optimisticComment['id']?.toString() ?? '';
+
+      setState(() {
+        _replyToId = null;
+        _replyToName = null;
+      });
+      _insertCommentLocally(optimisticComment);
 
       await _supabaseService.addPostComment(
         postId: widget.post['id'].toString(),
         content: StickerCommentCodec.encode(url),
         userEmail: widget.userEmail,
         userName: _authService.displayName ?? widget.userEmail.split('@')[0],
-        parentId: _replyToId,
+        parentId: replyTargetId,
       );
-
-      setState(() {
-        _replyToId = null;
-        _replyToName = null;
-      });
-      await _loadData();
+      unawaited(_refreshCommentsOnly());
     } catch (e) {
+      if (optimisticCommentId.isNotEmpty) {
+        _removeCommentLocally(optimisticCommentId);
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,

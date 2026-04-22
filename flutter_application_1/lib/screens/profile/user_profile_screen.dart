@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import '../../config/theme.dart';
@@ -87,7 +90,6 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       final currentUserEmail = _authService.userEmail;
       final isSelfProfile = _isSelfProfile;
 
-      final statsFuture = _supabaseService.getUserStats(widget.userEmail);
       final resourcesFuture = _supabaseService.getUserResources(
         widget.userEmail,
         approvedOnly: !isSelfProfile,
@@ -101,40 +103,15 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           : Future.value(FollowStatus.notFollowing);
 
       final results = await Future.wait<dynamic>([
-        statsFuture,
-        resourcesFuture,
         userInfoFuture,
         currentProfileFuture,
         statusFuture,
       ]);
 
-      final stats =
-          (results[0] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
-      final resources = (results[1] as List?)?.cast<Resource>() ?? <Resource>[];
-      final userInfo = results[2] as Map<String, dynamic>?;
+      final userInfo = results[0] as Map<String, dynamic>?;
       final currentProfile =
-          (results[3] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
-      final status = results[4] as FollowStatus;
-
-      final followers = (stats['followers'] as num?)?.toInt() ?? 0;
-      final following = (stats['following'] as num?)?.toInt() ?? 0;
-      final uploads =
-          ((stats['uploads'] ?? stats['contributions']) as num?)?.toInt() ?? 0;
-
-      if (currentUserEmail != null &&
-          currentUserEmail.trim().isNotEmpty &&
-          resources.isNotEmpty) {
-        try {
-          await _resourceStateRepository.prefetchResourceStateForResources(
-            userEmail: currentUserEmail,
-            resources: resources,
-          );
-        } catch (e, stackTrace) {
-          debugPrint(
-            'User-profile resource-state prefetch failed: $e\n$stackTrace',
-          );
-        }
-      }
+          (results[1] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
+      final status = results[2] as FollowStatus;
 
       final viewerCollegeId = currentProfile['college_id']?.toString().trim();
       final profileCollegeId =
@@ -143,12 +120,13 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       final viewerRole = resolveEffectiveProfileRole(currentProfile);
       final viewerCanBanUsers = canBanUsersProfile(currentProfile);
       final isBanned = _resolveBanStatus(userInfo);
+      final followers = (userInfo?['followers_count'] as num?)?.toInt() ?? 0;
+      final following = (userInfo?['following_count'] as num?)?.toInt() ?? 0;
+
       if (mounted) {
         setState(() {
-          _uploadCount = uploads;
           _followersCount = followers;
           _followingCount = following;
-          _userResources = resources;
           _followStatus = status;
           _fetchedPhotoUrl = resolveProfilePhotoUrl(userInfo);
           _fetchedBio = userInfo?['bio']?.toString();
@@ -164,6 +142,44 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           _isLoading = false;
         });
       }
+
+      unawaited(() async {
+        try {
+          final statsFuture = _supabaseService.getUserStats(widget.userEmail);
+          final resources = await resourcesFuture;
+          final stats = await statsFuture;
+
+          if (currentUserEmail != null &&
+              currentUserEmail.trim().isNotEmpty &&
+              resources.isNotEmpty) {
+            try {
+              await _resourceStateRepository.prefetchResourceStateForResources(
+                userEmail: currentUserEmail,
+                resources: resources,
+              );
+            } catch (e, stackTrace) {
+              debugPrint(
+                'User-profile resource-state prefetch failed: $e\n$stackTrace',
+              );
+            }
+          }
+
+          if (!mounted) return;
+          setState(() {
+            _userResources = resources;
+            _uploadCount =
+                ((stats['uploads'] ?? stats['contributions']) as num?)
+                    ?.toInt() ??
+                resources.length;
+            _followersCount =
+                (stats['followers'] as num?)?.toInt() ?? _followersCount;
+            _followingCount =
+                (stats['following'] as num?)?.toInt() ?? _followingCount;
+          });
+        } catch (e, stackTrace) {
+          debugPrint('Deferred profile data load failed: $e\n$stackTrace');
+        }
+      }());
     } catch (e) {
       debugPrint('Error loading profile: $e');
       if (mounted) {
@@ -548,51 +564,35 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                         shape: BoxShape.circle,
                                       ),
                                       clipBehavior: Clip.antiAlias,
-                                      child: _photoUrl != null &&
+                                      child:
+                                          _photoUrl != null &&
                                               _photoUrl!.isNotEmpty
-                                          ? Image.network(
-                                              _photoUrl!,
+                                          ? CachedNetworkImage(
+                                              imageUrl: _photoUrl!,
                                               fit: BoxFit.cover,
-                                              loadingBuilder: (
-                                                context,
-                                                child,
-                                                loadingProgress,
-                                              ) {
-                                                if (loadingProgress == null) {
-                                                  return child;
-                                                }
-                                                return Center(
+                                              placeholder: (context, url) {
+                                                return const Center(
                                                   child:
-                                                      CircularProgressIndicator(
-                                                    value:
-                                                        loadingProgress
-                                                                    .expectedTotalBytes !=
-                                                                null
-                                                            ? loadingProgress
-                                                                      .cumulativeBytesLoaded /
-                                                                  loadingProgress
-                                                                      .expectedTotalBytes!
-                                                            : null,
-                                                  ),
+                                                      CircularProgressIndicator(),
                                                 );
                                               },
-                                              errorBuilder: (
-                                                context,
-                                                error,
-                                                stackTrace,
-                                              ) {
-                                                return Center(
-                                                  child: Text(
-                                                    _avatarLetter,
-                                                    style: GoogleFonts.inter(
-                                                      fontSize: 32,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                      color: Colors.white,
-                                                    ),
-                                                  ),
-                                                );
-                                              },
+                                              errorWidget:
+                                                  (context, url, error) {
+                                                    return Center(
+                                                      child: Text(
+                                                        _avatarLetter,
+                                                        style:
+                                                            GoogleFonts.inter(
+                                                              fontSize: 32,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .bold,
+                                                              color:
+                                                                  Colors.white,
+                                                            ),
+                                                      ),
+                                                    );
+                                                  },
                                             )
                                           : Center(
                                               child: Text(
@@ -626,10 +626,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                                   ),
                                 ),
                                 const SizedBox(width: 6),
-                                UserBadge(
-                                  email: widget.userEmail,
-                                  size: 18,
-                                ),
+                                UserBadge(email: widget.userEmail, size: 18),
                               ],
                             ),
                             const SizedBox(height: 4),

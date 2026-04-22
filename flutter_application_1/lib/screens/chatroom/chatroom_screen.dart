@@ -237,6 +237,64 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
     }
   }
 
+  Future<void> _refreshPostsOnly({bool silent = true}) async {
+    final int requestId = ++_loadRequestId;
+    if (!silent && mounted) {
+      setState(() => _isLoading = true);
+    }
+
+    try {
+      final results = await Future.wait<Object?>([
+        _supabaseService.getRoomPosts(
+          widget.roomId,
+          sortBy: _sortBy,
+          limit: _roomPostPageSize,
+          offset: 0,
+        ),
+        _supabaseService.getSavedPostIds(widget.userEmail),
+        _supabaseService.getUserVotes(widget.roomId),
+      ]);
+
+      if (!mounted || requestId != _loadRequestId) return;
+
+      final posts = _coerceMapList(
+        results[0],
+      ).map(_normalizePostMetrics).toList();
+      final rawSavedPostIds = results[1];
+      final Set<String> savedPostIds = (rawSavedPostIds is List)
+          ? rawSavedPostIds.map((e) => e.toString()).toSet()
+          : (rawSavedPostIds is Set)
+          ? rawSavedPostIds.map((e) => e.toString()).toSet()
+          : <String>{};
+      final userVotes = _coerceStringIntMap(results[2]);
+
+      for (final post in posts) {
+        final postId = post['id']?.toString() ?? '';
+        if (postId.isNotEmpty) {
+          _savedPosts[postId] = savedPostIds.contains(postId);
+          _userVotes[postId] = userVotes[postId] ?? 0;
+        }
+      }
+      _primePhotoCacheFromPosts(posts);
+
+      setState(() {
+        _posts = posts;
+        _postsOffset = posts.length;
+        _hasMorePosts = posts.length >= _roomPostPageSize;
+        _isLoadingMorePosts = false;
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('Error refreshing room posts: $e');
+      if (mounted && requestId == _loadRequestId) {
+        setState(() {
+          _isLoading = false;
+          _isLoadingMorePosts = false;
+        });
+      }
+    }
+  }
+
   Future<void> _loadMorePosts() async {
     if (_isLoading || _isLoadingMorePosts || !_hasMorePosts) {
       return;
@@ -263,9 +321,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
 
       if (!mounted) return;
 
-      final incomingPosts = _coerceMapList(results[0])
-          .map(_normalizePostMetrics)
-          .toList();
+      final incomingPosts = _coerceMapList(
+        results[0],
+      ).map(_normalizePostMetrics).toList();
 
       final rawSavedPostIds = results[1];
       final Set<String> savedPostIds = (rawSavedPostIds is List)
@@ -373,7 +431,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
             // Debounce the reload
             if (_reloadDebounce?.isActive ?? false) _reloadDebounce!.cancel();
             _reloadDebounce = Timer(debounceDuration, () {
-              if (mounted) _loadRoomData(silent: true);
+              if (mounted) _refreshPostsOnly();
             });
           },
         )
@@ -1049,7 +1107,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
     if (_posts.isEmpty) {
       return _buildEmptyState(isDark);
     }
-    final showPaginationFooter = canPaginate && (_hasMorePosts || _isLoadingMorePosts);
+    final showPaginationFooter =
+        canPaginate && (_hasMorePosts || _isLoadingMorePosts);
 
     return ListView.builder(
       controller: _postScrollController,

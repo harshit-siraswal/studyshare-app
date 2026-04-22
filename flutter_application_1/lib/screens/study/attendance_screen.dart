@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:add_2_calendar/add_2_calendar.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../config/theme.dart';
 import '../../models/attendance_models.dart';
@@ -29,6 +31,8 @@ class AttendanceScreen extends StatefulWidget {
 class _AttendanceScreenState extends State<AttendanceScreen> {
   final AttendanceService _attendanceService = AttendanceService();
   final AuthService _authService = AuthService();
+  final DateFormat _scheduleTileDateFormat = DateFormat('dd/MM/\nyyyy');
+  final DateFormat _scheduleTimeFormat = DateFormat('HH:mm');
 
   AttendanceSnapshot? _snapshot;
   bool _isLoading = true;
@@ -52,6 +56,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
   String get _syncCooldownUntilKey =>
       'attendance_sync_cooldown_until_${widget.collegeId}';
+
+  String get _projectionPrefsKey =>
+      'attendance_projection_skips_${widget.collegeId}_${_currentUserEmail ?? 'anonymous'}';
 
   String? get _currentUserEmail {
     final email = _authService.userEmail?.trim().toLowerCase();
@@ -112,34 +119,10 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     for (final entry in snapshot.schedule.entries) {
-      final entryDate = _attendanceService.tryParseDate(entry.lectureDate);
-      if (entryDate == null) continue;
-      if (DateTime(entryDate.year, entryDate.month, entryDate.day) != today) {
-        continue;
-      }
-      if (entry.start.isEmpty || entry.end.isEmpty) continue;
-      final sParts = entry.start.split(':');
-      final eParts = entry.end.split(':');
-      if (sParts.length < 2 || eParts.length < 2) continue;
-      final sH = int.tryParse(sParts[0]);
-      final sM = int.tryParse(sParts[1]);
-      final eH = int.tryParse(eParts[0]);
-      final eM = int.tryParse(eParts[1]);
-      if (sH == null || sM == null || eH == null || eM == null) continue;
-      final start = DateTime(
-        entryDate.year,
-        entryDate.month,
-        entryDate.day,
-        sH,
-        sM,
-      );
-      final end = DateTime(
-        entryDate.year,
-        entryDate.month,
-        entryDate.day,
-        eH,
-        eM,
-      );
+      final start = _parseEntryDateTime(entry.lectureDate, entry.start);
+      final end = _parseEntryDateTime(entry.lectureDate, entry.end);
+      if (start == null || end == null) continue;
+      if (DateTime(start.year, start.month, start.day) != today) continue;
       if (!now.isBefore(start) && now.isBefore(end)) return true;
     }
     return false;
@@ -159,17 +142,28 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         widget.collegeId,
         userEmail: _currentUserEmail,
       ),
+      _loadSavedProjectedMisses(),
     ]);
     final token = results[0] as String?;
     final snapshot = results[1] as AttendanceSnapshot?;
+    final savedProjectedMisses = results[2] as Set<String>;
+    final activeProjectedMisses = snapshot == null
+        ? <String>{}
+        : _filterProjectedMisses(snapshot, savedProjectedMisses);
     if (!mounted) return;
     setState(() {
       _snapshot = snapshot;
       _hasSavedSession = token != null && token.trim().isNotEmpty;
+      _projectedMissedEntries
+        ..clear()
+        ..addAll(activeProjectedMisses);
       _isLoading = false;
     });
     if (snapshot != null) {
       _seedProjectionDays(snapshot);
+    }
+    if (savedProjectedMisses.length != activeProjectedMisses.length) {
+      unawaited(_persistProjectedMisses());
     }
     _startScheduleProgressTimerIfNeeded();
     unawaited(_syncScheduleWidget(snapshot));
@@ -334,6 +328,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       userEmail: _currentUserEmail,
     );
     await _clearSyncCooldown();
+    await _clearSavedProjectedMisses();
     if (!mounted) return;
     setState(() {
       _snapshot = null;
@@ -372,12 +367,19 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
 
       final snapshot = await doSync();
       await _clearSyncCooldown();
+      final savedProjectedMisses = _filterProjectedMisses(
+        snapshot,
+        await _loadSavedProjectedMisses(),
+      );
       if (!mounted) return;
       setState(() {
         _snapshot = snapshot;
         _hasSavedSession = true;
         _lastSyncErrorMessage = null;
         _lastSyncErrorCode = null;
+        _projectedMissedEntries
+          ..clear()
+          ..addAll(savedProjectedMisses);
       });
       _seedProjectionDays(snapshot);
       unawaited(_syncScheduleWidget(snapshot));
@@ -446,7 +448,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${component.courseName} • ${component.componentName}',
+                      '${component.courseName} â€¢ ${component.componentName}',
                       style: GoogleFonts.inter(
                         fontSize: 18,
                         fontWeight: FontWeight.w700,
@@ -483,7 +485,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                     ),
                                   ),
                                   subtitle: Text(
-                                    '${lecture.dayName} • ${lecture.timeSlot}',
+                                    '${lecture.dayName} â€¢ ${lecture.timeSlot}',
                                     style: GoogleFonts.inter(),
                                   ),
                                   trailing: Text(
@@ -561,16 +563,164 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     }
   }
 
+  Future<Set<String>> _loadSavedProjectedMisses() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_projectionPrefsKey);
+    if (raw == null || raw.trim().isEmpty) {
+      return <String>{};
+    }
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) {
+        return <String>{};
+      }
+      return decoded
+          .map((value) => value?.toString().trim() ?? '')
+          .where((value) => value.isNotEmpty)
+          .toSet();
+    } catch (_) {
+      return <String>{};
+    }
+  }
+
+  Future<void> _persistProjectedMisses() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (_projectedMissedEntries.isEmpty) {
+      await prefs.remove(_projectionPrefsKey);
+      return;
+    }
+    final values = _projectedMissedEntries.toList()..sort();
+    await prefs.setString(_projectionPrefsKey, jsonEncode(values));
+  }
+
+  Future<void> _clearSavedProjectedMisses() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_projectionPrefsKey);
+  }
+
+  Set<String> _filterProjectedMisses(
+    AttendanceSnapshot snapshot,
+    Set<String> persisted,
+  ) {
+    if (persisted.isEmpty) return <String>{};
+    final activeEntries = _upcomingScheduleEntries(
+      snapshot,
+    ).where(_isClassEntry).map(_scheduleEntryIdentity).toSet();
+    return persisted.where(activeEntries.contains).toSet();
+  }
+
+  DateTime? _tryParseFlexibleDateTime(String raw) {
+    final normalized = raw.trim();
+    if (normalized.isEmpty) return null;
+    final direct = DateTime.tryParse(normalized);
+    if (direct != null) return direct;
+
+    const patterns = <String>[
+      'dd/MM/yyyy HH:mm:ss',
+      'dd/MM/yyyy HH:mm',
+      'dd-MM-yyyy HH:mm:ss',
+      'dd-MM-yyyy HH:mm',
+      'yyyy-MM-dd HH:mm:ss',
+      'yyyy-MM-dd HH:mm',
+      'dd/MM/yyyy',
+      'dd-MM-yyyy',
+      'yyyy-MM-dd',
+    ];
+
+    for (final pattern in patterns) {
+      try {
+        return DateFormat(pattern).parseLoose(normalized);
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  ({int hour, int minute, int second})? _extractTimeParts(String rawTime) {
+    final normalized = rawTime.trim();
+    if (normalized.isEmpty) return null;
+    final directDateTime = _tryParseFlexibleDateTime(normalized);
+    if (directDateTime != null) {
+      return (
+        hour: directDateTime.hour,
+        minute: directDateTime.minute,
+        second: directDateTime.second,
+      );
+    }
+
+    final match = RegExp(
+      r'(\d{1,2})\s*:\s*(\d{2})(?:\s*:\s*(\d{2}))?',
+    ).firstMatch(normalized);
+    if (match == null) return null;
+    return (
+      hour: int.tryParse(match.group(1) ?? '0') ?? 0,
+      minute: int.tryParse(match.group(2) ?? '0') ?? 0,
+      second: int.tryParse(match.group(3) ?? '0') ?? 0,
+    );
+  }
+
   DateTime? _parseEntryDateTime(String rawDate, String rawTime) {
-    final baseDate = _attendanceService.tryParseDate(rawDate);
-    if (baseDate == null) return null;
-    final normalizedTime = rawTime.trim();
-    if (normalizedTime.isEmpty) return baseDate;
-    final parts = normalizedTime.split(':');
-    if (parts.length < 2) return baseDate;
-    final hour = int.tryParse(parts[0]) ?? 0;
-    final minute = int.tryParse(parts[1]) ?? 0;
-    return DateTime(baseDate.year, baseDate.month, baseDate.day, hour, minute);
+    final timeAsDateTime = _tryParseFlexibleDateTime(rawTime);
+    if (timeAsDateTime != null &&
+        (rawDate.trim().isEmpty ||
+            rawTime.contains('/') ||
+            rawTime.contains('-'))) {
+      return timeAsDateTime;
+    }
+
+    final baseDate =
+        _attendanceService.tryParseDate(rawDate) ??
+        _tryParseFlexibleDateTime(rawDate);
+    if (baseDate == null) {
+      return timeAsDateTime;
+    }
+
+    final timeParts = _extractTimeParts(rawTime);
+    if (timeParts == null) {
+      return DateTime(baseDate.year, baseDate.month, baseDate.day);
+    }
+
+    return DateTime(
+      baseDate.year,
+      baseDate.month,
+      baseDate.day,
+      timeParts.hour,
+      timeParts.minute,
+      timeParts.second,
+    );
+  }
+
+  String _formatScheduleDateLabel(AttendanceScheduleEntry entry) {
+    final date =
+        _parseEntryDateTime(entry.lectureDate, entry.start) ??
+        _attendanceService.tryParseDate(entry.lectureDate) ??
+        _tryParseFlexibleDateTime(entry.lectureDate);
+    if (date == null) {
+      return _formatDate(entry.lectureDate).replaceAll('/', '/\n');
+    }
+    return _scheduleTileDateFormat.format(date);
+  }
+
+  String _formatScheduleTimeLabel(DateTime? dateTime, String fallback) {
+    if (dateTime != null) {
+      return _scheduleTimeFormat.format(dateTime);
+    }
+    final timeParts = _extractTimeParts(fallback);
+    if (timeParts != null) {
+      return '${timeParts.hour.toString().padLeft(2, '0')}:${timeParts.minute.toString().padLeft(2, '0')}';
+    }
+    return fallback.trim();
+  }
+
+  String _formatScheduleTimeRange(AttendanceScheduleEntry entry) {
+    final startLabel = _formatScheduleTimeLabel(
+      _parseEntryDateTime(entry.lectureDate, entry.start),
+      entry.start,
+    );
+    final endLabel = _formatScheduleTimeLabel(
+      _parseEntryDateTime(entry.lectureDate, entry.end),
+      entry.end,
+    );
+    return '$startLabel - $endLabel';
   }
 
   int _additionalClassesCanMiss({
@@ -656,13 +806,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         ? 'No classes held yet.'
         : safe
         ? classesToSafety > 0
-              ? 'You can still miss $classesToSafety more '
-                    'class${classesToSafety == 1 ? '' : 'es'} and stay above '
-                    '${component.threshold}%.'
+              ? 'You can still miss $classesToSafety more class${classesToSafety == 1 ? '' : 'es'} and stay above ${component.threshold}%.'
               : 'Try not to miss any more classes.'
-        : 'Need to attend next $classesToSafety '
-              'class${classesToSafety == 1 ? '' : 'es'} to reach '
-              '${component.threshold}%.';
+        : 'Need to attend next $classesToSafety class${classesToSafety == 1 ? '' : 'es'} to reach ${component.threshold}%.';
 
     return _AttendanceProjectionSummary(
       percentage: percentage,
@@ -674,30 +820,6 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     );
   }
 
-  String _formatGoogleCalendarDateTime(DateTime dateTime) {
-    String twoDigits(int value) => value.toString().padLeft(2, '0');
-    return '${dateTime.year}'
-        '${twoDigits(dateTime.month)}'
-        '${twoDigits(dateTime.day)}'
-        'T'
-        '${twoDigits(dateTime.hour)}'
-        '${twoDigits(dateTime.minute)}'
-        '${twoDigits(dateTime.second)}';
-  }
-
-  String _googleCalendarByDay(DateTime date) {
-    const weekdays = <int, String>{
-      DateTime.monday: 'MO',
-      DateTime.tuesday: 'TU',
-      DateTime.wednesday: 'WE',
-      DateTime.thursday: 'TH',
-      DateTime.friday: 'FR',
-      DateTime.saturday: 'SA',
-      DateTime.sunday: 'SU',
-    };
-    return weekdays[date.weekday] ?? 'MO';
-  }
-
   List<AttendanceScheduleEntry> _dedupeCalendarEntries(
     List<AttendanceScheduleEntry> entries,
   ) {
@@ -705,22 +827,24 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     final unique = <AttendanceScheduleEntry>[];
     for (final entry in entries.where(_isClassEntry)) {
       final start = _parseEntryDateTime(entry.lectureDate, entry.start);
-      if (start == null) continue;
+      final end =
+          _parseEntryDateTime(entry.lectureDate, entry.end) ??
+          start?.add(const Duration(hours: 1));
       final key = [
         entry.courseCode.trim().toLowerCase(),
         entry.courseComponentName.trim().toLowerCase(),
-        entry.courseName.trim().toLowerCase(),
-        _googleCalendarByDay(start),
-        entry.start.trim(),
-        entry.end.trim(),
+        _formatScheduleDateLabel(entry),
+        _formatScheduleTimeLabel(start, entry.start),
+        _formatScheduleTimeLabel(end, entry.end),
       ].join('|');
-      if (!seen.add(key)) continue;
-      unique.add(entry);
+      if (seen.add(key)) {
+        unique.add(entry);
+      }
     }
     return unique;
   }
 
-  Uri? _buildGoogleCalendarUri(AttendanceScheduleEntry entry) {
+  Event? _buildNativeCalendarEvent(AttendanceScheduleEntry entry) {
     final start = _parseEntryDateTime(entry.lectureDate, entry.start);
     if (start == null) return null;
     final end =
@@ -742,132 +866,80 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
       'Created from StudyShare weekly schedule',
     ].join('\n');
 
-    return Uri.https('calendar.google.com', '/calendar/render', {
-      'action': 'TEMPLATE',
-      'text': title,
-      'dates':
-          '${_formatGoogleCalendarDateTime(start)}/${_formatGoogleCalendarDateTime(safeEnd)}',
-      'details': details,
-      'location': entry.classRoom.trim(),
-      'recur': 'RRULE:FREQ=WEEKLY;BYDAY=${_googleCalendarByDay(start)}',
-    });
+    return Event(
+      title: title,
+      description: details,
+      location: entry.classRoom.trim().isEmpty ? null : entry.classRoom.trim(),
+      startDate: start,
+      endDate: safeEnd,
+      recurrence: Recurrence(frequency: Frequency.weekly),
+    );
   }
 
   Future<void> _addEntriesToCalendar(
     List<AttendanceScheduleEntry> entries,
   ) async {
-    final classes = _dedupeCalendarEntries(entries);
-    if (classes.isEmpty) return;
+    final events = _dedupeCalendarEntries(
+      entries,
+    ).map(_buildNativeCalendarEvent).whereType<Event>().toList(growable: false);
+    if (events.isEmpty) return;
     if (!mounted) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      builder: (context) {
-        final isDark = Theme.of(context).brightness == Brightness.dark;
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 18, 16, 22),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Add to Google Calendar',
-                  style: GoogleFonts.inter(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: isDark
-                        ? AppTheme.darkTextPrimary
-                        : AppTheme.lightTextPrimary,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'Each class opens directly in Google Calendar as a recurring weekly event.',
-                  style: GoogleFonts.inter(
-                    fontSize: 12.5,
-                    height: 1.45,
-                    color: isDark
-                        ? AppTheme.darkTextSecondary
-                        : AppTheme.lightTextSecondary,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Flexible(
-                  child: ListView.separated(
-                    shrinkWrap: true,
-                    itemCount: classes.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 10),
-                    itemBuilder: (context, index) {
-                      final entry = classes[index];
-                      return Container(
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: isDark
-                              ? Colors.white.withValues(alpha: 0.04)
-                              : const Color(0xFFF8FAFC),
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(
-                            color: isDark ? Colors.white10 : Colors.black12,
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    entry.courseName.trim().isNotEmpty
-                                        ? entry.courseName.trim()
-                                        : entry.title.trim(),
-                                    style: GoogleFonts.inter(
-                                      fontSize: 13.5,
-                                      fontWeight: FontWeight.w700,
-                                      color: isDark
-                                          ? AppTheme.darkTextPrimary
-                                          : AppTheme.lightTextPrimary,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '${_formatDate(entry.lectureDate)} • ${entry.start} - ${entry.end}',
-                                    style: GoogleFonts.inter(
-                                      fontSize: 12.2,
-                                      color: isDark
-                                          ? AppTheme.darkTextSecondary
-                                          : AppTheme.lightTextSecondary,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            TextButton(
-                              onPressed: () async {
-                                final uri = _buildGoogleCalendarUri(entry);
-                                if (uri == null) return;
-                                await launchUrl(
-                                  uri,
-                                  mode: LaunchMode.externalApplication,
-                                );
-                              },
-                              child: Text(
-                                'Open',
-                                style: GoogleFonts.inter(
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
+    try {
+      for (final event in events) {
+        Add2Calendar.addEvent2Cal(event);
+      }
+    } catch (error) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Could not open your calendar app: ${error.toString().replaceFirst('Exception: ', '')}',
           ),
-        );
-      },
+        ),
+      );
+    }
+  }
+
+  _AttendanceOverviewProjectionSummary _buildOverallProjectionSummary(
+    AttendanceSnapshot snapshot,
+  ) {
+    final futureClasses = _upcomingScheduleEntries(
+      snapshot,
+    ).where(_isClassEntry).toList(growable: false);
+    final scheduledFutureClasses = futureClasses.length;
+    final skippedClasses = futureClasses
+        .where(
+          (entry) =>
+              _projectedMissedEntries.contains(_scheduleEntryIdentity(entry)),
+        )
+        .length;
+    final plannedAttendances = math.max(
+      0,
+      scheduledFutureClasses - skippedClasses,
+    );
+    final projectedTotal =
+        snapshot.overall.totalClasses + scheduledFutureClasses;
+    final projectedPresent =
+        snapshot.overall.presentClasses + plannedAttendances;
+    final projectedPercentage = projectedTotal <= 0
+        ? 0.0
+        : (projectedPresent / projectedTotal) * 100;
+
+    final message = scheduledFutureClasses == 0
+        ? 'No upcoming classes are available for projection right now.'
+        : skippedClasses > 0
+        ? 'Projected from $scheduledFutureClasses upcoming class${scheduledFutureClasses == 1 ? '' : 'es'}, with $skippedClasses marked to skip.'
+        : 'Projected assuming you attend the next $scheduledFutureClasses scheduled class${scheduledFutureClasses == 1 ? '' : 'es'}.';
+
+    return _AttendanceOverviewProjectionSummary(
+      actualPercentage: snapshot.overall.percentage,
+      projectedPercentage: projectedPercentage,
+      actualPresent: snapshot.overall.presentClasses,
+      actualTotal: snapshot.overall.totalClasses,
+      projectedPresent: projectedPresent,
+      projectedTotal: projectedTotal,
+      scheduledFutureClasses: scheduledFutureClasses,
+      skippedClasses: skippedClasses,
+      message: message,
     );
   }
 
@@ -880,6 +952,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         _projectedMissedEntries.add(identity);
       }
     });
+    unawaited(_persistProjectedMisses());
   }
 
   void _toggleProjectedDayEntries(
@@ -896,6 +969,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         }
       }
     });
+    unawaited(_persistProjectedMisses());
   }
 
   Map<String, List<AttendanceScheduleEntry>> _groupScheduleEntries(
@@ -1174,7 +1248,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                                           height: 4,
                                                         ),
                                                         Text(
-                                                          '${dayEntries.length} class${dayEntries.length == 1 ? '' : 'es'} • ${dayEntries.first.start} - ${dayEntries.last.end}',
+                                                          '${dayEntries.length} class${dayEntries.length == 1 ? '' : 'es'} â€¢ ${dayEntries.first.start} - ${dayEntries.last.end}',
                                                           style: GoogleFonts.inter(
                                                             fontSize: 12.4,
                                                             color: isDark
@@ -1535,8 +1609,9 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
   }
 
   Widget _buildOverviewCard(AttendanceSnapshot snapshot, bool isDark) {
-    final alert =
-        snapshot.overall.percentage < AttendanceService.lowAttendanceThreshold;
+    final summary = _buildOverallProjectionSummary(snapshot);
+    final displayPercentage = summary.projectedPercentage;
+    final alert = displayPercentage < AttendanceService.lowAttendanceThreshold;
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -1571,7 +1646,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            '${snapshot.student.branchShortName} • ${snapshot.student.semesterName} • ${snapshot.student.sectionName}',
+            '${snapshot.student.branchShortName} â€¢ ${snapshot.student.semesterName} â€¢ ${snapshot.student.sectionName}',
             style: GoogleFonts.inter(
               fontSize: 13,
               color: isDark
@@ -1593,7 +1668,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${snapshot.overall.percentage.toStringAsFixed(2)}%',
+                  '${displayPercentage.toStringAsFixed(2)}%',
                   style: GoogleFonts.inter(
                     fontSize: 34,
                     fontWeight: FontWeight.w800,
@@ -1602,12 +1677,22 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  alert
-                      ? 'You are below the safe threshold right now.'
-                      : 'You are above the safe threshold right now.',
+                  'Actual ${summary.actualPercentage.toStringAsFixed(2)}% from CyberVidya',
                   style: GoogleFonts.inter(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
+                    color: isDark
+                        ? AppTheme.darkTextSecondary
+                        : AppTheme.lightTextSecondary,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  summary.message,
+                  style: GoogleFonts.inter(
+                    fontSize: 12.4,
+                    fontWeight: FontWeight.w600,
+                    height: 1.35,
                     color: isDark
                         ? AppTheme.darkTextPrimary
                         : AppTheme.lightTextPrimary,
@@ -1622,9 +1707,13 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             runSpacing: 10,
             children: [
               _buildOverviewStat(
-                label: 'Attended',
-                value:
-                    '${snapshot.overall.presentClasses}/${snapshot.overall.totalClasses}',
+                label: 'Actual',
+                value: '${summary.actualPresent}/${summary.actualTotal}',
+                isDark: isDark,
+              ),
+              _buildOverviewStat(
+                label: 'Projected',
+                value: '${summary.projectedPresent}/${summary.projectedTotal}',
                 isDark: isDark,
               ),
               _buildOverviewStat(
@@ -1632,6 +1721,12 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 value: _formatSyncTime(snapshot.syncedAt),
                 isDark: isDark,
               ),
+              if (summary.skippedClasses > 0)
+                _buildOverviewStat(
+                  label: 'Skipped',
+                  value: summary.skippedClasses.toString(),
+                  isDark: isDark,
+                ),
               _buildOverviewStat(
                 label: 'Low subjects',
                 value: snapshot.lowAttendance.length.toString(),
@@ -1713,7 +1808,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${component.componentName} • ${component.percentage.toStringAsFixed(2)}%',
+                      '${component.componentName} â€¢ ${component.percentage.toStringAsFixed(2)}%',
                       style: GoogleFonts.inter(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w600,
@@ -1799,6 +1894,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                 TextButton.icon(
                   onPressed: () {
                     setState(() => _projectedMissedEntries.clear());
+                    unawaited(_persistProjectedMisses());
                     onStateChanged?.call();
                   },
                   icon: const Icon(Icons.restart_alt_rounded, size: 18),
@@ -1902,7 +1998,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                               ),
                                               const SizedBox(height: 4),
                                               Text(
-                                                '${dayEntries.length} class${dayEntries.length == 1 ? '' : 'es'} • '
+                                                '${dayEntries.length} class${dayEntries.length == 1 ? '' : 'es'} â€¢ '
                                                 '${dayEntries.first.start} - ${dayEntries.last.end}',
                                                 style: GoogleFonts.inter(
                                                   fontSize: 12.4,
@@ -2090,8 +2186,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                                             height: 4,
                                                           ),
                                                           Text(
-                                                            '${entry.start} - ${entry.end}'
-                                                            '${entry.classRoom.trim().isEmpty ? '' : ' • Room ${entry.classRoom.trim()}'}',
+                                                            '${_formatScheduleTimeRange(entry)}${entry.classRoom.trim().isEmpty ? '' : ' • Room ${entry.classRoom.trim()}'}',
                                                             style: GoogleFonts.inter(
                                                               fontSize: 12.2,
                                                               color: isDark
@@ -2189,7 +2284,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${component.componentName} • ${component.courseCode}',
+                      '${component.componentName} â€¢ ${component.courseCode}',
                       style: GoogleFonts.inter(
                         color: isDark
                             ? AppTheme.darkTextSecondary
@@ -2395,40 +2490,19 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     bool showDate = true,
   }) {
     final now = DateTime.now();
-    final entryDate = _attendanceService.tryParseDate(entry.lectureDate);
+    final classStart = _parseEntryDateTime(entry.lectureDate, entry.start);
+    final classEnd = _parseEntryDateTime(entry.lectureDate, entry.end);
+    final entryDate =
+        classStart ??
+        _attendanceService.tryParseDate(entry.lectureDate) ??
+        _tryParseFlexibleDateTime(entry.lectureDate);
     final today = DateTime(now.year, now.month, now.day);
     final isToday =
         entryDate != null &&
         DateTime(entryDate.year, entryDate.month, entryDate.day) == today;
-
-    DateTime? classStart;
-    DateTime? classEnd;
-    if (entryDate != null && entry.start.isNotEmpty && entry.end.isNotEmpty) {
-      final sParts = entry.start.split(':');
-      final eParts = entry.end.split(':');
-      if (sParts.length >= 2 && eParts.length >= 2) {
-        final sHour = int.tryParse(sParts[0]);
-        final sMin = int.tryParse(sParts[1]);
-        final eHour = int.tryParse(eParts[0]);
-        final eMin = int.tryParse(eParts[1]);
-        if (sHour != null && sMin != null && eHour != null && eMin != null) {
-          classStart = DateTime(
-            entryDate.year,
-            entryDate.month,
-            entryDate.day,
-            sHour,
-            sMin,
-          );
-          classEnd = DateTime(
-            entryDate.year,
-            entryDate.month,
-            entryDate.day,
-            eHour,
-            eMin,
-          );
-        }
-      }
-    }
+    final startLabel = _formatScheduleTimeLabel(classStart, entry.start);
+    final endLabel = _formatScheduleTimeLabel(classEnd, entry.end);
+    final dateLabel = _formatScheduleDateLabel(entry);
 
     final isOngoing =
         isToday &&
@@ -2598,7 +2672,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              entry.start,
+                              showDate ? dateLabel : startLabel,
                               style: GoogleFonts.inter(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w800,
@@ -2607,17 +2681,17 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              entry.end,
+                              showDate ? startLabel : endLabel,
                               style: GoogleFonts.inter(
                                 fontSize: 11.5,
                                 fontWeight: FontWeight.w600,
                                 color: accentColor.withValues(alpha: 0.8),
                               ),
                             ),
-                            if (showDate) ...[
+                            if (showDate && endLabel.isNotEmpty) ...[
                               const SizedBox(height: 6),
                               Text(
-                                _formatDate(entry.lectureDate),
+                                endLabel,
                                 style: GoogleFonts.inter(
                                   fontSize: 10.5,
                                   fontWeight: FontWeight.w600,
@@ -2780,5 +2854,29 @@ class _AttendanceProjectionSummary {
   final int projectedPresent;
   final int projectedMisses;
   final bool isSafe;
+  final String message;
+}
+
+class _AttendanceOverviewProjectionSummary {
+  const _AttendanceOverviewProjectionSummary({
+    required this.actualPercentage,
+    required this.projectedPercentage,
+    required this.actualPresent,
+    required this.actualTotal,
+    required this.projectedPresent,
+    required this.projectedTotal,
+    required this.scheduledFutureClasses,
+    required this.skippedClasses,
+    required this.message,
+  });
+
+  final double actualPercentage;
+  final double projectedPercentage;
+  final int actualPresent;
+  final int actualTotal;
+  final int projectedPresent;
+  final int projectedTotal;
+  final int scheduledFutureClasses;
+  final int skippedClasses;
   final String message;
 }

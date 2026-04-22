@@ -22,6 +22,10 @@
 	<string>????</string>
 	<key>CFBundleVersion</key>
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>StudyShare adds your class schedule to your calendar.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>StudyShare uses the calendar event sheet which may access contact data for invites.</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>LSApplicationQueriesSchemes</key>
