@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:open_file/open_file.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
@@ -202,6 +203,8 @@ class AIChatMessage {
   List<AiLiveActivityStep> liveSteps;
   String? liveTitle;
   bool showLiveExport;
+  String? actionType;
+  Map<String, dynamic>? actionPayload;
 
   AIChatMessage({
     required this.isUser,
@@ -220,7 +223,41 @@ class AIChatMessage {
     this.liveSteps = const [],
     this.liveTitle,
     this.showLiveExport = false,
+    this.actionType,
+    this.actionPayload,
   });
+}
+
+class _GeneratedFileAction {
+  final String path;
+  final String fileName;
+  final String? mimeType;
+  final String? description;
+
+  const _GeneratedFileAction({
+    required this.path,
+    required this.fileName,
+    this.mimeType,
+    this.description,
+  });
+
+  factory _GeneratedFileAction.fromJson(Map<String, dynamic> json) {
+    return _GeneratedFileAction(
+      path: json['path']?.toString() ?? '',
+      fileName: json['fileName']?.toString() ?? 'Generated file',
+      mimeType: json['mimeType']?.toString(),
+      description: json['description']?.toString(),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'path': path,
+      'fileName': fileName,
+      if (mimeType != null) 'mimeType': mimeType,
+      if (description != null) 'description': description,
+    };
+  }
 }
 
 class _ChatAttachment {
@@ -372,6 +409,7 @@ class _AIChatScreenState extends State<AIChatScreen>
 
   bool _isLoading = false;
   bool _isSendAttemptInProgress = false;
+  bool _stopRequested = false;
   DateTime? _lastSendTriggeredAt;
   String? _lastSendFingerprint;
   DateTime? _lastSendFingerprintAt;
@@ -390,6 +428,7 @@ class _AIChatScreenState extends State<AIChatScreen>
   AIChatMessage? _typingMessage;
   bool _streamTypingDone = false;
   bool _typingScrollScheduled = false;
+  StreamSubscription<String>? _activeRagSubscription;
   static const Duration _typingTick = Duration(milliseconds: 16);
   static const Duration _longResponseThreshold = Duration(seconds: 12);
   final Set<_LongResponseTracker> _activeLongResponseTrackers =
@@ -556,6 +595,8 @@ class _AIChatScreenState extends State<AIChatScreen>
 
   @override
   void dispose() {
+    _activeRagSubscription?.cancel();
+    _activeRagSubscription = null;
     for (final tracker in _activeLongResponseTrackers) {
       tracker.timer?.cancel();
       tracker.timer = null;
@@ -834,30 +875,37 @@ class _AIChatScreenState extends State<AIChatScreen>
       final localScope = preferNoticeSources
           ? 'the local StudyShare context, including relevant notices/announcements and uploaded or pinned study material'
           : 'the local StudyShare context, including uploaded or pinned study material';
+      final attachmentInstruction = hasAttachments
+          ? ' The attached files are included in this request, so acknowledge them directly and answer from their content first.'
+          : '';
       if (searchAllPdfs) {
         return '$cleaned\n\n'
             'Important: Search only within $localScope. Search across all '
             'available study materials in your subject or semester instead of '
             'staying pinned to one file when needed. Do not add outside '
             'web/general info. If nothing relevant is found locally, say that '
-            'clearly.';
+            'clearly.$attachmentInstruction';
       }
       if (hasVideoTranscriptContext) {
         return '$cleaned\n\n'
             'Important: Use only the currently open video transcript plus any '
             'relevant local StudyShare context. Do not add outside web/general '
             'info. If the local context does not contain the answer, say that '
-            'clearly.';
+            'clearly.$attachmentInstruction';
       }
       return '$cleaned\n\n'
           'Important: Use only $localScope. Do not add outside web/general '
           'info. If the local context does not contain the answer, say that '
-          'clearly.';
+          'clearly.$attachmentInstruction';
     }
     if (cleaned.isNotEmpty && hasVideoTranscriptContext) {
       return '$cleaned\n\n'
           'Primary context: the transcript of the video currently open in '
           'StudyShare.';
+    }
+    if (cleaned.isNotEmpty && hasAttachments) {
+      return '$cleaned\n\n'
+          'Attached files are included in this request. Read them and mention them explicitly in your answer.';
     }
     if (cleaned.isNotEmpty) return cleaned;
     if (hasVideoTranscriptContext) {
@@ -893,6 +941,39 @@ class _AIChatScreenState extends State<AIChatScreen>
         normalized.contains('outline this pdf') ||
         normalized.contains('outline this document') ||
         normalized.contains('summary of this pdf');
+  }
+
+  bool _isCurrentMaterialOverviewPrompt(String prompt) {
+    final normalized = prompt.toLowerCase().trim();
+    if (normalized.isEmpty) return false;
+    if (_isPdfOverviewPrompt(normalized)) return true;
+    const directMatches = <String>{
+      'what is it about',
+      'what is this about',
+      'what is it',
+      'summarise this',
+      'summarize this',
+      'give me an overview',
+      'overview',
+      'summary',
+      'summarise',
+      'summarize',
+    };
+    if (directMatches.contains(normalized)) return true;
+    return normalized.contains('what is this note about') ||
+        normalized.contains('what is this video about') ||
+        normalized.contains('what does this cover') ||
+        normalized.contains('what topics does this cover') ||
+        normalized.contains('which topics does this cover') ||
+        normalized.contains('give me overview of this') ||
+        normalized.contains('summarise this document') ||
+        normalized.contains('summarize this document') ||
+        normalized.contains('summarise this note') ||
+        normalized.contains('summarize this note') ||
+        normalized.contains('summarise this pdf') ||
+        normalized.contains('summarize this pdf') ||
+        normalized.contains('summarise this video') ||
+        normalized.contains('summarize this video');
   }
 
   bool _promptRequestsAllPdfs(String prompt) {
@@ -967,8 +1048,10 @@ class _AIChatScreenState extends State<AIChatScreen>
     if (_extractSemesterFromPrompt(normalized) != null) return false;
     if (_shouldSearchAllPdfsForPrompt(normalized)) return false;
     if (_referencesCurrentStudyMaterial(normalized)) return false;
-    if ((widget.resourceContext?.fileId ?? '').trim().isNotEmpty) return false;
-    if ((widget.resourceContext?.videoUrl ?? '').trim().isNotEmpty) {
+    if (_isCurrentMaterialOverviewPrompt(normalized)) return false;
+    if (_isStudioChat &&
+        (_promptRequiresLocalContext(normalized) ||
+            _isCurrentMaterialOverviewPrompt(normalized))) {
       return false;
     }
 
@@ -1593,6 +1676,8 @@ class _AIChatScreenState extends State<AIChatScreen>
 
   LocalAiChatMessage _toLocalMessage(AIChatMessage message) {
     final quizPayload = message.quizActionPaper?.toJson();
+    final actionType = quizPayload != null ? 'start_quiz' : message.actionType;
+    final actionPayload = quizPayload ?? message.actionPayload;
     final orderedSources = _mergePrimarySource(
       message.primarySource,
       message.sources,
@@ -1638,20 +1723,25 @@ class _AIChatScreenState extends State<AIChatScreen>
       combinedConfidence: message.combinedConfidence,
       ocrFailureAffectsRetrieval: message.ocrFailureAffectsRetrieval,
       ocrErrors: message.ocrErrors.map((e) => e.toJson()).toList(),
-      actionType: quizPayload == null ? null : 'start_quiz',
-      actionPayload: quizPayload,
+      actionType: actionType,
+      actionPayload: actionPayload,
       createdAt: DateTime.now().toIso8601String(),
     );
   }
 
   AIChatMessage _fromLocalMessage(LocalAiChatMessage message) {
     AiQuestionPaper? quizActionPaper;
+    String? actionType;
+    Map<String, dynamic>? actionPayload;
     if (message.actionType == 'start_quiz' && message.actionPayload != null) {
       try {
         quizActionPaper = AiQuestionPaper.fromJson(message.actionPayload!);
       } catch (e) {
         debugPrint('Failed to restore quiz action from history: $e');
       }
+    } else if (message.actionType?.trim().isNotEmpty ?? false) {
+      actionType = message.actionType;
+      actionPayload = message.actionPayload;
     }
     final sources = message.sources
         .map((source) => RagSource.fromJson(source))
@@ -1678,6 +1768,8 @@ class _AIChatScreenState extends State<AIChatScreen>
           .map((entry) => OcrErrorInfo.fromJson(entry))
           .toList(),
       quizActionPaper: quizActionPaper,
+      actionType: actionType,
+      actionPayload: actionPayload,
     );
   }
 
@@ -3430,6 +3522,13 @@ class _AIChatScreenState extends State<AIChatScreen>
     if (_looksLikeHighTrafficError(trimmed)) {
       return 'StudyShare is seeing high traffic right now. Please try again in a moment.';
     }
+    final lowered = trimmed.toLowerCase();
+    if (lowered.contains('server') || lowered.contains('backend')) {
+      return 'Our servers are having trouble right now. Please try again in a moment.';
+    }
+    if (lowered.contains('request') && lowered.contains('check your request')) {
+      return 'There was a problem with your request. Please try again.';
+    }
     return trimmed;
   }
 
@@ -3591,14 +3690,34 @@ class _AIChatScreenState extends State<AIChatScreen>
     if (_looksLikeHighTrafficError(raw)) {
       return 'StudyShare is seeing high traffic right now. Please try again in a moment.';
     }
+    if (lowered.contains('clientexception')) {
+      return 'Something went wrong while contacting the server. Please try again in a moment.';
+    }
+    if (lowered.contains('failed to connect') ||
+        lowered.contains('host lookup') ||
+        lowered.contains('socketfailed') ||
+        lowered.contains('socketexception') ||
+        lowered.contains('network is unreachable') ||
+        lowered.contains('connection refused')) {
+      return 'Could not connect to the server. Please check your internet connection and try again.';
+    }
     if (lowered.contains('connection reset') ||
         lowered.contains('reset by peer') ||
-        lowered.contains('socketexception') ||
         lowered.contains('connection abort')) {
       return 'The AI server connection was interrupted. Please try again.';
     }
     if (lowered.contains('timed out') || lowered.contains('timeout')) {
-      return 'The AI request took too long. Please try again in a moment.';
+      return 'Could not connect to the server. Please check your internet connection and try again.';
+    }
+    final httpCodeMatch = RegExp(r'\b([45]\d{2})\b').firstMatch(raw);
+    final httpCode = httpCodeMatch?.group(1);
+    if (httpCode != null) {
+      if (httpCode.startsWith('5')) {
+        return 'Our servers are experiencing issues. Please try again later.';
+      }
+      if (httpCode.startsWith('4')) {
+        return 'There was a problem with your request. Please try again.';
+      }
     }
     final hasHtmlPayload =
         lowered.contains('<!doctype html') ||
@@ -3617,7 +3736,61 @@ class _AIChatScreenState extends State<AIChatScreen>
       }
       return 'Backend temporarily unavailable. Please retry in a moment.';
     }
+    if (raw.contains('://') ||
+        lowered.contains('uri=') ||
+        lowered.contains('stack') ||
+        lowered.contains('exception')) {
+      return 'Something went wrong. Please try again in a moment.';
+    }
     return raw;
+  }
+
+  _GeneratedFileAction? _generatedFileActionForMessage(AIChatMessage message) {
+    if (message.actionType != 'generated_file' || message.actionPayload == null) {
+      return null;
+    }
+    try {
+      final action = _GeneratedFileAction.fromJson(message.actionPayload!);
+      if (action.path.trim().isEmpty) return null;
+      return action;
+    } catch (e) {
+      debugPrint('Failed to parse generated file action: $e');
+      return null;
+    }
+  }
+
+  Future<void> _openGeneratedFile(_GeneratedFileAction action) async {
+    final result = await OpenFile.open(action.path);
+    if (!mounted) return;
+    if (result.type == ResultType.done) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Could not open the generated file on this device.'),
+      ),
+    );
+  }
+
+  Future<void> _shareGeneratedFile(_GeneratedFileAction action) async {
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(action.path, mimeType: action.mimeType)],
+        text: action.description?.trim().isNotEmpty == true
+            ? action.description!.trim()
+            : 'Shared from StudyShare',
+      ),
+    );
+  }
+
+  Future<void> _stopActiveGeneration() async {
+    if (!_isLoading) return;
+    _stopRequested = true;
+    _streamTypingDone = true;
+    _completeTypingDrainIfDrained();
+    final subscription = _activeRagSubscription;
+    _activeRagSubscription = null;
+    await subscription?.cancel();
+    if (!mounted) return;
+    setState(() => _isLoading = false);
   }
 
   void _handlePotentialTokenLimitError(String message) {
@@ -4790,7 +4963,16 @@ class _AIChatScreenState extends State<AIChatScreen>
           AIChatMessage(
             isUser: false,
             content:
-                'Report generated successfully. The PDF has been saved on your device.',
+                "I've generated your summary report. You can view or share it below.",
+            actionType: 'generated_file',
+            actionPayload: _GeneratedFileAction(
+              path: file.path,
+              fileName: file.uri.pathSegments.isNotEmpty
+                  ? file.uri.pathSegments.last
+                  : 'StudyShare_Report.pdf',
+              mimeType: 'application/pdf',
+              description: 'AI Chat Summary report from StudyShare',
+            ).toJson(),
           ),
         );
       });
@@ -4808,8 +4990,11 @@ class _AIChatScreenState extends State<AIChatScreen>
         _messages.add(
           AIChatMessage(
             isUser: false,
-            content:
-                'Summary export failed: ${e.toString().replaceFirst('Exception: ', '')}',
+            content: _presentAiErrorMessage(
+              _cleanUserVisibleErrorMessage(e),
+              fallback:
+                  'StudyShare could not generate the report right now. Please try again.',
+            ),
           ),
         );
       });
@@ -4898,11 +5083,14 @@ class _AIChatScreenState extends State<AIChatScreen>
           prompt: userPrompt,
         );
         final searchAllForPrompt = _shouldSearchAllPdfsForPrompt(userPrompt);
-        final isPdfOverviewPrompt = _isPdfOverviewPrompt(userPrompt);
+        final isPdfOverviewPrompt =
+            _isPdfOverviewPrompt(userPrompt) ||
+            _isCurrentMaterialOverviewPrompt(userPrompt);
         final localContextRequired =
             hasAttachments ||
-            _isStudioChat ||
             _promptRequiresLocalContext(userPrompt) ||
+            _referencesCurrentStudyMaterial(userPrompt) ||
+            (_isStudioChat && _isCurrentMaterialOverviewPrompt(userPrompt)) ||
             searchAllForPrompt;
         final sourceSwitchForTurn = _promptRequestsAllPdfs(userPrompt);
         final languageHint = _shouldForceEnglish(userPrompt) ? 'en' : 'auto';
@@ -4959,15 +5147,27 @@ class _AIChatScreenState extends State<AIChatScreen>
             hasOcrEligibleAttachments ||
             shouldGenerateQuestionPaper ||
             noticeRequestContext.preferNoticeSources;
-        final effectiveAllowWeb = _allowWebMode && !mustUseGroundedLocalContext;
+        final shouldUseGeneralAcademicFallback =
+            _isStudioChat &&
+            !localContextRequired &&
+            _extractAcademicTopicHint(userPrompt).isNotEmpty;
+        final effectiveAllowWeb =
+            (_allowWebMode || shouldUseGeneralAcademicFallback) &&
+            !mustUseGroundedLocalContext;
         final releasePinnedResourceForNotice =
             noticeRequestContext.preferNoticeSources;
+        final shouldPinStudioResource =
+            !effectiveAllowWeb &&
+            !releasePinnedResourceForNotice &&
+            (_isStudioChat
+                ? localContextRequired
+                : true);
         final effectiveFileId =
-            effectiveAllowWeb || releasePinnedResourceForNotice
+            !shouldPinStudioResource
             ? null
             : (searchAllForPrompt ? null : widget.resourceContext?.fileId);
         final effectiveVideoUrl =
-            effectiveAllowWeb || releasePinnedResourceForNotice
+            !shouldPinStudioResource
             ? null
             : widget.resourceContext?.videoUrl;
         final effectiveAttachmentPayload = effectiveAllowWeb
@@ -5069,6 +5269,7 @@ class _AIChatScreenState extends State<AIChatScreen>
 
         try {
           _resetTypingRenderer();
+          _stopRequested = false;
 
           final stream = _api.queryRagStream(
             question: sendPrompt,
@@ -5091,184 +5292,201 @@ class _AIChatScreenState extends State<AIChatScreen>
             languageHint: languageHint,
           );
           aiInvoked = true;
+          final streamDone = Completer<void>();
+          _activeRagSubscription = stream.listen(
+            (chunkStr) {
+              if (!mounted) return;
+              try {
+                final chunk = jsonDecode(chunkStr);
+                final type = chunk['type'];
 
-          await for (final chunkStr in stream) {
-            if (!mounted) break;
-            try {
-              final chunk = jsonDecode(chunkStr);
-              final type = chunk['type'];
-
-              if (type == 'metadata') {
-                final data = chunk['data'] as Map<String, dynamic>? ?? {};
-                _guardUnexpectedWebResponse(
-                  allowWeb: effectiveAllowWeb,
-                  response: data,
-                );
-                final sourcesRaw = (data['sources'] as List?) ?? const [];
-                final ocrErrorsRaw = (data['ocr_errors'] as List?) ?? const [];
-                final sources = sourcesRaw
-                    .whereType<Map>()
-                    .map(
-                      (s) => RagSource.fromJson(Map<String, dynamic>.from(s)),
-                    )
-                    .toList();
-                final ocrErrors = ocrErrorsRaw
-                    .whereType<Map>()
-                    .map(
-                      (entry) => OcrErrorInfo.fromJson(
-                        Map<String, dynamic>.from(entry),
-                      ),
-                    )
-                    .toList();
-                final primarySource = _parsePrimarySource(
-                  data['primary_source'],
-                );
-                final orderedSources = _mergePrimarySource(
-                  primarySource,
-                  sources,
-                );
-                final primarySourceFileId =
-                    _extractPrimarySourceFileId(data) ?? primarySource?.fileId;
-                final answerOrigin = AiAnswerOriginX.fromWireValue(
-                  data['answer_origin']?.toString(),
-                );
-                final insufficientGrounding =
-                    data['insufficient_grounding'] == true ||
-                    answerOrigin == AiAnswerOrigin.insufficientNotes;
-                final effectiveAnswerOrigin = insufficientGrounding
-                    ? AiAnswerOrigin.insufficientNotes
-                    : answerOrigin;
-                final liveSteps = _buildLiveAnswerSteps(
-                  answerOrigin: effectiveAnswerOrigin,
-                  sources: orderedSources,
-                  noLocal: data['no_local'] == true || insufficientGrounding,
-                  answerCompleted: false,
-                );
-
-                setState(() {
-                  aiMessage.primarySource = primarySource;
-                  aiMessage.sources = orderedSources;
-                  aiMessage.noLocal =
-                      data['no_local'] == true || insufficientGrounding;
-                  aiMessage.answerOrigin = effectiveAnswerOrigin;
-                  aiMessage.liveTitle = 'Tracing your answer';
-                  aiMessage.liveSteps = liveSteps;
-                  aiMessage.retrievalScore = _toNullableDouble(
-                    data['retrieval_score'],
+                if (type == 'metadata') {
+                  final data = chunk['data'] as Map<String, dynamic>? ?? {};
+                  _guardUnexpectedWebResponse(
+                    allowWeb: effectiveAllowWeb,
+                    response: data,
                   );
-                  aiMessage.llmConfidenceScore = _toNullableDouble(
-                    data['llm_confidence_score'],
-                  );
-                  aiMessage.combinedConfidence = _toNullableDouble(
-                    data['combined_confidence'],
-                  );
-                  aiMessage.ocrFailureAffectsRetrieval =
-                      data['ocr_failure_affects_retrieval'] == true;
-                  aiMessage.ocrErrors = ocrErrors;
-                  if (primarySourceFileId != null &&
-                      primarySourceFileId.trim().isNotEmpty) {
-                    _lastPrimarySourceFileId = primarySourceFileId.trim();
-                  }
-                });
-              } else if (type == 'chunk') {
-                final textChunk = chunk['text']?.toString() ?? '';
-                _enqueueTypedChunk(aiMessage, textChunk);
-              } else if (type == 'error') {
-                _enqueueTypedChunk(aiMessage, '\n\nError: ${chunk['message']}');
-              } else if (type == 'done') {
-                if (aiMessage.liveSteps.isNotEmpty) {
-                  setState(() {
-                    aiMessage.liveSteps = _markLiveAnswerStatus(
-                      aiMessage.liveSteps,
-                      AiLiveActivityStatus.completed,
-                    );
-                  });
-                }
-              } else {
-                _guardUnexpectedWebResponse(
-                  allowWeb: effectiveAllowWeb,
-                  response: Map<String, dynamic>.from(chunk),
-                );
-                final textChunk =
-                    chunk['text']?.toString() ??
-                    chunk['answer']?.toString() ??
-                    chunk['response']?.toString() ??
-                    '';
-                if (textChunk.trim().isNotEmpty) {
-                  _enqueueTypedChunk(aiMessage, textChunk);
-                }
-                final sourcesRaw = (chunk['sources'] as List?) ?? const [];
-                if (sourcesRaw.isNotEmpty) {
+                  final sourcesRaw = (data['sources'] as List?) ?? const [];
+                  final ocrErrorsRaw = (data['ocr_errors'] as List?) ?? const [];
                   final sources = sourcesRaw
                       .whereType<Map>()
                       .map(
                         (s) => RagSource.fromJson(Map<String, dynamic>.from(s)),
                       )
                       .toList();
+                  final ocrErrors = ocrErrorsRaw
+                      .whereType<Map>()
+                      .map(
+                        (entry) => OcrErrorInfo.fromJson(
+                          Map<String, dynamic>.from(entry),
+                        ),
+                      )
+                      .toList();
                   final primarySource = _parsePrimarySource(
-                    chunk['primary_source'],
+                    data['primary_source'],
                   );
                   final orderedSources = _mergePrimarySource(
                     primarySource,
                     sources,
                   );
                   final primarySourceFileId =
-                      _extractPrimarySourceFileId(
-                        Map<String, dynamic>.from(chunk),
-                      ) ??
-                      primarySource?.fileId;
-                  if (sources.isNotEmpty) {
-                    final chunkAnswerOrigin = AiAnswerOriginX.fromWireValue(
-                      chunk['answer_origin']?.toString(),
+                      _extractPrimarySourceFileId(data) ?? primarySource?.fileId;
+                  final answerOrigin = AiAnswerOriginX.fromWireValue(
+                    data['answer_origin']?.toString(),
+                  );
+                  final insufficientGrounding =
+                      data['insufficient_grounding'] == true ||
+                      answerOrigin == AiAnswerOrigin.insufficientNotes;
+                  final effectiveAnswerOrigin = insufficientGrounding
+                      ? AiAnswerOrigin.insufficientNotes
+                      : answerOrigin;
+                  final liveSteps = _buildLiveAnswerSteps(
+                    answerOrigin: effectiveAnswerOrigin,
+                    sources: orderedSources,
+                    noLocal: data['no_local'] == true || insufficientGrounding,
+                    answerCompleted: false,
+                  );
+
+                  setState(() {
+                    aiMessage.primarySource = primarySource;
+                    aiMessage.sources = orderedSources;
+                    aiMessage.noLocal =
+                        data['no_local'] == true || insufficientGrounding;
+                    aiMessage.answerOrigin = effectiveAnswerOrigin;
+                    aiMessage.liveTitle = 'Tracing your answer';
+                    aiMessage.liveSteps = liveSteps;
+                    aiMessage.retrievalScore = _toNullableDouble(
+                      data['retrieval_score'],
                     );
-                    final insufficientGrounding =
-                        chunk['insufficient_grounding'] == true ||
-                        chunkAnswerOrigin == AiAnswerOrigin.insufficientNotes;
+                    aiMessage.llmConfidenceScore = _toNullableDouble(
+                      data['llm_confidence_score'],
+                    );
+                    aiMessage.combinedConfidence = _toNullableDouble(
+                      data['combined_confidence'],
+                    );
+                    aiMessage.ocrFailureAffectsRetrieval =
+                        data['ocr_failure_affects_retrieval'] == true;
+                    aiMessage.ocrErrors = ocrErrors;
+                    if (primarySourceFileId != null &&
+                        primarySourceFileId.trim().isNotEmpty) {
+                      _lastPrimarySourceFileId = primarySourceFileId.trim();
+                    }
+                  });
+                } else if (type == 'chunk') {
+                  final textChunk = chunk['text']?.toString() ?? '';
+                  _enqueueTypedChunk(aiMessage, textChunk);
+                } else if (type == 'error') {
+                  _enqueueTypedChunk(aiMessage, '\n\n${chunk['message']}');
+                } else if (type == 'done') {
+                  if (aiMessage.liveSteps.isNotEmpty) {
                     setState(() {
-                      aiMessage.primarySource = primarySource;
-                      aiMessage.sources = orderedSources;
-                      aiMessage.noLocal =
-                          chunk['no_local'] == true || insufficientGrounding;
-                      aiMessage.answerOrigin ??= insufficientGrounding
-                          ? AiAnswerOrigin.insufficientNotes
-                          : chunkAnswerOrigin;
-                      aiMessage.liveTitle = 'Tracing your answer';
-                      aiMessage.liveSteps = _buildLiveAnswerSteps(
-                        answerOrigin: aiMessage.answerOrigin,
-                        sources: orderedSources,
-                        noLocal:
-                            chunk['no_local'] == true || insufficientGrounding,
-                        answerCompleted: false,
+                      aiMessage.liveSteps = _markLiveAnswerStatus(
+                        aiMessage.liveSteps,
+                        AiLiveActivityStatus.completed,
                       );
-                      aiMessage.retrievalScore = _toNullableDouble(
-                        chunk['retrieval_score'],
-                      );
-                      aiMessage.llmConfidenceScore = _toNullableDouble(
-                        chunk['llm_confidence_score'],
-                      );
-                      aiMessage.combinedConfidence = _toNullableDouble(
-                        chunk['combined_confidence'],
-                      );
-                      aiMessage.ocrFailureAffectsRetrieval =
-                          chunk['ocr_failure_affects_retrieval'] == true;
-                      if (primarySourceFileId != null &&
-                          primarySourceFileId.trim().isNotEmpty) {
-                        _lastPrimarySourceFileId = primarySourceFileId.trim();
-                      }
                     });
                   }
+                } else {
+                  _guardUnexpectedWebResponse(
+                    allowWeb: effectiveAllowWeb,
+                    response: Map<String, dynamic>.from(chunk),
+                  );
+                  final textChunk =
+                      chunk['text']?.toString() ??
+                      chunk['answer']?.toString() ??
+                      chunk['response']?.toString() ??
+                      '';
+                  if (textChunk.trim().isNotEmpty) {
+                    _enqueueTypedChunk(aiMessage, textChunk);
+                  }
+                  final sourcesRaw = (chunk['sources'] as List?) ?? const [];
+                  if (sourcesRaw.isNotEmpty) {
+                    final sources = sourcesRaw
+                        .whereType<Map>()
+                        .map(
+                          (s) =>
+                              RagSource.fromJson(Map<String, dynamic>.from(s)),
+                        )
+                        .toList();
+                    final primarySource = _parsePrimarySource(
+                      chunk['primary_source'],
+                    );
+                    final orderedSources = _mergePrimarySource(
+                      primarySource,
+                      sources,
+                    );
+                    final primarySourceFileId =
+                        _extractPrimarySourceFileId(
+                          Map<String, dynamic>.from(chunk),
+                        ) ??
+                        primarySource?.fileId;
+                    if (sources.isNotEmpty) {
+                      final chunkAnswerOrigin = AiAnswerOriginX.fromWireValue(
+                        chunk['answer_origin']?.toString(),
+                      );
+                      final insufficientGrounding =
+                          chunk['insufficient_grounding'] == true ||
+                          chunkAnswerOrigin == AiAnswerOrigin.insufficientNotes;
+                      setState(() {
+                        aiMessage.primarySource = primarySource;
+                        aiMessage.sources = orderedSources;
+                        aiMessage.noLocal =
+                            chunk['no_local'] == true || insufficientGrounding;
+                        aiMessage.answerOrigin ??= insufficientGrounding
+                            ? AiAnswerOrigin.insufficientNotes
+                            : chunkAnswerOrigin;
+                        aiMessage.liveTitle = 'Tracing your answer';
+                        aiMessage.liveSteps = _buildLiveAnswerSteps(
+                          answerOrigin: aiMessage.answerOrigin,
+                          sources: orderedSources,
+                          noLocal:
+                              chunk['no_local'] == true ||
+                              insufficientGrounding,
+                          answerCompleted: false,
+                        );
+                        aiMessage.retrievalScore = _toNullableDouble(
+                          chunk['retrieval_score'],
+                        );
+                        aiMessage.llmConfidenceScore = _toNullableDouble(
+                          chunk['llm_confidence_score'],
+                        );
+                        aiMessage.combinedConfidence = _toNullableDouble(
+                          chunk['combined_confidence'],
+                        );
+                        aiMessage.ocrFailureAffectsRetrieval =
+                            chunk['ocr_failure_affects_retrieval'] == true;
+                        if (primarySourceFileId != null &&
+                            primarySourceFileId.trim().isNotEmpty) {
+                          _lastPrimarySourceFileId = primarySourceFileId.trim();
+                        }
+                      });
+                    }
+                  }
+                }
+              } catch (e, st) {
+                final fallbackText = chunkStr.trim();
+                if (fallbackText.isNotEmpty) {
+                  _enqueueTypedChunk(aiMessage, fallbackText);
+                } else {
+                  debugPrint('Chunk parse error: $e\nStack: $st');
+                  malformedChunkCount++;
                 }
               }
-            } catch (e, st) {
-              final fallbackText = chunkStr.trim();
-              if (fallbackText.isNotEmpty) {
-                _enqueueTypedChunk(aiMessage, fallbackText);
-              } else {
-                debugPrint('Chunk parse error: $e\nStack: $st');
-                malformedChunkCount++;
+            },
+            onError: (Object error, StackTrace st) {
+              if (!streamDone.isCompleted) {
+                streamDone.completeError(error, st);
               }
-            }
-          }
+            },
+            onDone: () {
+              if (!streamDone.isCompleted) {
+                streamDone.complete();
+              }
+            },
+            cancelOnError: true,
+          );
+          await streamDone.future;
+          _activeRagSubscription = null;
 
           if (malformedChunkCount > 0) {
             debugPrint(
@@ -5278,6 +5496,24 @@ class _AIChatScreenState extends State<AIChatScreen>
           _streamTypingDone = true;
           _completeTypingDrainIfDrained();
           await _waitForTypingDrain();
+          if (_stopRequested) {
+            final stoppedText = _sanitizeAssistantAnswerText(aiMessage.content);
+            if (mounted) {
+              setState(() {
+                aiMessage.content = stoppedText.isEmpty
+                    ? '(Stopped)'
+                    : '$stoppedText\n\n(Stopped)';
+                if (aiMessage.liveSteps.isNotEmpty) {
+                  aiMessage.liveSteps = _markLiveAnswerStatus(
+                    aiMessage.liveSteps,
+                    AiLiveActivityStatus.failed,
+                  );
+                }
+              });
+            }
+            await _persistCurrentSession();
+            return;
+          }
           final hasAssistantText = aiMessage.content.trim().isNotEmpty;
           if (hasAssistantText) {
             final sanitized = _sanitizeAssistantAnswerText(aiMessage.content);
@@ -5322,6 +5558,11 @@ class _AIChatScreenState extends State<AIChatScreen>
             },
           );
         } catch (e) {
+          _activeRagSubscription = null;
+          if (_stopRequested) {
+            await _persistCurrentSession();
+            return;
+          }
           final errorMessage = _cleanUserVisibleErrorMessage(e);
           final presentedErrorMessage = _presentAiErrorMessage(errorMessage);
           final isTokenLimitError = _looksLikeTokenLimitError(errorMessage);
@@ -5357,6 +5598,7 @@ class _AIChatScreenState extends State<AIChatScreen>
             },
           );
         } finally {
+          _activeRagSubscription = null;
           _resetTypingRenderer();
           if (mounted) {
             setState(() => _isLoading = false);
@@ -5423,7 +5665,17 @@ class _AIChatScreenState extends State<AIChatScreen>
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Attachment upload failed: $e')));
+      ).showSnackBar(
+        SnackBar(
+          content: Text(
+            _presentAiErrorMessage(
+              _cleanUserVisibleErrorMessage(e),
+              fallback:
+                  'I could not attach that file right now. Please try again.',
+            ),
+          ),
+        ),
+      );
     } finally {
       if (mounted) setState(() => _isUploadingAttachment = false);
     }
@@ -5761,6 +6013,7 @@ class _AIChatScreenState extends State<AIChatScreen>
     final showLegacyShimmer =
         isStreamingPlaceholder &&
         !_shouldShowLiveActivityCard(msg, isStreamingAssistantMessage);
+    final generatedFileAction = _generatedFileActionForMessage(msg);
     final messageTextStyle = GoogleFonts.inter(
       fontSize: isCompact ? 13.5 : 14,
       height: 1.46,
@@ -5948,6 +6201,128 @@ class _AIChatScreenState extends State<AIChatScreen>
                           : () => _requestReuploadForMessage(msg),
                       color: isDark ? Colors.white70 : Colors.black87,
                       isCompact: isCompact,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+        if (!msg.isUser && generatedFileAction != null) ...[
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? Colors.white.withValues(alpha: 0.05)
+                  : const Color(0xFFF6F8FC),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isDark ? Colors.white12 : const Color(0xFFD9E2F1),
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.description_rounded,
+                        color: AppTheme.primary,
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            generatedFileAction.fileName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.inter(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: isDark ? Colors.white : Colors.black87,
+                            ),
+                          ),
+                          if (generatedFileAction.description?.trim().isNotEmpty ==
+                              true)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Text(
+                                generatedFileAction.description!.trim(),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.inter(
+                                  fontSize: 11,
+                                  color: isDark
+                                      ? Colors.white60
+                                      : const Color(0xFF64748B),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    SizedBox(
+                      height: 36,
+                      child: ElevatedButton.icon(
+                        onPressed: () => _openGeneratedFile(generatedFileAction),
+                        icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                        label: const Text('Open'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primary,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          textStyle: GoogleFonts.inter(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                    ),
+                    SizedBox(
+                      height: 36,
+                      child: OutlinedButton.icon(
+                        onPressed: () =>
+                            _shareGeneratedFile(generatedFileAction),
+                        icon: const Icon(Icons.share_rounded, size: 16),
+                        label: const Text('Share'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: isDark ? Colors.white : Colors.black87,
+                          side: BorderSide(
+                            color: isDark ? Colors.white24 : Colors.black12,
+                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 14),
+                          textStyle: GoogleFonts.inter(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -6413,6 +6788,7 @@ class _AIChatScreenState extends State<AIChatScreen>
     final composerBusy =
         _isLoading || _isUploadingAttachment || _isSendAttemptInProgress;
     final canSend = hasComposerContent && !composerBusy;
+    final showStopButton = _isLoading;
     final sendSurface = canSend
         ? AppTheme.primary
         : (isDark ? Colors.white12 : const Color(0xFFE5E7EB));
@@ -6587,18 +6963,24 @@ class _AIChatScreenState extends State<AIChatScreen>
                     child: Material(
                       color: Colors.transparent,
                       child: InkWell(
-                        onTap: canSend ? _sendMessage : null,
+                        onTap: showStopButton
+                            ? _stopActiveGeneration
+                            : (canSend ? _sendMessage : null),
                         borderRadius: BorderRadius.circular(999),
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 180),
                           decoration: BoxDecoration(
-                            color: sendSurface,
+                            color: showStopButton
+                                ? const Color(0xFFDC2626)
+                                : sendSurface,
                             borderRadius: BorderRadius.circular(999),
                           ),
                           child: Icon(
-                            Icons.arrow_upward_rounded,
+                            showStopButton
+                                ? Icons.stop_rounded
+                                : Icons.arrow_upward_rounded,
                             size: 20,
-                            color: sendIconColor,
+                            color: showStopButton ? Colors.white : sendIconColor,
                           ),
                         ),
                       ),

@@ -1,13 +1,12 @@
-import 'dart:async';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:youtube_player_iframe/youtube_player_iframe.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../config/theme.dart';
 import '../../utils/youtube_link_utils.dart';
 import '../../widgets/ai_study_tools_sheet.dart';
-import '../../widgets/branded_loader.dart';
 import '../ai_chat_screen.dart';
 
 class YoutubePlayerScreen extends StatefulWidget {
@@ -39,13 +38,19 @@ class YoutubePlayerScreen extends StatefulWidget {
 class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
   static const String _genericLoadErrorMessage =
       'Unable to load this YouTube video right now.';
+  static const String _mobileChromeUserAgent =
+      'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
+      '(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36';
 
-  YoutubePlayerController? _playerController;
+  WebViewController? _webViewController;
   int _currentStartSeconds = 0;
   String? _playerErrorMessage;
+  int _loadProgress = 0;
 
   ParsedYoutubeLink get _activeLink =>
       widget.youtubeLink.copyWith(startSeconds: _currentStartSeconds);
+
+  Uri get _watchUri => _activeLink.watchUri;
 
   bool get _canUseAiStudio => widget.resourceId?.trim().isNotEmpty ?? false;
   bool get _hasVideoTranscriptContext =>
@@ -69,59 +74,59 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
     }
   }
 
-  @override
-  void dispose() {
-    unawaited(_playerController?.close() ?? Future<void>.value());
-    super.dispose();
-  }
-
   void _setupPlayer() {
-    late final YoutubePlayerController nextController;
-    nextController = YoutubePlayerController(
-      key: widget.youtubeLink.videoId,
-      params: const YoutubePlayerParams(
-        showControls: true,
-        showFullscreenButton: true,
-        strictRelatedVideos: true,
-        showVideoAnnotations: false,
-        interfaceLanguage: 'en',
-        color: 'white',
-      ),
-      onWebResourceError: (error) {
-        if (!mounted || _playerController != nextController) return;
-        final description = error.description.trim();
-        setState(() {
-          _playerErrorMessage = description.isNotEmpty
-              ? description
-              : _genericLoadErrorMessage;
-        });
-      },
-    );
+    if (kIsWeb) {
+      setState(() {
+        _webViewController = null;
+        _playerErrorMessage = 'In-app YouTube playback is not available here.';
+        _loadProgress = 0;
+      });
+      return;
+    }
 
-    final previousController = _playerController;
+    final controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(Colors.black)
+      ..setUserAgent(_mobileChromeUserAgent)
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onProgress: (progress) {
+            if (!mounted) return;
+            setState(() => _loadProgress = progress.clamp(0, 100));
+          },
+          onPageStarted: (_) {
+            if (!mounted) return;
+            setState(() {
+              _playerErrorMessage = null;
+              _loadProgress = 0;
+            });
+          },
+          onPageFinished: (_) {
+            if (!mounted) return;
+            setState(() => _loadProgress = 100);
+          },
+          onWebResourceError: (error) {
+            if (!mounted) return;
+            setState(() {
+              _playerErrorMessage = error.description.trim().isNotEmpty
+                  ? error.description.trim()
+                  : _genericLoadErrorMessage;
+            });
+          },
+        ),
+      )
+      ..loadRequest(_watchUri);
+
     setState(() {
-      _playerController = nextController;
+      _webViewController = controller;
       _playerErrorMessage = null;
+      _loadProgress = 0;
     });
-
-    unawaited(previousController?.close() ?? Future<void>.value());
-    unawaited(
-      nextController.loadVideoById(
-        videoId: widget.youtubeLink.videoId,
-        startSeconds: _currentStartSeconds.toDouble(),
-      ).catchError((error) {
-        if (!mounted || _playerController != nextController) return;
-        final description = error?.toString().trim() ?? '';
-        setState(() {
-          _playerErrorMessage = description.isNotEmpty
-              ? description
-              : _genericLoadErrorMessage;
-        });
-      }),
-    );
   }
 
-
+  Future<void> _openExternally() async {
+    await launchUrl(_activeLink.watchUri, mode: LaunchMode.externalApplication);
+  }
 
   void _openAiStudioSheet({int initialTabIndex = 0, String? autoGenerateType}) {
     final resourceId = widget.resourceId?.trim() ?? '';
@@ -168,7 +173,7 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
+              const Icon(
                 Icons.error_outline_rounded,
                 color: Colors.white70,
                 size: 28,
@@ -184,17 +189,29 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
                 ),
               ),
               const SizedBox(height: 14),
-              OutlinedButton.icon(
-                onPressed: _setupPlayer,
-                icon: const Icon(Icons.refresh_rounded, size: 16),
-                label: const Text('Retry'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: Colors.white70,
-                  side: const BorderSide(color: Colors.white24),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                alignment: WrapAlignment.center,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: _setupPlayer,
+                    icon: const Icon(Icons.refresh_rounded, size: 16),
+                    label: const Text('Retry'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white70,
+                      side: const BorderSide(color: Colors.white24),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
                   ),
-                ),
+                  FilledButton.icon(
+                    onPressed: _openExternally,
+                    icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                    label: const Text('Open in YouTube'),
+                  ),
+                ],
               ),
             ],
           ),
@@ -204,7 +221,7 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
   }
 
   Widget _buildPlayerSurface() {
-    final controller = _playerController;
+    final controller = _webViewController;
     if (controller == null) {
       return AspectRatio(
         aspectRatio: 16 / 9,
@@ -223,36 +240,34 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
       borderRadius: BorderRadius.circular(18),
       child: AspectRatio(
         aspectRatio: 16 / 9,
-        child: YoutubeValueBuilder(
-          controller: controller,
-          builder: (context, value) {
-            return Stack(
-              children: [
-                Positioned.fill(
+        child: Stack(
+          children: [
+            Positioned.fill(child: WebViewWidget(controller: controller)),
+            if (_loadProgress < 100 && _playerErrorMessage == null)
+              const Positioned.fill(
+                child: IgnorePointer(
                   child: ColoredBox(
-                    color: Colors.black,
-                    child: YoutubePlayer(
-                      controller: controller,
-                      aspectRatio: 16 / 9,
+                    color: Colors.black12,
+                    child: Center(
+                      child: CircularProgressIndicator(color: Colors.white),
                     ),
                   ),
                 ),
-                if (value.playerState == PlayerState.unknown &&
-                    !value.hasError &&
-                    _playerErrorMessage == null)
-                  const Positioned.fill(
-                    child: ColoredBox(
-                      color: Colors.black,
-                      child: Center(
-                        child: BrandedLoader(message: 'Loading video...'),
-                      ),
-                    ),
-                  ),
-                if (_playerErrorMessage != null)
-                  Positioned.fill(child: _buildPlayerError()),
-              ],
-            );
-          },
+              ),
+            if (_playerErrorMessage != null)
+              Positioned.fill(child: _buildPlayerError()),
+            if (_loadProgress < 100 && _playerErrorMessage == null)
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 0,
+                child: LinearProgressIndicator(
+                  value: _loadProgress / 100,
+                  minHeight: 2.5,
+                  backgroundColor: Colors.white10,
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -271,6 +286,11 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
+          IconButton(
+            tooltip: 'Open in YouTube',
+            onPressed: _openExternally,
+            icon: const Icon(Icons.open_in_new_rounded),
+          ),
           if (_canUseAiStudio)
             IconButton(
               tooltip: 'AI Studio',
@@ -286,7 +306,10 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
               padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
               child: Center(
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 800, maxHeight: 400),
+                  constraints: const BoxConstraints(
+                    maxWidth: 800,
+                    maxHeight: 420,
+                  ),
                   child: _buildPlayerSurface(),
                 ),
               ),
