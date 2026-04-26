@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../services/backend_api_service.dart';
-import '../../services/supabase_service.dart';
+import '../../services/supabase_service.dart' hide FollowStatus;
 import '../../widgets/user_avatar.dart';
 import '../../widgets/follow_button.dart';
 import '../../config/theme.dart';
@@ -81,6 +81,18 @@ class _FollowListScreenState extends State<FollowListScreen>
         });
       }
     }
+  }
+
+  void _handleFollowStatusChanged(String email, FollowStatus status) {
+    if (!mounted) return;
+
+    setState(() {
+      if (_tabController.index == 1 && status == FollowStatus.notFollowing) {
+        _following = _following
+            .where((user) => user['email'] != email)
+            .toList();
+      }
+    });
   }
 
   @override
@@ -181,7 +193,8 @@ class _FollowListScreenState extends State<FollowListScreen>
           trailing: FollowButton(
             targetEmail: email,
             targetName: user['display_name'],
-            onFollowChanged: _fetchData, // Refresh list on change
+            onStatusChanged: (status) =>
+                _handleFollowStatusChanged(email, status),
           ),
         );
       },

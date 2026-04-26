@@ -283,6 +283,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       context,
       widget.collegeId,
       _effectiveUserEmail,
+      collegeDomain: widget.collegeDomain,
+      collegeName: widget.collegeName,
       prefilledFile: prefilledFile,
     );
   }
@@ -442,7 +444,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   Future<void> _openSyllabusUploadFlowFromFab() async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final departments = await DepartmentsProvider.getDepartments();
+    final departments = await DepartmentsProvider.getDepartments(
+      collegeId: widget.collegeId,
+      collegeDomain: widget.collegeDomain,
+      collegeName: widget.collegeName,
+    );
     if (!mounted) return;
 
     if (departments.isEmpty) {
@@ -460,6 +466,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       MaterialPageRoute(
         builder: (_) => SyllabusUploadScreen(
           collegeId: widget.collegeId,
+          collegeDomain: widget.collegeDomain,
+          collegeName: widget.collegeName,
           department: department.name,
           departmentName: department.full,
           departmentColor: department.color,

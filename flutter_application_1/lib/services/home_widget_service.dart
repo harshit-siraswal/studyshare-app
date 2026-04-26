@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -12,6 +13,10 @@ class HomeWidgetService {
   static const String _defaultAndroidWidgetPackage = 'me.studyshare.android';
   static const int _maxVisibleItems = 3;
   static const int _maxScheduleCards = 5;
+  static const String _scheduleCollegeIdKey = 'schedule_context_college_id';
+  static const String _scheduleSemesterKey = 'schedule_context_semester';
+  static const String _scheduleBranchKey = 'schedule_context_branch';
+  static const Duration _scheduleRefreshInterval = Duration(minutes: 1);
 
   final AttendanceService _attendanceService = AttendanceService();
 
@@ -21,6 +26,8 @@ class HomeWidgetService {
 
   bool _isInitialized = false;
   Future<bool>? _initializing;
+  Timer? _scheduleRefreshTimer;
+  bool _isRefreshingStoredSchedule = false;
 
   HomeWidgetService._();
   static final HomeWidgetService instance = HomeWidgetService._();
@@ -28,8 +35,11 @@ class HomeWidgetService {
   /// Resets all mutable internal state back to defaults for testing.
   @visibleForTesting
   void resetForTesting() {
+    _scheduleRefreshTimer?.cancel();
+    _scheduleRefreshTimer = null;
     _isInitialized = false;
     _initializing = null;
+    _isRefreshingStoredSchedule = false;
     _groupId = 'group.com.studyshare.app';
     _noticesWidgetName = 'NoticesWidgetProvider';
     _scheduleWidgetName = 'ScheduleWidgetProvider';
@@ -550,6 +560,9 @@ class HomeWidgetService {
       );
 
       await Future.wait([
+        HomeWidget.saveWidgetData<String>(_scheduleCollegeIdKey, collegeId),
+        HomeWidget.saveWidgetData<String>(_scheduleSemesterKey, semester),
+        HomeWidget.saveWidgetData<String>(_scheduleBranchKey, branch),
         HomeWidget.saveWidgetData<String>('schedule_badge', payload.badge),
         HomeWidget.saveWidgetData<String>(
           'schedule_location_label',
@@ -591,12 +604,73 @@ class HomeWidgetService {
           ),
         ),
       ]);
+      _ensureScheduleRefreshLoop();
       await _updateWidget(_scheduleWidgetName);
       return true;
     } catch (e) {
       debugPrint('Error syncing schedule to widget: $e');
       return false;
     }
+  }
+
+  void _ensureScheduleRefreshLoop() {
+    if (_scheduleRefreshTimer?.isActive ?? false) {
+      return;
+    }
+    _scheduleRefreshTimer = Timer.periodic(_scheduleRefreshInterval, (_) {
+      unawaited(refreshScheduleFromStoredContext());
+    });
+  }
+
+  Future<bool> refreshScheduleFromStoredContext() async {
+    if (_isRefreshingStoredSchedule) {
+      return false;
+    }
+    if (!await _ensureInitialized()) {
+      return false;
+    }
+
+    _isRefreshingStoredSchedule = true;
+    try {
+      final collegeId =
+          await HomeWidget.getWidgetData<String>(
+            _scheduleCollegeIdKey,
+            defaultValue: '',
+          ) ??
+          '';
+      final semester =
+          await HomeWidget.getWidgetData<String>(
+            _scheduleSemesterKey,
+            defaultValue: '',
+          ) ??
+          '';
+      final branch =
+          await HomeWidget.getWidgetData<String>(
+            _scheduleBranchKey,
+            defaultValue: '',
+          ) ??
+          '';
+
+      if (collegeId.trim().isEmpty) {
+        return false;
+      }
+
+      return syncSchedule(
+        collegeId: collegeId,
+        semester: semester,
+        branch: branch,
+      );
+    } catch (e) {
+      debugPrint('Error refreshing stored schedule widget context: $e');
+      return false;
+    } finally {
+      _isRefreshingStoredSchedule = false;
+    }
+  }
+
+  Future<void> handleAppResumed() async {
+    _ensureScheduleRefreshLoop();
+    await refreshScheduleFromStoredContext();
   }
 }
 

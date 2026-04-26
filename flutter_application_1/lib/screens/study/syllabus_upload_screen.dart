@@ -4,11 +4,13 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../../config/theme.dart';
 import '../../data/academic_subjects_data.dart';
-import '../../services/cloudinary_service.dart';
+import '../../services/backend_api_service.dart';
 import '../../services/supabase_service.dart';
 
 class SyllabusUploadScreen extends StatefulWidget {
   final String collegeId;
+  final String collegeDomain;
+  final String collegeName;
   final String department;
   final String departmentName;
   final Color departmentColor;
@@ -18,6 +20,8 @@ class SyllabusUploadScreen extends StatefulWidget {
   const SyllabusUploadScreen({
     super.key,
     required this.collegeId,
+    required this.collegeDomain,
+    required this.collegeName,
     required this.department,
     required this.departmentName,
     required this.departmentColor,
@@ -30,8 +34,10 @@ class SyllabusUploadScreen extends StatefulWidget {
 }
 
 class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
+  final BackendApiService _backendApi = BackendApiService();
   final SupabaseService _supabaseService = SupabaseService();
   final TextEditingController _titleController = TextEditingController();
+  final TextEditingController _subjectController = TextEditingController();
 
   final List<String> _semesters = semesterOptions;
   List<String> _availableSubjects = [];
@@ -57,11 +63,13 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
     } else {
       _selectedSubject = null;
     }
+    _subjectController.text = _selectedSubject ?? '';
   }
 
   @override
   void dispose() {
     _titleController.dispose();
+    _subjectController.dispose();
     super.dispose();
   }
 
@@ -69,10 +77,13 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
     return getSubjectsForBranchAndSemester(
       widget.department,
       _selectedSemester,
+      collegeId: widget.collegeId,
+      collegeDomain: widget.collegeDomain,
+      collegeName: widget.collegeName,
     );
   }
 
-  void _onSemesterChanged(String? newValue) {
+  Future<void> _onSemesterChanged(String? newValue) async {
     final normalized = (newValue ?? '').trim();
     if (normalized.isEmpty || normalized == _selectedSemester) return;
     setState(() {
@@ -80,8 +91,10 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
       _availableSubjects = _getSubjectsForBranch();
       if (_availableSubjects.isNotEmpty) {
         _selectedSubject = _availableSubjects.first;
+        _subjectController.text = _selectedSubject!;
       } else {
         _selectedSubject = null;
+        _subjectController.clear();
       }
     });
   }
@@ -89,7 +102,10 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
   void _onSubjectChanged(String? newValue) {
     final normalized = (newValue ?? '').trim();
     if (normalized.isEmpty || normalized == _selectedSubject) return;
-    setState(() => _selectedSubject = normalized);
+    setState(() {
+      _selectedSubject = normalized;
+      _subjectController.text = normalized;
+    });
   }
 
   Future<void> _pickPdf() async {
@@ -150,7 +166,7 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
       return;
     }
     if (_selectedSubject == null || _selectedSubject!.trim().isEmpty) {
-      _showSnack('Please select a subject.');
+      _showSnack('Please enter or select a subject.');
       return;
     }
     if (_titleController.text.trim().isEmpty) {
@@ -164,9 +180,23 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
 
     setState(() => _isUploading = true);
     try {
-      final pdfUrl = await CloudinaryService.uploadFile(
-        _selectedPdf!,
-        timeout: const Duration(seconds: 90),
+      final uploadPlan = await _backendApi.getSyllabusUploadUrl(
+        filename: _selectedPdf!.name,
+      );
+      final uploadUrl = uploadPlan['uploadUrl']?.toString().trim();
+      final publicUrl = uploadPlan['publicUrl']?.toString().trim();
+      if (uploadUrl == null ||
+          uploadUrl.isEmpty ||
+          publicUrl == null ||
+          publicUrl.isEmpty) {
+        throw const FormatException('Failed to get syllabus upload URL.');
+      }
+
+      await _backendApi.uploadToPresignedUrl(
+        file: _selectedPdf!,
+        uploadUrl: uploadUrl,
+        contentType: _backendApi.inferContentType(_selectedPdf!.name),
+        bytes: _selectedPdf!.bytes,
       );
 
       await _supabaseService.uploadSyllabus(
@@ -175,7 +205,7 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
         semester: _selectedSemester!,
         subject: _selectedSubject!,
         title: _titleController.text.trim(),
-        fileUrl: pdfUrl,
+        fileUrl: publicUrl,
       );
 
       if (!mounted) return;
@@ -192,7 +222,9 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
   }
 
   void _showSnack(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -200,7 +232,9 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : const Color(0xFFF8FAFC),
+      backgroundColor: isDark
+          ? AppTheme.darkBackground
+          : const Color(0xFFF8FAFC),
       appBar: AppBar(
         backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
         elevation: 0,
@@ -248,6 +282,31 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
                             : 'Select Subject'),
                   isDisabled: _selectedSemester == null,
                 ),
+                if (_availableSubjects.isEmpty) ...[
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: _subjectController,
+                    decoration: InputDecoration(
+                      labelText: 'Subject',
+                      hintText: 'Enter subject manually',
+                      filled: true,
+                      fillColor: isDark
+                          ? AppTheme.darkBackground
+                          : Colors.grey.shade50,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    style: GoogleFonts.inter(
+                      color: isDark ? Colors.white : Colors.black,
+                    ),
+                    onChanged: (value) => setState(() {
+                      _selectedSubject = value.trim().isEmpty
+                          ? null
+                          : value.trim();
+                    }),
+                  ),
+                ],
               ],
             ),
           ),
@@ -280,8 +339,7 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
             width: double.infinity,
             height: 48,
             child: FilledButton.icon(
-              onPressed:
-                  _canUpload && !_isUploading ? _submitUpload : null,
+              onPressed: _canUpload && !_isUploading ? _submitUpload : null,
               icon: Icon(
                 _isUploading
                     ? Icons.cloud_upload_rounded
@@ -336,10 +394,7 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
               color: widget.departmentColor.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(
-              Icons.menu_book_rounded,
-              color: widget.departmentColor,
-            ),
+            child: Icon(Icons.menu_book_rounded, color: widget.departmentColor),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -401,7 +456,10 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: widget.departmentColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(999),
@@ -472,11 +530,7 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
             isDark,
           ),
           const SizedBox(height: 8),
-          _summaryRow(
-            'File',
-            _selectedPdf?.name ?? 'No PDF selected',
-            isDark,
-          ),
+          _summaryRow('File', _selectedPdf?.name ?? 'No PDF selected', isDark),
         ],
       ),
     );
@@ -658,9 +712,7 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
         labelStyle: GoogleFonts.inter(color: AppTheme.textMuted),
         filled: true,
         fillColor: isDark ? AppTheme.darkBackground : Colors.grey.shade50,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
       ),
       style: GoogleFonts.inter(color: isDark ? Colors.white : Colors.black),
       onChanged: (_) => setState(() {}),

@@ -23,7 +23,6 @@ import '../profile/user_profile_screen.dart';
 import '../../widgets/user_badge.dart';
 import 'post_detail_screen.dart';
 import 'room_details_screen.dart';
-import '../../services/cloudinary_service.dart';
 import '../../services/subscription_service.dart';
 import '../../config/app_config.dart';
 import '../../models/user.dart';
@@ -54,6 +53,15 @@ class ChatRoomScreen extends StatefulWidget {
 
 class _ChatRoomScreenState extends State<ChatRoomScreen>
     with SingleTickerProviderStateMixin {
+  static final Map<String, List<Map<String, dynamic>>> _roomPostsCache =
+      <String, List<Map<String, dynamic>>>{};
+  static final Map<String, Map<String, dynamic>> _roomInfoCache =
+      <String, Map<String, dynamic>>{};
+  static final Map<String, Set<String>> _savedPostIdsCache =
+      <String, Set<String>>{};
+  static final Map<String, Map<String, int>> _roomVoteCache =
+      <String, Map<String, int>>{};
+
   final SupabaseService _supabaseService = SupabaseService();
   final AuthService _authService = AuthService();
   final BackendApiService _backendApiService = BackendApiService();
@@ -86,6 +94,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   final Map<String, int> _userVotes = {};
   final Map<String, String> _profilePhotoCache = {};
   final Set<String> _profilePhotoFetchInFlight = {};
+  bool _isInteractionStateLoading = false;
 
   // Realtime subscription
   RealtimeChannel? _subscription;
@@ -140,6 +149,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   // Request sequencing
   int _loadRequestId = 0;
 
+  String get _normalizedUserEmail => _normalizeEmail(widget.userEmail);
+  String get _roomPostsCacheKey => '${widget.roomId}|$_sortBy';
+  String get _roomVotesCacheKey => '${widget.roomId}|$_normalizedUserEmail';
+
   void _onPostScroll() {
     if (!_postScrollController.hasClients) return;
     if (_postScrollController.position.pixels >=
@@ -148,13 +161,114 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
     }
   }
 
+  List<Map<String, dynamic>> _clonePosts(List<Map<String, dynamic>> posts) {
+    return posts
+        .map((post) => Map<String, dynamic>.from(post))
+        .toList(growable: true);
+  }
+
+  void _applyInteractionStateToPosts(
+    List<Map<String, dynamic>> posts, {
+    Set<String>? savedPostIds,
+    Map<String, int>? userVotes,
+  }) {
+    for (final post in posts) {
+      final postId = post['id']?.toString() ?? '';
+      if (postId.isEmpty) continue;
+      final saved = savedPostIds?.contains(postId) ?? _savedPosts[postId];
+      final vote = userVotes?[postId] ?? _userVotes[postId] ?? 0;
+      _savedPosts[postId] = saved ?? false;
+      _userVotes[postId] = vote;
+    }
+  }
+
+  Future<void> _loadInteractionState({bool forceRefresh = false}) async {
+    if (_isReadOnly || _normalizedUserEmail.isEmpty) {
+      return;
+    }
+    if (_isInteractionStateLoading && !forceRefresh) {
+      return;
+    }
+
+    final cachedSavedIds = _savedPostIdsCache[_normalizedUserEmail];
+    final cachedVotes = _roomVoteCache[_roomVotesCacheKey];
+    if (!forceRefresh && cachedSavedIds != null && cachedVotes != null) {
+      _applyInteractionStateToPosts(
+        _posts,
+        savedPostIds: cachedSavedIds,
+        userVotes: cachedVotes,
+      );
+      if (mounted) {
+        setState(() {});
+      }
+      return;
+    }
+
+    _isInteractionStateLoading = true;
+    try {
+      final results = await Future.wait<Object?>([
+        _supabaseService.getSavedPostIds(widget.userEmail),
+        _supabaseService.getUserVotes(widget.roomId),
+      ]);
+
+      final rawSavedPostIds = results[0];
+      final savedPostIds = (rawSavedPostIds is Set)
+          ? rawSavedPostIds.map((e) => e.toString()).toSet()
+          : (rawSavedPostIds is List)
+          ? rawSavedPostIds.map((e) => e.toString()).toSet()
+          : <String>{};
+      final userVotes = _coerceStringIntMap(results[1]);
+
+      _savedPostIdsCache[_normalizedUserEmail] = savedPostIds;
+      _roomVoteCache[_roomVotesCacheKey] = Map<String, int>.from(userVotes);
+      _applyInteractionStateToPosts(
+        _posts,
+        savedPostIds: savedPostIds,
+        userVotes: userVotes,
+      );
+
+      if (mounted) {
+        setState(() {});
+      }
+    } catch (e) {
+      debugPrint('Error loading post interaction state: $e');
+    } finally {
+      _isInteractionStateLoading = false;
+    }
+  }
+
   Future<void> _loadRoomData({bool silent = false}) async {
     final int requestId = ++_loadRequestId;
     if (!silent && mounted) setState(() => _isLoading = true);
 
+    final cachedPosts = _roomPostsCache[_roomPostsCacheKey];
+    final cachedInfo = _roomInfoCache[widget.roomId];
+    if (!silent && mounted && (cachedPosts != null || cachedInfo != null)) {
+      final previewPosts = cachedPosts == null
+          ? null
+          : _clonePosts(cachedPosts);
+      if (previewPosts != null) {
+        _primePhotoCacheFromPosts(previewPosts);
+      }
+      setState(() {
+        if (previewPosts != null) {
+          _posts = previewPosts;
+          _postsOffset = previewPosts.length;
+          _hasMorePosts = previewPosts.length >= _roomPostPageSize;
+        }
+        if (cachedInfo != null) {
+          _roomInfo = Map<String, dynamic>.from(cachedInfo);
+          _isAdmin = cachedInfo['isAdmin'] == true;
+          _isMember = cachedInfo['isMember'] == true;
+        }
+        _isLoading = false;
+        _isLoadingMorePosts = false;
+      });
+      unawaited(_loadInteractionState());
+    }
+
     try {
-      // Parallelize requests to speed up load time
-      final results = await Future.wait([
+      final results = await Future.wait<Object?>([
         _supabaseService.getRoomPosts(
           widget.roomId,
           sortBy: _sortBy,
@@ -162,10 +276,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
           offset: 0,
         ),
         _supabaseService.getRoomInfo(widget.roomId),
-        _supabaseService.isRoomAdmin(widget.roomId, widget.userEmail),
-        _supabaseService.getUserRoomIds(widget.userEmail),
-        _supabaseService.getSavedPostIds(widget.userEmail),
-        _supabaseService.getUserVotes(widget.roomId),
       ]);
 
       if (requestId != _loadRequestId || !mounted) return;
@@ -174,46 +284,27 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         results[0],
       ).map(_normalizePostMetrics).toList();
       final info = _coerceMapOrNull(results[1]);
-      final isAdmin = results[2] is bool ? results[2] as bool : false;
-
-      // Handle User Room IDs (List -> Set)
-      final rawUserRoomIds = results[3];
-      final Set<String> memberCheckIds = (rawUserRoomIds is List)
-          ? rawUserRoomIds.map((e) => e.toString()).toSet()
-          : (rawUserRoomIds is Set)
-          ? rawUserRoomIds.map((e) => e.toString()).toSet()
-          : <String>{};
-
-      // Handle Saved Post IDs (Set or List -> Set)
-      final rawSavedPostIds = results[4];
-      final Set<String> savedPostIds = (rawSavedPostIds is List)
-          ? rawSavedPostIds.map((e) => e.toString()).toSet()
-          : (rawSavedPostIds is Set)
-          ? rawSavedPostIds.map((e) => e.toString()).toSet()
-          : <String>{};
-
-      final userVotes = _coerceStringIntMap(results[5]);
-
-      // Update saved status from batch
-      for (var post in posts) {
-        final postId = post['id']?.toString() ?? '';
-        if (postId.isNotEmpty) {
-          _savedPosts[postId] = savedPostIds.contains(postId);
-          _userVotes[postId] = userVotes[postId] ?? 0;
-        }
+      _roomPostsCache[_roomPostsCacheKey] = _clonePosts(posts);
+      if (info != null) {
+        _roomInfoCache[widget.roomId] = Map<String, dynamic>.from(info);
       }
+      _applyInteractionStateToPosts(posts);
       _primePhotoCacheFromPosts(posts);
 
       if (mounted && requestId == _loadRequestId) {
         final bool prevFABVisible = !_isMember && !_isLoading && !_isReadOnly;
+        final resolvedIsAdmin = info == null
+            ? _isAdmin
+            : info['isAdmin'] == true;
+        final resolvedIsMember = info == null
+            ? _isMember
+            : info['isMember'] == true;
 
         setState(() {
           _posts = posts;
-          _roomInfo = info;
-          _isAdmin = isAdmin || (info?['isAdmin'] == true);
-          _isMember =
-              memberCheckIds.contains(widget.roomId) ||
-              (info?['isMember'] == true);
+          _roomInfo = info ?? _roomInfo;
+          _isAdmin = resolvedIsAdmin;
+          _isMember = resolvedIsMember;
           _postsOffset = posts.length;
           _hasMorePosts = posts.length >= _roomPostPageSize;
           _isLoadingMorePosts = false;
@@ -226,6 +317,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
           _fabAnimationController.forward();
         }
       }
+      unawaited(_loadInteractionState());
     } catch (e) {
       debugPrint('Error loading room data: $e');
       if (mounted && requestId == _loadRequestId) {
@@ -251,8 +343,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
           limit: _roomPostPageSize,
           offset: 0,
         ),
-        _supabaseService.getSavedPostIds(widget.userEmail),
-        _supabaseService.getUserVotes(widget.roomId),
       ]);
 
       if (!mounted || requestId != _loadRequestId) return;
@@ -260,21 +350,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       final posts = _coerceMapList(
         results[0],
       ).map(_normalizePostMetrics).toList();
-      final rawSavedPostIds = results[1];
-      final Set<String> savedPostIds = (rawSavedPostIds is List)
-          ? rawSavedPostIds.map((e) => e.toString()).toSet()
-          : (rawSavedPostIds is Set)
-          ? rawSavedPostIds.map((e) => e.toString()).toSet()
-          : <String>{};
-      final userVotes = _coerceStringIntMap(results[2]);
-
-      for (final post in posts) {
-        final postId = post['id']?.toString() ?? '';
-        if (postId.isNotEmpty) {
-          _savedPosts[postId] = savedPostIds.contains(postId);
-          _userVotes[postId] = userVotes[postId] ?? 0;
-        }
-      }
+      _roomPostsCache[_roomPostsCacheKey] = _clonePosts(posts);
+      _applyInteractionStateToPosts(posts);
       _primePhotoCacheFromPosts(posts);
 
       setState(() {
@@ -284,6 +361,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         _isLoadingMorePosts = false;
         _isLoading = false;
       });
+      unawaited(_loadInteractionState());
     } catch (e) {
       debugPrint('Error refreshing room posts: $e');
       if (mounted && requestId == _loadRequestId) {
@@ -315,8 +393,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
           limit: _roomPostPageSize,
           offset: _postsOffset,
         ),
-        _supabaseService.getSavedPostIds(widget.userEmail),
-        _supabaseService.getUserVotes(widget.roomId),
       ]);
 
       if (!mounted) return;
@@ -324,14 +400,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       final incomingPosts = _coerceMapList(
         results[0],
       ).map(_normalizePostMetrics).toList();
-
-      final rawSavedPostIds = results[1];
-      final Set<String> savedPostIds = (rawSavedPostIds is List)
-          ? rawSavedPostIds.map((e) => e.toString()).toSet()
-          : (rawSavedPostIds is Set)
-          ? rawSavedPostIds.map((e) => e.toString()).toSet()
-          : <String>{};
-      final userVotes = _coerceStringIntMap(results[2]);
 
       final existingIds = _posts
           .map((post) => post['id']?.toString() ?? '')
@@ -344,13 +412,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         if (postId.isNotEmpty && existingIds.contains(postId)) {
           continue;
         }
-        if (postId.isNotEmpty) {
-          _savedPosts[postId] = savedPostIds.contains(postId);
-          _userVotes[postId] = userVotes[postId] ?? 0;
-        }
         newPosts.add(post);
       }
 
+      _applyInteractionStateToPosts(newPosts);
       _primePhotoCacheFromPosts(newPosts);
 
       setState(() {
@@ -359,6 +424,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         _hasMorePosts = incomingPosts.length >= _roomPostPageSize;
         _isLoadingMorePosts = false;
       });
+      _roomPostsCache[_roomPostsCacheKey] = _clonePosts(_posts);
+      unawaited(_loadInteractionState());
     } catch (e) {
       debugPrint('Error loading more room posts: $e');
       if (!mounted) return;
@@ -576,6 +643,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
 
           _posts[index] = _normalizePostMetrics(updatedPost);
         });
+        _roomPostsCache[_roomPostsCacheKey] = _clonePosts(_posts);
+        _roomVoteCache[_roomVotesCacheKey] = Map<String, int>.from(_userVotes);
       }
 
       await _supabaseService.votePost(postId, widget.userEmail, direction);
@@ -583,6 +652,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       // _loadRoomData(silent: true);
     } catch (e) {
       if (mounted) {
+        _roomVoteCache[_roomVotesCacheKey] = Map<String, int>.from(_userVotes);
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Error voting: $e')));
@@ -619,6 +689,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       setState(() {
         _savedPosts[postId] = !currentlySaved;
       });
+      final cachedSavedIds = Set<String>.from(
+        _savedPostIdsCache[_normalizedUserEmail] ?? {},
+      );
+      if (currentlySaved) {
+        cachedSavedIds.remove(postId);
+      } else {
+        cachedSavedIds.add(postId);
+      }
+      _savedPostIdsCache[_normalizedUserEmail] = cachedSavedIds;
 
       if (currentlySaved) {
         await _supabaseService.unsavePost(
@@ -649,6 +728,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       setState(() {
         _savedPosts[postId] = originalState;
       });
+      final revertedSavedIds = Set<String>.from(
+        _savedPostIdsCache[_normalizedUserEmail] ?? {},
+      );
+      if (originalState) {
+        revertedSavedIds.add(postId);
+      } else {
+        revertedSavedIds.remove(postId);
+      }
+      _savedPostIdsCache[_normalizedUserEmail] = revertedSavedIds;
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -1802,10 +1890,21 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                               setModalState(() => isPosting = true);
                               try {
                                 String? imageUrl;
+                                String? imageFileId;
                                 if (selectedFile != null) {
-                                  imageUrl = await CloudinaryService.uploadFile(
-                                    selectedFile!,
-                                  );
+                                  final upload = await _backendApiService
+                                      .uploadChatImage(file: selectedFile!);
+                                  imageUrl =
+                                      upload['imageUrl']?.toString().trim() ??
+                                      upload['url']?.toString().trim();
+                                  imageFileId = upload['fileId']
+                                      ?.toString()
+                                      .trim();
+                                  if (imageUrl == null || imageUrl.isEmpty) {
+                                    throw const FormatException(
+                                      'Image upload completed without a URL.',
+                                    );
+                                  }
                                 } else if (selectedGif != null) {
                                   imageUrl = selectedGif!.images.original?.url;
                                 }
@@ -1819,13 +1918,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                                       _authService.displayName ??
                                       widget.userEmail.split('@')[0],
                                   imageUrl: imageUrl,
+                                  imageFileId: imageFileId,
                                 );
 
                                 if (sheetCtx.mounted) {
                                   Navigator.pop(sheetCtx);
                                 }
                                 if (mounted) {
-                                  _loadRoomData();
+                                  _refreshPostsOnly(silent: false);
                                 }
                               } catch (e) {
                                 if (sheetCtx.mounted) {

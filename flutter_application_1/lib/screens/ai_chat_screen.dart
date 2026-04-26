@@ -23,7 +23,6 @@ import '../services/auth_service.dart';
 import '../services/ai_chat_notification_service.dart';
 import '../services/analytics_service.dart';
 import '../services/backend_api_service.dart';
-import '../services/cloudinary_service.dart';
 import '../services/ai_chat_local_service.dart';
 import '../services/chat_session_repository.dart';
 import '../services/summary_pdf_service.dart';
@@ -5396,11 +5395,25 @@ class _AIChatScreenState extends State<AIChatScreen>
 
     setState(() => _isUploadingAttachment = true);
     try {
-      final url = await CloudinaryService.uploadFile(file);
+      final uploadPlan = await _api.getResourceUploadUrl(filename: file.name);
+      final uploadUrl = uploadPlan['uploadUrl']?.toString().trim();
+      final publicUrl = uploadPlan['publicUrl']?.toString().trim();
+      if (uploadUrl == null ||
+          uploadUrl.isEmpty ||
+          publicUrl == null ||
+          publicUrl.isEmpty) {
+        throw const FormatException('Failed to get attachment upload URL.');
+      }
+      await _api.uploadToPresignedUrl(
+        file: file,
+        uploadUrl: uploadUrl,
+        contentType: _api.inferContentType(file.name),
+        bytes: file.bytes,
+      );
       if (!mounted) return;
       setState(() {
         _attachments.add(
-          _ChatAttachment(name: file.name, url: url, isPdf: isPdf),
+          _ChatAttachment(name: file.name, url: publicUrl, isPdf: isPdf),
         );
       });
       ScaffoldMessenger.of(

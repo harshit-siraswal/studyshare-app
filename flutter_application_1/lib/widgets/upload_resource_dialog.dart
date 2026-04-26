@@ -18,6 +18,8 @@ import '../data/academic_subjects_data.dart';
 
 class UploadResourceDialog extends StatefulWidget {
   final String collegeId;
+  final String? collegeDomain;
+  final String? collegeName;
   final String userEmail;
   final VoidCallback? onUploadComplete;
   final PlatformFile? prefilledFile;
@@ -25,6 +27,8 @@ class UploadResourceDialog extends StatefulWidget {
   const UploadResourceDialog({
     super.key,
     required this.collegeId,
+    this.collegeDomain,
+    this.collegeName,
     required this.userEmail,
     this.onUploadComplete,
     this.prefilledFile,
@@ -72,14 +76,27 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
   ];
   static const int _maxUploadBytes = 50 * 1024 * 1024;
   static const int _skipHashThresholdBytes = 8 * 1024 * 1024;
-  static final Map<String, String> branches = <String, String>{
-    for (final option in branchOptions) option.shortLabel: option.value,
+
+  List<BranchOption> get _branchOptions => getBranchOptionsForCollege(
+    collegeId: widget.collegeId,
+    collegeDomain: widget.collegeDomain,
+    collegeName: widget.collegeName,
+  );
+
+  Map<String, String> get _branches => <String, String>{
+    for (final option in _branchOptions) option.shortLabel: option.value,
   };
 
   List<String> get availableSubjects =>
       _catalogSubjectsForCurrentScope.isNotEmpty
       ? _catalogSubjectsForCurrentScope
-      : getSubjectsForBranchAndSemester(_branch, _semester);
+      : getSubjectsForBranchAndSemester(
+          _branch,
+          _semester,
+          collegeId: widget.collegeId,
+          collegeDomain: widget.collegeDomain,
+          collegeName: widget.collegeName,
+        );
 
   List<String> get _catalogSubjectsForCurrentScope {
     final offerings = (_academicCatalog?['offerings'] as List?) ?? const [];
@@ -111,6 +128,9 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     }
     if (availableSubjects.isEmpty) {
       return 'No subjects available for this scope';
+    }
+    if (_subject.trim().isEmpty) {
+      return 'Select subject';
     }
     return _subject;
   }
@@ -333,7 +353,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     if (_title.trim().isEmpty) return _showError('Enter a title');
     if (_semester.isEmpty) return _showError('Select semester');
     if (_branch.isEmpty) return _showError('Select branch');
-    if (_subject.isEmpty) return _showError('Select subject');
+    if (_subject.isEmpty) return _showError('Enter or select a subject');
     String resolvedVideoUrl = '';
     if (_typeIndex == 0 && _selectedFile == null) {
       return _showError('Attach a file to contribute');
@@ -740,17 +760,17 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                         Expanded(
                           child: _buildChipSelector(
                             'Branch',
-                            branches.keys.toList(),
+                            _branches.keys.toList(),
                             _branch.isEmpty
                                 ? ''
-                                : branches.entries
+                                : _branches.entries
                                       .firstWhere(
                                         (e) => e.value == _branch,
                                         orElse: () => const MapEntry('', ''),
                                       )
                                       .key,
                             (v) => setState(() {
-                              _branch = branches[v] ?? '';
+                              _branch = _branches[v] ?? '';
                               _clearSubjectValue();
                             }),
                             isDark,
@@ -770,6 +790,18 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
                       enabled: _canSelectSubject,
                       placeholder: _subjectSelectorLabel,
                     ),
+                    if (!_canSelectSubject &&
+                        _semester.trim().isNotEmpty &&
+                        _branch.trim().isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      _buildInput(
+                        hint: 'Enter subject manually',
+                        controller: _subjectController,
+                        onChanged: (v) => _setSubjectValue(v.trim()),
+                        isDark: isDark,
+                        prefixIcon: Icons.edit_note_rounded,
+                      ),
+                    ],
                     const SizedBox(height: 12),
 
                     // Chapter & Topic
@@ -1395,6 +1427,8 @@ Future<void> showUploadDialog(
   BuildContext context,
   String collegeId,
   String userEmail, {
+  String? collegeDomain,
+  String? collegeName,
   VoidCallback? onComplete,
   PlatformFile? prefilledFile,
 }) async {
@@ -1404,6 +1438,8 @@ Future<void> showUploadDialog(
     backgroundColor: Colors.transparent,
     builder: (context) => UploadResourceDialog(
       collegeId: collegeId,
+      collegeDomain: collegeDomain,
+      collegeName: collegeName,
       userEmail: userEmail,
       onUploadComplete: onComplete,
       prefilledFile: prefilledFile,

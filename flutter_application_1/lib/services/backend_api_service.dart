@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'dart:developer' as developer;
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
@@ -352,8 +353,7 @@ class BackendApiService {
     }
   }
 
-  String get _baseUrl =>
-      AppConfig.apiUrl; // e.g. https://studyspace-backend.onrender.com
+  String get _baseUrl => AppConfig.apiUrl;
 
   List<Uri> _backendUris(String path) {
     final uris = _apiBaseUrls
@@ -916,31 +916,33 @@ class BackendApiService {
     );
   }
 
-  Future<Map<String, dynamic>> uploadChatImage({
-    required PlatformFile file,
+  Future<Map<String, dynamic>> _uploadChatImageRequest({
+    required Uri uri,
+    required String? token,
+    Uint8List? bytes,
+    String? filePath,
+    required String filename,
   }) async {
-    final token = await _getIdToken();
-    final uri = Uri.parse('$_baseUrl/api/chat/messages/upload-image');
     final request = http.MultipartRequest('POST', uri);
 
     if (token != null && token.isNotEmpty) {
       request.headers['Authorization'] = 'Bearer $token';
     }
 
-    if (file.bytes != null) {
+    if (bytes != null) {
       request.files.add(
-        http.MultipartFile.fromBytes('image', file.bytes!, filename: file.name),
+        http.MultipartFile.fromBytes('image', bytes, filename: filename),
       );
-    } else if (file.path != null) {
+    } else if (filePath != null && filePath.trim().isNotEmpty) {
       request.files.add(
         await http.MultipartFile.fromPath(
           'image',
-          file.path!,
-          filename: file.name,
+          filePath,
+          filename: filename,
         ),
       );
     } else {
-      throw BackendApiHttpException(
+      throw const BackendApiHttpException(
         statusCode: 400,
         message: 'Image data is unavailable for upload.',
       );
@@ -970,6 +972,156 @@ class BackendApiService {
     }
 
     return data;
+  }
+
+  Future<Map<String, dynamic>> uploadChatImage({
+    required PlatformFile file,
+  }) async {
+    final token = await _getIdToken();
+    final uris = _backendUris('/api/chat/messages/upload-image');
+    Object? lastError;
+
+    for (final uri in uris) {
+      try {
+        return await _uploadChatImageRequest(
+          uri: uri,
+          token: token,
+          bytes: file.bytes,
+          filePath: file.path,
+          filename: file.name,
+        );
+      } catch (error) {
+        lastError = error;
+        if (!_shouldFallbackToNextBaseUrl(error, uri.path, 'POST')) {
+          rethrow;
+        }
+      }
+    }
+
+    throw lastError ??
+        const BackendApiHttpException(
+          statusCode: 500,
+          message: 'Chat image upload failed',
+        );
+  }
+
+  Future<Map<String, dynamic>> uploadChatImageBytes({
+    required Uint8List bytes,
+    required String filename,
+  }) async {
+    final token = await _getIdToken();
+    final uris = _backendUris('/api/chat/messages/upload-image');
+    Object? lastError;
+
+    for (final uri in uris) {
+      try {
+        return await _uploadChatImageRequest(
+          uri: uri,
+          token: token,
+          bytes: bytes,
+          filename: filename,
+        );
+      } catch (error) {
+        lastError = error;
+        if (!_shouldFallbackToNextBaseUrl(error, uri.path, 'POST')) {
+          rethrow;
+        }
+      }
+    }
+
+    throw lastError ??
+        const BackendApiHttpException(
+          statusCode: 500,
+          message: 'Chat image upload failed',
+        );
+  }
+
+  String inferContentType(String filename) {
+    final lower = filename.trim().toLowerCase();
+    if (lower.endsWith('.png')) return 'image/png';
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    if (lower.endsWith('.gif')) return 'image/gif';
+    if (lower.endsWith('.pdf')) return 'application/pdf';
+    if (lower.endsWith('.doc')) return 'application/msword';
+    if (lower.endsWith('.docx')) {
+      return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    }
+    if (lower.endsWith('.ppt')) return 'application/vnd.ms-powerpoint';
+    if (lower.endsWith('.pptx')) {
+      return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    }
+    if (lower.endsWith('.odt')) {
+      return 'application/vnd.oasis.opendocument.text';
+    }
+    if (lower.endsWith('.odp')) {
+      return 'application/vnd.oasis.opendocument.presentation';
+    }
+    if (lower.endsWith('.txt')) return 'text/plain';
+    return 'application/octet-stream';
+  }
+
+  Future<void> uploadToPresignedUrl({
+    required PlatformFile file,
+    required String uploadUrl,
+    required String contentType,
+    Uint8List? bytes,
+  }) async {
+    final uri = Uri.parse(uploadUrl);
+
+    if (bytes != null) {
+      final response = await _httpClient
+          .put(
+            uri,
+            headers: <String, String>{
+              'Content-Type': contentType,
+              'Cache-Control': 'max-age=31536000',
+              'Content-Length': bytes.length.toString(),
+            },
+            body: bytes,
+          )
+          .timeout(_requestTimeout);
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw BackendApiHttpException(
+          statusCode: response.statusCode,
+          message: _friendlyHttpErrorMessage(
+            statusCode: response.statusCode,
+            body: response.body,
+            fallbackMessage: 'File upload failed',
+          ),
+        );
+      }
+      return;
+    }
+
+    final filePath = file.path?.trim() ?? '';
+    if (filePath.isEmpty) {
+      throw const BackendApiHttpException(
+        statusCode: 400,
+        message: 'File path is unavailable for upload.',
+      );
+    }
+
+    final request = http.StreamedRequest('PUT', uri);
+    request.headers['Content-Type'] = contentType;
+    request.headers['Cache-Control'] = 'max-age=31536000';
+    request.contentLength = file.size;
+    await request.sink.addStream(File(filePath).openRead());
+    await request.sink.close();
+
+    final response = await _httpClient.send(request).timeout(_requestTimeout);
+    final responseBody = await response.stream.bytesToString();
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw BackendApiHttpException(
+        statusCode: response.statusCode,
+        message: _friendlyHttpErrorMessage(
+          statusCode: response.statusCode,
+          body: responseBody,
+          fallbackMessage: 'File upload failed',
+        ),
+      );
+    }
   }
 
   Future<Map<String, dynamic>> getChatRoomInfo(String roomId) async {
@@ -1186,6 +1338,28 @@ class BackendApiService {
       '/api/resources/upload-url',
       method: 'POST',
       body: {'filename': filename},
+    );
+  }
+
+  Future<Map<String, dynamic>> getSyllabusUploadUrl({
+    required String filename,
+  }) async {
+    return _requestJson(
+      '/api/syllabus/upload-url',
+      method: 'POST',
+      body: <String, dynamic>{'filename': filename},
+    );
+  }
+
+  Future<Map<String, dynamic>> getAdminUploadPresign({
+    required String filename,
+    required String category,
+  }) async {
+    return _requestJson(
+      '/api/admin/uploads/presign',
+      method: 'POST',
+      body: <String, dynamic>{'filename': filename, 'category': category},
+      requireAuthToken: true,
     );
   }
 

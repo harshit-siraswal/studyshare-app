@@ -224,13 +224,16 @@ class _StudyScreenState extends State<StudyScreen>
     });
     _notifySyllabusContextChanged();
     _loadFilters();
-    _departmentsFuture = DepartmentsProvider.getDepartments();
+    _departmentsFuture = DepartmentsProvider.getDepartments(
+      collegeId: widget.collegeId,
+      collegeDomain: widget.collegeDomain,
+      collegeName: widget.collegeName,
+    );
     _scrollController.addListener(_onScroll);
 
     _ensureUserProfileLoaded().whenComplete(() {
       if (!mounted) return;
       _loadResources();
-      _loadFollowingFeed();
       _loadUnreadNotificationCount();
     });
   }
@@ -523,14 +526,12 @@ class _StudyScreenState extends State<StudyScreen>
   }
 
   Future<void> _loadFilters() async {
-    final semesters = await _supabaseService.getUniqueValues(
-      'semester',
-      widget.collegeId,
-    );
-    final branches = await _supabaseService.getUniqueValues(
-      'branch',
-      widget.collegeId,
-    );
+    final results = await Future.wait<List<String>>([
+      _supabaseService.getUniqueValues('semester', widget.collegeId),
+      _supabaseService.getUniqueValues('branch', widget.collegeId),
+    ]);
+    final semesters = results[0];
+    final branches = results[1];
 
     if (!mounted) return;
     setState(() {
@@ -2065,7 +2066,11 @@ class _StudyScreenState extends State<StudyScreen>
                 const SizedBox(height: 16),
                 ElevatedButton(
                   onPressed: () => setState(() {
-                    _departmentsFuture = DepartmentsProvider.getDepartments();
+                    _departmentsFuture = DepartmentsProvider.getDepartments(
+                      collegeId: widget.collegeId,
+                      collegeDomain: widget.collegeDomain,
+                      collegeName: widget.collegeName,
+                    );
                   }),
                   child: const Text('Retry'),
                 ),
@@ -2356,6 +2361,8 @@ class _StudyScreenState extends State<StudyScreen>
     return DepartmentCard3D(
       dept: dept,
       collegeId: widget.collegeId,
+      collegeDomain: widget.collegeDomain,
+      collegeName: widget.collegeName,
       canUploadSyllabus: _canUploadSyllabus,
       textColor: textColor,
       secondaryColor: secondaryColor,
@@ -3088,20 +3095,6 @@ class _StudyScreenState extends State<StudyScreen>
   }
 
   Widget _buildLoadingSkeleton() {
-    return GridView.builder(
-      padding: const EdgeInsets.all(20),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 0.75,
-      ),
-      itemCount: 6,
-      itemBuilder: (context, index) => _buildLoadingCard(),
-    );
-  }
-
-  Widget _buildLoadingCard() {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
     final baseColor =
@@ -3112,15 +3105,125 @@ class _StudyScreenState extends State<StudyScreen>
         : theme.colorScheme.surface;
     final highlightColor =
         Color.lerp(baseColor, lightTarget, isDark ? 0.22 : 0.08) ?? baseColor;
-    return Shimmer.fromColors(
-      baseColor: baseColor,
-      highlightColor: highlightColor,
-      child: Container(
-        decoration: BoxDecoration(
-          color: baseColor,
-          borderRadius: BorderRadius.circular(16),
-        ),
-      ),
+
+    return ListView.separated(
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+      itemCount: 5,
+      separatorBuilder: (_, index) => const SizedBox(height: 12),
+      itemBuilder: (context, index) {
+        return Shimmer.fromColors(
+          baseColor: baseColor,
+          highlightColor: highlightColor,
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: baseColor,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: highlightColor,
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            height: 14,
+                            decoration: BoxDecoration(
+                              color: highlightColor,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          FractionallySizedBox(
+                            widthFactor: 0.48,
+                            child: Container(
+                              height: 11,
+                              decoration: BoxDecoration(
+                                color: highlightColor,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  height: 18,
+                  width: double.infinity,
+                  decoration: BoxDecoration(
+                    color: highlightColor,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                FractionallySizedBox(
+                  widthFactor: 0.72,
+                  child: Container(
+                    height: 14,
+                    decoration: BoxDecoration(
+                      color: highlightColor,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: List<Widget>.generate(3, (chipIndex) {
+                    return Container(
+                      width: chipIndex == 0 ? 82 : 68,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: highlightColor,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    );
+                  }),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Container(
+                      width: 96,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: highlightColor,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    const Spacer(),
+                    Container(
+                      width: 84,
+                      height: 12,
+                      decoration: BoxDecoration(
+                        color: highlightColor,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 

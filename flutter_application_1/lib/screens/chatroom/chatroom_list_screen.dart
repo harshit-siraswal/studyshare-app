@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
 import '../../services/supabase_service.dart';
@@ -6,9 +7,9 @@ import '../../services/backend_api_service.dart';
 import '../../services/auth_service.dart';
 
 import '../profile/saved_posts_screen.dart';
-import '../../services/subscription_service.dart';
 import '../../utils/admin_access.dart';
 import 'chatroom_screen.dart';
+import 'create_room_screen.dart';
 import 'discover_rooms_screen.dart';
 
 class ChatroomListScreen extends StatefulWidget {
@@ -742,152 +743,25 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
       );
       return;
     }
-    // Minimal implementation
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final nameCtrl = TextEditingController();
-    bool isPrivate = false;
-    bool isPermanent = false;
-
-    // Check premium status
-    final subService = SubscriptionService();
-    final isPremium = await subService.isPremium();
-
-    if (!mounted) return;
-
-    try {
-      await showDialog(
-        context: context,
-        builder: (context) => StatefulBuilder(
-          builder: (context, setDialogState) => AlertDialog(
-            backgroundColor: isDark ? const Color(0xFF1C1C1E) : Colors.white,
-            title: Text(
-              'Create Room',
-              style: TextStyle(color: isDark ? Colors.white : Colors.black),
-            ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameCtrl,
-                  style: TextStyle(color: isDark ? Colors.white : Colors.black),
-                  decoration: InputDecoration(
-                    hintText: 'Room Name',
-                    filled: true,
-                    fillColor: isDark ? Colors.black45 : Colors.grey.shade100,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none,
-                    ),
-                  ),
-                ),
-                SwitchListTile(
-                  title: Text(
-                    'Private',
-                    style: TextStyle(
-                      color: isDark ? Colors.white : Colors.black,
-                    ),
-                  ),
-                  value: isPrivate,
-                  onChanged: (v) => setDialogState(() => isPrivate = v),
-                  activeThumbColor: isDark ? Colors.white : Colors.black,
-                ),
-                SwitchListTile(
-                  title: Row(
-                    children: [
-                      Text(
-                        'Permanent Room',
-                        style: TextStyle(
-                          color: isDark ? Colors.white : Colors.black,
-                        ),
-                      ),
-                      if (!isPremium) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.amber,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: const Text(
-                            'PRO',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.black,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  subtitle: Text(
-                    isPremium
-                        ? 'Room will not expire'
-                        : 'Upgrade to create permanent rooms (7 days expiry for free)',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: isDark ? Colors.white54 : Colors.grey,
-                    ),
-                  ),
-                  value: isPermanent,
-                  onChanged: isPremium
-                      ? (v) => setDialogState(() => isPermanent = v)
-                      : null, // Disabled for free users
-                  activeThumbColor: isDark ? Colors.white : Colors.black,
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-              TextButton(
-                onPressed: () async {
-                  final parentContext = this.context;
-                  final messenger = ScaffoldMessenger.of(parentContext);
-                  if (nameCtrl.text.isNotEmpty) {
-                    try {
-                      // Duration
-                      final duration = isPermanent
-                          ? SupabaseService.kUnlimitedDuration
-                          : SupabaseService.kDefaultExpiryDays;
-                      await _supabaseService.createChatRoom(
-                        name: nameCtrl.text,
-                        description: '',
-                        isPrivate: isPrivate,
-                        userEmail: widget.userEmail,
-                        collegeId: widget.collegeId,
-                        durationInDays: duration,
-                      );
-                      if (!parentContext.mounted) return;
-                      Navigator.of(parentContext).pop();
-                      _loadRooms();
-                    } catch (e) {
-                      if (!parentContext.mounted) return;
-                      messenger.showSnackBar(
-                        const SnackBar(
-                          content: Text(
-                            'Failed to create room. Please try again.',
-                          ),
-                        ),
-                      );
-                      // Log the actual error for debugging
-                      debugPrint('Create room error: $e');
-                    }
-                  }
-                },
-                child: const Text('Create'),
-              ),
-            ],
-          ),
+    final result = await Navigator.of(context).push<Map<String, dynamic>>(
+      MaterialPageRoute(
+        builder: (_) => CreateRoomScreen(
+          collegeId: widget.collegeId,
+          userEmail: widget.userEmail,
         ),
+      ),
+    );
+
+    if (!mounted || result == null) return;
+
+    await _loadRooms();
+    final joinCode = result['joinCode']?.toString().trim();
+    if (joinCode != null && joinCode.isNotEmpty) {
+      await Clipboard.setData(ClipboardData(text: joinCode));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Room created. Code copied: $joinCode')),
       );
-    } finally {
-      nameCtrl.dispose();
     }
   }
 

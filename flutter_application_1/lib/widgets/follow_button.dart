@@ -9,12 +9,14 @@ class FollowButton extends StatefulWidget {
   final String targetEmail;
   final String? targetName;
   final VoidCallback? onFollowChanged;
+  final ValueChanged<FollowStatus>? onStatusChanged;
 
   const FollowButton({
     super.key,
     required this.targetEmail,
     this.targetName,
     this.onFollowChanged,
+    this.onStatusChanged,
   });
 
   @override
@@ -149,10 +151,7 @@ class _FollowButtonState extends State<FollowButton> {
       }
 
       widget.onFollowChanged?.call();
-      Future<void>.delayed(const Duration(milliseconds: 350), () async {
-        if (!mounted) return;
-        await _checkStatus(showLoading: false);
-      });
+      widget.onStatusChanged?.call(_status);
     } catch (e) {
       debugPrint('Error updating follow status: $e');
       if (mounted) {

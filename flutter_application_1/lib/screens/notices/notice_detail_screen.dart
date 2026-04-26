@@ -11,12 +11,12 @@ import 'package:photo_view/photo_view_gallery.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 // Stickers handled via file_picker in CommentInputBox
 import '../../config/theme.dart';
+import '../../services/backend_api_service.dart';
 import '../../services/supabase_service.dart';
 import '../../services/auth_service.dart';
 import '../../models/department_account.dart';
 import '../profile/user_profile_screen.dart';
 import '../../widgets/comment_input_box.dart';
-import '../../services/cloudinary_service.dart';
 import '../../services/subscription_service.dart';
 import '../../utils/sticker_comment_codec.dart';
 import '../../widgets/full_screen_image_viewer.dart';
@@ -48,6 +48,7 @@ class NoticeDetailScreen extends StatefulWidget {
 }
 
 class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
+  final BackendApiService _backendApiService = BackendApiService();
   final SupabaseService _supabaseService = SupabaseService();
   final AuthService _authService = AuthService();
   final SubscriptionService _subscriptionService = SubscriptionService();
@@ -1448,8 +1449,16 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
     try {
       final bytes = await stickerFile.readAsBytes();
       final filename = 'sticker_${DateTime.now().millisecondsSinceEpoch}.png';
-
-      final url = await CloudinaryService.uploadBytes(bytes, filename);
+      final upload = await _backendApiService.uploadChatImageBytes(
+        bytes: bytes,
+        filename: filename,
+      );
+      final url =
+          upload['imageUrl']?.toString().trim() ??
+          upload['url']?.toString().trim();
+      if (url == null || url.isEmpty) {
+        throw const FormatException('Sticker upload completed without a URL.');
+      }
 
       if (_authService.userEmail == null) throw Exception('User not signed in');
 

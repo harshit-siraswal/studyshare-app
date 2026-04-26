@@ -1,15 +1,16 @@
 import 'dart:io';
+import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_cropper/image_cropper.dart';
 import 'package:path/path.dart' as p;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../config/theme.dart';
 import '../../data/academic_subjects_data.dart';
 import '../../services/backend_api_service.dart';
-import '../../services/cloudinary_service.dart';
 import '../../services/supabase_service.dart';
 import '../../utils/admin_access.dart';
 
@@ -55,6 +56,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   String? _selectedBranch;
   String? _selectedSubject;
   List<String> _availableSubjects = [];
+  String? _selectedCollegeId;
+  String? _selectedCollegeDomain;
+  String? _selectedCollegeName;
   PlatformFile? _pickedImage;
   bool _saving = false;
 
@@ -99,11 +103,17 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   String? _normalizedBranch(String? value) {
     final normalized = normalizeBranchCode(value);
     if (normalized.isEmpty) return null;
-    final knownBranch = branchOptions.any(
+    final knownBranch = _branchOptions.any(
       (option) => option.value == normalized,
     );
     return knownBranch ? normalized : null;
   }
+
+  List<BranchOption> get _branchOptions => getBranchOptionsForCollege(
+    collegeId: _selectedCollegeId,
+    collegeDomain: _selectedCollegeDomain,
+    collegeName: _selectedCollegeName,
+  );
 
   String _deriveUsernameFromEmail(String? email) {
     final normalized = (email ?? '').trim().toLowerCase();
@@ -112,7 +122,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   String _sanitizeUsernameInput(String value) {
-    final normalized = value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '');
+    final normalized = value.trim().toLowerCase().replaceAll(
+      RegExp(r'\s+'),
+      '',
+    );
     final cleaned = normalized
         .replaceAll(RegExp(r'[^a-z0-9._-]'), '')
         .replaceAll(RegExp(r'^[._-]+'), '')
@@ -155,6 +168,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       keepExistingSelection: true,
       preserveCustomInput: true,
     );
+    _loadCollegeContext();
   }
 
   void _refreshSubjectOptionsForBranch(
@@ -162,7 +176,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     bool keepExistingSelection = false,
     bool preserveCustomInput = false,
   }) {
-    final subjects = getSubjectsForBranchAndSemester(branch, _selectedSemester);
+    final subjects = getSubjectsForBranchAndSemester(
+      branch,
+      _selectedSemester,
+      collegeId: _selectedCollegeId,
+      collegeDomain: _selectedCollegeDomain,
+      collegeName: _selectedCollegeName,
+    );
     _availableSubjects = _uniqueNonEmptyOptions(subjects);
 
     final currentSubject = _normalizedSelection(_subjectController.text);
@@ -184,6 +204,33 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
     _selectedSubject = null;
     _subjectController.clear();
+  }
+
+  Future<void> _loadCollegeContext() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final selectedCollege = prefs.getString('selectedCollege');
+      if (selectedCollege == null || selectedCollege.trim().isEmpty) {
+        return;
+      }
+
+      final data = jsonDecode(selectedCollege) as Map<String, dynamic>;
+      if (!mounted) return;
+
+      setState(() {
+        _selectedCollegeId = data['id']?.toString().trim();
+        _selectedCollegeDomain = data['domain']?.toString().trim();
+        _selectedCollegeName = data['name']?.toString().trim();
+        _selectedBranch = _normalizedBranch(_selectedBranch);
+        _refreshSubjectOptionsForBranch(
+          _selectedBranch,
+          keepExistingSelection: true,
+          preserveCustomInput: true,
+        );
+      });
+    } catch (e) {
+      debugPrint('Failed to load college context for profile editor: $e');
+    }
   }
 
   @override
@@ -278,7 +325,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     try {
       String? photoUrl = widget.initialPhotoUrl;
       if (_pickedImage != null) {
-        photoUrl = await CloudinaryService.uploadFile(_pickedImage!);
+        final upload = await _api.uploadChatImage(file: _pickedImage!);
+        photoUrl =
+            upload['imageUrl']?.toString().trim() ??
+            upload['url']?.toString().trim() ??
+            widget.initialPhotoUrl;
       }
 
       final normalizedSemester = _normalizedSemester(_selectedSemester);
@@ -462,7 +513,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       _selectedSemester,
       _semesterOptions,
     );
-    final branchValues = branchOptions.map((option) => option.value).toList();
+    final branchValues = _branchOptions.map((option) => option.value).toList();
     final branchValue = _safeDropdownValue(_selectedBranch, branchValues);
     final subjectOptions = _supportsSubjectField
         ? _uniqueNonEmptyOptions(_availableSubjects)
@@ -629,7 +680,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                    selectedItemBuilder: (context) => branchOptions
+                    selectedItemBuilder: (context) => _branchOptions
                         .map(
                           (option) => Align(
                             alignment: Alignment.centerLeft,
@@ -640,7 +691,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                           ),
                         )
                         .toList(),
-                    items: branchOptions
+                    items: _branchOptions
                         .map(
                           (option) => DropdownMenuItem(
                             value: option.value,

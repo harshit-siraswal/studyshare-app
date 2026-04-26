@@ -215,7 +215,7 @@ class AppRoot extends StatefulWidget {
   State<AppRoot> createState() => _AppRootState();
 }
 
-class _AppRootState extends State<AppRoot> {
+class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
   AppState _appState = AppState.loading;
   SharedPreferences? _prefs;
   ThemeProvider? _themeProvider;
@@ -241,7 +241,7 @@ class _AppRootState extends State<AppRoot> {
     final host = uri.host.toLowerCase();
     if (host.isEmpty) return false;
     return _trustedExternalHosts.contains(host) ||
-      host.endsWith('.studyshare.in');
+        host.endsWith('.studyshare.in');
   }
 
   ThemeMode get _bootThemeMode {
@@ -253,13 +253,23 @@ class _AppRootState extends State<AppRoot> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     initApp();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _authStateSubscription?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      unawaited(HomeWidgetService.instance.handleAppResumed());
+    }
   }
 
   void _bindAuthAwareFcmSync() {

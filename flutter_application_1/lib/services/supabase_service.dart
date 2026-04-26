@@ -4385,6 +4385,7 @@ class SupabaseService {
     required String userEmail,
     required String userName,
     String? imageUrl,
+    String? imageFileId,
     String? linkUrl,
   }) async {
     try {
@@ -4395,6 +4396,7 @@ class SupabaseService {
         roomId: roomId,
         content: fullContent,
         imageUrl: imageUrl,
+        imageFileId: imageFileId,
         authorName: userName,
         context: ctx,
       );

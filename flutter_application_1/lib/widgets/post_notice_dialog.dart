@@ -4,7 +4,6 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../config/theme.dart';
 import '../models/department_option.dart';
-import '../services/cloudinary_service.dart';
 import '../services/backend_api_service.dart';
 import '../services/supabase_service.dart';
 
@@ -16,6 +15,7 @@ Future<bool> showPostNoticeDialog({
   final parentCtx = context;
   final resolvedIsDark =
       isDark ?? Theme.of(parentCtx).brightness == Brightness.dark;
+  final backendApi = BackendApiService();
   final supabaseService = SupabaseService();
   final titleCtrl = TextEditingController();
   final contentCtrl = TextEditingController();
@@ -111,6 +111,7 @@ Future<bool> showPostNoticeDialog({
   }
 
   try {
+    if (!parentCtx.mounted) return false;
     await showDialog<void>(
       context: parentCtx,
       builder: (dialogCtx) => StatefulBuilder(
@@ -347,83 +348,110 @@ Future<bool> showPostNoticeDialog({
               onPressed: isSubmitting
                   ? null
                   : () async {
-                if (titleCtrl.text.trim().isEmpty ||
-                    contentCtrl.text.trim().isEmpty) {
-                  ScaffoldMessenger.of(parentCtx).showSnackBar(
-                    const SnackBar(
-                      content: Text('Please fill title and content'),
-                    ),
-                  );
-                  return;
-                }
-                final normalizedDept = (selectedDept ?? '').trim();
-                if (uniqueDepartmentOptions.isEmpty || normalizedDept.isEmpty) {
-                  ScaffoldMessenger.of(parentCtx).showSnackBar(
-                    const SnackBar(
-                      content: Text(
-                        'Please select a valid department before posting.',
-                      ),
-                    ),
-                  );
-                  return;
-                }
+                      if (titleCtrl.text.trim().isEmpty ||
+                          contentCtrl.text.trim().isEmpty) {
+                        ScaffoldMessenger.of(parentCtx).showSnackBar(
+                          const SnackBar(
+                            content: Text('Please fill title and content'),
+                          ),
+                        );
+                        return;
+                      }
+                      final normalizedDept = (selectedDept ?? '').trim();
+                      if (uniqueDepartmentOptions.isEmpty ||
+                          normalizedDept.isEmpty) {
+                        ScaffoldMessenger.of(parentCtx).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Please select a valid department before posting.',
+                            ),
+                          ),
+                        );
+                        return;
+                      }
 
-                try {
-                  setDialogState(() => isSubmitting = true);
-                  String? uploadedFileUrl;
-                  String? uploadedImageUrl;
-                  String? uploadedFileType;
-                  final attachment = selectedAttachment;
-                  if (attachment != null) {
-                    final ext = fileExtension(attachment.name);
-                    uploadedFileType = ext == 'pdf' ? 'pdf' : 'image';
-                    uploadedFileUrl = await CloudinaryService.uploadFile(
-                      attachment,
-                      timeout: const Duration(seconds: 90),
-                    );
-                    if (isImageAttachment(attachment)) {
-                      uploadedImageUrl = uploadedFileUrl;
-                    }
-                  }
+                      try {
+                        setDialogState(() => isSubmitting = true);
+                        String? uploadedFileUrl;
+                        String? uploadedImageUrl;
+                        String? uploadedFileType;
+                        final attachment = selectedAttachment;
+                        if (attachment != null) {
+                          final ext = fileExtension(attachment.name);
+                          uploadedFileType = ext == 'pdf' ? 'pdf' : 'image';
+                          final uploadPlan = await backendApi
+                              .getAdminUploadPresign(
+                                filename: attachment.name,
+                                category: 'notice',
+                              );
+                          final uploadUrl = uploadPlan['uploadUrl']
+                              ?.toString()
+                              .trim();
+                          final publicUrl = uploadPlan['publicUrl']
+                              ?.toString()
+                              .trim();
+                          if (uploadUrl == null ||
+                              uploadUrl.isEmpty ||
+                              publicUrl == null ||
+                              publicUrl.isEmpty) {
+                            throw const FormatException(
+                              'Failed to get attachment upload URL.',
+                            );
+                          }
+                          await backendApi.uploadToPresignedUrl(
+                            file: attachment,
+                            uploadUrl: uploadUrl,
+                            contentType: backendApi.inferContentType(
+                              attachment.name,
+                            ),
+                          );
+                          uploadedFileUrl = publicUrl;
+                          if (isImageAttachment(attachment)) {
+                            uploadedImageUrl = uploadedFileUrl;
+                          }
+                        }
 
-                  await supabaseService.addNotice(
-                    collegeId: collegeId,
-                    title: titleCtrl.text.trim(),
-                    content: contentCtrl.text.trim(),
-                    department: normalizedDept,
-                    imageUrl: uploadedImageUrl,
-                    fileUrl: uploadedFileUrl,
-                    fileType: uploadedFileType,
-                  );
-                  posted = true;
-                  if (!parentCtx.mounted) return;
-                  Navigator.pop(dialogCtx);
-                  ScaffoldMessenger.of(parentCtx).showSnackBar(
-                    const SnackBar(
-                      content: Text('Notice posted successfully!'),
-                    ),
-                  );
-                } catch (e) {
-                  debugPrint('Post notice failed: $e');
-                  if (!parentCtx.mounted) return;
-                  final errorMessage = e is BackendApiHttpException
-                      ? e.message.trim()
-                      : e.toString().replaceFirst('Exception: ', '').trim();
-                  ScaffoldMessenger.of(parentCtx).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        errorMessage.isNotEmpty
-                            ? errorMessage
-                            : 'Failed to post notice. Please try again.',
-                      ),
-                    ),
-                  );
-                } finally {
-                  if (!posted && parentCtx.mounted) {
-                    setDialogState(() => isSubmitting = false);
-                  }
-                }
-              },
+                        await supabaseService.addNotice(
+                          collegeId: collegeId,
+                          title: titleCtrl.text.trim(),
+                          content: contentCtrl.text.trim(),
+                          department: normalizedDept,
+                          imageUrl: uploadedImageUrl,
+                          fileUrl: uploadedFileUrl,
+                          fileType: uploadedFileType,
+                        );
+                        posted = true;
+                        if (!parentCtx.mounted) return;
+                        Navigator.pop(dialogCtx);
+                        ScaffoldMessenger.of(parentCtx).showSnackBar(
+                          const SnackBar(
+                            content: Text('Notice posted successfully!'),
+                          ),
+                        );
+                      } catch (e) {
+                        debugPrint('Post notice failed: $e');
+                        if (!parentCtx.mounted) return;
+                        final errorMessage = e is BackendApiHttpException
+                            ? e.message.trim()
+                            : e
+                                  .toString()
+                                  .replaceFirst('Exception: ', '')
+                                  .trim();
+                        ScaffoldMessenger.of(parentCtx).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              errorMessage.isNotEmpty
+                                  ? errorMessage
+                                  : 'Failed to post notice. Please try again.',
+                            ),
+                          ),
+                        );
+                      } finally {
+                        if (!posted && parentCtx.mounted) {
+                          setDialogState(() => isSubmitting = false);
+                        }
+                      }
+                    },
               icon: isSubmitting
                   ? const SizedBox(
                       width: 16,

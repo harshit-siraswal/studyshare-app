@@ -7,6 +7,8 @@ import '../../screens/study/syllabus_screen.dart';
 class DepartmentCard3D extends StatefulWidget {
   final DepartmentData dept;
   final String collegeId;
+  final String collegeDomain;
+  final String collegeName;
   final bool canUploadSyllabus;
   final Color textColor;
   final Color secondaryColor;
@@ -17,6 +19,8 @@ class DepartmentCard3D extends StatefulWidget {
     super.key,
     required this.dept,
     required this.collegeId,
+    required this.collegeDomain,
+    required this.collegeName,
     required this.canUploadSyllabus,
     required this.textColor,
     required this.secondaryColor,
@@ -132,7 +136,7 @@ class _DepartmentCard3DState extends State<DepartmentCard3D>
 
             try {
               await Future.delayed(const Duration(milliseconds: 150));
-              if (!mounted) {
+              if (!mounted || !context.mounted) {
                 _isNavigating = false;
                 return;
               }
@@ -142,6 +146,8 @@ class _DepartmentCard3DState extends State<DepartmentCard3D>
                 MaterialPageRoute(
                   builder: (context) => SyllabusScreen(
                     collegeId: widget.collegeId,
+                    collegeDomain: widget.collegeDomain,
+                    collegeName: widget.collegeName,
                     department: widget.dept.name,
                     departmentName: widget.dept.full,
                     departmentColor: widget.dept.color,

@@ -9,6 +9,8 @@ import 'syllabus_upload_screen.dart';
 
 class SyllabusScreen extends StatefulWidget {
   final String collegeId;
+  final String collegeDomain;
+  final String collegeName;
   final String department;
   final String departmentName;
   final Color departmentColor;
@@ -17,6 +19,8 @@ class SyllabusScreen extends StatefulWidget {
   const SyllabusScreen({
     super.key,
     required this.collegeId,
+    required this.collegeDomain,
+    required this.collegeName,
     required this.department,
     required this.departmentName,
     required this.departmentColor,
@@ -47,7 +51,7 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
     super.initState();
   }
 
-  void _onSemesterChanged(String? newValue) {
+  Future<void> _onSemesterChanged(String? newValue) async {
     final normalized = (newValue ?? '').trim();
     if (normalized.isEmpty) return;
 
@@ -56,10 +60,12 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
     setState(() {
       _selectedSemester = normalized;
       _selectedSubject = null; // Reset subject
-      _availableSubjects = _getSubjectsForBranch();
+      _availableSubjects = const <String>[];
       _syllabusItems = []; // Clear list until subject selected
       _hasFetched = false;
     });
+
+    await _refreshAvailableSubjects();
   }
 
   void _onSubjectChanged(String? newValue) {
@@ -77,11 +83,48 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
     return getSubjectsForBranchAndSemester(
       widget.department,
       _selectedSemester,
+      collegeId: widget.collegeId,
+      collegeDomain: widget.collegeDomain,
+      collegeName: widget.collegeName,
     );
   }
 
-  EdgeInsets get _contentPadding =>
-      const EdgeInsets.fromLTRB(16, 16, 16, 24);
+  Future<void> _refreshAvailableSubjects() async {
+    final localSubjects = _getSubjectsForBranch();
+    if (localSubjects.isNotEmpty) {
+      if (!mounted) return;
+      setState(() => _availableSubjects = localSubjects);
+      return;
+    }
+
+    if (_selectedSemester == null || _selectedSemester!.trim().isEmpty) {
+      if (!mounted) return;
+      setState(() => _availableSubjects = const <String>[]);
+      return;
+    }
+
+    try {
+      final rows = await _supabaseService.getSyllabus(
+        collegeId: widget.collegeId,
+        department: normalizeBranchCode(widget.department),
+        semester: _selectedSemester,
+      );
+      final subjects =
+          rows
+              .map((row) => row['subject']?.toString().trim() ?? '')
+              .where((value) => value.isNotEmpty)
+              .toSet()
+              .toList()
+            ..sort();
+      if (!mounted) return;
+      setState(() => _availableSubjects = subjects);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _availableSubjects = const <String>[]);
+    }
+  }
+
+  EdgeInsets get _contentPadding => const EdgeInsets.fromLTRB(16, 16, 16, 24);
 
   Future<void> _fetchSyllabus() async {
     if (_selectedSemester == null || _selectedSubject == null) return;
@@ -127,6 +170,8 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
       MaterialPageRoute(
         builder: (_) => SyllabusUploadScreen(
           collegeId: widget.collegeId,
+          collegeDomain: widget.collegeDomain,
+          collegeName: widget.collegeName,
           department: widget.department,
           departmentName: widget.departmentName,
           departmentColor: widget.departmentColor,
@@ -563,6 +608,4 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
       ),
     );
   }
-
-
 }

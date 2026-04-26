@@ -20,11 +20,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
   static const String _collegeRequestEmail = AppConfig.supportEmail;
   static const Duration _collegeFetchTimeout = Duration(seconds: 8);
   static const List<Map<String, String>> _starterCollegeDirectory = [
-    {
-      'id': 'kiet',
-      'name': 'KIET Group of Institutions',
-      'domain': 'kiet.edu',
-    },
+    {'id': 'kiet', 'name': 'KIET Group of Institutions', 'domain': 'kiet.edu'},
     {'id': 'iiitbh', 'name': 'IIIT Bhagalpur', 'domain': 'iiitbh.ac.in'},
     {
       'id': 'iiitsonepat',
@@ -75,6 +71,18 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
       'name': 'Manipal Institute of Technology',
       'domain': 'learner.manipal.edu',
     },
+    {
+      'id': 'thapar',
+      'name': 'Thapar Institute of Engineering and Technology',
+      'domain': 'thapar.edu',
+    },
+    {
+      'id': 'coep',
+      'name': 'COEP Technological University',
+      'domain': 'coeptech.ac.in',
+    },
+    {'id': 'iiitn', 'name': 'IIIT Nagpur', 'domain': 'iiitn.ac.in'},
+    {'id': 'usar', 'name': 'USAR, GGSIPU', 'domain': 'ipu.ac.in'},
   ];
 
   final SupabaseService _supabaseService = SupabaseService();

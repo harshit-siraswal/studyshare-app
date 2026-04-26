@@ -1,5 +1,7 @@
 import 'dart:ui';
 
+import 'academic_subjects_data.dart';
+
 class DepartmentData {
   final String name;
   final String full;
@@ -61,76 +63,45 @@ class DepartmentData {
 }
 
 class DepartmentsProvider {
-  // Syllabus departments use a curated academic list.
-  static Future<List<DepartmentData>> getDepartments() async {
+  static const List<Color> _departmentPalette = <Color>[
+    Color(0xFF8B5CF6),
+    Color(0xFF14B8A6),
+    Color(0xFF6366F1),
+    Color(0xFF7C3AED),
+    Color(0xFF0EA5E9),
+    Color(0xFF2563EB),
+    Color(0xFF10B981),
+    Color(0xFF0F766E),
+    Color(0xFFF59E0B),
+    Color(0xFF0284C7),
+    Color(0xFFEF4444),
+    Color(0xFFDC2626),
+    Color(0xFF64748B),
+    Color(0xFF8B5E3C),
+    Color(0xFFD97706),
+    Color(0xFF6D28D9),
+  ];
+
+  static Future<List<DepartmentData>> getDepartments({
+    String? collegeId,
+    String? collegeDomain,
+    String? collegeName,
+  }) async {
     await Future.delayed(const Duration(milliseconds: 10));
 
-    return const [
-      DepartmentData(
-        name: 'CSE',
-        full: 'Computer Science & Engineering (CSE/CS)',
-        color: Color(0xFF8B5CF6),
-      ),
-      DepartmentData(
-        name: 'IT/CSIT',
-        full: 'Information Technology (IT/CSIT)',
-        color: Color(0xFF14B8A6),
-      ),
-      DepartmentData(
-        name: 'CSE-AI',
-        full: 'Computer Science (AI)',
-        color: Color(0xFF6366F1),
-      ),
-      DepartmentData(
-        name: 'CSE-AIML',
-        full: 'Computer Science (AI & ML)',
-        color: Color(0xFF7C3AED),
-      ),
-      DepartmentData(
-        name: 'CSE-DS',
-        full: 'Computer Science (Data Science)',
-        color: Color(0xFF0EA5E9),
-      ),
-      DepartmentData(
-        name: 'CSE-CS',
-        full: 'Computer Science (Cyber Security)',
-        color: Color(0xFF2563EB),
-      ),
-      DepartmentData(
-        name: 'ECE',
-        full: 'Electronics & Communication Engineering (ECE)',
-        color: Color(0xFF10B981),
-      ),
-      DepartmentData(
-        name: 'ECE-VLSI',
-        full: 'ECE (VLSI Design & Technology)',
-        color: Color(0xFF0F766E),
-      ),
-      DepartmentData(
-        name: 'EEE',
-        full: 'Electrical & Electronics Engineering (EEE)',
-        color: Color(0xFFF59E0B),
-      ),
-      DepartmentData(
-        name: 'ELCE',
-        full: 'Electrical & Computer Engineering (ELCE)',
-        color: Color(0xFF0284C7),
-      ),
-      DepartmentData(
-        name: 'ME',
-        full: 'Mechanical Engineering (ME)',
-        color: Color(0xFFEF4444),
-      ),
-      DepartmentData(
-        name: 'AM&IA',
-        full: 'Advanced Mechatronics & Industrial Automation',
-        color: Color(0xFFDC2626),
-      ),
-      DepartmentData(
-        name: 'CE',
-        full: 'Civil Engineering',
-        color: Color(0xFF6366F1),
-      ),
+    final options = getBranchOptionsForCollege(
+      collegeId: collegeId,
+      collegeDomain: collegeDomain,
+      collegeName: collegeName,
+    );
+
+    return <DepartmentData>[
+      for (var index = 0; index < options.length; index++)
+        DepartmentData(
+          name: options[index].shortLabel,
+          full: options[index].label,
+          color: _departmentPalette[index % _departmentPalette.length],
+        ),
     ];
   }
 }

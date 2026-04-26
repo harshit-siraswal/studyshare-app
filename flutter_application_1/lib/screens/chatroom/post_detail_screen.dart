@@ -9,7 +9,6 @@ import '../../services/auth_service.dart';
 import '../../widgets/emoji_reactions.dart';
 import '../profile/user_profile_screen.dart';
 import '../../services/backend_api_service.dart';
-import '../../services/cloudinary_service.dart';
 import '../../services/subscription_service.dart';
 import '../../widgets/comment_input_box.dart';
 
@@ -45,6 +44,9 @@ class PostDetailScreen extends StatefulWidget {
 }
 
 class _PostDetailScreenState extends State<PostDetailScreen> {
+  static final Map<String, List<Map<String, dynamic>>> _commentCache =
+      <String, List<Map<String, dynamic>>>{};
+
   final SupabaseService _supabaseService = SupabaseService();
   final AuthService _authService = AuthService();
   final BackendApiService _backendApiService = BackendApiService();
@@ -82,6 +84,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
   static const List<String> _privilegedDomains = ['@kiet.edu'];
 
+  String get _commentCacheKey => widget.post['id'].toString();
+
   bool _isPrivilegedEmail(String email) {
     final normalized = email.trim().toLowerCase();
     return _privilegedDomains.any((domain) => normalized.endsWith(domain));
@@ -92,6 +96,24 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final normalizedDomain = domain.trim().toLowerCase().replaceAll('@', '');
     if (normalizedEmail.isEmpty || normalizedDomain.isEmpty) return false;
     return normalizedEmail.endsWith('@$normalizedDomain');
+  }
+
+  Map<String, dynamic> _cloneCommentNode(Map<String, dynamic> comment) {
+    final clone = Map<String, dynamic>.from(comment);
+    clone['replies'] = _safeReplyList(
+      comment['replies'],
+    ).map(_cloneCommentNode).toList(growable: true);
+    return clone;
+  }
+
+  List<Map<String, dynamic>> _cloneCommentTree(
+    List<Map<String, dynamic>> comments,
+  ) {
+    return comments.map(_cloneCommentNode).toList(growable: true);
+  }
+
+  void _cacheComments(List<Map<String, dynamic>> comments) {
+    _commentCache[_commentCacheKey] = _cloneCommentTree(comments);
   }
 
   Widget _buildCommentContent(
@@ -201,6 +223,16 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   Future<void> _loadData() async {
+    final cachedComments = _commentCache[_commentCacheKey];
+    if (cachedComments != null && mounted) {
+      final hydratedComments = _cloneCommentTree(cachedComments);
+      _primePhotoCacheFromComments(hydratedComments);
+      setState(() {
+        _comments = hydratedComments;
+        _isLoading = false;
+      });
+    }
+
     try {
       final results = await Future.wait<Object?>([
         _supabaseService.getPostComments(widget.post['id'].toString()),
@@ -212,10 +244,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       final comments = (results[0] as List).cast<Map<String, dynamic>>();
       final isSaved = results[1] as bool;
       _primePhotoCacheFromComments(comments);
+      _cacheComments(comments);
 
       if (mounted) {
         setState(() {
-          _comments = comments;
+          _comments = _cloneCommentTree(comments);
           _isSaved = isSaved;
           _isLoading = false;
         });
@@ -238,8 +271,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         widget.post['id'].toString(),
       );
       _primePhotoCacheFromComments(comments);
+      _cacheComments(comments);
       if (!mounted) return;
-      setState(() => _comments = comments);
+      setState(() => _comments = _cloneCommentTree(comments));
     } catch (e, stackTrace) {
       debugPrint(
         'PostDetailScreen._refreshCommentsOnly error: $e\n$stackTrace',
@@ -308,6 +342,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       nextComments.add(comment);
     }
     _primePhotoCacheFromComments([comment]);
+    _cacheComments(nextComments);
     setState(() => _comments = nextComments);
   }
 
@@ -338,6 +373,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         .map((entry) => Map<String, dynamic>.from(entry))
         .toList(growable: true);
     if (_removeCommentFromTree(nextComments, commentId)) {
+      _cacheComments(nextComments);
       setState(() => _comments = nextComments);
     }
   }
@@ -488,7 +524,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   Future<void> _deletePostCommentById(String commentId) async {
     try {
       await _supabaseService.deletePostComment(commentId);
-      await _loadData();
+      _removeCommentLocally(commentId);
+      unawaited(_refreshCommentsOnly());
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
@@ -727,12 +764,13 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       width: 120,
       height: 120,
       fit: BoxFit.contain,
-      placeholder: (_, __) => SizedBox(
+      placeholder: (context, imageUrl) => SizedBox(
         width: 120,
         height: 120,
         child: Container(color: isDark ? Colors.white10 : Colors.grey.shade200),
       ),
-      errorWidget: (_, __, ___) => const Icon(Icons.broken_image_outlined),
+      errorWidget: (context, imageUrl, error) =>
+          const Icon(Icons.broken_image_outlined),
     );
   }
 
@@ -1950,7 +1988,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     if (_isReadOnly) return;
     if (!await _ensurePremiumStickerAccess()) return;
 
-    // For stickers, we would upload to cloudinary or storage and get URL
+    // Upload sticker media first, then persist the encoded URL as comment content.
     // For now, show a placeholder message
     setState(() => _isSubmitting = true);
     String optimisticCommentId = '';
@@ -1966,7 +2004,16 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           : '.png';
       final filename = 'sticker_${DateTime.now().millisecondsSinceEpoch}$ext';
 
-      final url = await CloudinaryService.uploadBytes(bytes, filename);
+      final upload = await _backendApiService.uploadChatImageBytes(
+        bytes: bytes,
+        filename: filename,
+      );
+      final url =
+          upload['imageUrl']?.toString().trim() ??
+          upload['url']?.toString().trim();
+      if (url == null || url.isEmpty) {
+        throw const FormatException('Sticker upload completed without a URL.');
+      }
       final replyTargetId = _replyToId;
       final optimisticComment = _buildOptimisticComment(
         StickerCommentCodec.encode(url),

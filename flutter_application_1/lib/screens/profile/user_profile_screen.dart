@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
+import 'package:shimmer/shimmer.dart';
 import '../../config/theme.dart';
 import '../../services/auth_service.dart';
 import '../../services/supabase_service.dart';
@@ -54,6 +55,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   FollowStatus _followStatus = FollowStatus.notFollowing;
   bool _followLoading = false;
   List<Resource> _userResources = [];
+  bool _isLoadingResources = true;
   String? _fetchedPhotoUrl;
   String? _fetchedBio;
   String? _fetchedDisplayName;
@@ -83,6 +85,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
   Future<void> _loadUserProfile() async {
     setState(() {
       _isLoading = true;
+      _isLoadingResources = true;
       _errorMessage = null;
     });
 
@@ -167,6 +170,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           if (!mounted) return;
           setState(() {
             _userResources = resources;
+            _isLoadingResources = false;
             _uploadCount =
                 ((stats['uploads'] ?? stats['contributions']) as num?)
                     ?.toInt() ??
@@ -178,6 +182,10 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           });
         } catch (e, stackTrace) {
           debugPrint('Deferred profile data load failed: $e\n$stackTrace');
+          if (!mounted) return;
+          setState(() {
+            _isLoadingResources = false;
+          });
         }
       }());
     } catch (e) {
@@ -211,6 +219,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       if (mounted) {
         setState(() {
           _userResources = resources;
+          _isLoadingResources = false;
         });
       }
     } catch (e) {
@@ -305,6 +314,243 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
       !_isBanned &&
       _isTeacherOrAdminViewer &&
       _viewerCanBanUsers;
+
+  Widget _buildSkeletonBox({
+    required double height,
+    double? width,
+    double radius = 14,
+    BoxShape shape = BoxShape.rectangle,
+  }) {
+    return Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        shape: shape,
+        borderRadius: shape == BoxShape.circle
+            ? null
+            : BorderRadius.circular(radius),
+      ),
+    );
+  }
+
+  Widget _buildProfileSkeleton(bool isDark, Color bgColor) {
+    final baseColor = isDark ? const Color(0xFF1A2230) : Colors.grey.shade300;
+    final highlightColor = isDark
+        ? const Color(0xFF253247)
+        : Colors.grey.shade100;
+
+    return Shimmer.fromColors(
+      baseColor: baseColor,
+      highlightColor: highlightColor,
+      child: SafeArea(
+        bottom: false,
+        child: CustomScrollView(
+          physics: const NeverScrollableScrollPhysics(),
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildSkeletonBox(
+                          width: 80,
+                          height: 80,
+                          shape: BoxShape.circle,
+                        ),
+                        const Spacer(),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            _buildSkeletonBox(
+                              height: 36,
+                              width: 120,
+                              radius: 18,
+                            ),
+                            const SizedBox(height: 8),
+                            _buildSkeletonBox(
+                              height: 36,
+                              width: 104,
+                              radius: 18,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    _buildSkeletonBox(height: 24, width: 180, radius: 12),
+                    const SizedBox(height: 10),
+                    _buildSkeletonBox(height: 14, width: double.infinity),
+                    const SizedBox(height: 8),
+                    FractionallySizedBox(
+                      widthFactor: 0.72,
+                      child: _buildSkeletonBox(height: 14),
+                    ),
+                    const SizedBox(height: 18),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _buildSkeletonBox(height: 52, radius: 18),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _buildSkeletonBox(height: 52, radius: 18),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _buildSkeletonBox(height: 52, radius: 18),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    Divider(
+                      height: 1,
+                      color: isDark
+                          ? Colors.white.withValues(alpha: 0.1)
+                          : Colors.black.withValues(alpha: 0.08),
+                    ),
+                    const SizedBox(height: 18),
+                    Row(
+                      children: [
+                        _buildSkeletonBox(height: 20, width: 140, radius: 10),
+                        const Spacer(),
+                        _buildSkeletonBox(
+                          height: 38,
+                          width: 38,
+                          shape: BoxShape.circle,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    ...List<Widget>.generate(3, (index) {
+                      return Padding(
+                        padding: EdgeInsets.only(bottom: index == 2 ? 0 : 12),
+                        child: Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: bgColor,
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  _buildSkeletonBox(
+                                    width: 42,
+                                    height: 42,
+                                    radius: 14,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        _buildSkeletonBox(height: 14),
+                                        const SizedBox(height: 8),
+                                        FractionallySizedBox(
+                                          widthFactor: 0.44,
+                                          child: _buildSkeletonBox(height: 11),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 16),
+                              _buildSkeletonBox(height: 18),
+                              const SizedBox(height: 10),
+                              FractionallySizedBox(
+                                widthFactor: 0.68,
+                                child: _buildSkeletonBox(height: 14),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContributionSkeleton(Color cardColor, bool isDark) {
+    final baseColor = isDark ? const Color(0xFF1A2230) : Colors.grey.shade300;
+    final highlightColor = isDark
+        ? const Color(0xFF253247)
+        : Colors.grey.shade100;
+
+    return Shimmer.fromColors(
+      baseColor: baseColor,
+      highlightColor: highlightColor,
+      child: Column(
+        children: List<Widget>.generate(3, (index) {
+          return Padding(
+            padding: EdgeInsets.only(bottom: index == 2 ? 0 : 12),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: cardColor,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      _buildSkeletonBox(width: 42, height: 42, radius: 14),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildSkeletonBox(height: 14),
+                            const SizedBox(height: 8),
+                            FractionallySizedBox(
+                              widthFactor: 0.52,
+                              child: _buildSkeletonBox(height: 11),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _buildSkeletonBox(height: 18),
+                  const SizedBox(height: 10),
+                  FractionallySizedBox(
+                    widthFactor: 0.72,
+                    child: _buildSkeletonBox(height: 14),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      _buildSkeletonBox(height: 30, width: 82, radius: 999),
+                      const SizedBox(width: 8),
+                      _buildSkeletonBox(height: 30, width: 68, radius: 999),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          );
+        }),
+      ),
+    );
+  }
 
   @override
   void dispose() {
@@ -504,7 +750,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
         actions: const [],
       ),
       body: _isLoading
-          ? Center(child: CircularProgressIndicator(color: AppTheme.primary))
+          ? _buildProfileSkeleton(isDark, bgColor)
           : ShaderMask(
               shaderCallback: (Rect bounds) {
                 return LinearGradient(
@@ -737,7 +983,22 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
                     ),
 
                     // Content Grid
-                    _filteredUserResources.isEmpty
+                    _isLoadingResources
+                        ? SliverToBoxAdapter(
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(
+                                16,
+                                0,
+                                16,
+                                140,
+                              ),
+                              child: _buildContributionSkeleton(
+                                cardColor,
+                                isDark,
+                              ),
+                            ),
+                          )
+                        : _filteredUserResources.isEmpty
                         ? SliverToBoxAdapter(
                             child: Padding(
                               padding: const EdgeInsets.symmetric(vertical: 40),
@@ -1145,19 +1406,9 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           currentUserEmail,
           widget.userEmail,
         );
-        final newStatus = await _supabaseService.getFollowStatus(
-          currentUserEmail,
-          widget.userEmail,
-        );
         if (mounted) {
           setState(() {
-            final wasFollowingBeforeAction =
-                oldStatus == FollowStatus.following;
-            _followStatus = newStatus;
-            if (!wasFollowingBeforeAction &&
-                newStatus == FollowStatus.following) {
-              _followersCount += 1;
-            }
+            _followStatus = FollowStatus.pending;
           });
         }
       }
