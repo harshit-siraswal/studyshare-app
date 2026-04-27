@@ -17,6 +17,7 @@ import '../services/backend_api_service.dart';
 import '../services/subscription_service.dart';
 import '../services/summary_pdf_service.dart';
 import '../services/supabase_service.dart';
+import '../services/youtube_transcript_service.dart';
 import 'ai_formatted_text.dart';
 import 'ai_loading_game_card.dart';
 import 'ai_logo.dart';
@@ -108,6 +109,8 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   final BackendApiService _api = BackendApiService();
   final SupabaseService _supabaseService = SupabaseService();
   final SubscriptionService _subscriptionService = SubscriptionService();
+  final YoutubeTranscriptService _youtubeTranscriptService =
+      YoutubeTranscriptService();
   static const Color _studioBlue = Color(0xFF2563EB);
   static const Color _studioBlueDark = Color(0xFF1D4ED8);
   static const Duration _aiJobPollInterval = Duration(seconds: 3);
@@ -129,6 +132,8 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   String? _summary;
   List<QuizQuestion>? _quiz;
   List<Flashcard>? _flashcards;
+  String? _videoTranscriptText;
+  bool _videoTranscriptResolved = false;
 
   bool _useOcr = true;
   bool _forceOcr = false;
@@ -182,6 +187,38 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
       default:
         return 'unknown';
     }
+  }
+
+  Future<({String? sourceText, String? sourceType})>
+  _resolveVideoTranscriptSource() async {
+    final videoUrl = widget.videoUrl?.trim() ?? '';
+    if (widget.resourceType != 'video' || videoUrl.isEmpty) {
+      return (sourceText: null, sourceType: null);
+    }
+
+    if (_videoTranscriptResolved) {
+      final cached = _videoTranscriptText?.trim() ?? '';
+      return (
+        sourceText: cached.isEmpty ? null : cached,
+        sourceType: cached.isEmpty ? null : 'transcript',
+      );
+    }
+
+    _videoTranscriptResolved = true;
+    try {
+      final transcript = await _youtubeTranscriptService.fetchTranscript(
+        videoUrl,
+      );
+      final text = transcript?.fullText.trim() ?? '';
+      if (text.isNotEmpty) {
+        _videoTranscriptText = text;
+        return (sourceText: text, sourceType: 'transcript');
+      }
+    } catch (error) {
+      debugPrint('Native YouTube transcript fetch failed: $error');
+    }
+
+    return (sourceText: null, sourceType: null);
   }
 
   Future<void> _trackAiStudioOpened() async {
@@ -1313,12 +1350,15 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
       );
 
       final clientRequestId = _buildAiClientRequestId(type);
+      final sourcePayload = await _resolveVideoTranscriptSource();
       final response = await _requestBackgroundGeneration(
         type: type,
         regenerate: regenerate,
         useOcr: useOcr,
         forceOcr: forceOcr,
         clientRequestId: clientRequestId,
+        sourceText: sourcePayload.sourceText,
+        sourceType: sourcePayload.sourceType,
       );
       final jobId = response['job_id']?.toString().trim() ?? '';
       final status = response['status']?.toString().trim().toLowerCase() ?? '';
