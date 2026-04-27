@@ -28,8 +28,9 @@ class SupabaseService {
   SupabaseService._internal();
   static final SupabaseService _instance = SupabaseService._internal();
 
-  static const int kUnlimitedDuration = -1;
   static const int kDefaultExpiryDays = 7;
+  static const int kPremiumExpiryDays = 30;
+  static const int kTier2ExpiryDays = 90;
   static const Duration _currentUserProfileCacheTtl = Duration(minutes: 2);
   static const Duration _resourcesCacheTtl = Duration(seconds: 20);
   static const Duration _filterValuesCacheTtl = Duration(minutes: 5);
@@ -6409,18 +6410,12 @@ class SupabaseService {
 
     try {
       if (filter != null && filter.trim().isNotEmpty) {
-        final joinedRoomIds = await fetchJoinedRoomIds();
         final backendRooms = await _api.listChatRooms(
           collegeId: collegeId,
           filter: filter.trim(),
         );
-        return filterMembershipState(
-          filterActiveRooms(
-            backendRooms
-                .map((entry) => _normalizeChatRoomRecord(entry))
-                .toList(),
-          ),
-          joinedRoomIds,
+        return filterActiveRooms(
+          backendRooms.map((entry) => _normalizeChatRoomRecord(entry)).toList(),
         );
       }
 
@@ -6447,11 +6442,17 @@ class SupabaseService {
     } catch (e) {
       debugPrint('Error fetching chat rooms via Supabase: $e');
       try {
-        final backendRooms = await _api.listChatRooms(collegeId: collegeId);
+        final backendRooms = await _api.listChatRooms(
+          collegeId: collegeId,
+          filter: filter,
+        );
         final normalized = backendRooms
             .map((entry) => _normalizeChatRoomRecord(entry))
             .toList();
         if (normalized.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
+          if (filter != null && filter.trim().isNotEmpty) {
+            return filterActiveRooms(normalized);
+          }
           final joinedRoomIds = await fetchJoinedRoomIds();
           return filterMembershipState(
             filterActiveRooms(normalized),

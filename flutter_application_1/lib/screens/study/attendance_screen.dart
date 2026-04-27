@@ -448,7 +448,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${component.courseName} â€¢ ${component.componentName}',
+                      '${component.courseName} | ${component.componentName}',
                       style: GoogleFonts.inter(
                         fontSize: 18,
                         fontWeight: FontWeight.w700,
@@ -485,7 +485,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                     ),
                                   ),
                                   subtitle: Text(
-                                    '${lecture.dayName} â€¢ ${lecture.timeSlot}',
+                                    '${lecture.dayName} | ${lecture.timeSlot}',
                                     style: GoogleFonts.inter(),
                                   ),
                                   trailing: Text(
@@ -1248,7 +1248,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                                           height: 4,
                                                         ),
                                                         Text(
-                                                          '${dayEntries.length} class${dayEntries.length == 1 ? '' : 'es'} â€¢ ${dayEntries.first.start} - ${dayEntries.last.end}',
+                                                          '${dayEntries.length} class${dayEntries.length == 1 ? '' : 'es'} | ${dayEntries.first.start} - ${dayEntries.last.end}',
                                                           style: GoogleFonts.inter(
                                                             fontSize: 12.4,
                                                             color: isDark
@@ -1646,7 +1646,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            '${snapshot.student.branchShortName} â€¢ ${snapshot.student.semesterName} â€¢ ${snapshot.student.sectionName}',
+            '${snapshot.student.branchShortName} | ${snapshot.student.semesterName} | ${snapshot.student.sectionName}',
             style: GoogleFonts.inter(
               fontSize: 13,
               color: isDark
@@ -1808,7 +1808,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${component.componentName} â€¢ ${component.percentage.toStringAsFixed(2)}%',
+                      '${component.componentName} | ${component.percentage.toStringAsFixed(2)}%',
                       style: GoogleFonts.inter(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w600,
@@ -1998,7 +1998,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                               ),
                                               const SizedBox(height: 4),
                                               Text(
-                                                '${dayEntries.length} class${dayEntries.length == 1 ? '' : 'es'} â€¢ '
+                                                '${dayEntries.length} class${dayEntries.length == 1 ? '' : 'es'} | '
                                                 '${dayEntries.first.start} - ${dayEntries.last.end}',
                                                 style: GoogleFonts.inter(
                                                   fontSize: 12.4,
@@ -2186,7 +2186,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                                                             height: 4,
                                                           ),
                                                           Text(
-                                                            '${_formatScheduleTimeRange(entry)}${entry.classRoom.trim().isEmpty ? '' : ' • Room ${entry.classRoom.trim()}'}',
+                                                            '${_formatScheduleTimeRange(entry)}${entry.classRoom.trim().isEmpty ? '' : ' | Room ${entry.classRoom.trim()}'}',
                                                             style: GoogleFonts.inter(
                                                               fontSize: 12.2,
                                                               color: isDark
@@ -2284,7 +2284,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${component.componentName} â€¢ ${component.courseCode}',
+                      '${component.componentName} | ${component.courseCode}',
                       style: GoogleFonts.inter(
                         color: isDark
                             ? AppTheme.darkTextSecondary

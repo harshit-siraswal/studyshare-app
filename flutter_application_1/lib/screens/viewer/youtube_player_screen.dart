@@ -1,8 +1,9 @@
-import 'package:flutter/foundation.dart';
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:webview_flutter/webview_flutter.dart';
+import 'package:youtube_player_iframe/youtube_player_iframe.dart';
 
 import '../../utils/youtube_link_utils.dart';
 import '../../widgets/ai_study_tools_sheet.dart';
@@ -40,34 +41,12 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
       'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 '
       '(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36';
 
-  WebViewController? _webViewController;
+  YoutubePlayerController? _playerController;
   int _currentStartSeconds = 0;
   String? _playerErrorMessage;
-  int _loadProgress = 0;
 
   ParsedYoutubeLink get _activeLink =>
       widget.youtubeLink.copyWith(startSeconds: _currentStartSeconds);
-
-  Uri get _embedUri => _activeLink.embedUri;
-
-  bool _isAllowedPlayerNavigation(String rawUrl) {
-    final uri = Uri.tryParse(rawUrl);
-    if (uri == null) return false;
-    if (uri.scheme == 'about') return true;
-    final host = uri.host.toLowerCase();
-    final path = uri.path.toLowerCase();
-    final isYoutubeHost =
-        host == 'www.youtube.com' ||
-        host == 'youtube.com' ||
-        host == 'm.youtube.com' ||
-        host == 'www.youtube-nocookie.com' ||
-        host == 'youtube-nocookie.com';
-    if (!isYoutubeHost) return false;
-    return path.startsWith('/embed/') ||
-        path.startsWith('/iframe_api') ||
-        path.startsWith('/youtubei/') ||
-        path.startsWith('/s/player/');
-  }
 
   bool get _canUseAiStudio => widget.resourceId?.trim().isNotEmpty ?? false;
 
@@ -88,66 +67,70 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
     }
   }
 
+  @override
+  void dispose() {
+    final controller = _playerController;
+    _playerController = null;
+    unawaited(
+      SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.edgeToEdge,
+        overlays: SystemUiOverlay.values,
+      ),
+    );
+    if (controller != null) {
+      unawaited(controller.close());
+    }
+    super.dispose();
+  }
+
   void _setupPlayer() {
-    if (kIsWeb) {
-      setState(() {
-        _webViewController = null;
-        _playerErrorMessage = 'In-app YouTube playback is not available here.';
-        _loadProgress = 0;
-      });
-      return;
+    final existingController = _playerController;
+    if (existingController != null) {
+      unawaited(existingController.close());
     }
 
-    final controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(Colors.black)
-      ..setUserAgent(_mobileChromeUserAgent)
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onNavigationRequest: (request) {
-            final url = request.url.trim();
-            if (_isAllowedPlayerNavigation(url)) {
-              return NavigationDecision.navigate;
-            }
-            _openExternally();
-            return NavigationDecision.prevent;
-          },
-          onProgress: (progress) {
-            if (!mounted) return;
-            setState(() => _loadProgress = progress.clamp(0, 100));
-          },
-          onPageStarted: (_) {
-            if (!mounted) return;
-            setState(() {
-              _playerErrorMessage = null;
-              _loadProgress = 0;
-            });
-          },
-          onPageFinished: (_) {
-            if (!mounted) return;
-            setState(() => _loadProgress = 100);
-          },
-          onWebResourceError: (error) {
-            if (!mounted) return;
-            setState(() {
-              _playerErrorMessage = error.description.trim().isNotEmpty
-                  ? error.description.trim()
-                  : _genericLoadErrorMessage;
-            });
-          },
-        ),
-      )
-      ..loadRequest(_embedUri);
+    final controller = YoutubePlayerController(
+      params: const YoutubePlayerParams(
+        showControls: true,
+        showFullscreenButton: true,
+        strictRelatedVideos: true,
+        userAgent: _mobileChromeUserAgent,
+      ),
+      onWebResourceError: (error) {
+        if (!mounted) return;
+        setState(() {
+          _playerErrorMessage = error.description.trim().isNotEmpty
+              ? error.description.trim()
+              : _genericLoadErrorMessage;
+        });
+      },
+    );
+
+    unawaited(
+      controller.cueVideoById(
+        videoId: widget.youtubeLink.videoId,
+        startSeconds: _currentStartSeconds.toDouble(),
+      ),
+    );
+
+    controller.setFullScreenListener((isFullScreen) {
+      if (!mounted) return;
+      SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.edgeToEdge,
+        overlays: isFullScreen
+            ? const <SystemUiOverlay>[]
+            : SystemUiOverlay.values,
+      );
+    });
 
     setState(() {
-      _webViewController = controller;
+      _playerController = controller;
       _playerErrorMessage = null;
-      _loadProgress = 0;
     });
   }
 
   Future<void> _openExternally() async {
-    await launchUrl(_activeLink.watchUri, mode: LaunchMode.externalApplication);
+    await openYoutubeExternally(_activeLink);
   }
 
   void _openAiStudioSheet({int initialTabIndex = 0, String? autoGenerateType}) {
@@ -243,52 +226,30 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
   }
 
   Widget _buildPlayerSurface() {
-    final controller = _webViewController;
+    final controller = _playerController;
     if (controller == null) {
-      return AspectRatio(
+      return const AspectRatio(
         aspectRatio: 16 / 9,
-        child: _playerErrorMessage == null
-            ? const ColoredBox(
-                color: Colors.black,
-                child: Center(
-                  child: CircularProgressIndicator(color: Colors.white),
-                ),
-              )
-            : _buildPlayerError(),
+        child: ColoredBox(
+          color: Colors.black,
+          child: Center(child: CircularProgressIndicator(color: Colors.white)),
+        ),
       );
     }
 
-    return AspectRatio(
-      aspectRatio: 16 / 9,
-      child: Stack(
-        children: [
-          Positioned.fill(child: WebViewWidget(controller: controller)),
-          if (_loadProgress < 100 && _playerErrorMessage == null)
-            const Positioned.fill(
-              child: IgnorePointer(
-                child: ColoredBox(
-                  color: Colors.black12,
-                  child: Center(
-                    child: CircularProgressIndicator(color: Colors.white),
-                  ),
-                ),
-              ),
-            ),
-          if (_playerErrorMessage != null)
-            Positioned.fill(child: _buildPlayerError()),
-          if (_loadProgress < 100 && _playerErrorMessage == null)
-            Positioned(
-              left: 0,
-              right: 0,
-              top: 0,
-              child: LinearProgressIndicator(
-                value: _loadProgress / 100,
-                minHeight: 2.5,
-                backgroundColor: Colors.white10,
-              ),
-            ),
-        ],
+    if (_playerErrorMessage != null) {
+      return AspectRatio(aspectRatio: 16 / 9, child: _buildPlayerError());
+    }
+
+    return YoutubePlayer(
+      key: ValueKey<String>(
+        '${widget.youtubeLink.videoId}-${_currentStartSeconds.toString()}',
       ),
+      controller: controller,
+      aspectRatio: 16 / 9,
+      backgroundColor: Colors.black,
+      enableFullScreenOnVerticalDrag: false,
+      keepAlive: true,
     );
   }
 

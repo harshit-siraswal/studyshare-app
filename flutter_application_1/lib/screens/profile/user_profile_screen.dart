@@ -92,15 +92,30 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     try {
       final currentUserEmail = _authService.userEmail;
       final isSelfProfile = _isSelfProfile;
+      final currentIdentity = _authService.currentIdentity;
 
       final resourcesFuture = _supabaseService.getUserResources(
         widget.userEmail,
         approvedOnly: !isSelfProfile,
       );
       final userInfoFuture = _supabaseService.getUserInfo(widget.userEmail);
-      final currentProfileFuture = _supabaseService.getCurrentUserProfile(
-        maxAttempts: 1,
-      );
+      final currentProfileFuture = currentIdentity != null
+          ? Future<Map<String, dynamic>>.value(<String, dynamic>{
+              'email': currentIdentity.email,
+              'display_name': currentIdentity.displayName,
+              'profile_photo_url': currentIdentity.profilePhotoUrl,
+              'role': currentIdentity.userRole,
+              'college_id': currentIdentity.collegeId,
+              'branch': currentIdentity.branch,
+              'semester': currentIdentity.semester,
+              'subscription_tier': currentIdentity.subscriptionTier,
+              'subscription_end_date': currentIdentity.premiumUntil
+                  ?.toIso8601String(),
+              'admin_role': currentIdentity.adminRole,
+              'admin_department': currentIdentity.adminDepartment,
+              'admin_capabilities': currentIdentity.adminCapabilities,
+            })
+          : _supabaseService.getCurrentUserProfile(maxAttempts: 1);
       final statusFuture = currentUserEmail != null
           ? _supabaseService.getFollowStatus(currentUserEmail, widget.userEmail)
           : Future.value(FollowStatus.notFollowing);
