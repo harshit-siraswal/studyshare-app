@@ -29,6 +29,7 @@ class PostDetailScreen extends StatefulWidget {
   final String collegeDomain;
   final String roomId;
   final bool isRoomAdmin;
+  final String? initialCommentId;
 
   const PostDetailScreen({
     super.key,
@@ -37,6 +38,7 @@ class PostDetailScreen extends StatefulWidget {
     required this.collegeDomain,
     this.roomId = '',
     this.isRoomAdmin = false,
+    this.initialCommentId,
   });
 
   @override
@@ -69,10 +71,13 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   bool _isReadOnly = false;
   bool _hasAccessOverride = false;
   final Set<String> _expandedCommentIds = {};
+  final Map<String, GlobalKey> _commentAnchorKeys = <String, GlobalKey>{};
   int _reactionRefreshTick = 0;
   late Map<String, dynamic> _post;
   final Map<String, String> _profilePhotoCache = {};
   final Set<String> _profilePhotoFetchInFlight = {};
+  bool _didRevealInitialComment = false;
+  int _initialCommentRevealAttempts = 0;
   static const List<String> _quickReactions = [
     '👍',
     '❤️',
@@ -231,6 +236,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         _comments = hydratedComments;
         _isLoading = false;
       });
+      _scheduleInitialCommentReveal();
     }
 
     try {
@@ -252,6 +258,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           _isSaved = isSaved;
           _isLoading = false;
         });
+        _scheduleInitialCommentReveal();
       }
     } catch (e, stackTrace) {
       debugPrint('PostDetailScreen._loadData error: $e\n$stackTrace');
@@ -274,6 +281,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       _cacheComments(comments);
       if (!mounted) return;
       setState(() => _comments = _cloneCommentTree(comments));
+      _scheduleInitialCommentReveal();
     } catch (e, stackTrace) {
       debugPrint(
         'PostDetailScreen._refreshCommentsOnly error: $e\n$stackTrace',
@@ -344,6 +352,87 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     _primePhotoCacheFromComments([comment]);
     _cacheComments(nextComments);
     setState(() => _comments = nextComments);
+  }
+
+  GlobalKey _commentKeyFor(String commentId) {
+    return _commentAnchorKeys.putIfAbsent(commentId, GlobalKey.new);
+  }
+
+  List<String>? _findCommentPath(
+    List<Map<String, dynamic>> comments,
+    String targetCommentId,
+  ) {
+    for (final comment in comments) {
+      final currentId = comment['id']?.toString().trim() ?? '';
+      if (currentId.isEmpty) continue;
+      if (currentId == targetCommentId) {
+        return <String>[currentId];
+      }
+
+      final nestedPath = _findCommentPath(
+        _safeReplyList(comment['replies']),
+        targetCommentId,
+      );
+      if (nestedPath != null) {
+        return <String>[currentId, ...nestedPath];
+      }
+    }
+    return null;
+  }
+
+  bool _subtreeContainsComment(
+    List<Map<String, dynamic>> comments,
+    String? targetCommentId,
+  ) {
+    final target = targetCommentId?.trim() ?? '';
+    if (target.isEmpty) return false;
+    return _findCommentPath(comments, target) != null;
+  }
+
+  void _scheduleInitialCommentReveal() {
+    final targetId = widget.initialCommentId?.trim() ?? '';
+    if (targetId.isEmpty || _didRevealInitialComment || !mounted) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(_revealInitialCommentIfNeeded());
+    });
+  }
+
+  Future<void> _revealInitialCommentIfNeeded() async {
+    final targetId = widget.initialCommentId?.trim() ?? '';
+    if (targetId.isEmpty || _didRevealInitialComment || !mounted) return;
+
+    final path = _findCommentPath(_comments, targetId);
+    if (path == null || path.isEmpty) {
+      return;
+    }
+
+    final missingAncestors = path
+        .take(path.length - 1)
+        .where((commentId) => !_expandedCommentIds.contains(commentId))
+        .toList(growable: false);
+    if (missingAncestors.isNotEmpty) {
+      setState(() => _expandedCommentIds.addAll(missingAncestors));
+      _scheduleInitialCommentReveal();
+      return;
+    }
+
+    final targetContext = _commentKeyFor(targetId).currentContext;
+    if (targetContext == null) {
+      if (_initialCommentRevealAttempts >= 6) return;
+      _initialCommentRevealAttempts += 1;
+      _scheduleInitialCommentReveal();
+      return;
+    }
+
+    _didRevealInitialComment = true;
+    await Scrollable.ensureVisible(
+      targetContext,
+      duration: const Duration(milliseconds: 420),
+      curve: Curves.easeOutCubic,
+      alignment: 0.18,
+    );
   }
 
   bool _removeCommentFromTree(
@@ -1540,6 +1629,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         comment['id']?.toString() ??
         'comment-${createdAt.toIso8601String()}-$authorName-${content.hashCode}';
     final isExpanded = _expandedCommentIds.contains(commentId);
+    final isInitialTarget = widget.initialCommentId?.trim() == commentId;
+    final shouldRenderFullReplyTree =
+        depth < 3 || _subtreeContainsComment(replies, widget.initialCommentId);
 
     return Dismissible(
       key: ValueKey('comment-swipe-$commentId-$depth'),
@@ -1581,281 +1673,301 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           );
         },
         behavior: HitTestBehavior.opaque,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Avatar
-                  GestureDetector(
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => UserProfileScreen(
-                            userEmail: authorEmail,
-                            userName: authorName,
-                            userPhotoUrl: hasAuthorPhoto ? resolvedPhoto : null,
-                          ),
-                        ),
-                      );
-                    },
-                    child: UserAvatar(
-                      radius: 18,
-                      displayName: authorName,
-                      photoUrl: hasAuthorPhoto ? resolvedPhoto : null,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-
-                  // Content
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // Header: Name + Time
-                        Row(
-                          children: [
-                            Row(
-                              children: [
-                                GestureDetector(
-                                  onTap: () {
-                                    Navigator.push(
-                                      context,
-                                      MaterialPageRoute(
-                                        builder: (context) => UserProfileScreen(
-                                          userEmail: authorEmail,
-                                          userName: authorName,
-                                          userPhotoUrl: hasAuthorPhoto
-                                              ? resolvedPhoto
-                                              : null,
-                                        ),
-                                      ),
-                                    );
-                                  },
-                                  child: Text(
-                                    authorName,
-                                    style: GoogleFonts.inter(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 14,
-                                      color: isDark
-                                          ? Colors.white
-                                          : Colors.black,
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 4),
-                                UserBadge(email: authorEmail, size: 14),
-                              ],
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              _formatTimeAgo(createdAt),
-                              style: GoogleFonts.inter(
-                                fontSize: 12,
-                                color: AppTheme.textMuted,
-                              ),
-                            ),
-                            const Spacer(),
-                            PopupMenuButton<String>(
-                              padding: EdgeInsets.zero,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              icon: Icon(
-                                Icons.more_horiz_rounded,
-                                size: 18,
-                                color: AppTheme.textMuted,
-                              ),
-                              onSelected: (value) {
-                                if (value == 'report') {
-                                  _showReportDialog(
-                                    context,
-                                    commentId,
-                                    isComment: true,
-                                  );
-                                }
-                              },
-                              itemBuilder: (context) => [
-                                const PopupMenuItem(
-                                  value: 'report',
-                                  child: Text('Report'),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-
-                        // Comment Body
-                        _buildCommentContent(
-                          content,
-                          isDark,
-                          textColor,
-                          commentId,
-                        ),
-
-                        const SizedBox(height: 8),
-
-                        // Actions Row: Reactions + Reply
-                        Row(
-                          children: [
-                            // Emoji Reactions
-                            Expanded(
-                              child: EmojiReactions(
-                                key: ValueKey(
-                                  'post-$commentId-$_reactionRefreshTick',
-                                ),
-                                commentId: commentId,
-                                commentType: 'post',
-                                compact: true,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            // Reply Button
-                            GestureDetector(
-                              onTap: () {
-                                _setReplyTarget(commentId, authorName);
-                              },
-                              child: Text(
-                                'Reply',
-                                style: GoogleFonts.inter(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                  color: isDark
-                                      ? Colors.white70
-                                      : Colors.black87,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-
-                        // Threaded Replies Toggle
-                        if (hasReplies) ...[
-                          Padding(
-                            padding: EdgeInsets.only(
-                              top: 6,
-                              bottom: isExpanded ? 6 : 10,
-                            ),
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: GestureDetector(
-                                behavior: HitTestBehavior.opaque,
-                                onTap: () {
-                                  setState(() {
-                                    if (isExpanded) {
-                                      _expandedCommentIds.remove(commentId);
-                                    } else {
-                                      _expandedCommentIds.add(commentId);
-                                    }
-                                  });
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 6,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: isDark
-                                        ? Colors.white.withValues(alpha: 0.06)
-                                        : Colors.black.withValues(alpha: 0.03),
-                                    borderRadius: BorderRadius.circular(999),
-                                    border: Border.all(
-                                      color: isDark
-                                          ? Colors.white12
-                                          : Colors.black12,
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        isExpanded
-                                            ? Icons.keyboard_arrow_up_rounded
-                                            : Icons.keyboard_arrow_down_rounded,
-                                        size: 16,
-                                        color: AppTheme.textMuted,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        isExpanded
-                                            ? 'Hide replies'
-                                            : 'View ${replies.length} replies',
-                                        style: GoogleFonts.inter(
-                                          fontSize: 13,
-                                          fontWeight: FontWeight.w600,
-                                          color: AppTheme.textMuted,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
+        child: Container(
+          key: _commentKeyFor(commentId),
+          decoration: BoxDecoration(
+            color: isInitialTarget
+                ? AppTheme.primary.withValues(alpha: isDark ? 0.12 : 0.08)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(16),
+            border: isInitialTarget
+                ? Border.all(color: AppTheme.primary.withValues(alpha: 0.28))
+                : null,
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Avatar
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => UserProfileScreen(
+                              userEmail: authorEmail,
+                              userName: authorName,
+                              userPhotoUrl: hasAuthorPhoto
+                                  ? resolvedPhoto
+                                  : null,
                             ),
                           ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-
-              // Render Recursive Replies
-              if (hasReplies && isExpanded)
-                Container(
-                  margin: const EdgeInsets.only(left: 36, top: 4),
-                  padding: const EdgeInsets.only(left: 12),
-                  decoration: BoxDecoration(
-                    border: Border(
-                      left: BorderSide(
-                        color: isDark ? Colors.white24 : Colors.black12,
-                        width: 1.5,
+                        );
+                      },
+                      child: UserAvatar(
+                        radius: 18,
+                        displayName: authorName,
+                        photoUrl: hasAuthorPhoto ? resolvedPhoto : null,
                       ),
                     ),
-                  ),
-                  child: depth < 3
-                      ? ListView.separated(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          itemCount: replies.length,
-                          separatorBuilder: (_, index) =>
-                              const SizedBox(height: 6),
-                          itemBuilder: (context, index) => _buildCommentCard(
-                            replies[index],
-                            isDark,
-                            depth: depth + 1,
-                          ),
-                        )
-                      : Align(
-                          alignment: Alignment.centerLeft,
-                          child: TextButton(
-                            style: TextButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 0,
-                                vertical: 6,
+                    const SizedBox(width: 12),
+
+                    // Content
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Header: Name + Time
+                          Row(
+                            children: [
+                              Row(
+                                children: [
+                                  GestureDetector(
+                                    onTap: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              UserProfileScreen(
+                                                userEmail: authorEmail,
+                                                userName: authorName,
+                                                userPhotoUrl: hasAuthorPhoto
+                                                    ? resolvedPhoto
+                                                    : null,
+                                              ),
+                                        ),
+                                      );
+                                    },
+                                    child: Text(
+                                      authorName,
+                                      style: GoogleFonts.inter(
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 14,
+                                        color: isDark
+                                            ? Colors.white
+                                            : Colors.black,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  UserBadge(email: authorEmail, size: 14),
+                                ],
                               ),
-                              minimumSize: const Size(0, 34),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                            onPressed: () {
-                              // Navigate to thread detail or expand further (not implemented)
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'Deep thread view not implemented',
+                              const SizedBox(width: 8),
+                              Text(
+                                _formatTimeAgo(createdAt),
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  color: AppTheme.textMuted,
+                                ),
+                              ),
+                              const Spacer(),
+                              PopupMenuButton<String>(
+                                padding: EdgeInsets.zero,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                icon: Icon(
+                                  Icons.more_horiz_rounded,
+                                  size: 18,
+                                  color: AppTheme.textMuted,
+                                ),
+                                onSelected: (value) {
+                                  if (value == 'report') {
+                                    _showReportDialog(
+                                      context,
+                                      commentId,
+                                      isComment: true,
+                                    );
+                                  }
+                                },
+                                itemBuilder: (context) => [
+                                  const PopupMenuItem(
+                                    value: 'report',
+                                    child: Text('Report'),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+
+                          // Comment Body
+                          _buildCommentContent(
+                            content,
+                            isDark,
+                            textColor,
+                            commentId,
+                          ),
+
+                          const SizedBox(height: 8),
+
+                          // Actions Row: Reactions + Reply
+                          Row(
+                            children: [
+                              // Emoji Reactions
+                              Expanded(
+                                child: EmojiReactions(
+                                  key: ValueKey(
+                                    'post-$commentId-$_reactionRefreshTick',
+                                  ),
+                                  commentId: commentId,
+                                  commentType: 'post',
+                                  compact: true,
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              // Reply Button
+                              GestureDetector(
+                                onTap: () {
+                                  _setReplyTarget(commentId, authorName);
+                                },
+                                child: Text(
+                                  'Reply',
+                                  style: GoogleFonts.inter(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: isDark
+                                        ? Colors.white70
+                                        : Colors.black87,
                                   ),
                                 ),
-                              );
-                            },
-                            child: Text('View ${replies.length} more replies'),
+                              ),
+                            ],
                           ),
-                        ),
+
+                          // Threaded Replies Toggle
+                          if (hasReplies) ...[
+                            Padding(
+                              padding: EdgeInsets.only(
+                                top: 6,
+                                bottom: isExpanded ? 6 : 10,
+                              ),
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onTap: () {
+                                    setState(() {
+                                      if (isExpanded) {
+                                        _expandedCommentIds.remove(commentId);
+                                      } else {
+                                        _expandedCommentIds.add(commentId);
+                                      }
+                                    });
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: isDark
+                                          ? Colors.white.withValues(alpha: 0.06)
+                                          : Colors.black.withValues(
+                                              alpha: 0.03,
+                                            ),
+                                      borderRadius: BorderRadius.circular(999),
+                                      border: Border.all(
+                                        color: isDark
+                                            ? Colors.white12
+                                            : Colors.black12,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          isExpanded
+                                              ? Icons.keyboard_arrow_up_rounded
+                                              : Icons
+                                                    .keyboard_arrow_down_rounded,
+                                          size: 16,
+                                          color: AppTheme.textMuted,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          isExpanded
+                                              ? 'Hide replies'
+                                              : 'View ${replies.length} replies',
+                                          style: GoogleFonts.inter(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600,
+                                            color: AppTheme.textMuted,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-            ],
+
+                // Render Recursive Replies
+                if (hasReplies && isExpanded)
+                  Container(
+                    margin: const EdgeInsets.only(left: 36, top: 4),
+                    padding: const EdgeInsets.only(left: 12),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        left: BorderSide(
+                          color: isDark ? Colors.white24 : Colors.black12,
+                          width: 1.5,
+                        ),
+                      ),
+                    ),
+                    child: shouldRenderFullReplyTree
+                        ? ListView.separated(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: replies.length,
+                            separatorBuilder: (_, index) =>
+                                const SizedBox(height: 6),
+                            itemBuilder: (context, index) => _buildCommentCard(
+                              replies[index],
+                              isDark,
+                              depth: depth + 1,
+                            ),
+                          )
+                        : Align(
+                            alignment: Alignment.centerLeft,
+                            child: TextButton(
+                              style: TextButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 0,
+                                  vertical: 6,
+                                ),
+                                minimumSize: const Size(0, 34),
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              onPressed: () {
+                                // Navigate to thread detail or expand further (not implemented)
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Deep thread view not implemented',
+                                    ),
+                                  ),
+                                );
+                              },
+                              child: Text(
+                                'View ${replies.length} more replies',
+                              ),
+                            ),
+                          ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),

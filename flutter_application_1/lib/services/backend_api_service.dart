@@ -1147,6 +1147,22 @@ class BackendApiService {
         .toList();
   }
 
+  Future<Map<String, dynamic>> getChatRoomPost(
+    String roomId,
+    String postId,
+  ) async {
+    final data = await _requestJson(
+      '/api/chat/rooms/${Uri.encodeComponent(roomId)}/posts/'
+      '${Uri.encodeComponent(postId)}',
+      method: 'GET',
+    );
+    final post = data['post'];
+    if (post is Map) {
+      return Map<String, dynamic>.from(post);
+    }
+    return Map<String, dynamic>.from(data);
+  }
+
   Future<List<Map<String, dynamic>>> getChatRoomMembers(String roomId) async {
     final data = await _requestJson(
       '/api/chat/rooms/${Uri.encodeComponent(roomId)}/members',
@@ -1166,6 +1182,18 @@ class BackendApiService {
       '/api/chat/rooms/${Uri.encodeComponent(roomId)}/code-visibility',
       method: 'PATCH',
       body: {'showRoomCode': showRoomCode},
+      requireAuthToken: true,
+    );
+  }
+
+  Future<Map<String, dynamic>> extendRoomExpiry({
+    required String roomId,
+    int days = 7,
+  }) async {
+    return _requestJson(
+      '/api/chat/rooms/${Uri.encodeComponent(roomId)}/extend-expiry',
+      method: 'POST',
+      body: {'days': days},
       requireAuthToken: true,
     );
   }

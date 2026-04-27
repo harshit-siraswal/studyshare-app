@@ -440,6 +440,8 @@ class _NotificationScreenState extends State<NotificationScreen>
         return 'sent an announcement';
       case 'department_notice':
         return 'posted a notice';
+      case 'chat_report':
+        return 'reported content in your room';
       default:
         return '';
     }
@@ -544,6 +546,12 @@ class _NotificationScreenState extends State<NotificationScreen>
     await _markRead(n);
 
     if (!mounted) return;
+    final actionUrl = n.actionUrl?.trim() ?? '';
+
+    if (actionUrl.startsWith('/chatroom/')) {
+      Navigator.pushNamed(context, actionUrl);
+      return;
+    }
 
     // 1. Follow Request Navigation
     if (_isFollowNotificationType(n.type)) {
@@ -756,6 +764,8 @@ class _NotificationScreenState extends State<NotificationScreen>
         return Icons.campaign_rounded;
       case 'department_notice':
         return Icons.local_activity_rounded;
+      case 'chat_report':
+        return Icons.report_problem_rounded;
       default:
         return Icons.notifications_rounded;
     }
@@ -775,6 +785,8 @@ class _NotificationScreenState extends State<NotificationScreen>
         return const Color(0xFFEF4444); // Red
       case 'department_notice':
         return const Color(0xFFF59E0B); // Amber
+      case 'chat_report':
+        return const Color(0xFFEF4444); // Red
       default:
         return Colors.grey;
     }

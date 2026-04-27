@@ -29,6 +29,7 @@ import 'screens/onboarding/onboarding_screen.dart';
 import 'screens/auth/college_selection_screen.dart';
 import 'screens/auth/banned_user_screen.dart';
 import 'screens/auth/login_screen.dart';
+import 'screens/chatroom/post_detail_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/notices/notice_detail_screen.dart';
 import 'services/analytics_service.dart';
@@ -808,6 +809,29 @@ class StudyShareApp extends StatelessWidget {
               home: AppRouter(prefs: prefs, themeProvider: themeProvider),
               onGenerateRoute: (settings) {
                 if (settings.name != null &&
+                    settings.name!.startsWith('/chatroom/')) {
+                  final uri = Uri.parse(settings.name!);
+                  final segments = uri.pathSegments;
+                  if (segments.length >= 4 &&
+                      segments[0] == 'chatroom' &&
+                      segments[2] == 'post') {
+                    final roomId = Uri.decodeComponent(segments[1]);
+                    final postId = Uri.decodeComponent(segments[3]);
+                    if (roomId.isNotEmpty && postId.isNotEmpty) {
+                      return MaterialPageRoute(
+                        settings: settings,
+                        builder: (_) => RoomPostDeepLinkLoader(
+                          roomId: roomId,
+                          postId: postId,
+                          commentId: uri.queryParameters['commentId'],
+                          collegeDomain:
+                              _getCollegeDomainFromPrefs(prefs) ?? '',
+                        ),
+                      );
+                    }
+                  }
+                }
+                if (settings.name != null &&
                     settings.name!.startsWith('/notices')) {
                   final uri = Uri.parse(settings.name!);
                   final noticeId = uri.queryParameters['id'];
@@ -1419,5 +1443,109 @@ class _NoticeDeepLinkLoaderState extends State<NoticeDeepLinkLoader> {
   @override
   Widget build(BuildContext context) {
     return const Scaffold(body: Center(child: CircularProgressIndicator()));
+  }
+}
+
+class RoomPostDeepLinkLoader extends StatefulWidget {
+  final String roomId;
+  final String postId;
+  final String? commentId;
+  final String collegeDomain;
+
+  const RoomPostDeepLinkLoader({
+    super.key,
+    required this.roomId,
+    required this.postId,
+    this.commentId,
+    required this.collegeDomain,
+  });
+
+  @override
+  State<RoomPostDeepLinkLoader> createState() => _RoomPostDeepLinkLoaderState();
+}
+
+class _RoomPostDeepLinkLoaderState extends State<RoomPostDeepLinkLoader> {
+  final SupabaseService _supabaseService = SupabaseService();
+  final AuthService _authService = AuthService();
+
+  @override
+  void initState() {
+    super.initState();
+    _openPost();
+  }
+
+  Future<void> _openPost() async {
+    try {
+      final userEmail = _authService.userEmail?.trim() ?? '';
+      if (userEmail.isEmpty) {
+        throw StateError('Your session expired. Please sign in again.');
+      }
+
+      final roomInfo = await _supabaseService.getRoomInfo(widget.roomId);
+      final post = await _supabaseService.getRoomPostById(
+        widget.roomId,
+        widget.postId,
+      );
+
+      if (!mounted) return;
+
+      if (post == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('That room post is no longer available.'),
+            duration: Duration(milliseconds: 1200),
+          ),
+        );
+        await Future.delayed(const Duration(milliseconds: 1200));
+        if (!mounted) return;
+        if (Navigator.canPop(context)) {
+          Navigator.pop(context);
+        } else {
+          Navigator.pushReplacementNamed(context, '/');
+        }
+        return;
+      }
+
+      final resolvedCollegeDomain = widget.collegeDomain.trim().isNotEmpty
+          ? widget.collegeDomain.trim()
+          : (userEmail.contains('@') ? userEmail.split('@').last : '');
+      final isRoomAdmin =
+          roomInfo?['isAdmin'] == true || roomInfo?['is_admin'] == true;
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PostDetailScreen(
+            post: post,
+            userEmail: userEmail,
+            collegeDomain: resolvedCollegeDomain,
+            roomId: widget.roomId,
+            isRoomAdmin: isRoomAdmin,
+            initialCommentId: widget.commentId,
+          ),
+        ),
+      );
+    } catch (e, stack) {
+      debugPrint('RoomPostDeepLinkLoader error: $e\n$stack');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to open that room report right now.'),
+          duration: Duration(milliseconds: 1200),
+        ),
+      );
+      await Future.delayed(const Duration(milliseconds: 1200));
+      if (!mounted) return;
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      } else {
+        Navigator.pushReplacementNamed(context, '/');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(body: Center(child: BrandedLoader()));
   }
 }

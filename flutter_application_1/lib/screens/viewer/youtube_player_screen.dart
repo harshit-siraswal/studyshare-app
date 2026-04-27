@@ -4,10 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
-import '../../config/theme.dart';
 import '../../utils/youtube_link_utils.dart';
 import '../../widgets/ai_study_tools_sheet.dart';
-import '../ai_chat_screen.dart';
 
 class YoutubePlayerScreen extends StatefulWidget {
   final ParsedYoutubeLink youtubeLink;
@@ -50,12 +48,28 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
   ParsedYoutubeLink get _activeLink =>
       widget.youtubeLink.copyWith(startSeconds: _currentStartSeconds);
 
-  Uri get _watchUri => _activeLink.watchUri;
+  Uri get _embedUri => _activeLink.embedUri;
+
+  bool _isAllowedPlayerNavigation(String rawUrl) {
+    final uri = Uri.tryParse(rawUrl);
+    if (uri == null) return false;
+    if (uri.scheme == 'about') return true;
+    final host = uri.host.toLowerCase();
+    final path = uri.path.toLowerCase();
+    final isYoutubeHost =
+        host == 'www.youtube.com' ||
+        host == 'youtube.com' ||
+        host == 'm.youtube.com' ||
+        host == 'www.youtube-nocookie.com' ||
+        host == 'youtube-nocookie.com';
+    if (!isYoutubeHost) return false;
+    return path.startsWith('/embed/') ||
+        path.startsWith('/iframe_api') ||
+        path.startsWith('/youtubei/') ||
+        path.startsWith('/s/player/');
+  }
 
   bool get _canUseAiStudio => widget.resourceId?.trim().isNotEmpty ?? false;
-  bool get _hasVideoTranscriptContext =>
-      (widget.resourceId?.trim().isNotEmpty ?? false) ||
-      _activeLink.watchUri.toString().trim().isNotEmpty;
 
   @override
   void initState() {
@@ -90,6 +104,14 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
       ..setUserAgent(_mobileChromeUserAgent)
       ..setNavigationDelegate(
         NavigationDelegate(
+          onNavigationRequest: (request) {
+            final url = request.url.trim();
+            if (_isAllowedPlayerNavigation(url)) {
+              return NavigationDecision.navigate;
+            }
+            _openExternally();
+            return NavigationDecision.prevent;
+          },
           onProgress: (progress) {
             if (!mounted) return;
             setState(() => _loadProgress = progress.clamp(0, 100));
@@ -115,7 +137,7 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
           },
         ),
       )
-      ..loadRequest(_watchUri);
+      ..loadRequest(_embedUri);
 
     setState(() {
       _webViewController = controller;
@@ -236,52 +258,53 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
       );
     }
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
-      child: AspectRatio(
-        aspectRatio: 16 / 9,
-        child: Stack(
-          children: [
-            Positioned.fill(child: WebViewWidget(controller: controller)),
-            if (_loadProgress < 100 && _playerErrorMessage == null)
-              const Positioned.fill(
-                child: IgnorePointer(
-                  child: ColoredBox(
-                    color: Colors.black12,
-                    child: Center(
-                      child: CircularProgressIndicator(color: Colors.white),
-                    ),
+    return AspectRatio(
+      aspectRatio: 16 / 9,
+      child: Stack(
+        children: [
+          Positioned.fill(child: WebViewWidget(controller: controller)),
+          if (_loadProgress < 100 && _playerErrorMessage == null)
+            const Positioned.fill(
+              child: IgnorePointer(
+                child: ColoredBox(
+                  color: Colors.black12,
+                  child: Center(
+                    child: CircularProgressIndicator(color: Colors.white),
                   ),
                 ),
               ),
-            if (_playerErrorMessage != null)
-              Positioned.fill(child: _buildPlayerError()),
-            if (_loadProgress < 100 && _playerErrorMessage == null)
-              Positioned(
-                left: 0,
-                right: 0,
-                top: 0,
-                child: LinearProgressIndicator(
-                  value: _loadProgress / 100,
-                  minHeight: 2.5,
-                  backgroundColor: Colors.white10,
-                ),
+            ),
+          if (_playerErrorMessage != null)
+            Positioned.fill(child: _buildPlayerError()),
+          if (_loadProgress < 100 && _playerErrorMessage == null)
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              child: LinearProgressIndicator(
+                value: _loadProgress / 100,
+                minHeight: 2.5,
+                backgroundColor: Colors.white10,
               ),
-          ],
-        ),
+            ),
+        ],
       ),
     );
   }
 
-  Widget _buildScreen({required bool isDark}) {
+  Widget _buildScreen() {
     return Scaffold(
-      backgroundColor: isDark
-          ? AppTheme.darkBackground
-          : AppTheme.lightBackground,
+      backgroundColor: Colors.black,
       appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
         title: Text(
           widget.title,
-          style: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 15),
+          style: GoogleFonts.inter(
+            fontWeight: FontWeight.w600,
+            fontSize: 15,
+            color: Colors.white,
+          ),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
@@ -300,41 +323,11 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
         ],
       ),
       body: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 12, 14, 0),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxWidth: 800,
-                    maxHeight: 420,
-                  ),
-                  child: _buildPlayerSurface(),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Expanded(
-              child: AIChatScreen(
-                collegeId: widget.collegeId ?? '',
-                collegeName: widget.collegeName ?? '',
-                resourceContext: _hasVideoTranscriptContext
-                    ? ResourceContext(
-                        fileId: widget.resourceId?.trim().isEmpty == true
-                            ? null
-                            : widget.resourceId?.trim(),
-                        title: widget.title,
-                        subject: widget.subject,
-                        semester: widget.semester,
-                        branch: widget.branch,
-                        videoUrl: _activeLink.watchUri.toString(),
-                      )
-                    : null,
-                embedded: true,
-              ),
-            ),
-          ],
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 1200),
+            child: _buildPlayerSurface(),
+          ),
         ),
       ),
     );
@@ -342,7 +335,6 @@ class _YoutubePlayerScreenState extends State<YoutubePlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return _buildScreen(isDark: isDark);
+    return _buildScreen();
   }
 }

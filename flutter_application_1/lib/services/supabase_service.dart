@@ -2065,6 +2065,9 @@ class SupabaseService {
     try {
       final ctx = _ctx;
       if (ctx == null) throw Exception('Security context not initialized');
+      if (!ctx.mounted) {
+        throw Exception('Security context is no longer active');
+      }
       await _api.acceptFollowRequest(requestId, context: ctx);
 
       // Backend handles notifications and DB updates now.
@@ -3757,6 +3760,81 @@ class SupabaseService {
       return response;
     } catch (e) {
       return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> getRoomPostById(
+    String roomId,
+    String postId,
+  ) async {
+    Future<Map<String, dynamic>> normalizePost(
+      Map<String, dynamic> rawPost,
+    ) async {
+      final post = Map<String, dynamic>.from(rawPost);
+      post['comment_count'] = _normalizeCount(post['comment_count']);
+      post['upvotes'] = _normalizeCount(post['upvotes']);
+      post['downvotes'] = _normalizeCount(post['downvotes']);
+
+      if ((post['author_email']?.toString().trim().isEmpty ?? true) &&
+          (post['user_email']?.toString().trim().isNotEmpty ?? false)) {
+        post['author_email'] = post['user_email'];
+      }
+
+      final usersByEmail = await _fetchUsersByEmails(<String>[
+        post['author_email']?.toString() ??
+            post['user_email']?.toString() ??
+            '',
+      ]);
+      final hasAuthorEmail =
+          post['author_email']?.toString().trim().isNotEmpty ?? false;
+      _applyProfileToRecord(
+        record: post,
+        emailKey: hasAuthorEmail ? 'author_email' : 'user_email',
+        outputNameKey: 'author_name',
+        outputPhotoKey: 'author_photo_url',
+        usersByEmail: usersByEmail,
+        existingNameKeys: const ['user_name', 'display_name'],
+        existingPhotoKeys: const [
+          'profile_photo_url',
+          'photo_url',
+          'avatar_url',
+        ],
+      );
+
+      final resolvedPhoto = _firstNonEmptyValue(post, const [
+        'author_photo_url',
+        'profile_photo_url',
+        'photo_url',
+        'avatar_url',
+      ]);
+      if (resolvedPhoto.isNotEmpty) {
+        post['author_photo_url'] = resolvedPhoto;
+        post['profile_photo_url'] = resolvedPhoto;
+      }
+
+      return post;
+    }
+
+    try {
+      final post = await _api.getChatRoomPost(roomId, postId);
+      return normalizePost(post);
+    } catch (e) {
+      debugPrint('Backend getRoomPostById failed: $e');
+      return null;
+    }
+  }
+
+  Future<DateTime?> extendRoomExpiry(String roomId, {int days = 7}) async {
+    try {
+      final payload = await _api.extendRoomExpiry(roomId: roomId, days: days);
+      final expiryRaw = payload['expiry_date']?.toString();
+      if (expiryRaw == null || expiryRaw.trim().isEmpty) {
+        return null;
+      }
+      return DateTime.tryParse(expiryRaw.trim());
+    } catch (e) {
+      debugPrint('Error extending room expiry: $e');
+      rethrow;
     }
   }
 
@@ -6318,9 +6396,13 @@ class SupabaseService {
             .toList();
       }
       if (normalizedFilter == 'discover') {
-        return rooms
-            .where((room) => !joinedRoomIds.contains(room['id']?.toString()))
-            .toList();
+        return rooms.where((room) {
+          final roomId = room['id']?.toString();
+          final isPrivate = _normalizeBool(
+            room['is_private'] ?? room['isPrivate'],
+          );
+          return !joinedRoomIds.contains(roomId) && !isPrivate;
+        }).toList();
       }
       return rooms;
     }
@@ -6678,6 +6760,9 @@ class SupabaseService {
       );
       final isMarked =
           _bookmarkStateCache[cacheKey] ?? await _api.checkBookmark(resourceId);
+      if (!ctx.mounted) {
+        throw Exception('Security context is no longer active');
+      }
       if (isMarked) {
         await _api.removeBookmarkByItem(itemId: resourceId, context: ctx);
         _bookmarkStateCache[cacheKey] = false;
