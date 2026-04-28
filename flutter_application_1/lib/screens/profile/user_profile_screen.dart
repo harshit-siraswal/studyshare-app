@@ -515,50 +515,68 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
           return Padding(
             padding: EdgeInsets.only(bottom: index == 2 ? 0 : 12),
             child: Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
                 color: cardColor,
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: isDark ? 0.18 : 0.05),
+                    blurRadius: 12,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
               ),
-              child: Column(
+              child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      _buildSkeletonBox(width: 42, height: 42, radius: 14),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                  _buildSkeletonBox(width: 36, height: 36, radius: 8),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
                           children: [
-                            _buildSkeletonBox(height: 14),
-                            const SizedBox(height: 8),
-                            FractionallySizedBox(
-                              widthFactor: 0.52,
-                              child: _buildSkeletonBox(height: 11),
+                            Expanded(child: _buildSkeletonBox(height: 13)),
+                            const SizedBox(width: 8),
+                            _buildSkeletonBox(width: 46, height: 16, radius: 6),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        FractionallySizedBox(
+                          widthFactor: 0.44,
+                          child: _buildSkeletonBox(height: 10),
+                        ),
+                        const SizedBox(height: 4),
+                        FractionallySizedBox(
+                          widthFactor: 0.62,
+                          child: _buildSkeletonBox(height: 10),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            _buildSkeletonBox(width: 92, height: 24, radius: 8),
+                            const SizedBox(width: 8),
+                            _buildSkeletonBox(
+                              width: 22,
+                              height: 22,
+                              shape: BoxShape.circle,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                child: _buildSkeletonBox(width: 52, height: 10),
+                              ),
                             ),
                           ],
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  _buildSkeletonBox(height: 18),
-                  const SizedBox(height: 10),
-                  FractionallySizedBox(
-                    widthFactor: 0.72,
-                    child: _buildSkeletonBox(height: 14),
-                  ),
-                  const SizedBox(height: 14),
-                  Row(
-                    children: [
-                      _buildSkeletonBox(height: 30, width: 82, radius: 999),
-                      const SizedBox(width: 8),
-                      _buildSkeletonBox(height: 30, width: 68, radius: 999),
-                    ],
+                      ],
+                    ),
                   ),
                 ],
               ),

@@ -3116,108 +3116,119 @@ class _StudyScreenState extends State<StudyScreen>
           baseColor: baseColor,
           highlightColor: highlightColor,
           child: Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
               color: baseColor,
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: isDark ? 0.18 : 0.05),
+                  blurRadius: 12,
+                  offset: const Offset(0, 6),
+                ),
+              ],
             ),
-            child: Column(
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: highlightColor,
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: highlightColor,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
                         children: [
-                          Container(
-                            height: 14,
-                            decoration: BoxDecoration(
-                              color: highlightColor,
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          FractionallySizedBox(
-                            widthFactor: 0.48,
+                          Expanded(
                             child: Container(
-                              height: 11,
+                              height: 13,
                               decoration: BoxDecoration(
                                 color: highlightColor,
                                 borderRadius: BorderRadius.circular(999),
                               ),
                             ),
                           ),
+                          const SizedBox(width: 8),
+                          Container(
+                            width: 46,
+                            height: 16,
+                            decoration: BoxDecoration(
+                              color: highlightColor,
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                          ),
                         ],
                       ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Container(
-                  height: 18,
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: highlightColor,
-                    borderRadius: BorderRadius.circular(999),
+                      const SizedBox(height: 4),
+                      FractionallySizedBox(
+                        widthFactor: 0.44,
+                        child: Container(
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: highlightColor,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      FractionallySizedBox(
+                        widthFactor: 0.62,
+                        child: Container(
+                          height: 10,
+                          decoration: BoxDecoration(
+                            color: highlightColor,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Container(
+                            width: 92,
+                            height: 24,
+                            decoration: BoxDecoration(
+                              color: highlightColor,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Container(
+                            width: 22,
+                            height: 22,
+                            decoration: BoxDecoration(
+                              color: highlightColor,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Align(
+                              alignment: Alignment.centerRight,
+                              child: Container(
+                                width: 52,
+                                height: 10,
+                                decoration: BoxDecoration(
+                                  color: highlightColor,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 10),
-                FractionallySizedBox(
-                  widthFactor: 0.72,
-                  child: Container(
-                    height: 14,
-                    decoration: BoxDecoration(
-                      color: highlightColor,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: List<Widget>.generate(3, (chipIndex) {
-                    return Container(
-                      width: chipIndex == 0 ? 82 : 68,
-                      height: 28,
-                      decoration: BoxDecoration(
-                        color: highlightColor,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                    );
-                  }),
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Container(
-                      width: 96,
-                      height: 34,
-                      decoration: BoxDecoration(
-                        color: highlightColor,
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    const Spacer(),
-                    Container(
-                      width: 84,
-                      height: 12,
-                      decoration: BoxDecoration(
-                        color: highlightColor,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                    ),
-                  ],
                 ),
               ],
             ),
