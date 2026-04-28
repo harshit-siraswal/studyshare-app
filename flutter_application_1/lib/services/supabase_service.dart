@@ -189,6 +189,38 @@ class SupabaseService {
     return value?.trim().toLowerCase() ?? '';
   }
 
+  Future<String> _resolveReadableCollegeId(
+    String? requestedCollegeId, {
+    required String action,
+  }) async {
+    final normalizedRequested = _normalizeCollegeScopeValue(requestedCollegeId);
+    if (normalizedRequested.isNotEmpty) {
+      return normalizedRequested;
+    }
+
+    final cachedIdentityCollegeId = _normalizeCollegeScopeValue(
+      _cachedCurrentUserIdentity?['college_id']?.toString(),
+    );
+    if (cachedIdentityCollegeId.isNotEmpty) {
+      return cachedIdentityCollegeId;
+    }
+
+    final cachedProfileCollegeId = _normalizeCollegeScopeValue(
+      _cachedCurrentUserProfile?['college_id']?.toString(),
+    );
+    if (cachedProfileCollegeId.isNotEmpty) {
+      return cachedProfileCollegeId;
+    }
+
+    try {
+      final profile = await getCurrentUserProfile(maxAttempts: 1);
+      return _normalizeCollegeScopeValue(profile['college_id']?.toString());
+    } catch (e) {
+      debugPrint('Error resolving readable college scope for $action: $e');
+      return '';
+    }
+  }
+
   Future<String> _resolveAuthorizedCollegeId(
     String? requestedCollegeId, {
     required String action,
@@ -1566,7 +1598,7 @@ class SupabaseService {
     int limit = 20,
     int offset = 0,
   }) async {
-    final effectiveCollegeId = await _resolveAuthorizedCollegeId(
+    final effectiveCollegeId = await _resolveReadableCollegeId(
       collegeId,
       action: 'get_resources',
     );
@@ -1642,7 +1674,7 @@ class SupabaseService {
           'Supabase anon key missing; using backend resources fallback directly.',
         );
         final fallbackRows = await _fetchResourcesViaBackend(
-          collegeId: collegeId,
+          collegeId: effectiveCollegeId,
           semester: normalizedSemester,
           branch: normalizedBranch,
           subject: normalizedSubject,
@@ -1932,7 +1964,7 @@ class SupabaseService {
     int offset = 0,
   }) async {
     final normalizedEmail = _normalizeEmail(userEmail);
-    final effectiveCollegeId = await _resolveAuthorizedCollegeId(
+    final effectiveCollegeId = await _resolveReadableCollegeId(
       collegeId,
       action: 'get_following_feed',
     );
@@ -3058,7 +3090,7 @@ class SupabaseService {
     String? collegeId,
     String? college,
   }) async {
-    var effectiveCollegeId = await _resolveAuthorizedCollegeId(
+    var effectiveCollegeId = await _resolveReadableCollegeId(
       collegeId,
       action: 'discover_users',
     );
@@ -3866,7 +3898,45 @@ class SupabaseService {
           .select()
           .eq('id', roomId)
           .single();
-      return response;
+      final room = Map<String, dynamic>.from(response);
+      final sessionEmail = _currentSessionEmail();
+      final normalizedSessionEmail = _normalizeEmail(sessionEmail);
+      var isMember = false;
+      var isAdmin = false;
+
+      if (normalizedSessionEmail.isNotEmpty) {
+        try {
+          final member = await _client
+              .from('room_members')
+              .select('role')
+              .eq('room_id', roomId)
+              .eq('user_email', normalizedSessionEmail)
+              .maybeSingle();
+          if (member != null) {
+            isMember = true;
+            final role = (member['role'] ?? 'member').toString().toLowerCase();
+            isAdmin = role == 'admin';
+          }
+        } catch (memberError) {
+          debugPrint('Direct room membership fallback failed: $memberError');
+        }
+      }
+
+      final createdByEmail = _normalizeEmail(
+        room['created_by_email']?.toString() ?? room['created_by']?.toString(),
+      );
+      if (createdByEmail.isNotEmpty &&
+          createdByEmail == normalizedSessionEmail) {
+        isMember = true;
+        isAdmin = true;
+      }
+
+      room['isMember'] = isMember;
+      room['isAdmin'] = isAdmin;
+      if (room['created_by_email'] == null && room['created_by'] != null) {
+        room['created_by_email'] = room['created_by'];
+      }
+      return room;
     } catch (e) {
       return null;
     }
@@ -6464,7 +6534,8 @@ class SupabaseService {
     String collegeId, {
     String? filter,
   }) async {
-    final effectiveCollegeId = await _resolveAuthorizedCollegeId(
+    final normalizedUserEmail = _normalizeEmail(userEmail);
+    final effectiveCollegeId = await _resolveReadableCollegeId(
       collegeId,
       action: 'get_chat_rooms',
     );
@@ -6516,9 +6587,15 @@ class SupabaseService {
     ) {
       final normalizedFilter = filter?.trim().toLowerCase();
       if (normalizedFilter == 'joined') {
-        return rooms
-            .where((room) => joinedRoomIds.contains(room['id']?.toString()))
-            .toList();
+        return rooms.where((room) {
+          final roomId = room['id']?.toString();
+          final creatorEmail = _normalizeEmail(
+            room['created_by_email']?.toString() ??
+                room['created_by']?.toString(),
+          );
+          return joinedRoomIds.contains(roomId) ||
+              (creatorEmail.isNotEmpty && creatorEmail == normalizedUserEmail);
+        }).toList();
       }
       if (normalizedFilter == 'discover') {
         return rooms.where((room) {
@@ -6526,7 +6603,13 @@ class SupabaseService {
           final isPrivate = _normalizeBool(
             room['is_private'] ?? room['isPrivate'],
           );
-          return !joinedRoomIds.contains(roomId) && !isPrivate;
+          final creatorEmail = _normalizeEmail(
+            room['created_by_email']?.toString() ??
+                room['created_by']?.toString(),
+          );
+          final isCreator =
+              creatorEmail.isNotEmpty && creatorEmail == normalizedUserEmail;
+          return !joinedRoomIds.contains(roomId) && !isPrivate && !isCreator;
         }).toList();
       }
       return rooms;
@@ -6678,7 +6761,7 @@ class SupabaseService {
     int limit = 80,
     int offset = 0,
   }) async {
-    final effectiveCollegeId = await _resolveAuthorizedCollegeId(
+    final effectiveCollegeId = await _resolveReadableCollegeId(
       collegeId,
       action: 'get_notices',
     );
@@ -7029,7 +7112,7 @@ class SupabaseService {
     String? collegeId,
   }) async {
     final normalizedId = id.trim();
-    final effectiveCollegeId = await _resolveAuthorizedCollegeId(
+    final effectiveCollegeId = await _resolveReadableCollegeId(
       collegeId,
       action: 'get_notice',
     );
@@ -7140,7 +7223,7 @@ class SupabaseService {
   }) async {
     final rawEmail = userEmail.trim();
     final normalizedEmail = _normalizeEmail(userEmail);
-    final effectiveCollegeId = await _resolveAuthorizedCollegeId(
+    final effectiveCollegeId = await _resolveReadableCollegeId(
       collegeId,
       action: 'get_user_resources',
     );

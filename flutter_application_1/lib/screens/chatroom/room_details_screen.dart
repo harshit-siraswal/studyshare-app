@@ -475,6 +475,22 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
     }
   }
 
+  Future<void> _openAddMembersSheet() async {
+    if (!_isAdmin) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => FractionallySizedBox(
+        heightFactor: 0.92,
+        child: _AddMembersSheet(
+          roomId: widget.roomId,
+          onInviteSent: _loadDetails,
+        ),
+      ),
+    );
+  }
+
   Widget _buildSectionBlock({required bool isDark, required Widget child}) {
     return Container(
       width: double.infinity,
@@ -928,6 +944,16 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                   if (_isAdmin && widget.onManageMembers != null) ...[
                     _buildActionRow(
                       isDark: isDark,
+                      icon: Icons.person_add_alt_1_rounded,
+                      title: 'Add members',
+                      subtitle:
+                          'Invite students from your college into this room.',
+                      onTap: _openAddMembersSheet,
+                      foreground: AppTheme.primary,
+                    ),
+                    Divider(color: dividerColor, height: 1),
+                    _buildActionRow(
+                      isDark: isDark,
                       icon: Icons.group_outlined,
                       title: 'Manage members',
                       subtitle:
@@ -965,6 +991,334 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AddMembersSheet extends StatefulWidget {
+  const _AddMembersSheet({required this.roomId, required this.onInviteSent});
+
+  final String roomId;
+  final Future<void> Function() onInviteSent;
+
+  @override
+  State<_AddMembersSheet> createState() => _AddMembersSheetState();
+}
+
+class _AddMembersSheetState extends State<_AddMembersSheet> {
+  final BackendApiService _api = BackendApiService();
+  final TextEditingController _searchController = TextEditingController();
+
+  bool _isLoading = true;
+  String? _error;
+  List<Map<String, dynamic>> _candidates = <Map<String, dynamic>>[];
+  final Set<String> _pendingInviteEmails = <String>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCandidates();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadCandidates() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      final rows = await _api.getRoomInviteCandidates(
+        roomId: widget.roomId,
+        query: _searchController.text,
+      );
+      if (!mounted) return;
+      setState(() {
+        _candidates = rows;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _sendInvite(Map<String, dynamic> candidate) async {
+    final email = (candidate['email'] ?? '').toString().trim().toLowerCase();
+    if (email.isEmpty || _pendingInviteEmails.contains(email)) return;
+
+    setState(() {
+      _pendingInviteEmails.add(email);
+    });
+
+    try {
+      await _api.sendRoomInvite(roomId: widget.roomId, inviteeEmail: email);
+      if (!mounted) return;
+      setState(() {
+        final index = _candidates.indexWhere(
+          (entry) =>
+              (entry['email'] ?? '').toString().trim().toLowerCase() == email,
+        );
+        if (index != -1) {
+          final updated = Map<String, dynamic>.from(_candidates[index]);
+          updated['invite_sent'] = true;
+          _candidates[index] = updated;
+        }
+      });
+      await widget.onInviteSent();
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Invite sent')));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to send invite: $e')));
+    } finally {
+      if (mounted) {
+        setState(() {
+          _pendingInviteEmails.remove(email);
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final sheetColor = isDark ? const Color(0xFF0F172A) : Colors.white;
+    final borderColor = isDark ? Colors.white10 : const Color(0xFFE2E8F0);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: sheetColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            const SizedBox(height: 10),
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: isDark ? Colors.white24 : Colors.black12,
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
+              child: Row(
+                children: [
+                  Text(
+                    'Add Members',
+                    style: GoogleFonts.inter(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: TextField(
+                controller: _searchController,
+                onChanged: (_) => _loadCandidates(),
+                decoration: InputDecoration(
+                  hintText: 'Search by name or username',
+                  prefixIcon: const Icon(Icons.search_rounded),
+                  filled: true,
+                  fillColor: isDark
+                      ? Colors.white.withValues(alpha: 0.05)
+                      : const Color(0xFFF8FAFC),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _error != null
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Text(
+                          _error!,
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.inter(
+                            color: isDark ? Colors.white70 : Colors.black54,
+                          ),
+                        ),
+                      ),
+                    )
+                  : _candidates.isEmpty
+                  ? Center(
+                      child: Text(
+                        'No students found.',
+                        style: GoogleFonts.inter(
+                          color: isDark ? Colors.white70 : Colors.black54,
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                      itemCount: _candidates.length,
+                      separatorBuilder: (_, _) =>
+                          Divider(color: borderColor, height: 1),
+                      itemBuilder: (context, index) {
+                        final candidate = _candidates[index];
+                        final email = (candidate['email'] ?? '')
+                            .toString()
+                            .trim()
+                            .toLowerCase();
+                        final displayName =
+                            (candidate['display_name'] ?? 'Student').toString();
+                        final username = (candidate['username'] ?? '')
+                            .toString()
+                            .trim();
+                        final photoUrl = (candidate['profile_photo_url'] ?? '')
+                            .toString()
+                            .trim();
+                        final alreadyInRoom =
+                            candidate['already_in_room'] == true;
+                        final inviteSent = candidate['invite_sent'] == true;
+                        final isSending = _pendingInviteEmails.contains(email);
+
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Row(
+                            children: [
+                              UserAvatar(
+                                radius: 22,
+                                displayName: displayName,
+                                photoUrl: photoUrl.isNotEmpty ? photoUrl : null,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      displayName,
+                                      style: GoogleFonts.inter(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w700,
+                                        color: isDark
+                                            ? Colors.white
+                                            : const Color(0xFF0F172A),
+                                      ),
+                                    ),
+                                    if (username.isNotEmpty || email.isNotEmpty)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 3),
+                                        child: Text(
+                                          username.isNotEmpty
+                                              ? username
+                                              : email,
+                                          style: GoogleFonts.inter(
+                                            fontSize: 12.5,
+                                            color: isDark
+                                                ? Colors.white60
+                                                : const Color(0xFF64748B),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              if (alreadyInRoom)
+                                _InviteStateChip(
+                                  label: 'Already in Room',
+                                  background: isDark
+                                      ? Colors.white12
+                                      : const Color(0xFFF1F5F9),
+                                  foreground: isDark
+                                      ? Colors.white70
+                                      : const Color(0xFF64748B),
+                                )
+                              else if (inviteSent)
+                                const _InviteStateChip(
+                                  label: 'Invite Sent',
+                                  background: Color(0x1A2563EB),
+                                  foreground: Color(0xFF2563EB),
+                                )
+                              else
+                                TextButton(
+                                  onPressed: isSending
+                                      ? null
+                                      : () => _sendInvite(candidate),
+                                  child: isSending
+                                      ? const SizedBox(
+                                          width: 16,
+                                          height: 16,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                          ),
+                                        )
+                                      : const Text('Send Invite'),
+                                ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _InviteStateChip extends StatelessWidget {
+  const _InviteStateChip({
+    required this.label,
+    required this.background,
+    required this.foreground,
+  });
+
+  final String label;
+  final Color background;
+  final Color foreground;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.inter(
+          fontSize: 11.5,
+          fontWeight: FontWeight.w700,
+          color: foreground,
         ),
       ),
     );

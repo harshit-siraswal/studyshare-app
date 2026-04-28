@@ -34,6 +34,7 @@ class _NotificationScreenState extends State<NotificationScreen>
   int _offset = 0;
   final int _limit = 20;
   final Set<int> _pendingFollowActionIds = <int>{};
+  final Set<String> _pendingRoomInviteActionIds = <String>{};
 
   List<NotificationModel> get _filteredNotifications {
     if (_tabController.index == 1) {
@@ -404,11 +405,29 @@ class _NotificationScreenState extends State<NotificationScreen>
                       const SizedBox(height: 12),
                       _buildFollowActions(n),
                     ],
+                    if (n.type == 'room_invite' &&
+                        n.roomInviteId != null &&
+                        !n.actionTaken) ...[
+                      const SizedBox(height: 12),
+                      _buildRoomInviteActions(n),
+                    ],
                     if (n.actionTaken && n.type == 'follow_request')
                       Padding(
                         padding: const EdgeInsets.only(top: 8),
                         child: Text(
                           'Request processed',
+                          style: GoogleFonts.inter(
+                            fontSize: 12,
+                            color: secondaryColor,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ),
+                    if (n.actionTaken && n.type == 'room_invite')
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          'Invite processed',
                           style: GoogleFonts.inter(
                             fontSize: 12,
                             color: secondaryColor,
@@ -436,6 +455,12 @@ class _NotificationScreenState extends State<NotificationScreen>
         return 'declined your request';
       case 'resource_posted':
         return 'posted a new resource';
+      case 'room_invite':
+        return 'invited you to a room';
+      case 'room_invite_accepted':
+        return 'accepted your room invite';
+      case 'room_invite_declined':
+        return 'declined your room invite';
       case 'admin_broadcast':
         return 'sent an announcement';
       case 'department_notice':
@@ -760,6 +785,12 @@ class _NotificationScreenState extends State<NotificationScreen>
         return Icons.cancel_rounded;
       case 'resource_posted':
         return Icons.library_books_rounded;
+      case 'room_invite':
+        return Icons.group_add_rounded;
+      case 'room_invite_accepted':
+        return Icons.groups_rounded;
+      case 'room_invite_declined':
+        return Icons.group_off_rounded;
       case 'admin_broadcast':
         return Icons.campaign_rounded;
       case 'department_notice':
@@ -781,6 +812,12 @@ class _NotificationScreenState extends State<NotificationScreen>
         return const Color(0xFFEF4444); // Red
       case 'resource_posted':
         return AppTheme.primary;
+      case 'room_invite':
+        return const Color(0xFF2563EB);
+      case 'room_invite_accepted':
+        return const Color(0xFF10B981);
+      case 'room_invite_declined':
+        return const Color(0xFFF59E0B);
       case 'admin_broadcast':
         return const Color(0xFFEF4444); // Red
       case 'department_notice':
@@ -823,6 +860,70 @@ class _NotificationScreenState extends State<NotificationScreen>
         Expanded(
           child: ElevatedButton(
             onPressed: isProcessing ? null : () => _handleFollowAction(n, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primary,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              elevation: 0,
+            ),
+            child: isProcessing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : Text(
+                    'Accept',
+                    style: GoogleFonts.inter(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRoomInviteActions(NotificationModel n) {
+    final inviteId = n.roomInviteId?.trim() ?? '';
+    final isProcessing =
+        inviteId.isNotEmpty && _pendingRoomInviteActionIds.contains(inviteId);
+    return Row(
+      children: [
+        Expanded(
+          child: OutlinedButton(
+            onPressed: isProcessing
+                ? null
+                : () => _handleRoomInviteAction(n, false),
+            style: OutlinedButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              side: BorderSide(color: Colors.grey.shade300),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: Text(
+              isProcessing ? 'Working...' : 'Decline',
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: ElevatedButton(
+            onPressed: isProcessing
+                ? null
+                : () => _handleRoomInviteAction(n, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.primary,
               foregroundColor: Colors.white,
@@ -910,6 +1011,53 @@ class _NotificationScreenState extends State<NotificationScreen>
       if (mounted) {
         setState(() {
           _pendingFollowActionIds.remove(requestId);
+        });
+      }
+    }
+  }
+
+  Future<void> _handleRoomInviteAction(NotificationModel n, bool accept) async {
+    final inviteId = n.roomInviteId?.trim() ?? '';
+    if (inviteId.isEmpty) return;
+
+    try {
+      setState(() {
+        _pendingRoomInviteActionIds.add(inviteId);
+      });
+
+      if (accept) {
+        await _api.acceptRoomInvite(inviteId);
+      } else {
+        await _api.declineRoomInvite(inviteId);
+      }
+
+      if (!n.isRead) {
+        try {
+          await _api.markNotificationRead(n.id);
+        } catch (e) {
+          debugPrint('Failed to mark room invite as read: $e');
+        }
+      }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(accept ? 'Invite accepted' : 'Invite declined')),
+      );
+
+      setState(() {
+        _replaceNotification(n, n.copyWith(actionTaken: true, isRead: true));
+      });
+      await _loadNotifications();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Action failed: $e')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _pendingRoomInviteActionIds.remove(inviteId);
         });
       }
     }

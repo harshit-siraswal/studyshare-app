@@ -16,6 +16,7 @@ class NotificationModel {
   final String? actorEmail;
   final String? actorAvatar;
   final String? followRequestId;
+  final String? roomInviteId;
   final bool actionTaken;
 
   const NotificationModel({
@@ -32,6 +33,7 @@ class NotificationModel {
     this.actorEmail,
     this.actorAvatar,
     this.followRequestId,
+    this.roomInviteId,
     this.actionTaken = false,
     this.data,
   });
@@ -59,8 +61,14 @@ class NotificationModel {
         data?['user_id'],
         data?['userId'],
       ]),
-      type: _stringFromCandidates([json['type'], data?['type']], fallback: 'unknown'),
-      title: _stringFromCandidates([json['title'], data?['title']], fallback: 'Notification'),
+      type: _stringFromCandidates([
+        json['type'],
+        data?['type'],
+      ], fallback: 'unknown'),
+      title: _stringFromCandidates([
+        json['title'],
+        data?['title'],
+      ], fallback: 'Notification'),
       message: _stringFromCandidates([json['message'], data?['message']]),
       isRead: _boolFromCandidates([
         json['is_read'],
@@ -152,6 +160,14 @@ class NotificationModel {
         data?['request_id'],
         data?['requestId'],
       ]),
+      roomInviteId: _stringFromCandidates([
+        json['room_invite_id'],
+        json['roomInviteId'],
+        data?['room_invite_id'],
+        data?['roomInviteId'],
+        data?['invite_id'],
+        data?['inviteId'],
+      ]),
       actionTaken: _boolFromCandidates([
         json['action_taken'],
         json['actionTaken'],
@@ -176,6 +192,7 @@ class NotificationModel {
       actorEmail: actorEmail,
       actorAvatar: actorAvatar,
       followRequestId: followRequestId,
+      roomInviteId: roomInviteId,
       actionTaken: actionTaken ?? this.actionTaken,
       data: data,
     );

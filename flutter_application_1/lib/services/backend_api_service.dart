@@ -1223,6 +1223,59 @@ class BackendApiService {
     );
   }
 
+  Future<List<Map<String, dynamic>>> getRoomInviteCandidates({
+    required String roomId,
+    String? query,
+    int limit = 50,
+  }) async {
+    final uri = Uri(
+      path: '/api/chat/rooms/${Uri.encodeComponent(roomId)}/invite-candidates',
+      queryParameters: <String, String>{
+        if (query != null && query.trim().isNotEmpty) 'query': query.trim(),
+        'limit': limit.toString(),
+      },
+    );
+    final data = await _requestJson(
+      uri.toString(),
+      method: 'GET',
+      requireAuthToken: true,
+    );
+    final raw = data['candidates'];
+    if (raw is! List) return const <Map<String, dynamic>>[];
+    return raw
+        .whereType<Map>()
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> sendRoomInvite({
+    required String roomId,
+    required String inviteeEmail,
+  }) async {
+    return _requestJson(
+      '/api/chat/rooms/${Uri.encodeComponent(roomId)}/invites',
+      method: 'POST',
+      body: {'inviteeEmail': inviteeEmail},
+      requireAuthToken: true,
+    );
+  }
+
+  Future<Map<String, dynamic>> acceptRoomInvite(String inviteId) async {
+    return _requestJson(
+      '/api/chat/room-invites/${Uri.encodeComponent(inviteId)}/accept',
+      method: 'POST',
+      requireAuthToken: true,
+    );
+  }
+
+  Future<Map<String, dynamic>> declineRoomInvite(String inviteId) async {
+    return _requestJson(
+      '/api/chat/room-invites/${Uri.encodeComponent(inviteId)}/decline',
+      method: 'POST',
+      requireAuthToken: true,
+    );
+  }
+
   Future<Map<String, dynamic>> deleteChatRoom(String roomId) async {
     return _requestJson(
       '/api/chat/rooms/${Uri.encodeComponent(roomId)}',

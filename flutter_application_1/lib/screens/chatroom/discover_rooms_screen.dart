@@ -261,10 +261,15 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
                   )
                 : _rooms.isEmpty
                 ? Center(
-                    child: Text(
-                      'No public rooms found',
-                      style: TextStyle(
-                        color: isDark ? Colors.white54 : Colors.grey,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 28),
+                      child: Text(
+                        "You've joined all available rooms!\nInvite friends or create a new room.",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: isDark ? Colors.white54 : Colors.grey,
+                          height: 1.45,
+                        ),
                       ),
                     ),
                   )
