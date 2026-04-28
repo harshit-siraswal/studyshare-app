@@ -1581,7 +1581,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       itemCount: _comments.length,
-      separatorBuilder: (_, index) => const SizedBox(height: 6),
+      separatorBuilder: (_, index) => const SizedBox(height: 4),
       itemBuilder: (context, index) {
         return _buildCommentCard(_comments[index], isDark);
       },
@@ -1642,8 +1642,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         return false;
       },
       background: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        margin: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+        padding: const EdgeInsets.symmetric(horizontal: 14),
         alignment: Alignment.centerLeft,
         decoration: BoxDecoration(
           color: AppTheme.primary.withValues(alpha: 0.16),
@@ -1679,13 +1679,13 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
             color: isInitialTarget
                 ? AppTheme.primary.withValues(alpha: isDark ? 0.12 : 0.08)
                 : Colors.transparent,
-            borderRadius: BorderRadius.circular(16),
+            borderRadius: BorderRadius.circular(14),
             border: isInitialTarget
                 ? Border.all(color: AppTheme.primary.withValues(alpha: 0.28))
                 : null,
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1709,12 +1709,12 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         );
                       },
                       child: UserAvatar(
-                        radius: 18,
+                        radius: 16,
                         displayName: authorName,
                         photoUrl: hasAuthorPhoto ? resolvedPhoto : null,
                       ),
                     ),
-                    const SizedBox(width: 12),
+                    const SizedBox(width: 8),
 
                     // Content
                     Expanded(
@@ -1746,7 +1746,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                       authorName,
                                       style: GoogleFonts.inter(
                                         fontWeight: FontWeight.w700,
-                                        fontSize: 14,
+                                        fontSize: 13.5,
                                         color: isDark
                                             ? Colors.white
                                             : Colors.black,
@@ -1757,7 +1757,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                   UserBadge(email: authorEmail, size: 14),
                                 ],
                               ),
-                              const SizedBox(width: 8),
+                              const SizedBox(width: 6),
                               Text(
                                 _formatTimeAgo(createdAt),
                                 style: GoogleFonts.inter(
@@ -1794,7 +1794,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               ),
                             ],
                           ),
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 2),
 
                           // Comment Body
                           _buildCommentContent(
@@ -1804,7 +1804,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             commentId,
                           ),
 
-                          const SizedBox(height: 8),
+                          const SizedBox(height: 6),
 
                           // Actions Row: Reactions + Reply
                           Row(
@@ -1820,7 +1820,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                   compact: true,
                                 ),
                               ),
-                              const SizedBox(width: 12),
+                              const SizedBox(width: 8),
                               // Reply Button
                               GestureDetector(
                                 onTap: () {
@@ -1844,8 +1844,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                           if (hasReplies) ...[
                             Padding(
                               padding: EdgeInsets.only(
-                                top: 6,
-                                bottom: isExpanded ? 6 : 10,
+                                top: 4,
+                                bottom: isExpanded ? 6 : 8,
                               ),
                               child: Align(
                                 alignment: Alignment.centerLeft,
@@ -1862,8 +1862,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                   },
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 6,
+                                      horizontal: 9,
+                                      vertical: 5,
                                     ),
                                     decoration: BoxDecoration(
                                       color: isDark
@@ -1886,7 +1886,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                               ? Icons.keyboard_arrow_up_rounded
                                               : Icons
                                                     .keyboard_arrow_down_rounded,
-                                          size: 16,
+                                          size: 15,
                                           color: AppTheme.textMuted,
                                         ),
                                         const SizedBox(width: 4),
@@ -1895,7 +1895,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                               ? 'Hide replies'
                                               : 'View ${replies.length} replies',
                                           style: GoogleFonts.inter(
-                                            fontSize: 13,
+                                            fontSize: 12.5,
                                             fontWeight: FontWeight.w600,
                                             color: AppTheme.textMuted,
                                           ),
@@ -1916,8 +1916,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 // Render Recursive Replies
                 if (hasReplies && isExpanded)
                   Container(
-                    margin: const EdgeInsets.only(left: 36, top: 4),
-                    padding: const EdgeInsets.only(left: 12),
+                    margin: const EdgeInsets.only(left: 28, top: 2),
+                    padding: const EdgeInsets.only(left: 10),
                     decoration: BoxDecoration(
                       border: Border(
                         left: BorderSide(
@@ -1932,7 +1932,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             physics: const NeverScrollableScrollPhysics(),
                             itemCount: replies.length,
                             separatorBuilder: (_, index) =>
-                                const SizedBox(height: 6),
+                                const SizedBox(height: 4),
                             itemBuilder: (context, index) => _buildCommentCard(
                               replies[index],
                               isDark,

@@ -1222,17 +1222,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
 
     return ListView.builder(
       controller: _postScrollController,
-      padding: const EdgeInsets.fromLTRB(
-        18,
-        18,
-        18,
-        108,
-      ), // Bottom padding for FAB
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 96),
       itemCount: displayPosts.length + (showPaginationFooter ? 1 : 0),
       itemBuilder: (context, index) {
         if (showPaginationFooter && index == displayPosts.length) {
           return Padding(
-            padding: const EdgeInsets.only(top: 8, bottom: 20),
+            padding: const EdgeInsets.only(top: 6, bottom: 16),
             child: Center(
               child: _isLoadingMorePosts
                   ? const SizedBox(
@@ -1340,7 +1335,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         ).then((_) => _loadRoomData(silent: true));
       },
       child: Container(
-        padding: const EdgeInsets.fromLTRB(12, 14, 12, 10),
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
         decoration: BoxDecoration(
           border: Border(bottom: BorderSide(color: borderColor)),
         ),
@@ -1380,14 +1375,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                     );
                   },
                   child: UserAvatar(
-                    radius: 18,
+                    radius: 16,
                     displayName: authorName,
                     photoUrl: hasPhoto ? resolvedPhoto : null,
                   ),
                 );
               },
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1561,7 +1556,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                     ],
                   ),
                   if (titleText.isNotEmpty) ...[
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 2),
                     Text(
                       titleText,
                       style: GoogleFonts.inter(
@@ -1573,7 +1568,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                     ),
                   ],
                   if (bodyText.isNotEmpty) ...[
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 4),
                     SelectableLinkify(
                       text: bodyText,
                       onOpen: (link) async {
@@ -1608,7 +1603,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                   ],
                   if (post['image_url'] != null &&
                       post['image_url'].toString().isNotEmpty) ...[
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 8),
                     GestureDetector(
                       onTap: () {
                         Navigator.push(
@@ -1660,61 +1655,53 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                       ),
                     ),
                   ],
-                  const SizedBox(height: 12),
-                  Row(
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 14,
+                    runSpacing: 6,
                     children: [
-                      Expanded(
-                        child: _buildPostAction(
-                          icon: Icons.chat_bubble_outline_rounded,
-                          label: '$commentCount',
-                          color: secondaryTextColor,
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => PostDetailScreen(
-                                  post: post,
-                                  userEmail: widget.userEmail,
-                                  collegeDomain: widget.collegeDomain,
-                                  roomId: widget.roomId,
-                                  isRoomAdmin: _isAdmin,
-                                ),
+                      _buildPostAction(
+                        icon: Icons.chat_bubble_outline_rounded,
+                        label: '$commentCount',
+                        color: secondaryTextColor,
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => PostDetailScreen(
+                                post: post,
+                                userEmail: widget.userEmail,
+                                collegeDomain: widget.collegeDomain,
+                                roomId: widget.roomId,
+                                isRoomAdmin: _isAdmin,
                               ),
-                            ).then((_) => _loadRoomData(silent: true));
-                          },
-                        ),
+                            ),
+                          ).then((_) => _loadRoomData(silent: true));
+                        },
                       ),
-                      Expanded(
-                        child: _buildPostAction(
-                          icon: Icons.arrow_upward_rounded,
-                          label: '$upvotes',
-                          color: (_userVotes[postId] == 1)
-                              ? const Color(0xFFFB923C)
-                              : secondaryTextColor,
-                          onTap: () => _handleVote(postId, 1),
-                        ),
+                      _buildPostAction(
+                        icon: Icons.arrow_upward_rounded,
+                        label: '$upvotes',
+                        color: (_userVotes[postId] == 1)
+                            ? const Color(0xFFFB923C)
+                            : secondaryTextColor,
+                        onTap: () => _handleVote(postId, 1),
                       ),
-                      Expanded(
-                        child: _buildPostAction(
-                          icon: Icons.arrow_downward_rounded,
-                          label: '$downvotes',
-                          color: (_userVotes[postId] == -1)
-                              ? const Color(0xFF38BDF8)
-                              : secondaryTextColor,
-                          onTap: () => _handleVote(postId, -1),
-                        ),
+                      _buildPostAction(
+                        icon: Icons.arrow_downward_rounded,
+                        label: '$downvotes',
+                        color: (_userVotes[postId] == -1)
+                            ? const Color(0xFF38BDF8)
+                            : secondaryTextColor,
+                        onTap: () => _handleVote(postId, -1),
                       ),
-                      Expanded(
-                        child: _buildPostAction(
-                          icon: isSaved
-                              ? Icons.bookmark_rounded
-                              : Icons.bookmark_border_rounded,
-                          label: isSaved ? 'Saved' : 'Save',
-                          color: isSaved
-                              ? AppTheme.primary
-                              : secondaryTextColor,
-                          onTap: () => _handleBookmark(postId),
-                        ),
+                      _buildPostAction(
+                        icon: isSaved
+                            ? Icons.bookmark_rounded
+                            : Icons.bookmark_border_rounded,
+                        label: isSaved ? 'Saved' : 'Save',
+                        color: isSaved ? AppTheme.primary : secondaryTextColor,
+                        onTap: () => _handleBookmark(postId),
                       ),
                     ],
                   ),
@@ -1737,16 +1724,16 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       onTap: onTap,
       borderRadius: BorderRadius.circular(999),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
         child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 18, color: color),
-            const SizedBox(width: 6),
+            Icon(icon, size: 17, color: color),
+            const SizedBox(width: 4),
             Text(
               label,
               style: GoogleFonts.inter(
-                fontSize: 12,
+                fontSize: 11.5,
                 fontWeight: FontWeight.w600,
                 color: color,
               ),

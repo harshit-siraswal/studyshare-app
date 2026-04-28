@@ -1186,6 +1186,18 @@ class BackendApiService {
     );
   }
 
+  Future<Map<String, dynamic>> updateRoomInvitePermissions({
+    required String roomId,
+    required bool allowMemberInvites,
+  }) async {
+    return _requestJson(
+      '/api/chat/rooms/${Uri.encodeComponent(roomId)}/invite-permissions',
+      method: 'PATCH',
+      body: {'allowMemberInvites': allowMemberInvites},
+      requireAuthToken: true,
+    );
+  }
+
   Future<Map<String, dynamic>> extendRoomExpiry({
     required String roomId,
     int days = 7,

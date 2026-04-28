@@ -64,6 +64,12 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
     return _members.any((member) => _isSameUser(member, widget.userEmail));
   }
 
+  bool get _allowMemberInvites =>
+      _roomInfo?['allow_member_invites'] == true ||
+      _roomInfo?['allowMemberInvites'] == true;
+
+  bool get _canInviteMembers => _isAdmin || (_isMember && _allowMemberInvites);
+
   @override
   void initState() {
     super.initState();
@@ -160,6 +166,27 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to update visibility: $e')),
+      );
+    }
+  }
+
+  Future<void> _updateInvitePermissions(bool value) async {
+    try {
+      final result = await _backendApiService.updateRoomInvitePermissions(
+        roomId: widget.roomId,
+        allowMemberInvites: value,
+      );
+      if (!mounted) return;
+      setState(() {
+        _roomInfo = {
+          ...?_roomInfo,
+          'allow_member_invites': result['allow_member_invites'] ?? value,
+        };
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to update invite permissions: $e')),
       );
     }
   }
@@ -309,15 +336,15 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
         _showMemberActions(member, role, isDark);
       },
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(vertical: 8),
         child: Row(
           children: [
             UserAvatar(
-              radius: 20,
+              radius: 18,
               displayName: _memberDisplayName(member),
               photoUrl: photoUrl.isNotEmpty ? photoUrl : null,
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -505,7 +532,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
   }
 
   Future<void> _openAddMembersSheet() async {
-    if (!_isAdmin) return;
+    if (!_canInviteMembers) return;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -523,10 +550,10 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
   Widget _buildSectionBlock({required bool isDark, required Widget child}) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF111827) : Colors.white,
-        borderRadius: BorderRadius.circular(20),
+        color: isDark ? const Color(0xFF111827) : Colors.transparent,
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
         ),
@@ -539,7 +566,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
     return Text(
       title,
       style: GoogleFonts.inter(
-        fontSize: 13,
+        fontSize: 13.5,
         fontWeight: FontWeight.w700,
         color: isDark ? Colors.white70 : const Color(0xFF64748B),
       ),
@@ -561,17 +588,17 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          width: 36,
-          height: 36,
+          width: 32,
+          height: 32,
           decoration: BoxDecoration(
             color: isDark
                 ? Colors.white.withValues(alpha: 0.05)
                 : const Color(0xFFF8FAFC),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(10),
           ),
           child: Icon(icon, size: 18, color: AppTheme.primary),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 10),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -588,7 +615,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
               Text(
                 value,
                 style: GoogleFonts.inter(
-                  fontSize: 15,
+                  fontSize: 14,
                   fontWeight: FontWeight.w700,
                   color: valueColor,
                 ),
@@ -615,19 +642,19 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 10),
+        padding: const EdgeInsets.symmetric(vertical: 8),
         child: Row(
           children: [
             Container(
-              width: 40,
-              height: 40,
+              width: 36,
+              height: 36,
               decoration: BoxDecoration(
                 color: resolvedForeground.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(icon, color: resolvedForeground, size: 20),
             ),
-            const SizedBox(width: 12),
+            const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -635,16 +662,16 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                   Text(
                     title,
                     style: GoogleFonts.inter(
-                      fontSize: 14,
+                      fontSize: 13.5,
                       fontWeight: FontWeight.w700,
                       color: resolvedForeground,
                     ),
                   ),
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 2),
                   Text(
                     subtitle,
                     style: GoogleFonts.inter(
-                      fontSize: 12,
+                      fontSize: 11.8,
                       height: 1.4,
                       color: isDark ? Colors.white54 : const Color(0xFF64748B),
                     ),
@@ -719,8 +746,8 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
     final isPrivate =
         _roomInfo?['is_private'] == true || _roomInfo?['is_private'] == 'true';
     final showRoomCode = (_roomInfo?['show_room_code'] ?? true) == true;
-    final canShowRoomCode =
-        roomCode.isNotEmpty && (!isPrivate || showRoomCode || _isAdmin);
+    final allowMemberInvites = _allowMemberInvites;
+    final canShowRoomCode = roomCode.isNotEmpty && (_isAdmin || showRoomCode);
     final expiryDate = _parseExpiryDate();
 
     return Scaffold(
@@ -731,6 +758,12 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
         foregroundColor: isDark ? Colors.white : Colors.black,
         elevation: 0,
         actions: [
+          if (_canInviteMembers)
+            IconButton(
+              onPressed: _openAddMembersSheet,
+              icon: const Icon(Icons.add_rounded),
+              tooltip: 'Add members',
+            ),
           IconButton(
             onPressed: _loadDetails,
             icon: const Icon(Icons.refresh_rounded),
@@ -742,7 +775,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
         onRefresh: _loadDetails,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: const EdgeInsets.fromLTRB(18, 8, 18, 26),
+          padding: const EdgeInsets.fromLTRB(14, 6, 14, 20),
           children: [
             if (_isLoading) const LinearProgressIndicator(minHeight: 2),
             if (_loadError != null)
@@ -756,8 +789,8 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
             Column(
               children: [
                 Container(
-                  width: 88,
-                  height: 88,
+                  width: 78,
+                  height: 78,
                   decoration: BoxDecoration(
                     color: AppTheme.primary.withValues(
                       alpha: isDark ? 0.18 : 0.1,
@@ -770,29 +803,29 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                     size: 38,
                   ),
                 ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 10),
                 Text(
                   widget.roomName,
                   textAlign: TextAlign.center,
                   style: GoogleFonts.inter(
-                    fontSize: 24,
+                    fontSize: 22,
                     fontWeight: FontWeight.w800,
                     color: isDark ? Colors.white : const Color(0xFF0F172A),
                   ),
                 ),
                 if (roomDescription.isNotEmpty) ...[
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   Text(
                     roomDescription,
                     textAlign: TextAlign.center,
                     style: GoogleFonts.inter(
-                      fontSize: 14,
+                      fontSize: 13.5,
                       height: 1.45,
                       color: isDark ? Colors.white70 : const Color(0xFF64748B),
                     ),
                   ),
                 ],
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
                 Text(
                   _formatMemberCount(memberCount),
                   style: GoogleFonts.inter(
@@ -813,23 +846,23 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                 ],
               ],
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 18),
             _buildSectionBlock(
               isDark: isDark,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildSectionTitle('Details', isDark),
-                  const SizedBox(height: 16),
+                  _buildSectionTitle('Room settings', isDark),
+                  const SizedBox(height: 12),
                   _buildInfoRow(
                     isDark: isDark,
                     icon: isPrivate ? Icons.lock_rounded : Icons.public_rounded,
                     label: 'Visibility',
                     value: isPrivate ? 'Private room' : 'Public room',
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   Divider(color: dividerColor, height: 1),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 12),
                   _buildInfoRow(
                     isDark: isDark,
                     icon: Icons.schedule_rounded,
@@ -837,9 +870,9 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                     value: _formatExpiry(expiryDate),
                   ),
                   if (canShowRoomCode) ...[
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
                     Divider(color: dividerColor, height: 1),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
                     _buildInfoRow(
                       isDark: isDark,
                       icon: Icons.key_rounded,
@@ -861,10 +894,10 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                       ),
                     ),
                   ],
-                  if (_isAdmin && isPrivate) ...[
-                    const SizedBox(height: 16),
+                  if (_isAdmin) ...[
+                    const SizedBox(height: 12),
                     Divider(color: dividerColor, height: 1),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 12),
                     Row(
                       children: [
                         Expanded(
@@ -872,7 +905,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Show room code to members',
+                                'Show room code on this page',
                                 style: GoogleFonts.inter(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w700,
@@ -884,8 +917,8 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                               const SizedBox(height: 4),
                               Text(
                                 showRoomCode
-                                    ? 'Members can copy the code from this page.'
-                                    : 'Only admins can view and share the code.',
+                                    ? 'Members can view and copy the room code.'
+                                    : 'Only admins can view the room code here.',
                                 style: GoogleFonts.inter(
                                   fontSize: 12.5,
                                   height: 1.45,
@@ -905,18 +938,90 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                         ),
                       ],
                     ),
+                    const SizedBox(height: 12),
+                    Divider(color: dividerColor, height: 1),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Who can invite',
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      allowMemberInvites
+                          ? 'Any joined member can invite students from this college.'
+                          : 'Only admins and the founder can invite students.',
+                      style: GoogleFonts.inter(
+                        fontSize: 12.3,
+                        height: 1.4,
+                        color: isDark
+                            ? Colors.white60
+                            : const Color(0xFF64748B),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _InvitePermissionButton(
+                            label: 'Admins only',
+                            selected: !allowMemberInvites,
+                            onTap: () => _updateInvitePermissions(false),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _InvitePermissionButton(
+                            label: 'All members',
+                            selected: allowMemberInvites,
+                            onTap: () => _updateInvitePermissions(true),
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ],
               ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 10),
             _buildSectionBlock(
               isDark: isDark,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildSectionTitle('Administrators', isDark),
-                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Expanded(child: _buildSectionTitle('People', isDark)),
+                      if (_canInviteMembers)
+                        TextButton.icon(
+                          onPressed: _openAddMembersSheet,
+                          style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
+                            minimumSize: const Size(0, 36),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            foregroundColor: AppTheme.primary,
+                          ),
+                          icon: const Icon(Icons.add_rounded, size: 18),
+                          label: const Text('Invite'),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Admins',
+                    style: GoogleFonts.inter(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white60 : const Color(0xFF64748B),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   if (admins.isEmpty)
                     Text(
                       'No admins found',
@@ -943,9 +1048,20 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                       ),
                     ),
                   if (nonAdmins.isNotEmpty) ...[
-                    const SizedBox(height: 18),
-                    _buildSectionTitle('Members', isDark),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 12),
+                    Divider(color: dividerColor, height: 1),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Members',
+                      style: GoogleFonts.inter(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w700,
+                        color: isDark
+                            ? Colors.white60
+                            : const Color(0xFF64748B),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                     ListView.separated(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
@@ -962,25 +1078,15 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                 ],
               ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 10),
             _buildSectionBlock(
               isDark: isDark,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildSectionTitle('Actions', isDark),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
                   if (_isAdmin && widget.onManageMembers != null) ...[
-                    _buildActionRow(
-                      isDark: isDark,
-                      icon: Icons.person_add_alt_1_rounded,
-                      title: 'Add members',
-                      subtitle:
-                          'Invite students from your college into this room.',
-                      onTap: _openAddMembersSheet,
-                      foreground: AppTheme.primary,
-                    ),
-                    Divider(color: dividerColor, height: 1),
                     _buildActionRow(
                       isDark: isDark,
                       icon: Icons.group_outlined,
@@ -1034,6 +1140,55 @@ class _AddMembersSheet extends StatefulWidget {
 
   @override
   State<_AddMembersSheet> createState() => _AddMembersSheetState();
+}
+
+class _InvitePermissionButton extends StatelessWidget {
+  const _InvitePermissionButton({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+        decoration: BoxDecoration(
+          color: selected
+              ? AppTheme.primary.withValues(alpha: isDark ? 0.22 : 0.1)
+              : (isDark
+                    ? Colors.white.withValues(alpha: 0.04)
+                    : const Color(0xFFF8FAFC)),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: selected
+                ? AppTheme.primary.withValues(alpha: 0.45)
+                : (isDark ? Colors.white12 : const Color(0xFFE2E8F0)),
+          ),
+        ),
+        child: Center(
+          child: Text(
+            label,
+            style: GoogleFonts.inter(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+              color: selected
+                  ? AppTheme.primary
+                  : (isDark ? Colors.white70 : const Color(0xFF475569)),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _AddMembersSheetState extends State<_AddMembersSheet> {
