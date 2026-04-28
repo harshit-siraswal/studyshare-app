@@ -3881,11 +3881,49 @@ class SupabaseService {
       final roomRaw = payload['room'];
       if (roomRaw is Map) {
         final room = Map<String, dynamic>.from(roomRaw);
-        room['isMember'] = payload['isMember'] == true;
-        room['isAdmin'] = payload['isAdmin'] == true;
+        final sessionEmail = _currentSessionEmail();
+        final normalizedSessionEmail = _normalizeEmail(sessionEmail);
+        var isMember = payload['isMember'] == true;
+        var isAdmin = payload['isAdmin'] == true;
         if (room['created_by_email'] == null && room['created_by'] != null) {
           room['created_by_email'] = room['created_by'];
         }
+        final createdByEmail = _normalizeEmail(
+          room['created_by_email']?.toString() ??
+              room['created_by']?.toString(),
+        );
+        if (!isMember &&
+            normalizedSessionEmail.isNotEmpty &&
+            createdByEmail == normalizedSessionEmail) {
+          isMember = true;
+          isAdmin = true;
+        }
+        if (!isMember &&
+            normalizedSessionEmail.isNotEmpty &&
+            _hasConfiguredSupabaseAnonKey) {
+          try {
+            final member = await _client
+                .from('room_members')
+                .select('role')
+                .eq('room_id', roomId)
+                .eq('user_email', normalizedSessionEmail)
+                .maybeSingle();
+            if (member != null) {
+              isMember = true;
+              final role = (member['role'] ?? 'member')
+                  .toString()
+                  .toLowerCase();
+              isAdmin = isAdmin || role == 'admin';
+            }
+          } catch (memberError) {
+            debugPrint(
+              'Backend room info membership verification failed: '
+              '$memberError',
+            );
+          }
+        }
+        room['isMember'] = isMember;
+        room['isAdmin'] = isAdmin;
         return room;
       }
     } catch (e) {
@@ -6546,7 +6584,7 @@ class SupabaseService {
           final joined = await _client
               .from('room_members')
               .select('room_id')
-              .eq('user_email', userEmail);
+              .eq('user_email', normalizedUserEmail);
           return (joined as List)
               .map((entry) => entry['room_id']?.toString() ?? '')
               .where((value) => value.isNotEmpty)
@@ -6621,9 +6659,11 @@ class SupabaseService {
           collegeId: effectiveCollegeId,
           filter: filter.trim(),
         );
-        return filterActiveRooms(
+        final normalized = filterActiveRooms(
           backendRooms.map((entry) => _normalizeChatRoomRecord(entry)).toList(),
         );
+        final joinedRoomIds = await fetchJoinedRoomIds();
+        return filterMembershipState(normalized, joinedRoomIds);
       }
 
       if (!_hasConfiguredSupabaseAnonKey) {
