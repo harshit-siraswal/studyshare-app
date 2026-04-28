@@ -96,6 +96,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
 
       final resourcesFuture = _supabaseService.getUserResources(
         widget.userEmail,
+        collegeId: currentIdentity?.collegeId,
         approvedOnly: !isSelfProfile,
       );
       final userInfoFuture = _supabaseService.getUserInfo(widget.userEmail);
@@ -218,6 +219,7 @@ class _UserProfileScreenState extends State<UserProfileScreen> {
     try {
       final resources = await _supabaseService.getUserResources(
         widget.userEmail,
+        collegeId: _viewerCollegeId,
         approvedOnly: !_isSelfProfile,
       );
       final viewerEmail = _authService.userEmail?.trim() ?? '';

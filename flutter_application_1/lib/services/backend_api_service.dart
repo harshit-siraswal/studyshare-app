@@ -1590,18 +1590,25 @@ class BackendApiService {
 
   Future<Map<String, dynamic>> getPublicUserResources({
     required String email,
+    String? collegeId,
     bool approvedOnly = true,
     int limit = 50,
     int offset = 0,
   }) async {
+    final queryParameters = <String, String>{
+      'email': email.trim(),
+      'approvedOnly': approvedOnly.toString(),
+      'limit': limit.toString(),
+      'offset': offset.toString(),
+    };
+    if (collegeId != null && collegeId.trim().isNotEmpty) {
+      final normalizedCollegeId = collegeId.trim();
+      queryParameters['collegeId'] = normalizedCollegeId;
+      queryParameters['college_id'] = normalizedCollegeId;
+    }
     final uri = Uri(
       path: '/api/users/resources',
-      queryParameters: <String, String>{
-        'email': email.trim(),
-        'approvedOnly': approvedOnly.toString(),
-        'limit': limit.toString(),
-        'offset': offset.toString(),
-      },
+      queryParameters: queryParameters,
     );
     return _requestJson(uri.toString(), method: 'GET');
   }
@@ -1876,10 +1883,19 @@ class BackendApiService {
     );
   }
 
-  Future<Map<String, dynamic>> getPublicProfile({required String email}) async {
+  Future<Map<String, dynamic>> getPublicProfile({
+    required String email,
+    String? collegeId,
+  }) async {
+    final queryParameters = <String, String>{'email': email.trim()};
+    if (collegeId != null && collegeId.trim().isNotEmpty) {
+      final normalizedCollegeId = collegeId.trim();
+      queryParameters['collegeId'] = normalizedCollegeId;
+      queryParameters['college_id'] = normalizedCollegeId;
+    }
     final uri = Uri(
       path: '/api/users/public',
-      queryParameters: <String, String>{'email': email.trim()},
+      queryParameters: queryParameters,
     );
     return _requestJson(uri.toString(), method: 'GET');
   }

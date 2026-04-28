@@ -189,6 +189,67 @@ class SupabaseService {
     return value?.trim().toLowerCase() ?? '';
   }
 
+  Future<String> _resolveAuthorizedCollegeId(
+    String? requestedCollegeId, {
+    required String action,
+  }) async {
+    final normalizedRequested = _normalizeCollegeScopeValue(requestedCollegeId);
+    final cachedIdentityCollegeId = _normalizeCollegeScopeValue(
+      _cachedCurrentUserIdentity?['college_id']?.toString(),
+    );
+    if (cachedIdentityCollegeId.isNotEmpty) {
+      if (normalizedRequested.isNotEmpty &&
+          normalizedRequested != cachedIdentityCollegeId) {
+        developer.log(
+          'action=$action requested_college=$normalizedRequested '
+          'resolved_college=$cachedIdentityCollegeId',
+          name: 'security.college_scope_mismatch',
+          level: 1000,
+        );
+      }
+      return cachedIdentityCollegeId;
+    }
+
+    final cachedProfileCollegeId = _normalizeCollegeScopeValue(
+      _cachedCurrentUserProfile?['college_id']?.toString(),
+    );
+    if (cachedProfileCollegeId.isNotEmpty) {
+      if (normalizedRequested.isNotEmpty &&
+          normalizedRequested != cachedProfileCollegeId) {
+        developer.log(
+          'action=$action requested_college=$normalizedRequested '
+          'resolved_college=$cachedProfileCollegeId',
+          name: 'security.college_scope_mismatch',
+          level: 1000,
+        );
+      }
+      return cachedProfileCollegeId;
+    }
+
+    try {
+      final profile = await getCurrentUserProfile(maxAttempts: 1);
+      final resolvedCollegeId = _normalizeCollegeScopeValue(
+        profile['college_id']?.toString(),
+      );
+      if (resolvedCollegeId.isNotEmpty) {
+        if (normalizedRequested.isNotEmpty &&
+            normalizedRequested != resolvedCollegeId) {
+          developer.log(
+            'action=$action requested_college=$normalizedRequested '
+            'resolved_college=$resolvedCollegeId',
+            name: 'security.college_scope_mismatch',
+            level: 1000,
+          );
+        }
+        return resolvedCollegeId;
+      }
+    } catch (e) {
+      debugPrint('Error resolving authorized college scope for $action: $e');
+    }
+
+    return normalizedRequested;
+  }
+
   bool _looksLikeDomainScope(String value) {
     final normalized = value.trim().toLowerCase().replaceAll('@', '');
     if (normalized.isEmpty) return false;
@@ -1505,6 +1566,10 @@ class SupabaseService {
     int limit = 20,
     int offset = 0,
   }) async {
+    final effectiveCollegeId = await _resolveAuthorizedCollegeId(
+      collegeId,
+      action: 'get_resources',
+    );
     final normalizedSemester = semester?.trim();
     final normalizedBranch = branch?.trim();
     final normalizedSubject = subject?.trim();
@@ -1521,7 +1586,7 @@ class SupabaseService {
         : _escapeLikePattern(normalizedType);
     final escapedSearch = _escapeLikePattern(normalizedSearch);
     final cacheKey = _resourceListCacheKey(
-      collegeId: collegeId,
+      collegeId: effectiveCollegeId,
       semester: normalizedSemester,
       branch: normalizedBranch,
       subject: normalizedSubject,
@@ -1549,7 +1614,7 @@ class SupabaseService {
     final fetchFuture = () async {
       if ((sortBy?.trim().toLowerCase() ?? '') == 'teacher') {
         final backendTeacherRows = await _fetchResourcesViaBackend(
-          collegeId: collegeId,
+          collegeId: effectiveCollegeId,
           semester: normalizedSemester,
           branch: normalizedBranch,
           subject: normalizedSubject,
@@ -1601,13 +1666,13 @@ class SupabaseService {
 
       try {
         debugPrint(
-          'SupabaseService.getResources: collegeId=$collegeId, semester=$normalizedSemester, branch=$normalizedBranch, type=$normalizedType',
+          'SupabaseService.getResources: collegeId=$effectiveCollegeId, semester=$normalizedSemester, branch=$normalizedBranch, type=$normalizedType',
         );
 
         var query = _client
             .from('resources')
             .select()
-            .eq('college_id', collegeId)
+            .eq('college_id', effectiveCollegeId)
             .eq('status', 'approved');
 
         if (normalizedSemester != null && normalizedSemester.isNotEmpty) {
@@ -1670,7 +1735,7 @@ class SupabaseService {
       } catch (e) {
         debugPrint('Error fetching resources via Supabase: $e');
         final fallbackRows = await _fetchResourcesViaBackend(
-          collegeId: collegeId,
+          collegeId: effectiveCollegeId,
           semester: normalizedSemester,
           branch: normalizedBranch,
           subject: normalizedSubject,
@@ -1712,6 +1777,7 @@ class SupabaseService {
   /// Get resources from users the current user follows
   Future<List<Resource>> _fetchApprovedResourcesByUploaderEmailsViaBackend(
     List<String> uploaderEmails, {
+    required String collegeId,
     int limit = 20,
     int offset = 0,
   }) async {
@@ -1733,6 +1799,7 @@ class SupabaseService {
         try {
           final payload = await _api.getPublicUserResources(
             email: email,
+            collegeId: collegeId.isEmpty ? null : collegeId,
             approvedOnly: true,
             limit: fetchPerUser,
             offset: 0,
@@ -1865,6 +1932,10 @@ class SupabaseService {
     int offset = 0,
   }) async {
     final normalizedEmail = _normalizeEmail(userEmail);
+    final effectiveCollegeId = await _resolveAuthorizedCollegeId(
+      collegeId,
+      action: 'get_following_feed',
+    );
     final activeUserEmail = normalizedEmail.isNotEmpty
         ? normalizedEmail
         : _currentSessionEmail();
@@ -1876,7 +1947,7 @@ class SupabaseService {
     // variants and uploader metadata in one pass.
     try {
       final feedPayload = await _api.getFollowingFeed(
-        collegeId: collegeId,
+        collegeId: effectiveCollegeId,
         page: page,
         limit: limit,
       );
@@ -1914,6 +1985,7 @@ class SupabaseService {
         final backendResources =
             await _fetchApprovedResourcesByUploaderEmailsViaBackend(
               followingEmails,
+              collegeId: effectiveCollegeId,
               limit: limit,
               offset: offset,
             );
@@ -1956,7 +2028,7 @@ class SupabaseService {
 
         if (followingEmails.isNotEmpty) {
           return _fetchApprovedResourcesByUploaderEmails(
-            collegeId: collegeId,
+            collegeId: effectiveCollegeId,
             uploaderEmails: followingEmails,
             limit: limit,
             offset: offset,
@@ -1983,7 +2055,7 @@ class SupabaseService {
       if (followingEmails.isEmpty) return [];
 
       return _fetchApprovedResourcesByUploaderEmails(
-        collegeId: collegeId,
+        collegeId: effectiveCollegeId,
         uploaderEmails: followingEmails,
         limit: limit,
         offset: offset,
@@ -2054,6 +2126,9 @@ class SupabaseService {
         throw Exception('Invalid follow request id');
       }
 
+      if (ctx == null || !ctx.mounted) {
+        throw Exception('Security context is no longer active');
+      }
       await _api.cancelFollowRequest(parsedRequestId, context: ctx);
     } catch (e) {
       debugPrint('Error cancelling follow request: $e');
@@ -2265,6 +2340,10 @@ class SupabaseService {
     }
 
     final future = () async {
+      final viewerCollegeId = await _resolveAuthorizedCollegeId(
+        null,
+        action: 'get_user_info',
+      );
       final currentEmail = _currentSessionEmail();
       if (normalizedEmail == currentEmail) {
         try {
@@ -2281,7 +2360,10 @@ class SupabaseService {
       }
 
       try {
-        final payload = await _api.getPublicProfile(email: normalizedEmail);
+        final payload = await _api.getPublicProfile(
+          email: normalizedEmail,
+          collegeId: viewerCollegeId.isEmpty ? null : viewerCollegeId,
+        );
         final profilePayload = payload['profile'];
         final profile = profilePayload is Map
             ? Map<String, dynamic>.from(profilePayload)
@@ -2299,13 +2381,16 @@ class SupabaseService {
       }
 
       try {
-        final res = await _client
+        var query = _client
             .from('users_safe')
             .select(
-              'id, email, display_name, profile_photo_url, username, bio, semester, branch, subject, role, admin_capabilities, scope_all_colleges, admin_college_id',
+              'id, email, display_name, profile_photo_url, username, bio, semester, branch, subject, role, college, college_id, admin_capabilities, scope_all_colleges, admin_college_id',
             )
-            .eq('email', normalizedEmail)
-            .maybeSingle();
+            .eq('email', normalizedEmail);
+        if (viewerCollegeId.isNotEmpty) {
+          query = query.eq('college_id', viewerCollegeId);
+        }
+        final res = await query.maybeSingle();
         if (res == null) {
           return null;
         }
@@ -2635,6 +2720,13 @@ class SupabaseService {
     String? fileUrl,
     String? fileType,
   }) async {
+    final effectiveCollegeId = await _resolveAuthorizedCollegeId(
+      collegeId,
+      action: 'add_notice',
+    );
+    if (effectiveCollegeId.isEmpty) {
+      throw Exception('College context is required to post notices');
+    }
     final normalizedImageUrl = imageUrl?.trim() ?? '';
     final normalizedFileUrl = fileUrl?.trim() ?? '';
     final normalizedFileType = fileType?.trim().toLowerCase() ?? '';
@@ -2647,7 +2739,7 @@ class SupabaseService {
     StackTrace? backendStackTrace;
     try {
       await _api.createNotice(
-        collegeId: collegeId,
+        collegeId: effectiveCollegeId,
         title: title,
         content: content,
         department: normalizedDepartment,
@@ -2680,7 +2772,7 @@ class SupabaseService {
         : email.split('@').first;
 
     final payload = <String, dynamic>{
-      'college_id': collegeId,
+      'college_id': effectiveCollegeId,
       'title': title,
       'content': content,
       'department': normalizedDepartment,
@@ -2695,7 +2787,7 @@ class SupabaseService {
       await _client.from('notices').insert(payload);
       try {
         await _notifyDepartmentFollowersForNotice(
-          collegeId: collegeId,
+          collegeId: effectiveCollegeId,
           departmentId: normalizedDepartment,
           noticeTitle: title,
           noticeContent: content,
@@ -2966,8 +3058,14 @@ class SupabaseService {
     String? collegeId,
     String? college,
   }) async {
-    var effectiveCollegeId = collegeId?.trim() ?? '';
+    var effectiveCollegeId = await _resolveAuthorizedCollegeId(
+      collegeId,
+      action: 'discover_users',
+    );
     var effectiveCollege = college?.trim() ?? '';
+    if (effectiveCollegeId.isNotEmpty) {
+      effectiveCollege = '';
+    }
 
     if (effectiveCollegeId.isEmpty && effectiveCollege.isEmpty) {
       try {
@@ -3677,9 +3775,19 @@ class SupabaseService {
     List<String>? tags,
     int? durationInDays,
   }) async {
+    final effectiveCollegeId = await _resolveAuthorizedCollegeId(
+      collegeId,
+      action: 'create_chat_room',
+    );
+    if (effectiveCollegeId.isEmpty) {
+      throw Exception('College context is required to create a room');
+    }
     try {
       final ctx = _ctx;
       if (ctx == null) throw Exception('Security context not initialized');
+      if (!ctx.mounted) {
+        throw Exception('Security context is no longer active');
+      }
 
       // Limits are now strictly enforced on backend.
       // We pass the desired duration (-1 for permanent).
@@ -3690,7 +3798,7 @@ class SupabaseService {
             ? null
             : description.trim(),
         isPrivate: isPrivate,
-        collegeId: collegeId,
+        collegeId: effectiveCollegeId,
         context: ctx,
         durationInDays: durationInDays,
         tags: tags,
@@ -5615,8 +5723,19 @@ class SupabaseService {
       action: 'create_resource',
     );
     payload['uploaded_by_email'] = uploaderEmail;
+    final effectiveCollegeId = await _resolveAuthorizedCollegeId(
+      payload['college_id']?.toString(),
+      action: 'create_resource',
+    );
+    if (effectiveCollegeId.isEmpty) {
+      throw Exception('College context is required to create a resource');
+    }
+    payload['college_id'] = effectiveCollegeId;
 
     try {
+      if (!context.mounted) {
+        throw Exception('Security context is no longer active');
+      }
       await _api.createResource(payload, context: context);
       invalidateResourceListCache();
       return;
@@ -6345,6 +6464,11 @@ class SupabaseService {
     String collegeId, {
     String? filter,
   }) async {
+    final effectiveCollegeId = await _resolveAuthorizedCollegeId(
+      collegeId,
+      action: 'get_chat_rooms',
+    );
+
     Future<Set<String>> fetchJoinedRoomIds() async {
       try {
         if (_hasConfiguredSupabaseAnonKey) {
@@ -6411,7 +6535,7 @@ class SupabaseService {
     try {
       if (filter != null && filter.trim().isNotEmpty) {
         final backendRooms = await _api.listChatRooms(
-          collegeId: collegeId,
+          collegeId: effectiveCollegeId,
           filter: filter.trim(),
         );
         return filterActiveRooms(
@@ -6423,7 +6547,9 @@ class SupabaseService {
         debugPrint(
           'Supabase anon key missing; using backend room discovery directly.',
         );
-        final backendRooms = await _api.listChatRooms(collegeId: collegeId);
+        final backendRooms = await _api.listChatRooms(
+          collegeId: effectiveCollegeId,
+        );
         return filterActiveRooms(
           backendRooms.map((entry) => _normalizeChatRoomRecord(entry)).toList(),
         );
@@ -6432,7 +6558,7 @@ class SupabaseService {
       final response = await _client
           .from('chat_rooms')
           .select('*, member_count:room_members(count)')
-          .eq('college_id', collegeId)
+          .eq('college_id', effectiveCollegeId)
           .order('created_at', ascending: false);
 
       final rooms = (response as List)
@@ -6443,7 +6569,7 @@ class SupabaseService {
       debugPrint('Error fetching chat rooms via Supabase: $e');
       try {
         final backendRooms = await _api.listChatRooms(
-          collegeId: collegeId,
+          collegeId: effectiveCollegeId,
           filter: filter,
         );
         final normalized = backendRooms
@@ -6468,7 +6594,7 @@ class SupabaseService {
           final response = await _client
               .from('chat_rooms')
               .select('*, member_count:room_members(count)')
-              .eq('college_id', collegeId)
+              .eq('college_id', effectiveCollegeId)
               .order('created_at', ascending: false);
           final normalized = (response as List)
               .map((entry) => _normalizeChatRoomRecord(entry))
@@ -6552,6 +6678,11 @@ class SupabaseService {
     int limit = 80,
     int offset = 0,
   }) async {
+    final effectiveCollegeId = await _resolveAuthorizedCollegeId(
+      collegeId,
+      action: 'get_notices',
+    );
+
     List<Map<String, dynamic>> normalizeBackendRows(
       List<Map<String, dynamic>> rawRows,
     ) {
@@ -6576,7 +6707,7 @@ class SupabaseService {
       if (!_hasConfiguredSupabaseAnonKey) {
         final backendRows = normalizeBackendRows(
           await _api.getNotices(
-            collegeId,
+            effectiveCollegeId,
             department: normalizedDepartment.isEmpty
                 ? null
                 : normalizedDepartment,
@@ -6588,7 +6719,10 @@ class SupabaseService {
         final end = (safeOffset + safeLimit).clamp(0, backendRows.length);
         return backendRows.sublist(safeOffset, end);
       }
-      var query = _client.from('notices').select().eq('college_id', collegeId);
+      var query = _client
+          .from('notices')
+          .select()
+          .eq('college_id', effectiveCollegeId);
       if (normalizedDepartment.isNotEmpty) {
         query = query.eq('department', normalizedDepartment);
       }
@@ -6607,7 +6741,7 @@ class SupabaseService {
         final normalizedDepartment = normalizeDepartmentCode(department);
         final backendRows = normalizeBackendRows(
           await _api.getNotices(
-            collegeId,
+            effectiveCollegeId,
             department: normalizedDepartment.isEmpty
                 ? null
                 : normalizedDepartment,
@@ -6895,14 +7029,18 @@ class SupabaseService {
     String? collegeId,
   }) async {
     final normalizedId = id.trim();
+    final effectiveCollegeId = await _resolveAuthorizedCollegeId(
+      collegeId,
+      action: 'get_notice',
+    );
     if (normalizedId.isEmpty) return null;
 
     try {
-      final response = await _client
-          .from('notices')
-          .select()
-          .eq('id', normalizedId)
-          .maybeSingle();
+      var query = _client.from('notices').select().eq('id', normalizedId);
+      if (effectiveCollegeId.isNotEmpty) {
+        query = query.eq('college_id', effectiveCollegeId);
+      }
+      final response = await query.maybeSingle();
       if (response != null) {
         return response;
       }
@@ -6911,7 +7049,10 @@ class SupabaseService {
     }
 
     try {
-      return await _api.getNoticeById(normalizedId, collegeId: collegeId);
+      return await _api.getNoticeById(
+        normalizedId,
+        collegeId: effectiveCollegeId.isEmpty ? collegeId : effectiveCollegeId,
+      );
     } catch (e) {
       debugPrint('Backend notice lookup failed: $e');
       return null;
@@ -6952,6 +7093,7 @@ class SupabaseService {
   /// If [approvedOnly] is true (default), only approved resources are returned.
   Future<List<Resource>> _getUserResourcesViaBackend({
     required String userEmail,
+    required String collegeId,
     required bool approvedOnly,
     required int limit,
     required int offset,
@@ -6962,6 +7104,7 @@ class SupabaseService {
         ? await _api.getMyResources()
         : await _api.getPublicUserResources(
             email: normalizedEmail,
+            collegeId: collegeId.isEmpty ? null : collegeId,
             approvedOnly: approvedOnly,
             limit: limit,
             offset: offset,
@@ -6990,17 +7133,23 @@ class SupabaseService {
 
   Future<List<Resource>> getUserResources(
     String userEmail, {
+    String? collegeId,
     bool approvedOnly = true,
     int limit = 50,
     int offset = 0,
   }) async {
     final rawEmail = userEmail.trim();
     final normalizedEmail = _normalizeEmail(userEmail);
+    final effectiveCollegeId = await _resolveAuthorizedCollegeId(
+      collegeId,
+      action: 'get_user_resources',
+    );
     if (normalizedEmail.isEmpty) return [];
     if (limit <= 0) return [];
     try {
       return await _getUserResourcesViaBackend(
         userEmail: normalizedEmail,
+        collegeId: effectiveCollegeId,
         approvedOnly: approvedOnly,
         limit: limit,
         offset: offset,
@@ -7017,6 +7166,9 @@ class SupabaseService {
           .from('resources')
           .select()
           .eq('uploaded_by_email', rawEmail);
+      if (effectiveCollegeId.isNotEmpty) {
+        query = query.eq('college_id', effectiveCollegeId);
+      }
 
       if (approvedOnly) {
         query = query.eq('status', 'approved');
@@ -7039,6 +7191,9 @@ class SupabaseService {
     try {
       final fetchWindow = (limit * 8).clamp(80, 240).toInt();
       var query = _client.from('resources').select();
+      if (effectiveCollegeId.isNotEmpty) {
+        query = query.eq('college_id', effectiveCollegeId);
+      }
       if (approvedOnly) {
         query = query.eq('status', 'approved');
       }

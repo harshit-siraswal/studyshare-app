@@ -133,6 +133,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<List<Resource>> _loadContributionResources(String email) async {
     final resources = await _supabaseService.getUserResources(
       email,
+      collegeId: widget.collegeId,
       approvedOnly: false,
     );
     if (resources.isEmpty) {
@@ -837,82 +838,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildCompactProfileStrip(
-    Color textColor,
-    Color subTextColor,
-    bool isDark,
-  ) {
-    return Container(
-      height: 62,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkCard : Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isDark
-              ? AppTheme.darkBorder.withValues(alpha: 0.8)
-              : AppTheme.lightBorder,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.24 : 0.07),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          _buildCollapsedAvatar(textColor),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _displayName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.inter(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: textColor,
-                  ),
-                ),
-                Text(
-                  '@$_resolvedUsername',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: GoogleFonts.inter(fontSize: 12, color: subTextColor),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                _statsLoading ? '...' : _uploadCount.toString(),
-                style: GoogleFonts.inter(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: textColor,
-                ),
-              ),
-              Text(
-                'contributions',
-                style: GoogleFonts.inter(fontSize: 11, color: subTextColor),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildProfileSkeleton(bool isDark) {
     final blockColor = isDark
         ? const Color(0xFF2A2A2E)
@@ -1001,56 +926,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildCollapsedAvatar(Color textColor) {
-    if (_photoUrl != null && _photoUrl!.isNotEmpty) {
-      return ClipOval(
-        child: CachedNetworkImage(
-          imageUrl: _photoUrl!,
-          width: 40,
-          height: 40,
-          fit: BoxFit.cover,
-          errorWidget: (context, url, error) {
-            return Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: textColor.withValues(alpha: 0.08),
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                getInitials(_displayName),
-                style: GoogleFonts.inter(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: textColor,
-                ),
-              ),
-            );
-          },
-        ),
-      );
-    }
-
-    return Container(
-      width: 40,
-      height: 40,
-      decoration: BoxDecoration(
-        color: textColor.withValues(alpha: 0.08),
-        shape: BoxShape.circle,
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        getInitials(_displayName),
-        style: GoogleFonts.inter(
-          fontSize: 14,
-          fontWeight: FontWeight.w700,
-          color: textColor,
-        ),
-      ),
     );
   }
 
