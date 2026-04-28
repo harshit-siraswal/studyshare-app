@@ -541,6 +541,12 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
             description: _roomText(room, 'description'),
             userEmail: widget.userEmail,
             collegeDomain: widget.collegeDomain,
+            initialIsAdmin: room['isAdmin'] == true || room['is_admin'] == true,
+            initialIsMember:
+                isMember ||
+                room['isMember'] == true ||
+                room['is_member'] == true,
+            initialRoomInfo: Map<String, dynamic>.from(room),
           ),
         ),
       );

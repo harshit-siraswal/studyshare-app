@@ -37,6 +37,9 @@ class ChatRoomScreen extends StatefulWidget {
   final String description;
   final String userEmail;
   final String collegeDomain;
+  final bool initialIsAdmin;
+  final bool initialIsMember;
+  final Map<String, dynamic>? initialRoomInfo;
 
   const ChatRoomScreen({
     super.key,
@@ -45,6 +48,9 @@ class ChatRoomScreen extends StatefulWidget {
     required this.description,
     required this.userEmail,
     required this.collegeDomain,
+    this.initialIsAdmin = false,
+    this.initialIsMember = false,
+    this.initialRoomInfo,
   });
 
   @override
@@ -115,6 +121,22 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   @override
   void initState() {
     super.initState();
+    if (widget.initialRoomInfo != null) {
+      _roomInfoCache[widget.roomId] = Map<String, dynamic>.from(
+        widget.initialRoomInfo!,
+      );
+    }
+    _roomInfo = widget.initialRoomInfo == null
+        ? null
+        : Map<String, dynamic>.from(widget.initialRoomInfo!);
+    _isAdmin =
+        widget.initialIsAdmin ||
+        widget.initialRoomInfo?['isAdmin'] == true ||
+        widget.initialRoomInfo?['is_admin'] == true;
+    _isMember =
+        widget.initialIsMember ||
+        widget.initialRoomInfo?['isMember'] == true ||
+        widget.initialRoomInfo?['is_member'] == true;
     _fabAnimationController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 600),

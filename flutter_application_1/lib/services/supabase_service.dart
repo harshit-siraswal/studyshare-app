@@ -6699,9 +6699,6 @@ class SupabaseService {
             .map((entry) => _normalizeChatRoomRecord(entry))
             .toList();
         if (normalized.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
-          if (filter != null && filter.trim().isNotEmpty) {
-            return filterActiveRooms(normalized);
-          }
           final joinedRoomIds = await fetchJoinedRoomIds();
           return filterMembershipState(
             filterActiveRooms(normalized),

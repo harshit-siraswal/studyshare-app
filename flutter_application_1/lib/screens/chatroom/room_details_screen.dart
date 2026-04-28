@@ -50,11 +50,17 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
 
   bool get _isAdmin {
     if (widget.isAdmin) return true;
+    if (_roomInfo?['isAdmin'] == true || _roomInfo?['is_admin'] == true) {
+      return true;
+    }
     return _members.any((member) => _isAdminMember(member, widget.userEmail));
   }
 
   bool get _isMember {
     if (widget.isMember) return true;
+    if (_roomInfo?['isMember'] == true || _roomInfo?['is_member'] == true) {
+      return true;
+    }
     return _members.any((member) => _isSameUser(member, widget.userEmail));
   }
 
@@ -94,6 +100,29 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
           roomMap['created_by'] != null) {
         roomMap['created_by_email'] = roomMap['created_by'];
       }
+      final currentUserEmail = widget.userEmail.trim().toLowerCase();
+      final creatorEmail =
+          ((roomMap['created_by_email'] ??
+                      roomMap['created_by'] ??
+                      roomMap['createdBy'] ??
+                      '')
+                  .toString())
+              .trim()
+              .toLowerCase();
+      final isCreator =
+          currentUserEmail.isNotEmpty && currentUserEmail == creatorEmail;
+      roomMap['isMember'] =
+          roomMap['isMember'] == true ||
+          roomMap['is_member'] == true ||
+          roomPayload['isMember'] == true ||
+          widget.isMember ||
+          isCreator;
+      roomMap['isAdmin'] =
+          roomMap['isAdmin'] == true ||
+          roomMap['is_admin'] == true ||
+          roomPayload['isAdmin'] == true ||
+          widget.isAdmin ||
+          isCreator;
       if (roomMap['member_count'] == null) {
         roomMap['member_count'] = members.length;
       }

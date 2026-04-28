@@ -44,6 +44,10 @@ class RoomCard extends StatelessWidget {
             description: _roomValue('description'),
             userEmail: userEmail,
             collegeDomain: collegeDomain,
+            initialIsAdmin: room['isAdmin'] == true || room['is_admin'] == true,
+            initialIsMember:
+                room['isMember'] == true || room['is_member'] == true,
+            initialRoomInfo: Map<String, dynamic>.from(room),
           ),
         ),
       ).then((_) {
