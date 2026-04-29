@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import 'package:google_fonts/google_fonts.dart';
@@ -35,6 +37,7 @@ class _NotificationScreenState extends State<NotificationScreen>
   final int _limit = 20;
   final Set<int> _pendingFollowActionIds = <int>{};
   final Set<String> _pendingRoomInviteActionIds = <String>{};
+  Timer? _refreshTimer;
 
   List<NotificationModel> get _filteredNotifications {
     if (_tabController.index == 1) {
@@ -76,10 +79,15 @@ class _NotificationScreenState extends State<NotificationScreen>
     _tabController = TabController(length: _tabs.length, vsync: this);
     _scrollController.addListener(_onScroll);
     _loadNotifications();
+    _refreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (!mounted || _isLoading || _isLoadingMore) return;
+      _loadNotifications();
+    });
   }
 
   @override
   void dispose() {
+    _refreshTimer?.cancel();
     _tabController.dispose();
     _scrollController.dispose();
     super.dispose();

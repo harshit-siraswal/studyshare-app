@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -150,6 +152,10 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
   }
 
   Future<void> _updateRoomCodeVisibility(bool value) async {
+    final previous = _roomInfo?['show_room_code'];
+    setState(() {
+      _roomInfo = {...?_roomInfo, 'show_room_code': value};
+    });
     try {
       final result = await _backendApiService.updateRoomCodeVisibility(
         roomId: widget.roomId,
@@ -164,6 +170,9 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
       });
     } catch (e) {
       if (!mounted) return;
+      setState(() {
+        _roomInfo = {...?_roomInfo, 'show_room_code': previous};
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to update visibility: $e')),
       );
@@ -171,6 +180,10 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
   }
 
   Future<void> _updateInvitePermissions(bool value) async {
+    final previous = _roomInfo?['allow_member_invites'];
+    setState(() {
+      _roomInfo = {...?_roomInfo, 'allow_member_invites': value};
+    });
     try {
       final result = await _backendApiService.updateRoomInvitePermissions(
         roomId: widget.roomId,
@@ -185,6 +198,9 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
       });
     } catch (e) {
       if (!mounted) return;
+      setState(() {
+        _roomInfo = {...?_roomInfo, 'allow_member_invites': previous};
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Failed to update invite permissions: $e')),
       );
@@ -1192,6 +1208,14 @@ class _InvitePermissionButton extends StatelessWidget {
 }
 
 class _AddMembersSheetState extends State<_AddMembersSheet> {
+  static const Duration _inviteCandidateCacheTtl = Duration(minutes: 1);
+  static final Map<
+    String,
+    ({DateTime cachedAt, List<Map<String, dynamic>> rows})
+  >
+  _candidateCache =
+      <String, ({DateTime cachedAt, List<Map<String, dynamic>> rows})>{};
+
   final BackendApiService _api = BackendApiService();
   final TextEditingController _searchController = TextEditingController();
 
@@ -1199,6 +1223,7 @@ class _AddMembersSheetState extends State<_AddMembersSheet> {
   String? _error;
   List<Map<String, dynamic>> _candidates = <Map<String, dynamic>>[];
   final Set<String> _pendingInviteEmails = <String>{};
+  Timer? _searchDebounce;
 
   @override
   void initState() {
@@ -1208,11 +1233,44 @@ class _AddMembersSheetState extends State<_AddMembersSheet> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadCandidates() async {
+  String get _cacheKey =>
+      '${widget.roomId}|${_searchController.text.trim().toLowerCase()}';
+
+  List<Map<String, dynamic>> _cloneCandidates(List<Map<String, dynamic>> rows) {
+    return rows
+        .map((row) => Map<String, dynamic>.from(row))
+        .toList(growable: true);
+  }
+
+  void _scheduleCandidateSearch() {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 260), () {
+      if (mounted) {
+        _loadCandidates(forceRefresh: true);
+      }
+    });
+  }
+
+  Future<void> _loadCandidates({bool forceRefresh = false}) async {
+    if (!forceRefresh) {
+      final cached = _candidateCache[_cacheKey];
+      if (cached != null &&
+          DateTime.now().difference(cached.cachedAt) <
+              _inviteCandidateCacheTtl) {
+        setState(() {
+          _candidates = _cloneCandidates(cached.rows);
+          _isLoading = false;
+          _error = null;
+        });
+        return;
+      }
+    }
+
     setState(() {
       _isLoading = true;
       _error = null;
@@ -1224,6 +1282,10 @@ class _AddMembersSheetState extends State<_AddMembersSheet> {
         query: _searchController.text,
       );
       if (!mounted) return;
+      _candidateCache[_cacheKey] = (
+        cachedAt: DateTime.now(),
+        rows: _cloneCandidates(rows),
+      );
       setState(() {
         _candidates = rows;
         _isLoading = false;
@@ -1240,32 +1302,43 @@ class _AddMembersSheetState extends State<_AddMembersSheet> {
   Future<void> _sendInvite(Map<String, dynamic> candidate) async {
     final email = (candidate['email'] ?? '').toString().trim().toLowerCase();
     if (email.isEmpty || _pendingInviteEmails.contains(email)) return;
+    final index = _candidates.indexWhere(
+      (entry) =>
+          (entry['email'] ?? '').toString().trim().toLowerCase() == email,
+    );
+    Map<String, dynamic>? previousCandidate;
+    if (index != -1) {
+      previousCandidate = Map<String, dynamic>.from(_candidates[index]);
+    }
 
     setState(() {
       _pendingInviteEmails.add(email);
+      if (index != -1) {
+        final updated = Map<String, dynamic>.from(_candidates[index]);
+        updated['invite_sent'] = true;
+        _candidates[index] = updated;
+      }
     });
 
     try {
       await _api.sendRoomInvite(roomId: widget.roomId, inviteeEmail: email);
       if (!mounted) return;
-      setState(() {
-        final index = _candidates.indexWhere(
-          (entry) =>
-              (entry['email'] ?? '').toString().trim().toLowerCase() == email,
-        );
-        if (index != -1) {
-          final updated = Map<String, dynamic>.from(_candidates[index]);
-          updated['invite_sent'] = true;
-          _candidates[index] = updated;
-        }
-      });
-      await widget.onInviteSent();
+      _candidateCache[_cacheKey] = (
+        cachedAt: DateTime.now(),
+        rows: _cloneCandidates(_candidates),
+      );
+      unawaited(widget.onInviteSent());
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Invite sent')));
     } catch (e) {
       if (!mounted) return;
+      setState(() {
+        if (index != -1 && previousCandidate != null) {
+          _candidates[index] = previousCandidate;
+        }
+      });
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Failed to send invite: $e')));
@@ -1326,7 +1399,7 @@ class _AddMembersSheetState extends State<_AddMembersSheet> {
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: TextField(
                 controller: _searchController,
-                onChanged: (_) => _loadCandidates(),
+                onChanged: (_) => _scheduleCandidateSearch(),
                 decoration: InputDecoration(
                   hintText: 'Search by name or username',
                   prefixIcon: const Icon(Icons.search_rounded),

@@ -1,14 +1,11 @@
 import 'package:flutter/material.dart';
+
 import '../config/theme.dart';
 import '../screens/chatroom/chatroom_screen.dart';
+import '../services/backend_api_service.dart';
 
-class RoomCard extends StatelessWidget {
+class RoomCard extends StatefulWidget {
   static const String _defaultRoomName = 'Unnamed Room';
-
-  final Map<String, dynamic> room;
-  final String userEmail;
-  final String collegeDomain;
-  final VoidCallback? onReturn;
 
   const RoomCard({
     super.key,
@@ -18,45 +15,137 @@ class RoomCard extends StatelessWidget {
     this.onReturn,
   });
 
+  final Map<String, dynamic> room;
+  final String userEmail;
+  final String collegeDomain;
+  final VoidCallback? onReturn;
+
+  @override
+  State<RoomCard> createState() => _RoomCardState();
+}
+
+class _RoomCardState extends State<RoomCard> {
+  final BackendApiService _api = BackendApiService();
+  late Map<String, dynamic> _room;
+  bool _isJoining = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _room = Map<String, dynamic>.from(widget.room);
+  }
+
+  bool get _isJoined => _room['isMember'] == true || _room['is_member'] == true;
+
+  bool get _isPrivate =>
+      _room['is_private'] == true || _room['isPrivate'] == true;
+
+  bool get _hasJoinAccess {
+    final email = widget.userEmail.trim().toLowerCase();
+    final domain = widget.collegeDomain.trim().toLowerCase();
+    if (email.isEmpty || domain.isEmpty) return false;
+    final normalizedDomain = domain.startsWith('@') ? domain : '@$domain';
+    return email.endsWith(normalizedDomain);
+  }
+
+  String _roomValue(String key, {String fallback = ''}) {
+    final value = _room[key]?.toString().trim() ?? '';
+    return value.isEmpty ? fallback : value;
+  }
+
+  List<String> _extractTags(dynamic rawTags) {
+    if (rawTags is List) {
+      return rawTags
+          .map((entry) => entry?.toString().trim() ?? '')
+          .where((entry) => entry.isNotEmpty)
+          .toList(growable: false);
+    }
+    final normalized = rawTags?.toString().trim() ?? '';
+    if (normalized.isEmpty) return const <String>[];
+    if (normalized.contains(',')) {
+      return normalized
+          .split(',')
+          .map((entry) => entry.trim())
+          .where((entry) => entry.isNotEmpty)
+          .toList(growable: false);
+    }
+    return <String>[normalized];
+  }
+
+  Future<void> _openRoom() async {
+    final roomName = _roomValue('name', fallback: RoomCard._defaultRoomName);
+    final roomId = _room['id']?.toString() ?? '';
+    if (roomId.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Error: Room ID missing')));
+      return;
+    }
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => ChatRoomScreen(
+          roomId: roomId,
+          roomName: roomName,
+          description: _roomValue('description'),
+          userEmail: widget.userEmail,
+          collegeDomain: widget.collegeDomain,
+          initialIsAdmin: _room['isAdmin'] == true || _room['is_admin'] == true,
+          initialIsMember: _isJoined,
+          initialRoomInfo: Map<String, dynamic>.from(_room),
+        ),
+      ),
+    );
+    widget.onReturn?.call();
+  }
+
+  Future<void> _joinRoom() async {
+    final roomId = _room['id']?.toString() ?? '';
+    if (roomId.isEmpty || _isJoining || _isJoined) {
+      await _openRoom();
+      return;
+    }
+
+    final previousRoom = Map<String, dynamic>.from(_room);
+    final previousCount = _room['member_count'];
+    setState(() {
+      _isJoining = true;
+      _room = {
+        ..._room,
+        'is_member': true,
+        'isMember': true,
+        if (previousCount is int) 'member_count': previousCount + 1,
+      };
+    });
+
+    try {
+      await _api.joinChatRoomById(roomId);
+      if (!mounted) return;
+      setState(() => _isJoining = false);
+      await _openRoom();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isJoining = false;
+        _room = previousRoom;
+      });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Failed to join room: $error')));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardColor = isDark ? const Color(0xFF1C1C1E) : Colors.white;
-
-    final tags = _extractTags(room['tags']);
-    final roomName = _roomValue('name', fallback: _defaultRoomName);
+    final tags = _extractTags(_room['tags']);
+    final roomName = _roomValue('name', fallback: RoomCard._defaultRoomName);
     final description = _roomValue('description', fallback: 'No description');
-
-    void openRoom() {
-      final roomId = room['id']?.toString() ?? '';
-      if (roomId.isEmpty) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Error: Room ID missing')));
-        return;
-      }
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => ChatRoomScreen(
-            roomId: roomId,
-            roomName: roomName,
-            description: _roomValue('description'),
-            userEmail: userEmail,
-            collegeDomain: collegeDomain,
-            initialIsAdmin: room['isAdmin'] == true || room['is_admin'] == true,
-            initialIsMember:
-                room['isMember'] == true || room['is_member'] == true,
-            initialRoomInfo: Map<String, dynamic>.from(room),
-          ),
-        ),
-      ).then((_) {
-        onReturn?.call();
-      });
-    }
+    final canJoinDirectly = !_isJoined && !_isPrivate && _hasJoinAccess;
 
     return GestureDetector(
-      onTap: openRoom,
+      onTap: _openRoom,
       child: Container(
         constraints: const BoxConstraints(minHeight: 176),
         decoration: BoxDecoration(
@@ -74,7 +163,6 @@ class RoomCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            // Header with Icon
             Padding(
               padding: const EdgeInsets.all(12),
               child: Row(
@@ -103,8 +191,6 @@ class RoomCard extends StatelessWidget {
                 ],
               ),
             ),
-
-            // Description
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Text(
@@ -118,8 +204,6 @@ class RoomCard extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-
-            // Tags
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Wrap(
@@ -129,8 +213,6 @@ class RoomCard extends StatelessWidget {
                     : [_buildTagChip('#notag', isDark, isPlaceholder: true)],
               ),
             ),
-
-            // Footer
             Material(
               color: Colors.transparent,
               child: Container(
@@ -156,7 +238,7 @@ class RoomCard extends StatelessWidget {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          '${room['member_count'] ?? 0}',
+                          '${_room['member_count'] ?? 0}',
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w500,
@@ -166,7 +248,7 @@ class RoomCard extends StatelessWidget {
                       ],
                     ),
                     InkWell(
-                      onTap: openRoom,
+                      onTap: canJoinDirectly ? _joinRoom : _openRoom,
                       borderRadius: BorderRadius.circular(20),
                       child: Ink(
                         padding: const EdgeInsets.symmetric(
@@ -174,17 +256,32 @@ class RoomCard extends StatelessWidget {
                           vertical: 4,
                         ),
                         decoration: BoxDecoration(
-                          color: AppTheme.primary,
+                          color: canJoinDirectly
+                              ? AppTheme.primary
+                              : AppTheme.primary.withValues(alpha: 0.16),
                           borderRadius: BorderRadius.circular(20),
                         ),
-                        child: const Text(
-                          'View',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                        child: _isJoining
+                            ? const SizedBox(
+                                width: 12,
+                                height: 12,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    Colors.white,
+                                  ),
+                                ),
+                              )
+                            : Text(
+                                canJoinDirectly ? 'Join' : 'Open',
+                                style: TextStyle(
+                                  color: canJoinDirectly
+                                      ? Colors.white
+                                      : AppTheme.primary,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                       ),
                     ),
                   ],
@@ -195,30 +292,6 @@ class RoomCard extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  String _roomValue(String key, {String fallback = ''}) {
-    final value = room[key]?.toString().trim() ?? '';
-    return value.isEmpty ? fallback : value;
-  }
-
-  List<String> _extractTags(dynamic rawTags) {
-    if (rawTags is List) {
-      return rawTags
-          .map((entry) => entry?.toString().trim() ?? '')
-          .where((entry) => entry.isNotEmpty)
-          .toList(growable: false);
-    }
-    final normalized = rawTags?.toString().trim() ?? '';
-    if (normalized.isEmpty) return const <String>[];
-    if (normalized.contains(',')) {
-      return normalized
-          .split(',')
-          .map((entry) => entry.trim())
-          .where((entry) => entry.isNotEmpty)
-          .toList(growable: false);
-    }
-    return <String>[normalized];
   }
 
   Widget _buildTagChip(

@@ -1134,11 +1134,12 @@ class BackendApiService {
   Future<List<Map<String, dynamic>>> getChatRoomPosts(
     String roomId, {
     int limit = 50,
+    int offset = 0,
     String sortBy = 'recent',
   }) async {
     final data = await _requestJson(
       '/api/chat/rooms/${Uri.encodeComponent(roomId)}/posts'
-      '?limit=$limit&sortBy=${Uri.encodeQueryComponent(sortBy)}',
+      '?limit=$limit&offset=$offset&sortBy=${Uri.encodeQueryComponent(sortBy)}',
       method: 'GET',
     );
     final list = (data['posts'] as List?) ?? const [];

@@ -91,6 +91,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   Map<String, dynamic>? _roomInfo;
   bool _isAdmin = false;
   bool _isMember = false;
+  bool _isJoiningRoom = false;
 
   // Track which posts are saved (bookmarked)
   final Map<String, bool> _savedPosts = {};
@@ -283,7 +284,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
           _isAdmin = cachedInfo['isAdmin'] == true;
           _isMember = cachedInfo['isMember'] == true;
         }
-        _isLoading = false;
+        _isLoading = previewPosts == null;
         _isLoadingMorePosts = false;
       });
       unawaited(_loadInteractionState());
@@ -470,6 +471,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   }
 
   Future<void> _joinRoom() async {
+    if (_isJoiningRoom) return;
     if (_isReadOnly) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -481,19 +483,37 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       return;
     }
     final messenger = ScaffoldMessenger.of(context);
-    setState(() => _isLoading = true);
+    final previousInfo = _roomInfo == null
+        ? null
+        : Map<String, dynamic>.from(_roomInfo!);
+    final previousIsMember = _isMember;
+    final previousMemberCount = _roomInfo?['member_count'];
+    setState(() {
+      _isJoiningRoom = true;
+      _isMember = true;
+      _roomInfo = {
+        ...?_roomInfo,
+        'isMember': true,
+        'is_member': true,
+        if (previousMemberCount is int) 'member_count': previousMemberCount + 1,
+      };
+    });
     try {
       await _backendApiService.joinChatRoomById(widget.roomId);
       if (!mounted) return;
-      await _loadRoomData();
-      if (!mounted) return;
+      setState(() => _isJoiningRoom = false);
+      unawaited(_loadRoomData(silent: true));
       messenger.showSnackBar(
         const SnackBar(content: Text('Joined room successfully!')),
       );
     } catch (e) {
       if (!mounted) return;
       messenger.showSnackBar(SnackBar(content: Text('Error joining room: $e')));
-      setState(() => _isLoading = false);
+      setState(() {
+        _isJoiningRoom = false;
+        _isMember = previousIsMember;
+        _roomInfo = previousInfo;
+      });
     }
   }
 
@@ -1083,8 +1103,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                   ),
                 ),
               Expanded(
-                child: _isLoading
-                    ? const Center(child: CircularProgressIndicator())
+                child: (_isLoading && _posts.isEmpty)
+                    ? _buildPostListSkeleton(isDark)
                     : _buildPostList(isDark),
               ),
             ],
@@ -1130,7 +1150,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       ),
       // Floating Animated Join Button
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
-      floatingActionButton: (!_isMember && !_isLoading && !_isReadOnly)
+      floatingActionButton:
+          (!_isMember && !_isLoading && !_isReadOnly && !_isJoiningRoom)
           ? AnimatedBuilder(
               animation: _fabAnimationController,
               builder: (context, child) {
@@ -1260,6 +1281,124 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
             );
           },
           child: _buildPostCard(post, isDark),
+        );
+      },
+    );
+  }
+
+  Widget _buildPostListSkeleton(bool isDark) {
+    final base = isDark ? const Color(0xFF171717) : const Color(0xFFF1F5F9);
+    final highlight = isDark
+        ? const Color(0xFF262626)
+        : const Color(0xFFE2E8F0);
+
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 24),
+      itemCount: 5,
+      separatorBuilder: (_, _) => const SizedBox(height: 10),
+      itemBuilder: (context, index) {
+        return Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF111827) : Colors.white,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: base,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: 120,
+                          height: 11,
+                          decoration: BoxDecoration(
+                            color: base,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Container(
+                          width: 76,
+                          height: 9,
+                          decoration: BoxDecoration(
+                            color: highlight,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Container(
+                width: 180,
+                height: 13,
+                decoration: BoxDecoration(
+                  color: base,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Container(
+                width: double.infinity,
+                height: 11,
+                decoration: BoxDecoration(
+                  color: highlight,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(height: 6),
+              Container(
+                width: MediaQuery.of(context).size.width * 0.52,
+                height: 11,
+                decoration: BoxDecoration(
+                  color: highlight,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              if (index.isEven) ...[
+                const SizedBox(height: 12),
+                Container(
+                  height: 168,
+                  decoration: BoxDecoration(
+                    color: base,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 12),
+              Row(
+                children: List.generate(3, (actionIndex) {
+                  return Container(
+                    margin: EdgeInsets.only(right: actionIndex == 2 ? 0 : 8),
+                    width: actionIndex == 0 ? 74 : 58,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: highlight,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                  );
+                }),
+              ),
+            ],
+          ),
         );
       },
     );

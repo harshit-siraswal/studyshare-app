@@ -62,12 +62,13 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
     super.dispose();
   }
 
-  Future<void> _loadRooms() async {
+  Future<void> _loadRooms({bool forceRefresh = false}) async {
     try {
       final publicRooms = await _supabaseService.getChatRooms(
         widget.userEmail,
         widget.collegeId,
         filter: 'discover',
+        forceRefresh: forceRefresh,
       );
 
       if (mounted) {
@@ -294,7 +295,7 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
                         room: _rooms[index],
                         userEmail: widget.userEmail,
                         collegeDomain: widget.collegeDomain,
-                        onReturn: _loadRooms,
+                        onReturn: () => _loadRooms(forceRefresh: true),
                       );
                     },
                   ),
@@ -457,7 +458,7 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
                     Navigator.pop(dialogContext);
                   }
                   if (mounted) {
-                    _loadRooms();
+                    _loadRooms(forceRefresh: true);
                   }
                 } catch (e, st) {
                   debugPrint('Join room failed: $e\n$st');
@@ -506,7 +507,7 @@ class _DiscoverRoomsScreenState extends State<DiscoverRoomsScreen> {
 
     if (!mounted || result == null) return;
 
-    await _loadRooms();
+    await _loadRooms(forceRefresh: true);
     final joinCode = result['joinCode']?.toString().trim();
     if (joinCode != null && joinCode.isNotEmpty) {
       await Clipboard.setData(ClipboardData(text: joinCode));

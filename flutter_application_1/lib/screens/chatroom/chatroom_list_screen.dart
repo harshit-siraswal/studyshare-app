@@ -89,7 +89,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
     super.dispose();
   }
 
-  Future<void> _loadRooms() async {
+  Future<void> _loadRooms({bool forceRefresh = false}) async {
     if (_isReadOnly) {
       if (mounted) {
         setState(() {
@@ -110,6 +110,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
         widget.userEmail,
         widget.collegeId,
         filter: 'joined',
+        forceRefresh: forceRefresh,
       );
       final joinedIdSet = joinedRooms
           .map((room) => room['id']?.toString().trim() ?? '')
@@ -148,7 +149,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
           _isTeacherOrAdmin = authIdentity.canPostNotices;
         });
         if (loadRoomsWhenFinished) {
-          await _loadRooms();
+          await _loadRooms(forceRefresh: true);
         }
         return;
       }
@@ -162,7 +163,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
             profile.isNotEmpty && isTeacherOrAdminProfile(profile);
       });
       if (loadRoomsWhenFinished) {
-        await _loadRooms();
+        await _loadRooms(forceRefresh: true);
       }
     } catch (e, st) {
       debugPrint('ChatroomListScreen._loadWriterRole failed: $e\n$st');
@@ -171,7 +172,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
         _isTeacherOrAdmin = false;
       });
       if (loadRoomsWhenFinished) {
-        await _loadRooms();
+        await _loadRooms(forceRefresh: true);
       }
     }
   }
@@ -204,7 +205,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                   const SizedBox(height: 24),
                   Expanded(
                     child: RefreshIndicator(
-                      onRefresh: _loadRooms,
+                      onRefresh: () => _loadRooms(forceRefresh: true),
                       color: Colors.white,
                       backgroundColor: const Color(0xFF1C1C1E),
                       child: _isLoading
@@ -304,7 +305,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                             SavedPostsScreen(userEmail: widget.userEmail),
                       ),
                     );
-                    _loadRooms();
+                    _loadRooms(forceRefresh: true);
                   },
                   borderRadius: BorderRadius.circular(12),
                   child: SizedBox(
@@ -719,7 +720,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
                     );
                     if (!parentContext.mounted) return;
                     Navigator.of(parentContext).pop();
-                    _loadRooms();
+                    _loadRooms(forceRefresh: true);
                   } catch (e) {
                     if (!parentContext.mounted) return;
                     messenger.showSnackBar(
@@ -760,7 +761,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
 
     if (!mounted || result == null) return;
 
-    await _loadRooms();
+    await _loadRooms(forceRefresh: true);
     final joinCode = result['joinCode']?.toString().trim();
     if (joinCode != null && joinCode.isNotEmpty) {
       await Clipboard.setData(ClipboardData(text: joinCode));
@@ -805,7 +806,7 @@ class _ChatroomListScreenState extends State<ChatroomListScreen> {
       ),
     );
     if (!mounted) return;
-    _loadRooms();
+    _loadRooms(forceRefresh: true);
   }
 
   Widget _buildEmptyState(bool isDark) {

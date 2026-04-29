@@ -36,9 +36,11 @@ class SupabaseService {
   static const Duration _filterValuesCacheTtl = Duration(minutes: 5);
   static const Duration _noticeDepartmentsCacheTtl = Duration(minutes: 10);
   static const Duration _userInfoCacheTtl = Duration(minutes: 5);
+  static const Duration _roomListCacheTtl = Duration(seconds: 30);
   static const int _maxResourceListCacheEntries = 24;
   static const int _maxFilterValuesCacheEntries = 24;
   static const int _maxUserInfoCacheEntries = 256;
+  static const int _maxRoomListCacheEntries = 24;
   static final ValueNotifier<int> aiTokenRefreshNotifier = ValueNotifier<int>(
     0,
   );
@@ -68,6 +70,14 @@ class SupabaseService {
   _userInfoCache = <String, ({DateTime cachedAt, Map<String, dynamic> data})>{};
   static final Map<String, Future<Map<String, dynamic>?>> _userInfoInFlight =
       <String, Future<Map<String, dynamic>?>>{};
+  static final Map<
+    String,
+    ({DateTime cachedAt, List<Map<String, dynamic>> data})
+  >
+  _roomListCache =
+      <String, ({DateTime cachedAt, List<Map<String, dynamic>> data})>{};
+  static final Map<String, Future<List<Map<String, dynamic>>>>
+  _roomListInFlight = <String, Future<List<Map<String, dynamic>>>>{};
   static final Map<String, bool> _bookmarkStateCache = <String, bool>{};
   static final Map<String, Future<bool>> _bookmarkStateInFlight =
       <String, Future<bool>>{};
@@ -4354,17 +4364,14 @@ class SupabaseService {
     }
 
     try {
+      final safeOffset = offset < 0 ? 0 : offset;
       final backendPosts = await _api.getChatRoomPosts(
         roomId,
-        limit: limit + (offset < 0 ? 0 : offset),
+        limit: limit,
+        offset: safeOffset,
         sortBy: sortBy,
       );
-      final safeOffset = offset < 0 ? 0 : offset;
-      if (safeOffset >= backendPosts.length) {
-        return const <Map<String, dynamic>>[];
-      }
-      final end = (safeOffset + limit).clamp(0, backendPosts.length);
-      return normalizePosts(backendPosts.sublist(safeOffset, end));
+      return normalizePosts(backendPosts);
     } catch (backendError) {
       debugPrint(
         'Backend getRoomPosts failed, falling back to Supabase: $backendError',
@@ -6571,12 +6578,35 @@ class SupabaseService {
     String userEmail,
     String collegeId, {
     String? filter,
+    bool forceRefresh = false,
   }) async {
     final normalizedUserEmail = _normalizeEmail(userEmail);
     final effectiveCollegeId = await _resolveReadableCollegeId(
       collegeId,
       action: 'get_chat_rooms',
     );
+    final normalizedFilter = filter?.trim().toLowerCase();
+    final cacheKey =
+        '$effectiveCollegeId|$normalizedUserEmail|${normalizedFilter ?? 'all'}';
+
+    List<Map<String, dynamic>> cloneRooms(List<Map<String, dynamic>> rooms) {
+      return rooms
+          .map((room) => Map<String, dynamic>.from(room))
+          .toList(growable: false);
+    }
+
+    if (!forceRefresh) {
+      final cached = _roomListCache[cacheKey];
+      if (cached != null &&
+          DateTime.now().difference(cached.cachedAt) < _roomListCacheTtl) {
+        return cloneRooms(cached.data);
+      }
+
+      final inFlight = _roomListInFlight[cacheKey];
+      if (inFlight != null) {
+        return cloneRooms(await inFlight);
+      }
+    }
 
     Future<Set<String>> fetchJoinedRoomIds() async {
       try {
@@ -6623,7 +6653,6 @@ class SupabaseService {
       List<Map<String, dynamic>> rooms,
       Set<String> joinedRoomIds,
     ) {
-      final normalizedFilter = filter?.trim().toLowerCase();
       if (normalizedFilter == 'joined') {
         return rooms.where((room) {
           final roomId = room['id']?.toString();
@@ -6631,8 +6660,15 @@ class SupabaseService {
             room['created_by_email']?.toString() ??
                 room['created_by']?.toString(),
           );
-          return joinedRoomIds.contains(roomId) ||
-              (creatorEmail.isNotEmpty && creatorEmail == normalizedUserEmail);
+          final isCreator =
+              creatorEmail.isNotEmpty && creatorEmail == normalizedUserEmail;
+          final isMember = joinedRoomIds.contains(roomId) || isCreator;
+          if (!isMember) return false;
+          room['is_member'] = true;
+          room['isMember'] = true;
+          room['is_admin'] = isCreator || _normalizeBool(room['is_admin']);
+          room['isAdmin'] = room['is_admin'];
+          return true;
         }).toList();
       }
       if (normalizedFilter == 'discover') {
@@ -6647,88 +6683,139 @@ class SupabaseService {
           );
           final isCreator =
               creatorEmail.isNotEmpty && creatorEmail == normalizedUserEmail;
-          return !joinedRoomIds.contains(roomId) && !isPrivate && !isCreator;
+          final isJoined = joinedRoomIds.contains(roomId);
+          room['is_member'] = false;
+          room['isMember'] = false;
+          room['is_admin'] = false;
+          room['isAdmin'] = false;
+          return !isJoined && !isPrivate && !isCreator;
         }).toList();
+      }
+      for (final room in rooms) {
+        final roomId = room['id']?.toString();
+        final creatorEmail = _normalizeEmail(
+          room['created_by_email']?.toString() ??
+              room['created_by']?.toString(),
+        );
+        final isCreator =
+            creatorEmail.isNotEmpty && creatorEmail == normalizedUserEmail;
+        final isMember = joinedRoomIds.contains(roomId) || isCreator;
+        room['is_member'] = isMember;
+        room['isMember'] = isMember;
+        room['is_admin'] = isCreator || _normalizeBool(room['is_admin']);
+        room['isAdmin'] = room['is_admin'];
       }
       return rooms;
     }
 
-    try {
-      if (filter != null && filter.trim().isNotEmpty) {
-        final backendRooms = await _api.listChatRooms(
-          collegeId: effectiveCollegeId,
-          filter: filter.trim(),
-        );
-        final normalized = filterActiveRooms(
-          backendRooms.map((entry) => _normalizeChatRoomRecord(entry)).toList(),
-        );
-        final joinedRoomIds = await fetchJoinedRoomIds();
-        return filterMembershipState(normalized, joinedRoomIds);
-      }
-
-      if (!_hasConfiguredSupabaseAnonKey) {
-        debugPrint(
-          'Supabase anon key missing; using backend room discovery directly.',
-        );
-        final backendRooms = await _api.listChatRooms(
-          collegeId: effectiveCollegeId,
-        );
-        return filterActiveRooms(
-          backendRooms.map((entry) => _normalizeChatRoomRecord(entry)).toList(),
-        );
-      }
-
-      final response = await _client
-          .from('chat_rooms')
-          .select('*, member_count:room_members(count)')
-          .eq('college_id', effectiveCollegeId)
-          .order('created_at', ascending: false);
-
-      final rooms = (response as List)
-          .map((e) => _normalizeChatRoomRecord(e))
-          .toList();
-      return filterActiveRooms(rooms);
-    } catch (e) {
-      debugPrint('Error fetching chat rooms via Supabase: $e');
+    Future<List<Map<String, dynamic>>> fetchRooms() async {
       try {
-        final backendRooms = await _api.listChatRooms(
-          collegeId: effectiveCollegeId,
-          filter: filter,
-        );
-        final normalized = backendRooms
-            .map((entry) => _normalizeChatRoomRecord(entry))
-            .toList();
-        if (normalized.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
-          final joinedRoomIds = await fetchJoinedRoomIds();
-          return filterMembershipState(
-            filterActiveRooms(normalized),
-            joinedRoomIds,
+        if (normalizedFilter != null && normalizedFilter.isNotEmpty) {
+          final backendRooms = await _api.listChatRooms(
+            collegeId: effectiveCollegeId,
+            filter: normalizedFilter,
+          );
+          return filterActiveRooms(
+            backendRooms
+                .map((entry) => _normalizeChatRoomRecord(entry))
+                .toList(),
           );
         }
-      } catch (backendError) {
-        debugPrint('Backend chat room fallback failed: $backendError');
-      }
-      if (_hasConfiguredSupabaseAnonKey) {
+
+        if (!_hasConfiguredSupabaseAnonKey) {
+          debugPrint(
+            'Supabase anon key missing; using backend room discovery directly.',
+          );
+          final backendRooms = await _api.listChatRooms(
+            collegeId: effectiveCollegeId,
+          );
+          return filterActiveRooms(
+            backendRooms
+                .map((entry) => _normalizeChatRoomRecord(entry))
+                .toList(),
+          );
+        }
+
+        final response = await _client
+            .from('chat_rooms')
+            .select('*, member_count:room_members(count)')
+            .eq('college_id', effectiveCollegeId)
+            .order('created_at', ascending: false);
+
+        final rooms = (response as List)
+            .map((e) => _normalizeChatRoomRecord(e))
+            .toList();
+        final joinedRoomIds = await fetchJoinedRoomIds();
+        return filterMembershipState(filterActiveRooms(rooms), joinedRoomIds);
+      } catch (e) {
+        debugPrint('Error fetching chat rooms via Supabase: $e');
         try {
-          final joinedRoomIds = await fetchJoinedRoomIds();
-          final response = await _client
-              .from('chat_rooms')
-              .select('*, member_count:room_members(count)')
-              .eq('college_id', effectiveCollegeId)
-              .order('created_at', ascending: false);
-          final normalized = (response as List)
+          final backendRooms = await _api.listChatRooms(
+            collegeId: effectiveCollegeId,
+            filter: normalizedFilter,
+          );
+          final normalized = backendRooms
               .map((entry) => _normalizeChatRoomRecord(entry))
               .toList();
-          return filterMembershipState(
-            filterActiveRooms(normalized),
-            joinedRoomIds,
-          );
-        } catch (directError) {
-          debugPrint('Direct chat room fallback failed: $directError');
+          if (normalized.isNotEmpty || !_hasConfiguredSupabaseAnonKey) {
+            if (normalizedFilter != null && normalizedFilter.isNotEmpty) {
+              return filterActiveRooms(normalized);
+            }
+            final joinedRoomIds = await fetchJoinedRoomIds();
+            return filterMembershipState(
+              filterActiveRooms(normalized),
+              joinedRoomIds,
+            );
+          }
+        } catch (backendError) {
+          debugPrint('Backend chat room fallback failed: $backendError');
         }
+        if (_hasConfiguredSupabaseAnonKey) {
+          try {
+            final joinedRoomIds = await fetchJoinedRoomIds();
+            final response = await _client
+                .from('chat_rooms')
+                .select('*, member_count:room_members(count)')
+                .eq('college_id', effectiveCollegeId)
+                .order('created_at', ascending: false);
+            final normalized = (response as List)
+                .map((entry) => _normalizeChatRoomRecord(entry))
+                .toList();
+            return filterMembershipState(
+              filterActiveRooms(normalized),
+              joinedRoomIds,
+            );
+          } catch (directError) {
+            debugPrint('Direct chat room fallback failed: $directError');
+          }
+        }
+        return [];
       }
-      return [];
     }
+
+    final request = fetchRooms();
+    _roomListInFlight[cacheKey] = request;
+    late final List<Map<String, dynamic>> rooms;
+    try {
+      rooms = await request;
+    } finally {
+      _roomListInFlight.remove(cacheKey);
+    }
+    if (_roomListCache.length >= _maxRoomListCacheEntries) {
+      final oldestKey = _roomListCache.entries
+          .reduce(
+            (left, right) => left.value.cachedAt.isBefore(right.value.cachedAt)
+                ? left
+                : right,
+          )
+          .key;
+      _roomListCache.remove(oldestKey);
+    }
+    _roomListCache[cacheKey] = (
+      cachedAt: DateTime.now(),
+      data: cloneRooms(rooms),
+    );
+    return cloneRooms(rooms);
   }
 
   /// Get all reactions for a comment
@@ -7371,6 +7458,12 @@ class SupabaseService {
     normalized['is_private'] = _normalizeBool(
       data['is_private'] ?? data['isPrivate'],
     );
+    normalized['created_by'] = _normalizeString(
+      data['created_by'] ?? data['createdBy'],
+    );
+    normalized['created_by_email'] = _normalizeString(
+      data['created_by_email'] ?? data['createdByEmail'] ?? data['created_by'],
+    );
     normalized['is_active'] = _normalizeBool(
       data['is_active'] ?? data['isActive'],
       fallback: true,
@@ -7386,6 +7479,14 @@ class SupabaseService {
       data['expiry_date'] ?? data['expiryDate'],
     );
     normalized['tags'] = _normalizeStringList(data['tags']);
+    normalized['is_member'] = _normalizeBool(
+      data['is_member'] ?? data['isMember'],
+    );
+    normalized['isMember'] = normalized['is_member'];
+    normalized['is_admin'] = _normalizeBool(
+      data['is_admin'] ?? data['isAdmin'],
+    );
+    normalized['isAdmin'] = normalized['is_admin'];
     return normalized;
   }
 
