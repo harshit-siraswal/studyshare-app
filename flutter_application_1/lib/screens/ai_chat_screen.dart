@@ -3703,6 +3703,9 @@ class _AIChatScreenState extends State<AIChatScreen>
     }
     if (lowered.contains('connection reset') ||
         lowered.contains('reset by peer') ||
+        lowered.contains('connection closed') ||
+        lowered.contains('clientconnection closed') ||
+        lowered.contains('closed while receiving data') ||
         lowered.contains('connection abort')) {
       return 'The AI server connection was interrupted. Please try again.';
     }
@@ -4774,7 +4777,7 @@ class _AIChatScreenState extends State<AIChatScreen>
     } catch (e) {
       if (!mounted) return;
       final errorMessage = _presentAiErrorMessage(
-        e.toString().replaceFirst('Exception: ', ''),
+        _cleanUserVisibleErrorMessage(e),
         fallback: 'StudyShare could not finish the question paper right now.',
       );
       setState(() {

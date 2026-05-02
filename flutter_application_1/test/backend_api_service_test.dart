@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -6,6 +7,19 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 import 'package:flutter_application_1/services/backend_api_service.dart';
+
+BackendApiService _backendServiceForTest({
+  required http.Client httpClient,
+  List<String>? apiBaseUrls,
+}) {
+  return BackendApiService(
+    httpClient: httpClient,
+    apiBaseUrls: apiBaseUrls,
+    idTokenProvider: ({bool forceRefresh = false}) async =>
+        forceRefresh ? 'fresh-test-token' : 'test-token',
+    startMaintenanceTimer: false,
+  );
+}
 
 void main() {
   testWidgets('updateResourceStatus sends PATCH instead of GET', (
@@ -30,10 +44,7 @@ void main() {
       ),
     );
 
-    final service = BackendApiService(
-      httpClient: client,
-      startMaintenanceTimer: false,
-    );
+    final service = _backendServiceForTest(httpClient: client);
 
     await service.updateResourceStatus(
       resourceId: '95aeade0-2eb7-4b5c-b776-39352479ef1f',
@@ -69,10 +80,7 @@ void main() {
       return http.Response('{"success":true}', 200);
     });
 
-    final service = BackendApiService(
-      httpClient: client,
-      startMaintenanceTimer: false,
-    );
+    final service = _backendServiceForTest(httpClient: client);
 
     await service.deleteResourceAsAdmin(
       resourceId: '95aeade0-2eb7-4b5c-b776-39352479ef1f',
@@ -107,10 +115,7 @@ void main() {
         return http.Response('{"answer":"ok"}', 200);
       });
 
-      final service = BackendApiService(
-        httpClient: client,
-        startMaintenanceTimer: false,
-      );
+      final service = _backendServiceForTest(httpClient: client);
 
       final response = await service.queryRag(
         question: 'Explain this topic from my notes',
@@ -139,10 +144,7 @@ void main() {
       return http.Response('{"answer":"ok"}', 200);
     });
 
-    final service = BackendApiService(
-      httpClient: client,
-      startMaintenanceTimer: false,
-    );
+    final service = _backendServiceForTest(httpClient: client);
 
     await service.queryRag(
       question: 'Search the web for this topic',
@@ -170,10 +172,7 @@ void main() {
       return http.Response('{"answer":"retry ok"}', 200);
     });
 
-    final service = BackendApiService(
-      httpClient: client,
-      startMaintenanceTimer: false,
-    );
+    final service = _backendServiceForTest(httpClient: client);
 
     final response = await service.queryRag(
       question: 'Explain this topic from my notes',
@@ -183,6 +182,35 @@ void main() {
     expect(response['answer'], 'retry ok');
     expect(requestCount, 2);
   });
+
+  test(
+    'queryRag retries once after the server closes while receiving data',
+    () async {
+      var requestCount = 0;
+
+      final client = MockClient((request) async {
+        requestCount++;
+        if (requestCount == 1) {
+          throw HttpException(
+            'ClientConnection closed while receiving data',
+            uri: request.url,
+          );
+        }
+        return http.Response('{"answer":"retry ok"}', 200);
+      });
+
+      final service = _backendServiceForTest(httpClient: client);
+
+      final response = await service.queryRag(
+        question: 'Generate a test of COLD subject',
+        allowWeb: false,
+        generationMode: 'question_paper',
+      );
+
+      expect(response['answer'], 'retry ok');
+      expect(requestCount, 2);
+    },
+  );
 
   test(
     'getAiFlashcards falls back to the next API base URL on socket failure',
@@ -200,13 +228,12 @@ void main() {
         return http.Response('{"flashcards":[{"front":"A","back":"B"}]}', 200);
       });
 
-      final service = BackendApiService(
+      final service = _backendServiceForTest(
         httpClient: client,
         apiBaseUrls: <String>[
           'https://primary.example.com',
           'https://backup.example.com',
         ],
-        startMaintenanceTimer: false,
       );
 
       final response = await service.getAiFlashcards(fileId: 'file-123');
@@ -228,10 +255,7 @@ void main() {
       return http.Response('{"status":"following"}', 200);
     });
 
-    final service = BackendApiService(
-      httpClient: client,
-      startMaintenanceTimer: false,
-    );
+    final service = _backendServiceForTest(httpClient: client);
 
     final response = await service.checkFollowStatus('test.user@example.com');
 

@@ -54,8 +54,10 @@ class BackendApiService {
     FirebaseAuth? firebaseAuth,
     http.Client? httpClient,
     List<String>? apiBaseUrls,
+    FutureOr<String?> Function({bool forceRefresh})? idTokenProvider,
     bool startMaintenanceTimer = true,
   }) : _injectedAuth = firebaseAuth,
+       _idTokenProvider = idTokenProvider,
        _httpClient = httpClient ?? _sharedHttpClient,
        _apiBaseUrls = List.unmodifiable(
          _normalizeApiBaseUrls(apiBaseUrls ?? AppConfig.apiBaseUrls),
@@ -81,6 +83,7 @@ class BackendApiService {
   static final http.Client _sharedHttpClient = _createSharedHttpClient();
 
   final FirebaseAuth? _injectedAuth;
+  final FutureOr<String?> Function({bool forceRefresh})? _idTokenProvider;
   final http.Client _httpClient;
   final List<String> _apiBaseUrls;
   bool _ragStreamUnavailable = false;
@@ -312,6 +315,9 @@ class BackendApiService {
     return lowered.contains('connection reset') ||
         lowered.contains('reset by peer') ||
         lowered.contains('broken pipe') ||
+        lowered.contains('connection closed') ||
+        lowered.contains('clientconnection closed') ||
+        lowered.contains('closed while receiving data') ||
         lowered.contains('connection abort') ||
         lowered.contains('socketexception') ||
         lowered.contains('timed out') ||
@@ -464,6 +470,16 @@ class BackendApiService {
   }
 
   Future<String?> _getIdToken({bool forceRefresh = false}) async {
+    final provider = _idTokenProvider;
+    if (provider != null) {
+      try {
+        return await provider(forceRefresh: forceRefresh);
+      } catch (e) {
+        debugPrint('[BackendApi] injected token error: $e');
+        return null;
+      }
+    }
+
     final auth = _auth;
     if (auth == null) return null;
 
