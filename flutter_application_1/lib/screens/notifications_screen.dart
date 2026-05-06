@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:timeago/timeago.dart' as timeago;
@@ -115,6 +118,75 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         ),
       ),
     );
+  }
+
+  Map<String, dynamic> _notificationData(Map<String, dynamic> notification) {
+    final raw = notification['data'] ?? notification['metadata'];
+    if (raw is Map<String, dynamic>) return raw;
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    if (raw is String && raw.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map<String, dynamic>) return decoded;
+        if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      } catch (_) {
+        return const <String, dynamic>{};
+      }
+    }
+    return const <String, dynamic>{};
+  }
+
+  String _notificationActionUrl(Map<String, dynamic> notification) {
+    final data = _notificationData(notification);
+    final direct =
+        [
+              notification['action_url'],
+              notification['actionUrl'],
+              data['action_url'],
+              data['actionUrl'],
+            ]
+            .map((value) => value?.toString().trim() ?? '')
+            .firstWhere((value) => value.isNotEmpty, orElse: () => '');
+    if (direct.isNotEmpty) return direct;
+
+    final noticeId =
+        [
+              notification['notice_id'],
+              notification['noticeId'],
+              data['notice_id'],
+              data['noticeId'],
+            ]
+            .map((value) => value?.toString().trim() ?? '')
+            .firstWhere((value) => value.isNotEmpty, orElse: () => '');
+    if (noticeId.isNotEmpty) {
+      return '/notices?id=${Uri.encodeQueryComponent(noticeId)}';
+    }
+
+    return '';
+  }
+
+  Future<void> _handleNotificationTap(Map<String, dynamic> notification) async {
+    final wasUnread = notification['is_read'] != true;
+    if (wasUnread && notification['id'] != null) {
+      final notificationId = notification['id'].toString();
+      setState(() {
+        notification['is_read'] = true;
+      });
+      try {
+        await _supabaseService.markNotificationRead(notificationId);
+      } catch (e) {
+        debugPrint('Failed to mark notification as read: $e');
+        if (mounted) {
+          setState(() {
+            notification['is_read'] = false;
+          });
+        }
+      }
+    }
+
+    final actionUrl = _notificationActionUrl(notification);
+    if (!mounted || actionUrl.isEmpty || !actionUrl.startsWith('/')) return;
+    await Navigator.of(context).pushNamed(actionUrl);
   }
 
   @override
@@ -479,24 +551,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           ],
         ),
         onTap: () {
-          if (!isRead && notification['id'] != null) {
-            final notificationId = notification['id'].toString();
-            // Optimistic update
-            setState(() {
-              notification['is_read'] = true;
-            });
-            _supabaseService.markNotificationRead(notificationId).catchError((
-              e,
-            ) {
-              debugPrint('Failed to mark notification as read: $e');
-              // Revert on error
-              if (mounted) {
-                setState(() {
-                  notification['is_read'] = false;
-                });
-              }
-            });
-          }
+          unawaited(_handleNotificationTap(notification));
         },
       ),
     );

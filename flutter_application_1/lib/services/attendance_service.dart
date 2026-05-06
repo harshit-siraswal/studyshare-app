@@ -32,7 +32,8 @@ class AttendanceService {
   static const int lowAttendanceThreshold = 75;
   static const String _snapshotKeyPrefix = 'attendance_snapshot_';
   static const String _tokenKeyPrefix = 'attendance_token_';
-  static const String _syncCooldownKeyPrefix = 'attendance_sync_cooldown_until_';
+  static const String _syncCooldownKeyPrefix =
+      'attendance_sync_cooldown_until_';
   final BackendApiService _apiService;
 
   String _normalizeKeyPart(String value) => value
@@ -58,7 +59,10 @@ class AttendanceService {
   List<String> _snapshotKeyCandidates(String collegeId, {String? userEmail}) {
     final normalizedEmail = userEmail?.trim();
     if (normalizedEmail != null && normalizedEmail.isNotEmpty) {
-      return <String>[_snapshotKey(collegeId, userEmail: normalizedEmail)];
+      return <String>[
+        _snapshotKey(collegeId, userEmail: normalizedEmail),
+        _snapshotKey(collegeId),
+      ];
     }
     return <String>[_snapshotKey(collegeId)];
   }
@@ -66,7 +70,10 @@ class AttendanceService {
   List<String> _tokenKeyCandidates(String collegeId, {String? userEmail}) {
     final normalizedEmail = userEmail?.trim();
     if (normalizedEmail != null && normalizedEmail.isNotEmpty) {
-      return <String>[_tokenKey(collegeId, userEmail: normalizedEmail)];
+      return <String>[
+        _tokenKey(collegeId, userEmail: normalizedEmail),
+        _tokenKey(collegeId),
+      ];
     }
     return <String>[_tokenKey(collegeId)];
   }
@@ -128,11 +135,14 @@ class AttendanceService {
 
   Future<void> clearAllSavedSessions() async {
     final prefs = await SharedPreferences.getInstance();
-    final keysToRemove = prefs.getKeys().where((key) {
-      return key.startsWith(_tokenKeyPrefix) ||
-          key.startsWith(_snapshotKeyPrefix) ||
-          key.startsWith(_syncCooldownKeyPrefix);
-    }).toList(growable: false);
+    final keysToRemove = prefs
+        .getKeys()
+        .where((key) {
+          return key.startsWith(_tokenKeyPrefix) ||
+              key.startsWith(_snapshotKeyPrefix) ||
+              key.startsWith(_syncCooldownKeyPrefix);
+        })
+        .toList(growable: false);
 
     for (final key in keysToRemove) {
       await prefs.remove(key);
@@ -242,26 +252,23 @@ class AttendanceService {
           }
         }
       }
-      return lecturesRaw
-          .whereType<Map>()
-          .map((item) {
-            final lecture = AttendanceLecture.fromJson(
-              Map<String, dynamic>.from(item),
-            );
-            if (lecture.lectureDate.trim().isEmpty &&
-                lecture.dayName.trim().isEmpty &&
-                lecture.timeSlot.trim().isEmpty &&
-                lecture.attendanceStatus.trim().isEmpty) {
-              throw const AttendanceSyncException(
-                code: 'invalid_payload',
-                message:
-                    'Attendance data for this subject is malformed. Please try syncing again.',
-                retryable: false,
-              );
-            }
-            return lecture;
-          })
-          .toList();
+      return lecturesRaw.whereType<Map>().map((item) {
+        final lecture = AttendanceLecture.fromJson(
+          Map<String, dynamic>.from(item),
+        );
+        if (lecture.lectureDate.trim().isEmpty &&
+            lecture.dayName.trim().isEmpty &&
+            lecture.timeSlot.trim().isEmpty &&
+            lecture.attendanceStatus.trim().isEmpty) {
+          throw const AttendanceSyncException(
+            code: 'invalid_payload',
+            message:
+                'Attendance data for this subject is malformed. Please try syncing again.',
+            retryable: false,
+          );
+        }
+        return lecture;
+      }).toList();
     } on AttendanceSyncException {
       rethrow;
     } catch (error) {
@@ -465,7 +472,8 @@ class AttendanceService {
           cause: error,
         );
       }
-      if (statusCode == 422 || message.toLowerCase().contains('invalid daywise')) {
+      if (statusCode == 422 ||
+          message.toLowerCase().contains('invalid daywise')) {
         return AttendanceSyncException(
           code: 'invalid_payload',
           message:
@@ -610,19 +618,19 @@ class AttendanceService {
               .join('\n');
 
     final overall = snapshot.overall;
-          // Avoid sending snapshot.student.fullName to external models; use a
-          // non-identifying reference that still helps the AI describe the report.
-          final studentReference = snapshot.student.studentId != null
-            ? 'Student ID ${snapshot.student.studentId}'
-            : snapshot.student.registrationNumber.trim().isNotEmpty
-            ? 'Registration ${snapshot.student.registrationNumber.trim()}'
-            : 'Anonymous student';
+    // Avoid sending snapshot.student.fullName to external models; use a
+    // non-identifying reference that still helps the AI describe the report.
+    final studentReference = snapshot.student.studentId != null
+        ? 'Student ID ${snapshot.student.studentId}'
+        : snapshot.student.registrationNumber.trim().isNotEmpty
+        ? 'Registration ${snapshot.student.registrationNumber.trim()}'
+        : 'Anonymous student';
     return 'I am a KIET student. Analyze my attendance and tell me the most urgent recovery steps, '
         'which subjects are risky, and how I should plan the next week.\n\n'
         'Overall attendance: ${overall.percentage.toStringAsFixed(2)}% '
         '(${overall.presentClasses}/${overall.totalClasses})\n'
-            'Student: $studentReference, ${snapshot.student.branchShortName}, '
-            '${snapshot.student.semesterName}\n\n'
+        'Student: $studentReference, ${snapshot.student.branchShortName}, '
+        '${snapshot.student.semesterName}\n\n'
         'Low attendance summary:\n$lowAttendanceLines';
   }
 }

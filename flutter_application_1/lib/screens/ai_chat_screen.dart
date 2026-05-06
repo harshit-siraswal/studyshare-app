@@ -679,6 +679,57 @@ class _AIChatScreenState extends State<AIChatScreen>
         : compact;
   }
 
+  String _normalizeCollapsedAssistantMarkdown(String raw) {
+    const sectionLabel =
+        r'(?:Direct answer|Key points|Example|Applications?|Types|Benefits|Limitations|Summary|Definition|In short)';
+    var value = raw.replaceAll(RegExp(r'[•●▪]'), '-');
+    value = value.replaceAllMapped(
+      RegExp('\\*\\*($sectionLabel)\\*\\*\\s*:', caseSensitive: false),
+      (match) => '**${match.group(1)}:**',
+    );
+    value = value.replaceAllMapped(
+      RegExp(
+        '([^\\n])\\s*\\d+\\.\\s*(\\*\\*(?:$sectionLabel):\\*\\*)',
+        caseSensitive: false,
+      ),
+      (match) => '${match.group(1)}\n\n${match.group(2)}',
+    );
+    value = value.replaceAllMapped(
+      RegExp(
+        '([^\\n])\\s+(\\*\\*(?:$sectionLabel):\\*\\*)',
+        caseSensitive: false,
+      ),
+      (match) => '${match.group(1)}\n\n${match.group(2)}',
+    );
+    value = value.replaceAllMapped(
+      RegExp(
+        '(\\*\\*(?:$sectionLabel):\\*\\*)\\s*[-–—]\\s*',
+        caseSensitive: false,
+      ),
+      (match) => '${match.group(1)}\n- ',
+    );
+    value = value
+        .replaceAllMapped(
+          RegExp(r'([^\n])\s+\d+\.\s*-\s*'),
+          (match) => '${match.group(1)}\n- ',
+        )
+        .replaceAllMapped(
+          RegExp(r'(^|\n)\s*\d+\.\s*-\s*'),
+          (match) => '${match.group(1)}- ',
+        )
+        .replaceAllMapped(
+          RegExp(r'(^|\n)\s*-\s*-\s*'),
+          (match) => '${match.group(1)}- ',
+        )
+        .replaceAllMapped(
+          RegExp(r'(:)\s*-\s+'),
+          (match) => '${match.group(1)}\n- ',
+        )
+        .replaceAll(RegExp(r'[ \t]+\n'), '\n')
+        .replaceAll(RegExp(r'\n{3,}'), '\n\n');
+    return value.trim();
+  }
+
   String _sanitizeAssistantAnswerText(String raw) {
     final sourceHeaderPattern = RegExp(
       r'^(?:sources?|references?|citations?)\s*:?\s*$',
@@ -689,7 +740,9 @@ class _AIChatScreenState extends State<AIChatScreen>
       caseSensitive: false,
     );
 
-    final lines = raw.replaceAll('\r', '').split('\n');
+    final lines = _normalizeCollapsedAssistantMarkdown(
+      raw.replaceAll('\r', ''),
+    ).split('\n');
     final cleaned = <String>[];
     var skippingSourceBlock = false;
 

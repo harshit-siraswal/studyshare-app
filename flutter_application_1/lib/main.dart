@@ -245,6 +245,22 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
         host.endsWith('.studyshare.in');
   }
 
+  String _actionUrlFromNotificationData(Map<String, dynamic> data) {
+    final direct = data['actionUrl']?.toString().trim().isNotEmpty == true
+        ? data['actionUrl'].toString().trim()
+        : data['action_url']?.toString().trim();
+    if (direct != null && direct.isNotEmpty) return direct;
+
+    final noticeId = data['noticeId']?.toString().trim().isNotEmpty == true
+        ? data['noticeId'].toString().trim()
+        : data['notice_id']?.toString().trim();
+    if (noticeId != null && noticeId.isNotEmpty) {
+      return '/notices?id=${Uri.encodeQueryComponent(noticeId)}';
+    }
+
+    return '';
+  }
+
   ThemeMode get _bootThemeMode {
     final savedTheme = _prefs?.getString('theme_mode');
     if (savedTheme == 'light') return ThemeMode.light;
@@ -601,11 +617,9 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
           debugPrint('Notification tapped: ${message.data}');
 
           try {
-            // Safe extraction
-            final dynamic actionUrlRaw = message.data['actionUrl'];
-            final String? actionUrl = actionUrlRaw?.toString();
+            final actionUrl = _actionUrlFromNotificationData(message.data);
 
-            if (actionUrl != null && actionUrl.isNotEmpty) {
+            if (actionUrl.isNotEmpty) {
               if (actionUrl.startsWith('/')) {
                 // Internal navigation using global navigator key
                 debugPrint('Internal navigation to $actionUrl requested');
@@ -1377,11 +1391,8 @@ class _NoticeDeepLinkLoaderState extends State<NoticeDeepLinkLoader> {
 
   Future<void> _loadNotice() async {
     try {
-      final response = await Supabase.instance.client
-          .from('notices')
-          .select()
-          .eq('id', widget.noticeId)
-          .maybeSingle()
+      final response = await BackendApiService()
+          .getNoticeById(widget.noticeId, collegeId: widget.collegeId)
           .timeout(const Duration(seconds: 10));
 
       if (response != null && mounted) {

@@ -73,6 +73,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
         collegeId: widget.collegeId,
         semester: effectiveSnapshot?.student.semesterName ?? '',
         branch: effectiveSnapshot?.student.branchShortName ?? '',
+        userEmail: _currentUserEmail,
         snapshot: effectiveSnapshot,
       );
     } catch (error) {

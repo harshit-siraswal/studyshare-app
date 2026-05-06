@@ -2826,11 +2826,17 @@ class SupabaseService {
     };
 
     try {
-      await _client.from('notices').insert(payload);
+      final insertedNotice = await _client
+          .from('notices')
+          .insert(payload)
+          .select('id')
+          .maybeSingle();
+      final noticeId = insertedNotice?['id']?.toString().trim() ?? '';
       try {
         await _notifyDepartmentFollowersForNotice(
           collegeId: effectiveCollegeId,
           departmentId: normalizedDepartment,
+          noticeId: noticeId,
           noticeTitle: title,
           noticeContent: content,
         );
@@ -2848,6 +2854,7 @@ class SupabaseService {
   Future<void> _notifyDepartmentFollowersForNotice({
     required String collegeId,
     required String departmentId,
+    required String noticeId,
     required String noticeTitle,
     required String noticeContent,
   }) async {
@@ -2936,12 +2943,18 @@ class SupabaseService {
     final metadata = <String, dynamic>{
       'department_id': normalizedDepartmentId,
       if (normalizedCollegeId.isNotEmpty) 'college_id': normalizedCollegeId,
+      if (noticeId.trim().isNotEmpty) 'notice_id': noticeId.trim(),
       'notice_title': noticeTitle.trim(),
     };
+    final actionUrl = noticeId.trim().isEmpty
+        ? ''
+        : '/notices?id=${Uri.encodeQueryComponent(noticeId.trim())}';
 
     for (final userId in recipientUserIds) {
       await _insertDepartmentNoticeNotification(
         userId: userId,
+        noticeId: noticeId,
+        actionUrl: actionUrl,
         title: notificationTitle,
         message: notificationMessage,
         metadata: metadata,
@@ -2951,6 +2964,8 @@ class SupabaseService {
     for (final userEmail in recipientEmails) {
       await _insertDepartmentNoticeNotification(
         userEmail: userEmail,
+        noticeId: noticeId,
+        actionUrl: actionUrl,
         title: notificationTitle,
         message: notificationMessage,
         metadata: metadata,
@@ -2961,6 +2976,8 @@ class SupabaseService {
   Future<void> _insertDepartmentNoticeNotification({
     String? userId,
     String? userEmail,
+    String? noticeId,
+    String? actionUrl,
     required String title,
     required String message,
     required Map<String, dynamic> metadata,
@@ -2983,6 +3000,10 @@ class SupabaseService {
         'type': 'department_notice',
         'title': title,
         'message': message,
+        if (noticeId != null && noticeId.trim().isNotEmpty)
+          'notice_id': noticeId.trim(),
+        if (actionUrl != null && actionUrl.trim().isNotEmpty)
+          'action_url': actionUrl.trim(),
         'is_read': false,
         'metadata': metadata,
       },
@@ -2990,13 +3011,25 @@ class SupabaseService {
         'type': 'department_notice',
         'title': title,
         'message': message,
+        if (noticeId != null && noticeId.trim().isNotEmpty)
+          'notice_id': noticeId.trim(),
+        if (actionUrl != null && actionUrl.trim().isNotEmpty)
+          'action_url': actionUrl.trim(),
         'is_read': false,
-        'data': metadata,
+        'data': {
+          ...metadata,
+          if (actionUrl != null && actionUrl.trim().isNotEmpty)
+            'action_url': actionUrl.trim(),
+        },
       },
       {
         'type': 'department_notice',
         'title': title,
         'message': message,
+        if (noticeId != null && noticeId.trim().isNotEmpty)
+          'notice_id': noticeId.trim(),
+        if (actionUrl != null && actionUrl.trim().isNotEmpty)
+          'action_url': actionUrl.trim(),
         'is_read': false,
       },
     ];
@@ -3017,6 +3050,8 @@ class SupabaseService {
               _isMissingColumnError(e, 'recipient_email') ||
               _isMissingColumnError(e, 'metadata') ||
               _isMissingColumnError(e, 'data') ||
+              _isMissingColumnError(e, 'notice_id') ||
+              _isMissingColumnError(e, 'action_url') ||
               _isMissingColumnError(e, 'is_read');
           if (!schemaIssue && !_isRowLevelSecurityError(e)) {
             debugPrint('Error creating department notice notification: $e');

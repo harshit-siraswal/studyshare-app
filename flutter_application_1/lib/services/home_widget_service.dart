@@ -16,6 +16,7 @@ class HomeWidgetService {
   static const String _scheduleCollegeIdKey = 'schedule_context_college_id';
   static const String _scheduleSemesterKey = 'schedule_context_semester';
   static const String _scheduleBranchKey = 'schedule_context_branch';
+  static const String _scheduleUserEmailKey = 'schedule_context_user_email';
   static const Duration _scheduleRefreshInterval = Duration(minutes: 1);
 
   final AttendanceService _attendanceService = AttendanceService();
@@ -546,23 +547,35 @@ class HomeWidgetService {
     required String collegeId,
     required String semester,
     required String branch,
+    String? userEmail,
     AttendanceSnapshot? snapshot,
   }) async {
     if (!await _ensureInitialized()) {
       return false;
     }
     try {
+      final normalizedUserEmail = userEmail?.trim().toLowerCase() ?? '';
       final payload = _buildScheduleWidgetPayload(
         semester: semester,
         branch: branch,
         snapshot:
-            snapshot ?? await _attendanceService.loadCachedSnapshot(collegeId),
+            snapshot ??
+            await _attendanceService.loadCachedSnapshot(
+              collegeId,
+              userEmail: normalizedUserEmail.isEmpty
+                  ? null
+                  : normalizedUserEmail,
+            ),
       );
 
       await Future.wait([
         HomeWidget.saveWidgetData<String>(_scheduleCollegeIdKey, collegeId),
         HomeWidget.saveWidgetData<String>(_scheduleSemesterKey, semester),
         HomeWidget.saveWidgetData<String>(_scheduleBranchKey, branch),
+        HomeWidget.saveWidgetData<String>(
+          _scheduleUserEmailKey,
+          normalizedUserEmail,
+        ),
         HomeWidget.saveWidgetData<String>('schedule_badge', payload.badge),
         HomeWidget.saveWidgetData<String>(
           'schedule_location_label',
@@ -650,6 +663,12 @@ class HomeWidgetService {
             defaultValue: '',
           ) ??
           '';
+      final userEmail =
+          await HomeWidget.getWidgetData<String>(
+            _scheduleUserEmailKey,
+            defaultValue: '',
+          ) ??
+          '';
 
       if (collegeId.trim().isEmpty) {
         return false;
@@ -659,6 +678,7 @@ class HomeWidgetService {
         collegeId: collegeId,
         semester: semester,
         branch: branch,
+        userEmail: userEmail,
       );
     } catch (e) {
       debugPrint('Error refreshing stored schedule widget context: $e');
