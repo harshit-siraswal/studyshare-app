@@ -380,10 +380,14 @@ class BackendApiService {
     }
 
     return path.startsWith('/api/bookmarks') ||
+        path.startsWith('/api/chat/rooms') ||
         path.startsWith('/api/follow') ||
         path.startsWith('/api/notifications') ||
-        path.startsWith('/api/resources/mine') ||
-        path.startsWith('/api/resources/state') ||
+        path.startsWith('/api/resources') ||
+        path.startsWith('/api/users/discover') ||
+        path.startsWith('/api/users/profile') ||
+        path.startsWith('/api/users/public') ||
+        path.startsWith('/api/users/resources') ||
         path.startsWith('/api/votes') ||
         path.startsWith('/api/notebooks') ||
         _isAiOrRagPath(path);
@@ -469,7 +473,10 @@ class BackendApiService {
     );
   }
 
-  Future<String?> _getIdToken({bool forceRefresh = false}) async {
+  Future<String?> _getIdToken({
+    bool forceRefresh = false,
+    Duration waitTimeout = const Duration(seconds: 2),
+  }) async {
     final provider = _idTokenProvider;
     if (provider != null) {
       try {
@@ -491,7 +498,7 @@ class BackendApiService {
             .where((u) => u != null)
             .cast<User>()
             .first
-            .timeout(const Duration(seconds: 2));
+            .timeout(waitTimeout);
       } catch (_) {
         return null;
       }
@@ -606,7 +613,11 @@ class BackendApiService {
   }) async {
     String? token = usesBearerOverride
         ? bearerOverride?.trim()
-        : await _getIdToken();
+        : await _getIdToken(
+            waitTimeout: requireAuthToken
+                ? const Duration(seconds: 8)
+                : const Duration(seconds: 2),
+          );
     if (requireAuthToken && (token == null || token.isEmpty)) {
       throw Exception('Authentication required');
     }
@@ -686,7 +697,12 @@ class BackendApiService {
 
     if (!usesBearerOverride &&
         (res.statusCode == 401 || res.statusCode == 403)) {
-      final refreshedToken = await _getIdToken(forceRefresh: true);
+      final refreshedToken = await _getIdToken(
+        forceRefresh: true,
+        waitTimeout: requireAuthToken
+            ? const Duration(seconds: 8)
+            : const Duration(seconds: 2),
+      );
       final shouldRetry =
           refreshedToken != null &&
           refreshedToken.isNotEmpty &&
@@ -896,8 +912,13 @@ class BackendApiService {
       return primaryRooms;
     }
 
+    final fallbackQuery = <String, String>{'college_id': normalizedCollegeId};
+    if (normalizedFilter == 'joined' || normalizedFilter == 'discover') {
+      fallbackQuery['filter'] = normalizedFilter!;
+    }
+
     // Compatibility fallback for backends still using snake_case query params.
-    return fetchWithQuery(<String, String>{'college_id': normalizedCollegeId});
+    return fetchWithQuery(fallbackQuery);
   }
 
   /// Leave a chat room
