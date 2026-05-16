@@ -10,7 +10,6 @@ import '../models/resource.dart';
 import '../services/supabase_service.dart';
 import '../services/auth_service.dart';
 import '../services/backend_api_service.dart';
-import 'package:http/http.dart' as http;
 import 'success_overlay.dart';
 import '../utils/youtube_link_utils.dart';
 import '../utils/admin_access.dart';
@@ -221,70 +220,6 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
     setState(() => _uploadProgress = nextProgress);
   }
 
-  Future<void> _uploadToPresignedUrl({
-    required PlatformFile file,
-    required String uploadUrl,
-    required String contentType,
-    List<int>? bytes,
-  }) async {
-    final uri = Uri.parse(uploadUrl);
-
-    if (bytes != null) {
-      final response = await http.put(
-        uri,
-        headers: {
-          'Content-Type': contentType,
-          'Cache-Control': 'max-age=31536000',
-          'Content-Length': bytes.length.toString(),
-        },
-        body: bytes,
-      );
-      _updateTransferProgress(1.0);
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw Exception('Upload failed: ${response.statusCode}');
-      }
-      return;
-    }
-
-    final filePath = file.path?.trim() ?? '';
-    if (filePath.isEmpty) {
-      throw Exception('File path is unavailable for upload.');
-    }
-
-    final request = http.StreamedRequest('PUT', uri);
-    request.headers['Content-Type'] = contentType;
-    request.headers['Cache-Control'] = 'max-age=31536000';
-    request.contentLength = file.size;
-
-    final source = File(filePath).openRead();
-    var uploadedBytes = 0;
-    var lastProgressUpdate = DateTime.fromMillisecondsSinceEpoch(0);
-
-    await request.sink.addStream(
-      source.map((chunk) {
-        uploadedBytes += chunk.length;
-        final now = DateTime.now();
-        final shouldRefresh =
-            uploadedBytes >= file.size ||
-            now.difference(lastProgressUpdate).inMilliseconds >= 80;
-        if (shouldRefresh && file.size > 0) {
-          lastProgressUpdate = now;
-          _updateTransferProgress(uploadedBytes / file.size);
-        }
-        return chunk;
-      }),
-    );
-    await request.sink.close();
-
-    final response = await request.send();
-    final responseBody = await response.stream.bytesToString();
-    _updateTransferProgress(1.0);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      final suffix = responseBody.trim().isEmpty ? '' : ': $responseBody';
-      throw Exception('Upload failed: ${response.statusCode}$suffix');
-    }
-  }
-
   void _setSubjectValue(String value) {
     _subject = value;
     if (_subjectController.text == value) return;
@@ -421,7 +356,7 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
           final file = _selectedFile!;
           final shouldSkipHash = _shouldSkipPreUploadHash(file);
 
-          List<int>? bytes;
+          Uint8List? bytes;
           if (!shouldSkipHash && kIsWeb) {
             if (file.bytes != null) {
               bytes = file.bytes!;
@@ -469,11 +404,12 @@ class _UploadResourceDialogState extends State<UploadResourceDialog>
               throw Exception('Failed to get upload URL');
             }
 
-            await _uploadToPresignedUrl(
+            await backendApi.uploadToPresignedUrl(
               file: file,
               uploadUrl: uploadUrl,
               contentType: _getContentType(file.name),
               bytes: bytes,
+              onProgress: _updateTransferProgress,
             );
 
             filePath = publicUrl;

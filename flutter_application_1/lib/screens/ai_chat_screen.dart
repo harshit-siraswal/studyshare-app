@@ -4,6 +4,7 @@ import 'dart:collection';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
@@ -417,6 +418,7 @@ class _AIChatScreenState extends State<AIChatScreen>
   final List<_ChatAttachment> _attachments = [];
   final List<_ChatAttachment> _stickyAttachments = [];
   bool _isUploadingAttachment = false;
+  double _attachmentUploadProgress = 0;
   bool _isOcrActionLoading = false;
   List<LocalAiChatSession> _sessions = [];
   String? _activeSessionId;
@@ -3802,7 +3804,8 @@ class _AIChatScreenState extends State<AIChatScreen>
   }
 
   _GeneratedFileAction? _generatedFileActionForMessage(AIChatMessage message) {
-    if (message.actionType != 'generated_file' || message.actionPayload == null) {
+    if (message.actionType != 'generated_file' ||
+        message.actionPayload == null) {
       return null;
     }
     try {
@@ -5215,15 +5218,11 @@ class _AIChatScreenState extends State<AIChatScreen>
         final shouldPinStudioResource =
             !effectiveAllowWeb &&
             !releasePinnedResourceForNotice &&
-            (_isStudioChat
-                ? localContextRequired
-                : true);
-        final effectiveFileId =
-            !shouldPinStudioResource
+            (_isStudioChat ? localContextRequired : true);
+        final effectiveFileId = !shouldPinStudioResource
             ? null
             : (searchAllForPrompt ? null : widget.resourceContext?.fileId);
-        final effectiveVideoUrl =
-            !shouldPinStudioResource
+        final effectiveVideoUrl = !shouldPinStudioResource
             ? null
             : widget.resourceContext?.videoUrl;
         final effectiveAttachmentPayload = effectiveAllowWeb
@@ -5363,7 +5362,8 @@ class _AIChatScreenState extends State<AIChatScreen>
                     response: data,
                   );
                   final sourcesRaw = (data['sources'] as List?) ?? const [];
-                  final ocrErrorsRaw = (data['ocr_errors'] as List?) ?? const [];
+                  final ocrErrorsRaw =
+                      (data['ocr_errors'] as List?) ?? const [];
                   final sources = sourcesRaw
                       .whereType<Map>()
                       .map(
@@ -5386,7 +5386,8 @@ class _AIChatScreenState extends State<AIChatScreen>
                     sources,
                   );
                   final primarySourceFileId =
-                      _extractPrimarySourceFileId(data) ?? primarySource?.fileId;
+                      _extractPrimarySourceFileId(data) ??
+                      primarySource?.fileId;
                   final answerOrigin = AiAnswerOriginX.fromWireValue(
                     data['answer_origin']?.toString(),
                   );
@@ -5681,7 +5682,7 @@ class _AIChatScreenState extends State<AIChatScreen>
     final picked = await FilePicker.platform.pickFiles(
       allowMultiple: false,
       type: FileType.custom,
-      withData: true,
+      withData: kIsWeb,
       allowedExtensions: const ['png', 'jpg', 'jpeg', 'webp', 'pdf'],
     );
 
@@ -5691,7 +5692,10 @@ class _AIChatScreenState extends State<AIChatScreen>
     final filename = file.name.toLowerCase();
     final isPdf = filename.endsWith('.pdf');
 
-    setState(() => _isUploadingAttachment = true);
+    setState(() {
+      _isUploadingAttachment = true;
+      _attachmentUploadProgress = 0.05;
+    });
     try {
       final uploadPlan = await _api.getResourceUploadUrl(filename: file.name);
       final uploadUrl = uploadPlan['uploadUrl']?.toString().trim();
@@ -5707,6 +5711,12 @@ class _AIChatScreenState extends State<AIChatScreen>
         uploadUrl: uploadUrl,
         contentType: _api.inferContentType(file.name),
         bytes: file.bytes,
+        onProgress: (fraction) {
+          if (!mounted) return;
+          setState(() {
+            _attachmentUploadProgress = 0.1 + (fraction.clamp(0.0, 1.0) * 0.85);
+          });
+        },
       );
       if (!mounted) return;
       setState(() {
@@ -5719,9 +5729,7 @@ class _AIChatScreenState extends State<AIChatScreen>
       ).showSnackBar(SnackBar(content: Text('${file.name} attached')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             _presentAiErrorMessage(
@@ -5733,7 +5741,12 @@ class _AIChatScreenState extends State<AIChatScreen>
         ),
       );
     } finally {
-      if (mounted) setState(() => _isUploadingAttachment = false);
+      if (mounted) {
+        setState(() {
+          _isUploadingAttachment = false;
+          _attachmentUploadProgress = 0;
+        });
+      }
     }
   }
 
@@ -6311,7 +6324,9 @@ class _AIChatScreenState extends State<AIChatScreen>
                               color: isDark ? Colors.white : Colors.black87,
                             ),
                           ),
-                          if (generatedFileAction.description?.trim().isNotEmpty ==
+                          if (generatedFileAction.description
+                                  ?.trim()
+                                  .isNotEmpty ==
                               true)
                             Padding(
                               padding: const EdgeInsets.only(top: 2),
@@ -6340,7 +6355,8 @@ class _AIChatScreenState extends State<AIChatScreen>
                     SizedBox(
                       height: 36,
                       child: ElevatedButton.icon(
-                        onPressed: () => _openGeneratedFile(generatedFileAction),
+                        onPressed: () =>
+                            _openGeneratedFile(generatedFileAction),
                         icon: const Icon(Icons.open_in_new_rounded, size: 16),
                         label: const Text('Open'),
                         style: ElevatedButton.styleFrom(
@@ -6365,7 +6381,9 @@ class _AIChatScreenState extends State<AIChatScreen>
                         icon: const Icon(Icons.share_rounded, size: 16),
                         label: const Text('Share'),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: isDark ? Colors.white : Colors.black87,
+                          foregroundColor: isDark
+                              ? Colors.white
+                              : Colors.black87,
                           side: BorderSide(
                             color: isDark ? Colors.white24 : Colors.black12,
                           ),
@@ -6945,7 +6963,9 @@ class _AIChatScreenState extends State<AIChatScreen>
                                 ),
                               const SizedBox(width: 6),
                               Text(
-                                'Attach',
+                                _isUploadingAttachment
+                                    ? '${(_attachmentUploadProgress * 100).round()}%'
+                                    : 'Attach',
                                 style: GoogleFonts.inter(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
@@ -7036,7 +7056,9 @@ class _AIChatScreenState extends State<AIChatScreen>
                                 ? Icons.stop_rounded
                                 : Icons.arrow_upward_rounded,
                             size: 20,
-                            color: showStopButton ? Colors.white : sendIconColor,
+                            color: showStopButton
+                                ? Colors.white
+                                : sendIconColor,
                           ),
                         ),
                       ),

@@ -1103,8 +1103,12 @@ class BackendApiService {
     required String uploadUrl,
     required String contentType,
     Uint8List? bytes,
+    ValueChanged<double>? onProgress,
   }) async {
     final uri = Uri.parse(uploadUrl);
+    final expectedBytes = bytes?.length ?? file.size;
+    final uploadTimeout = _uploadTimeoutForBytes(expectedBytes);
+    onProgress?.call(0);
 
     if (bytes != null) {
       final response = await _httpClient
@@ -1117,7 +1121,8 @@ class BackendApiService {
             },
             body: bytes,
           )
-          .timeout(_requestTimeout);
+          .timeout(uploadTimeout);
+      onProgress?.call(1);
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw BackendApiHttpException(
@@ -1140,25 +1145,64 @@ class BackendApiService {
       );
     }
 
-    final request = http.StreamedRequest('PUT', uri);
-    request.headers['Content-Type'] = contentType;
-    request.headers['Cache-Control'] = 'max-age=31536000';
-    request.contentLength = file.size;
-    await request.sink.addStream(File(filePath).openRead());
-    await request.sink.close();
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 20);
+    try {
+      final request = await client
+          .putUrl(uri)
+          .timeout(const Duration(seconds: 20));
+      request.headers.set(HttpHeaders.contentTypeHeader, contentType);
+      request.headers.set(HttpHeaders.cacheControlHeader, 'max-age=31536000');
+      request.contentLength = file.size;
 
-    final response = await _httpClient.send(request).timeout(_requestTimeout);
-    final responseBody = await response.stream.bytesToString();
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw BackendApiHttpException(
-        statusCode: response.statusCode,
-        message: _friendlyHttpErrorMessage(
+      var uploadedBytes = 0;
+      var lastProgressUpdate = DateTime.fromMillisecondsSinceEpoch(0);
+      await for (final chunk in File(filePath).openRead()) {
+        request.add(chunk);
+        uploadedBytes += chunk.length;
+        final now = DateTime.now();
+        final shouldRefresh =
+            uploadedBytes >= file.size ||
+            now.difference(lastProgressUpdate).inMilliseconds >= 120;
+        if (shouldRefresh && file.size > 0) {
+          lastProgressUpdate = now;
+          onProgress?.call((uploadedBytes / file.size).clamp(0.0, 1.0));
+        }
+      }
+
+      final response = await request.close().timeout(uploadTimeout);
+      final responseBody = await utf8.decoder.bind(response).join();
+      onProgress?.call(1);
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw BackendApiHttpException(
           statusCode: response.statusCode,
-          body: responseBody,
-          fallbackMessage: 'File upload failed',
-        ),
+          message: _friendlyHttpErrorMessage(
+            statusCode: response.statusCode,
+            body: responseBody,
+            fallbackMessage: 'File upload failed',
+          ),
+        );
+      }
+    } on TimeoutException catch (_) {
+      throw BackendApiHttpException(
+        statusCode: 408,
+        message:
+            'File upload timed out. Please check your connection and try again.',
       );
+    } finally {
+      client.close(force: true);
     }
+  }
+
+  Duration _uploadTimeoutForBytes(int bytes) {
+    const bytesPerMiB = 1024 * 1024;
+    final mebibytes = bytes <= 0
+        ? 1
+        : ((bytes + bytesPerMiB - 1) ~/ bytesPerMiB);
+    final seconds = 60 + (mebibytes * 12);
+    if (seconds < 120) return const Duration(seconds: 120);
+    if (seconds > 900) return const Duration(seconds: 900);
+    return Duration(seconds: seconds);
   }
 
   Future<Map<String, dynamic>> getChatRoomInfo(String roomId) async {

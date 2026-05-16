@@ -1,4 +1,5 @@
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -46,8 +47,9 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
   String? _selectedSubject;
   PlatformFile? _selectedPdf;
   bool _isUploading = false;
+  double _uploadProgress = 0;
 
-  static const int _maxPdfBytes = 12 * 1024 * 1024;
+  static const int _maxPdfBytes = 50 * 1024 * 1024;
 
   @override
   void initState() {
@@ -113,7 +115,7 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: const <String>['pdf'],
-        withData: true,
+        withData: kIsWeb,
       );
       if (result == null || result.files.isEmpty) return;
 
@@ -121,7 +123,7 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
       if (file.size > _maxPdfBytes) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('PDF must be under 12MB.')),
+          const SnackBar(content: Text('PDF must be under 50MB.')),
         );
         return;
       }
@@ -178,7 +180,10 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
       return;
     }
 
-    setState(() => _isUploading = true);
+    setState(() {
+      _isUploading = true;
+      _uploadProgress = 0.05;
+    });
     try {
       final uploadPlan = await _backendApi.getSyllabusUploadUrl(
         filename: _selectedPdf!.name,
@@ -192,13 +197,20 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
         throw const FormatException('Failed to get syllabus upload URL.');
       }
 
+      if (mounted) setState(() => _uploadProgress = 0.15);
       await _backendApi.uploadToPresignedUrl(
         file: _selectedPdf!,
         uploadUrl: uploadUrl,
         contentType: _backendApi.inferContentType(_selectedPdf!.name),
         bytes: _selectedPdf!.bytes,
+        onProgress: (fraction) {
+          if (!mounted) return;
+          final progress = 0.15 + (fraction.clamp(0.0, 1.0) * 0.7);
+          setState(() => _uploadProgress = progress);
+        },
       );
 
+      if (mounted) setState(() => _uploadProgress = 0.9);
       await _supabaseService.uploadSyllabus(
         collegeId: widget.collegeId,
         department: widget.department,
@@ -209,6 +221,7 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
       );
 
       if (!mounted) return;
+      setState(() => _uploadProgress = 1);
       Navigator.pop<Map<String, String>>(context, {
         'didUpload': 'true',
         'semester': _selectedSemester!,
@@ -217,7 +230,10 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
     } catch (e) {
       if (!mounted) return;
       _showSnack('Upload failed: $e');
-      setState(() => _isUploading = false);
+      setState(() {
+        _isUploading = false;
+        _uploadProgress = 0;
+      });
     }
   }
 
@@ -360,7 +376,16 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
           ),
           if (_isUploading) ...[
             const SizedBox(height: 16),
-            const LinearProgressIndicator(),
+            LinearProgressIndicator(value: _uploadProgress),
+            const SizedBox(height: 6),
+            Text(
+              'Uploading ${(_uploadProgress * 100).round()}%',
+              style: GoogleFonts.inter(
+                color: isDark ? Colors.white70 : AppTheme.textSecondary,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ],
         ],
       ),
@@ -742,7 +767,7 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
           const SizedBox(height: 6),
           Text(
             '- Use the official syllabus PDF\n'
-            '- Keep the file under 12MB\n'
+            '- Keep the file under 50MB\n'
             '- Title should match the subject and semester',
             style: GoogleFonts.inter(
               fontSize: 12,
