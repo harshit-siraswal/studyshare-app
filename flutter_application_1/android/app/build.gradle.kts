@@ -14,6 +14,9 @@ configurations.all {
         // UCrop's EdgeToEdge dependencies used during profile-photo editing.
         force("androidx.core:core-ktx:1.17.0")
         force("androidx.core:core:1.17.0")
+        // home_widget 0.9.0 declares glance-appwidget as 1.+; pin it so
+        // Gradle does not select newer alphas that require AGP 9.1+/SDK 37.
+        force("androidx.glance:glance-appwidget:1.2.0-rc01")
     }
 }
 

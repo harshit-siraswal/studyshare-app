@@ -56,6 +56,28 @@ Map<String, dynamic> _asStringKeyedMap(dynamic raw) {
   return const <String, dynamic>{};
 }
 
+Map<String, bool> _extractExplicitCapabilities(dynamic raw) {
+  if (raw is Iterable && raw is! String) {
+    return <String, bool>{
+      for (final value in raw)
+        if (value?.toString().trim().isNotEmpty ?? false)
+          value.toString().trim().toLowerCase(): true,
+    };
+  }
+
+  final rawMap = _asStringKeyedMap(raw);
+  if (rawMap.isEmpty) return const <String, bool>{};
+
+  return <String, bool>{
+    for (final entry in rawMap.entries)
+      entry.key.trim().toLowerCase(): _isTruthy(entry.value),
+  };
+}
+
+bool _hasNonEmptyText(dynamic value) {
+  return value?.toString().trim().isNotEmpty ?? false;
+}
+
 String normalizeProfileRoleValue(String? role) {
   final raw = role?.trim().toUpperCase() ?? '';
   switch (raw) {
@@ -77,25 +99,47 @@ String normalizeProfileRoleValue(String? role) {
 }
 
 bool hasAdminContext(Map<String, dynamic> profile) {
-  return profile.containsKey('admin_capabilities') ||
-      profile.containsKey('scope_all_colleges') ||
-      profile.containsKey('admin_college_id');
+  final role = normalizeProfileRoleValue(profile['role']?.toString());
+  final adminRole = normalizeProfileRoleValue(
+    profile['admin_role']?.toString(),
+  );
+  return _extractExplicitCapabilities(
+        profile['admin_capabilities'],
+      ).isNotEmpty ||
+      _isTruthy(profile['scope_all_colleges']) ||
+      _hasNonEmptyText(profile['admin_college_id']) ||
+      role == appRoleAdmin ||
+      adminRole == appRoleAdmin;
 }
 
 Map<String, bool> extractAdminCapabilities(Map<String, dynamic> profile) {
-  final explicit = _asStringKeyedMap(profile['admin_capabilities']);
-  if (!hasAdminContext(profile) && explicit.isEmpty) {
+  final explicit = _extractExplicitCapabilities(profile['admin_capabilities']);
+  final role = normalizeProfileRoleValue(profile['role']?.toString());
+  final adminRole = normalizeProfileRoleValue(
+    profile['admin_role']?.toString(),
+  );
+  final isSuperAdmin =
+      profile['role']?.toString().trim().toLowerCase() == 'super_admin' ||
+      profile['admin_role']?.toString().trim().toLowerCase() == 'super_admin';
+  final getsDefaultAdminCapabilities =
+      isSuperAdmin || role == appRoleAdmin || adminRole == appRoleAdmin;
+
+  if (!getsDefaultAdminCapabilities && explicit.isEmpty) {
+    if (_isTruthy(profile['scope_all_colleges'])) {
+      return const <String, bool>{'all_colleges': true};
+    }
     return const <String, bool>{};
   }
 
-  final normalizedRole = profile['role']?.toString().trim().toLowerCase() ?? '';
-  final base = normalizedRole == 'super_admin'
+  final base = isSuperAdmin
       ? <String, bool>{for (final key in _capabilityKeys) key: true}
-      : <String, bool>{..._defaultAdminCapabilities};
+      : getsDefaultAdminCapabilities
+      ? <String, bool>{..._defaultAdminCapabilities}
+      : <String, bool>{};
 
   for (final key in _capabilityKeys) {
     if (explicit.containsKey(key)) {
-      base[key] = _isTruthy(explicit[key]);
+      base[key] = explicit[key] == true;
     }
   }
 
