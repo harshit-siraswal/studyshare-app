@@ -237,6 +237,8 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     final lowered = message.toLowerCase();
     if (_looksLikeTokenLimitError(message)) return 'token_limit';
     if (_looksLikeHighTrafficError(message)) return 'traffic';
+    if (_isQualityGateReason(message)) return 'quality_gate';
+    if (_isSourceExtractionReason(message)) return 'source_extraction';
     if (lowered.contains('socket') ||
         lowered.contains('host lookup') ||
         lowered.contains('network')) {
@@ -258,7 +260,62 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         lowered.contains('high traffic');
   }
 
-  String _presentGenerationError(String message) {
+  String _normalizeStatusToken(String? value) =>
+      (value ?? '').trim().toLowerCase();
+
+  bool _isQualityGateReason(String? value) {
+    final normalized = _normalizeStatusToken(value);
+    return normalized == 'failed_quality_gate' ||
+        normalized == 'quality_gate_failed' ||
+        normalized == 'qualitygatefailed' ||
+        normalized.contains('quality validation') ||
+        normalized.contains('quality gate');
+  }
+
+  bool _isSourceExtractionReason(String? value) {
+    final normalized = _normalizeStatusToken(value);
+    return normalized == 'source_text_unavailable' ||
+        normalized == 'failed_extraction' ||
+        normalized == 'extraction_timeout' ||
+        normalized == 'source_quality_unacceptable' ||
+        normalized.contains('no text extracted') ||
+        normalized.contains('no usable text') ||
+        normalized.contains('transcript unavailable');
+  }
+
+  String? _messageForStatusReason(String? statusReason, {String? stage}) {
+    final reason = _normalizeStatusToken(statusReason);
+    final normalizedStage = _normalizeStatusToken(stage);
+    if (_isQualityGateReason(reason) || _isQualityGateReason(normalizedStage)) {
+      return _qualityGateFailureMessage(const []);
+    }
+    if (_isSourceExtractionReason(reason) ||
+        _isSourceExtractionReason(normalizedStage)) {
+      return 'StudyShare could not read enough usable text from this material. Try OCR, reprocess the PDF, or upload a clearer file.';
+    }
+    if (reason == 'quota_exceeded') {
+      return 'Your AI tokens are too low for this request. Recharge AI tokens to continue generating content.';
+    }
+    return null;
+  }
+
+  String _qualityGateFailureMessage(List<String> validationErrors) {
+    const base = 'The generated result did not pass StudyShare quality checks.';
+    if (validationErrors.isEmpty) {
+      return '$base Try regenerating with OCR or reprocessing the PDF.';
+    }
+    return '$base It likely missed source coverage, repeated content, or returned malformed questions. Try regenerating with OCR or reprocessing the PDF.';
+  }
+
+  String _presentGenerationError(
+    String message, {
+    String? statusReason,
+    String? stage,
+  }) {
+    final structured = _messageForStatusReason(statusReason, stage: stage);
+    if (structured != null) return structured;
+    final messageBased = _messageForStatusReason(message);
+    if (messageBased != null) return messageBased;
     if (_looksLikeTokenLimitError(message)) {
       return 'Your AI tokens are too low for this request. Recharge AI tokens to continue generating content.';
     }
@@ -417,6 +474,13 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         'cached': nested['cached'] == true || raw['cached'] == true,
         'source': nested['source'] ?? raw['source'],
         'studio_kind': nested['studio_kind'] ?? raw['studio_kind'],
+        'status': nested['status'] ?? raw['status'],
+        'stage': nested['stage'] ?? raw['stage'],
+        'status_reason': nested['status_reason'] ?? raw['status_reason'],
+        'error': nested['error'] ?? raw['error'],
+        'message': nested['message'] ?? raw['message'],
+        'validation_errors':
+            nested['validation_errors'] ?? raw['validation_errors'],
       };
     }
     return <String, dynamic>{
@@ -424,7 +488,27 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
       'cached': raw['cached'] == true,
       'source': raw['source'],
       'studio_kind': raw['studio_kind'],
+      'status': raw['status'],
+      'stage': raw['stage'],
+      'status_reason': raw['status_reason'],
+      'error': raw['error'],
+      'message': raw['message'],
+      'validation_errors': raw['validation_errors'],
     };
+  }
+
+  List<String> _extractValidationErrors(dynamic raw) {
+    final decoded = _decodeStructuredValue(raw);
+    if (decoded is List) {
+      return decoded
+          .map((item) => item.toString().trim())
+          .where((item) => item.isNotEmpty)
+          .toList(growable: false);
+    }
+    if (decoded is String && decoded.trim().isNotEmpty) {
+      return <String>[decoded.trim()];
+    }
+    return const [];
   }
 
   Future<Map<String, dynamic>> _requestBackgroundGeneration({
@@ -502,6 +586,33 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
   }) async {
     final response = _normalizeAiStudioResponse(rawResponse);
     final cached = response['cached'] == true;
+    final status = _normalizeStatusToken(response['status']?.toString());
+    final stage = response['stage']?.toString().trim();
+    final statusReason = response['status_reason']?.toString().trim();
+    final validationErrors = _extractValidationErrors(
+      response['validation_errors'],
+    );
+
+    if (validationErrors.isNotEmpty ||
+        _isQualityGateReason(statusReason) ||
+        _isQualityGateReason(response['error']?.toString())) {
+      throw Exception(_qualityGateFailureMessage(validationErrors));
+    }
+    if (status == 'failed' || _normalizeStatusToken(stage) == 'failed') {
+      final rawMessage =
+          response['message']?.toString().trim().isNotEmpty == true
+          ? response['message'].toString().trim()
+          : response['error']?.toString().trim().isNotEmpty == true
+          ? response['error'].toString().trim()
+          : 'AI generation failed. Please try again.';
+      throw Exception(
+        _presentGenerationError(
+          rawMessage,
+          statusReason: statusReason,
+          stage: stage,
+        ),
+      );
+    }
     late final int outputSize;
     dynamic persistPayload;
 
@@ -756,13 +867,20 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
         return true;
       }
       if (status == 'failed' || status == 'blocked' || status == 'cancelled') {
-        final message = response['error']?.toString().trim().isNotEmpty == true
+        final message =
+            response['message']?.toString().trim().isNotEmpty == true
+            ? response['message'].toString().trim()
+            : response['error']?.toString().trim().isNotEmpty == true
             ? response['error'].toString().trim()
             : 'AI generation failed. Please try again.';
         await _clearPendingJob(type: type);
         if (mounted) {
           setState(() {
-            _error = _presentGenerationError(message);
+            _error = _presentGenerationError(
+              message,
+              statusReason: statusReason,
+              stage: stage,
+            );
           });
         }
         return true;
@@ -1262,6 +1380,13 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     final stage = (_pendingJobStage ?? '').trim().toLowerCase();
     final stageMessage = switch (stage) {
       'queued' => 'Queued in background...',
+      'resolving_source' => 'Finding the best document text...',
+      'quality_checking_source' => 'Checking source quality...',
+      'planning_questions' => 'Planning topic coverage...',
+      'generating_summary' => 'Generating summary...',
+      'generating_questions' => 'Building quiz...',
+      'generating_flashcards' => 'Creating flashcards...',
+      'validating_output' => 'Checking result quality...',
       'extraction' => 'Extracting study material...',
       'inventory' => 'Mapping document topics...',
       'generation' => fallback,
@@ -1273,10 +1398,10 @@ class _AiStudyToolsSheetState extends State<AiStudyToolsSheet>
     final progress = _pendingJobProgress;
     final etaLabel = _etaLabel();
     if (progress == null || progress <= 0 || progress >= 100) {
-      return etaLabel == null ? stageMessage : '$stageMessage • $etaLabel';
+      return etaLabel == null ? stageMessage : '$stageMessage - $etaLabel';
     }
     final progressLabel = '$stageMessage ($progress%)';
-    return etaLabel == null ? progressLabel : '$progressLabel • $etaLabel';
+    return etaLabel == null ? progressLabel : '$progressLabel - $etaLabel';
   }
 
   int get _readyOutputCount {
