@@ -40,6 +40,7 @@ import 'services/push_notification_service.dart';
 import 'services/backend_api_service.dart';
 import 'providers/theme_provider.dart';
 import 'widgets/global_timer_overlay.dart';
+import 'widgets/app_update_gate.dart';
 import 'widgets/branded_loader.dart';
 import 'utils/app_navigator.dart';
 import 'utils/theme_animator.dart';
@@ -903,8 +904,10 @@ class StudyShareApp extends StatelessWidget {
                 }
                 return RepaintBoundary(
                   key: appBoundaryKey,
-                  child: GlobalTimerOverlay(
-                    child: child ?? const SizedBox.shrink(),
+                  child: AppUpdateGate(
+                    child: GlobalTimerOverlay(
+                      child: child ?? const SizedBox.shrink(),
+                    ),
                   ),
                 );
               },

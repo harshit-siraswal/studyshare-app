@@ -848,6 +848,14 @@ class BackendApiService {
     throw Exception('API request failed for $path');
   }
 
+  Future<Map<String, dynamic>> getAndroidReleaseInfo() {
+    return _requestJson(
+      '/api/app/android-release',
+      method: 'GET',
+      timeout: const Duration(seconds: 8),
+    );
+  }
+
   // ----------------------------
   // Chat (Rooms / Messages / Comments)
   // ----------------------------
