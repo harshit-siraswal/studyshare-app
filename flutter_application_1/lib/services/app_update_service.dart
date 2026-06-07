@@ -94,7 +94,9 @@ class AppUpdateService {
     PackageInfoProvider? packageInfoProvider,
     PreferencesProvider? preferencesProvider,
     PlatformProvider? isAndroidProvider,
-  }) : _backendApi = backendApi ?? BackendApiService(),
+  }) : _backendApi =
+           backendApi ??
+           (releaseInfoProvider == null ? BackendApiService() : null),
        _httpClient = httpClient ?? http.Client(),
        _releaseInfoProvider = releaseInfoProvider,
        _packageInfoProvider = packageInfoProvider ?? PackageInfo.fromPlatform,
@@ -110,7 +112,7 @@ class AppUpdateService {
     defaultValue: 'https://studyshare.in/android-release.json',
   );
 
-  final BackendApiService _backendApi;
+  final BackendApiService? _backendApi;
   final http.Client _httpClient;
   final ReleaseInfoProvider? _releaseInfoProvider;
   final PackageInfoProvider _packageInfoProvider;
@@ -150,11 +152,16 @@ class AppUpdateService {
     await prefs.setString(_dismissedReleaseKey, release.releaseKey);
   }
 
+  Future<bool> isReleaseDismissed(AndroidReleaseInfo release) async {
+    final prefs = await _preferencesProvider();
+    return prefs.getString(_dismissedReleaseKey) == release.releaseKey;
+  }
+
   Future<AndroidReleaseInfo?> _fetchReleaseInfo() async {
     try {
       final provider = _releaseInfoProvider;
       final data = provider == null
-          ? await _backendApi.getAndroidReleaseInfo()
+          ? await _backendApi!.getAndroidReleaseInfo()
           : await provider();
       final release = AndroidReleaseInfo.fromJson(data);
       if (release != null) return release;

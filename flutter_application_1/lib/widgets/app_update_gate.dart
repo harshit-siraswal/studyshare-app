@@ -22,6 +22,7 @@ class _AppUpdateGateState extends State<AppUpdateGate>
 
   late final AppUpdateService _service = widget.service ?? AppUpdateService();
   DateTime? _lastCheckAt;
+  AndroidReleaseInfo? _availableRelease;
   bool _checkInFlight = false;
   bool _dialogVisible = false;
 
@@ -57,9 +58,12 @@ class _AppUpdateGateState extends State<AppUpdateGate>
     _lastCheckAt = DateTime.now();
 
     try {
-      final release = await _service.checkForUpdate();
+      final release = await _service.checkForUpdate(includeDismissed: true);
       if (!mounted || release == null) return;
-      await _showUpdateDialog(release);
+      setState(() => _availableRelease = release);
+      if (!await _service.isReleaseDismissed(release)) {
+        await _showUpdateDialog(release);
+      }
     } catch (error) {
       debugPrint('App update prompt failed: $error');
     } finally {
@@ -129,7 +133,100 @@ class _AppUpdateGateState extends State<AppUpdateGate>
   }
 
   @override
-  Widget build(BuildContext context) => widget.child;
+  Widget build(BuildContext context) {
+    final release = _availableRelease;
+    if (release == null) return widget.child;
+
+    return Stack(
+      children: [
+        widget.child,
+        Positioned(
+          left: 12,
+          right: 12,
+          top: MediaQuery.paddingOf(context).top + 10,
+          child: _UpdateBanner(
+            release: release,
+            onDownload: () => unawaited(_openDownload(release)),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _UpdateBanner extends StatelessWidget {
+  const _UpdateBanner({required this.release, required this.onDownload});
+
+  final AndroidReleaseInfo release;
+  final VoidCallback onDownload;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return SafeArea(
+      bottom: false,
+      child: Material(
+        color: Colors.transparent,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: colors.surface,
+            border: Border.all(color: colors.primary.withValues(alpha: 0.22)),
+            borderRadius: BorderRadius.circular(18),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.16),
+                blurRadius: 22,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 18,
+                  backgroundColor: colors.primary.withValues(alpha: 0.12),
+                  foregroundColor: colors.primary,
+                  child: const Icon(Icons.system_update_rounded, size: 19),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'New version ${release.version} available',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        'Download the latest StudyShare APK.',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                FilledButton.tonalIcon(
+                  onPressed: onDownload,
+                  icon: const Icon(Icons.download_rounded, size: 18),
+                  label: const Text('Download'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _UpdateDialogContent extends StatelessWidget {

@@ -66,6 +66,7 @@ void main() {
       expect(release, isNotNull);
 
       await service.dismissRelease(release!);
+      expect(await service.isReleaseDismissed(release), isTrue);
       expect(await service.checkForUpdate(), isNull);
       expect(await service.checkForUpdate(includeDismissed: true), isNotNull);
     },
