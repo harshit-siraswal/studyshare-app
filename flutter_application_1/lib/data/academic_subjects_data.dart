@@ -311,8 +311,13 @@ const Map<String, List<String>> _collegeAliases = <String, List<String>>{
   ],
   'usar': <String>[
     'usar',
+    'usar delhi',
+    'usar delhi college',
     'usar ggsipu',
     'ggsipu usar',
+    'ggsipu east delhi campus',
+    'east delhi campus',
+    'surajmal vihar',
     'ipu.ac.in',
     'ggsipu',
     'guru gobind singh indraprastha university',
@@ -489,6 +494,416 @@ const Map<String, List<String>> _usarFirstYearSubjects = <String, List<String>>{
     'C Programming Lab',
   ],
 };
+
+const List<String> _usarCocurricularSubjects = <String>[
+  'Summer Training (after 4th semester) Report',
+  'NSS / NCC / Cultural Clubs / Technical Society / Technical Club',
+];
+
+const List<String> _usarFinalSemesterSubjects = <String>[
+  'Major Project - Dissertation',
+  'Internship - Dissertation',
+];
+
+const Map<String, List<String>> _usarOpenAreaElectivesBySemester =
+    <String, List<String>>{
+      '5': <String>[
+        '3D-Printing Technologies',
+        'Mobile Application Development',
+        'Analysis and Design of Algorithms',
+        'Software Engineering',
+        'Internet of Things',
+      ],
+      '6': <String>[
+        'Operations Management',
+        'Metaverse',
+        'Industry 4.0',
+        'Supply Chain Management',
+        'Software Project Management',
+        'Modeling and Simulation',
+        'Database Management Systems',
+        'Introduction to Robotics',
+      ],
+      '7': <String>[
+        'Software Metrics',
+        'Introduction to Electric Vehicle',
+        'Web Development',
+        'Modern Manufacturing Processes',
+        'Personal Finance',
+        'Automobile Engineering',
+        'Introduction to Smart Materials',
+        'Cloud Dew Edge Fog (CDEF) Computing',
+        'Social Media Analytics',
+        'Natural Language Processing',
+      ],
+    };
+
+const Map<String, List<String>> _usarAiCommonSubjectsBySemester =
+    <String, List<String>>{
+      '3': <String>[
+        'Essential Mathematics for Artificial Intelligence',
+        'Operating Systems',
+        'Database Management System',
+        'Foundation of Computer Science',
+        'Data Structures',
+        'Accountancy for Engineers',
+        'JAVA Lab',
+        'Database Management System Lab',
+        'Data Structures Lab',
+      ],
+      '4': <String>[
+        'Software Engineering',
+        'Introduction to Artificial Intelligence',
+        'Data Warehousing and Data Mining',
+        'Analysis and Design of Algorithm',
+        'Introduction to Machine Learning',
+        'Computer Network',
+        'Engineering Economics',
+        'Introduction to AI Lab',
+        'Analysis and Design of Algorithm Lab',
+        'Machine Learning Lab',
+        'Computer Network Lab',
+      ],
+    };
+
+const Map<String, List<String>> _usarAiDsCoreSubjectsBySemester =
+    <String, List<String>>{
+      ..._usarAiCommonSubjectsBySemester,
+      '5': <String>[
+        'Theory of Computation',
+        'Data Visualization',
+        'Big Data Analytics',
+        'Technical Writing',
+        'Data Visualization Lab',
+        'Big Data Analytics Lab',
+        ..._usarCocurricularSubjects,
+      ],
+      '6': <String>[
+        'Elements of Indian History for Engineers',
+        'Entrepreneurship Mindset',
+        'Natural Language Processing',
+        'Cloud Dew Edge Fog (CDEF) Computing',
+        'Natural Language Processing Lab',
+        'Cloud Dew Edge Fog (CDEF) Computing Lab',
+      ],
+      '7': <String>[
+        'Recommender Systems',
+        'Social Media Analytics',
+        'Recommender Systems Lab',
+        'Social Media Analytics Lab',
+        'Minor Project',
+        'Summer Training (after 6th semester) Report',
+      ],
+      '8': _usarFinalSemesterSubjects,
+    };
+
+const Map<String, List<String>> _usarAiDsPceBySemester = <String, List<String>>{
+  '5': <String>[
+    'Pattern Recognition',
+    'Ethics in AI',
+    'Digital Logic and Computer Organization',
+    'Soft Computing',
+    'Blockchain Technology',
+  ],
+  '6': <String>[
+    'Predictive Analytics',
+    'Predictive Analytics Lab',
+    'Microprocessors',
+    'Microprocessors Lab',
+    'Introduction to Computer Vision',
+    'Image Processing and Computer Vision Lab',
+    'Web Technologies',
+    'Web Technologies Lab',
+    'Software Project Management',
+    'Software Project Management Lab',
+    'Human Computer Interface',
+    'Human Computer Interface Lab',
+    'Advanced Optimization Techniques',
+    'Advanced Optimization Techniques Lab',
+    'Genetic Algorithms',
+    'Genetic Algorithms Lab',
+    'Meta-heuristic Algorithms',
+    'Meta-heuristic Algorithms Lab',
+    'Artificial Neural Network',
+    'Artificial Neural Network Lab',
+    'Fuzzy Logic',
+    'Fuzzy Logic Lab',
+  ],
+  '7': <String>[
+    'Embedded Systems',
+    'Reinforcement Learning',
+    'Quantum Computing',
+    'Cyber Physical Systems',
+    'Network Security and Cryptography',
+    'Information Retrieval',
+    'Time Series Analysis and Forecasting',
+    'Semantic Web',
+    'Software Testing',
+    'Web Intelligence',
+    'E-commerce',
+    'Compiler Design',
+    'Introduction to Large Language Models',
+    'Introduction to Deep Learning',
+  ],
+};
+
+const Map<String, List<String>> _usarAiMlCoreSubjectsBySemester =
+    <String, List<String>>{
+      ..._usarAiCommonSubjectsBySemester,
+      '5': <String>[
+        'Theory of Computation',
+        'Soft Computing',
+        'Cloud Dew Edge Fog (CDEF) Computing',
+        'Technical Writing',
+        'Soft Computing Lab',
+        'Cloud Dew Edge Fog (CDEF) Computing Lab',
+        ..._usarCocurricularSubjects,
+      ],
+      '6': <String>[
+        'Elements of Indian History for Engineers',
+        'Entrepreneurship Mindset',
+        'Artificial Neural Network',
+        'Introduction to Computer Vision',
+        'Artificial Neural Network Lab',
+        'Image Processing and Computer Vision Lab',
+      ],
+      '7': <String>[
+        'Reinforcement Learning',
+        'Introduction to Deep Learning',
+        'Reinforcement Learning Lab',
+        'Introduction to Deep Learning Lab',
+        'Minor Project',
+        'Summer Training (after 6th semester) Report',
+      ],
+      '8': _usarFinalSemesterSubjects,
+    };
+
+const Map<String, List<String>> _usarAiMlPceBySemester = <String, List<String>>{
+  '5': <String>[
+    'Pattern Recognition',
+    'Ethics in AI',
+    'Digital Logic and Computer Organization',
+    'Advanced Machine Learning',
+    'Blockchain Technology',
+    'Data Visualization',
+    'Big Data Analytics',
+  ],
+  '6': <String>[
+    'Predictive Analytics',
+    'Predictive Analytics Lab',
+    'Microprocessors',
+    'Microprocessors Lab',
+    'Parallel Computing',
+    'Parallel Computing Lab',
+    'Web Technologies',
+    'Web Technologies Lab',
+    'Software Project Management',
+    'Software Project Management Lab',
+    'Human Computer Interface',
+    'Human Computer Interface Lab',
+    'Advanced Optimization Techniques',
+    'Advanced Optimization Techniques Lab',
+    'Genetic Algorithms',
+    'Genetic Algorithms Lab',
+    'Meta-heuristic Algorithms',
+    'Meta-heuristic Algorithms Lab',
+    'Natural Language Processing',
+    'Natural Language Processing Lab',
+    'Fuzzy Logic',
+    'Fuzzy Logic Lab',
+  ],
+  '7': <String>[
+    'Embedded Systems',
+    'Recommender Systems',
+    'Quantum Computing',
+    'Cyber Physical Systems',
+    'Network Security and Cryptography',
+    'Social Media Analytics',
+    'Time Series Analysis and Forecasting',
+    'Semantic Web',
+    'Software Testing',
+    'Web Intelligence',
+    'E-Commerce',
+    'Compiler Design',
+    'Introduction to Large Language Models',
+  ],
+};
+
+const Map<String, List<String>> _usarIiotCoreSubjectsBySemester =
+    <String, List<String>>{
+      '3': <String>[
+        'Linear Algebra and Numerical Methods',
+        'Artificial Intelligence and Its Applications',
+        'Computer Networks',
+        'Analog Electronics',
+        'Mechatronic Systems and Applications',
+        'Engineering Economics',
+        'Artificial Intelligence Lab',
+        'Electronics Lab',
+        'Mechatronic Systems and Applications Lab',
+        'Computer Networks Lab',
+      ],
+      '4': <String>[
+        'Internet of Things',
+        'Data Structures',
+        'Fundamentals of Automation',
+        'Control Systems',
+        'Switching Theory and Logic Design',
+        'Optimization Techniques',
+        'Accountancy for Engineers',
+        'IoT Lab',
+        'Data Structures Lab',
+        'OOPS With Java Lab',
+        'Industrial Automation and Drives Lab',
+      ],
+      '5': <String>[
+        'Elements of Indian History for Engineers',
+        'Entrepreneurship Mindset',
+        'Data Analytics',
+        'Principles of Communication Systems',
+        'Software Engineering',
+        'Data Analytics Lab',
+        'Principles of Communication Systems Lab',
+        ..._usarCocurricularSubjects,
+      ],
+      '6': <String>[
+        'Technical Writing',
+        'Electronic Design Automation for VLSI',
+        'Embedded Systems',
+        'Electronic Design Automation for VLSI Lab',
+        'Embedded Systems Lab',
+      ],
+      '7': <String>[
+        'Cloud Dew Edge Fog Computing',
+        'Wireless Sensor Networks',
+        'Wireless Sensor Networks Lab',
+        'Cloud Dew Edge Fog Computing Lab',
+        'Minor Project',
+        'Summer Training (after 6th semester) Report',
+      ],
+      '8': _usarFinalSemesterSubjects,
+    };
+
+const Map<String, List<String>> _usarIiotPceBySemester = <String, List<String>>{
+  '5': <String>[
+    'Introduction to Semiconductor Devices',
+    'Smart Grid and Sensors',
+    'Operating System',
+  ],
+  '6': <String>[
+    'Cyber Security and Digital Forensics',
+    'Cyber Security and Digital Forensics Lab',
+    'Deep Learning and Reinforcement Learning',
+    'Deep Learning and Reinforcement Learning Lab',
+    'Smart Materials for IOT Devices',
+    'Smart Materials for IOT Devices Lab',
+    'Introduction to Wireless and Cellular Communication',
+    'Introduction to Wireless and Cellular Communication Lab',
+    'PCB Designing and Fabrication',
+    'PCB Designing and Fabrication Lab',
+    'Data Base Management System',
+    'Data Base Management System Lab',
+  ],
+  '7': <String>[
+    'Radar and Navigation',
+    'Microwave Engineering',
+    'Digital Signal and Image Processing',
+    'IoT Security',
+    'Information Theory and Coding Techniques',
+  ],
+};
+
+const Map<String, List<String>> _usarAutomationRoboticsCoreSubjectsBySemester =
+    <String, List<String>>{
+      '3': <String>[
+        'Linear Algebra & Numerical Methods',
+        'Introduction to Robotics',
+        'Structure and Mechanics of Materials',
+        'Internet of Things',
+        'Analog & Digital Electronics',
+        'Engineering Economics',
+        'Robotics Lab',
+        'Electronics Lab',
+        'Internet of Things Lab',
+        'Structure and Mechanics of Materials Lab',
+      ],
+      '4': <String>[
+        'Kinematics and Dynamics of Machines',
+        'Mechatronic Systems and Applications',
+        'Fundamentals of Automation',
+        'Industrial Engineering & Operation Research',
+        'Communication Systems and Networking',
+        'Production Technology',
+        'Accountancy for Engineers',
+        'KOM/DOM Lab',
+        'Mechatronic Systems Lab',
+        'Production Technology Lab',
+        'Communication Systems and Networking Lab',
+      ],
+      '5': <String>[
+        'Elements of Indian History for Engineers',
+        'Entrepreneurship Mindset',
+        'Cobotics and Factory Automation',
+        'Robotic Component Design and Simulation',
+        'Advanced Manufacturing Processes',
+        'Cobotics and Factory Automation Lab',
+        'CAD and Simulation Lab',
+        ..._usarCocurricularSubjects,
+      ],
+      '6': <String>[
+        'Technical Writing',
+        'Automotive Technology and Green Vehicles',
+        'Advanced Robotics',
+        'Automotive Technology and Green Vehicles Lab',
+        'Advanced Robotics Lab',
+      ],
+      '7': <String>[
+        'Totally Integrated Automation',
+        'Additive Manufacturing',
+        'Totally Integrated Automation Lab',
+        'Additive Manufacturing Lab',
+        'Minor Project',
+        'Summer Training (after 6th semester) Report',
+      ],
+      '8': _usarFinalSemesterSubjects,
+    };
+
+const Map<String, List<String>> _usarAutomationRoboticsPceBySemester =
+    <String, List<String>>{
+      '5': <String>[
+        'Thermal Science',
+        'MEMS: Introduction and Applications',
+        'Industrial Design and Applied Ergonomics',
+        'Introduction to Semiconductor Devices',
+        'Automatic Control Systems',
+        'Switching Theory and Logic Design',
+      ],
+      '6': <String>[
+        'Measurement and Metrology',
+        'Measurement and Metrology Lab',
+        'Autonomous Mobile Robots & UHV',
+        'Autonomous Mobile Robots & UHV Lab',
+        'Computer-Integrated Manufacturing (CIM)',
+        'Computer-Integrated Manufacturing (CIM) Lab',
+        'Electrical Machines and Drive',
+        'Electrical Machines and Drive Lab',
+        'Embedded Systems',
+        'Embedded Systems Lab',
+        'VLSI Design for Automation',
+        'VLSI Design for Automation Lab',
+      ],
+      '7': <String>[
+        'Soft Robotics',
+        'Fluid Systems',
+        'Introduction to Smart Materials',
+        'Micro-Nano Fabrication Processes',
+        'Field and Service Robotics',
+        'Green Logistics',
+        'Design for Additive Manufacturing',
+        'Image Processing and Robot Vision',
+        'Robotic Operating System',
+      ],
+    };
 
 const Map<String, Map<String, List<String>>> _kietSubjectsByBranchSemester =
     <String, Map<String, List<String>>>{
@@ -834,6 +1249,53 @@ Map<String, Map<String, List<String>>> _cloneSemestersForBranches(
   };
 }
 
+Map<String, List<String>> _mergeSemesterSubjectMaps(
+  Iterable<Map<String, List<String>>> semesterMaps,
+) {
+  final semesterKeys = <String>{};
+  for (final semesterMap in semesterMaps) {
+    semesterKeys.addAll(semesterMap.keys);
+  }
+
+  return <String, List<String>>{
+    for (final semester in semesterKeys)
+      semester: _mergeUniqueSubjects(
+        semesterMaps
+            .map((semesterMap) => semesterMap[semester])
+            .whereType<List<String>>(),
+      ),
+  };
+}
+
+final Map<String, Map<String, List<String>>> _usarSubjectsByBranchSemester =
+    <String, Map<String, List<String>>>{
+      'ai_ml': _mergeSemesterSubjectMaps(<Map<String, List<String>>>[
+        _usarFirstYearSubjects,
+        _usarAiMlCoreSubjectsBySemester,
+        _usarAiMlPceBySemester,
+        _usarOpenAreaElectivesBySemester,
+      ]),
+      'ai_ds': _mergeSemesterSubjectMaps(<Map<String, List<String>>>[
+        _usarFirstYearSubjects,
+        _usarAiDsCoreSubjectsBySemester,
+        _usarAiDsPceBySemester,
+        _usarOpenAreaElectivesBySemester,
+      ]),
+      'iiot': _mergeSemesterSubjectMaps(<Map<String, List<String>>>[
+        _usarFirstYearSubjects,
+        _usarIiotCoreSubjectsBySemester,
+        _usarIiotPceBySemester,
+        _usarOpenAreaElectivesBySemester,
+      ]),
+      'automation_robotics':
+          _mergeSemesterSubjectMaps(<Map<String, List<String>>>[
+            _usarFirstYearSubjects,
+            _usarAutomationRoboticsCoreSubjectsBySemester,
+            _usarAutomationRoboticsPceBySemester,
+            _usarOpenAreaElectivesBySemester,
+          ]),
+    };
+
 final Map<String, CollegeAcademicCatalog> _collegeCatalogs =
     <String, CollegeAcademicCatalog>{
       'kiet': const CollegeAcademicCatalog(
@@ -876,10 +1338,7 @@ final Map<String, CollegeAcademicCatalog> _collegeCatalogs =
       'usar': CollegeAcademicCatalog(
         key: 'usar',
         branchCodes: _usarBranchCodes,
-        subjectsByBranchSemester: _cloneSemestersForBranches(
-          _usarBranchCodes,
-          _usarFirstYearSubjects,
-        ),
+        subjectsByBranchSemester: _usarSubjectsByBranchSemester,
       ),
     };
 

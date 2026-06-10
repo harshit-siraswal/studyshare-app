@@ -82,7 +82,11 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
       'domain': 'coeptech.ac.in',
     },
     {'id': 'iiitn', 'name': 'IIIT Nagpur', 'domain': 'iiitn.ac.in'},
-    {'id': 'usar', 'name': 'USAR, GGSIPU', 'domain': 'ipu.ac.in'},
+    {
+      'id': 'usar',
+      'name': 'University School of Automation and Robotics, GGSIPU',
+      'domain': 'ipu.ac.in',
+    },
   ];
 
   final SupabaseService _supabaseService = SupabaseService();
@@ -128,6 +132,45 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
         .toList(growable: false);
   }
 
+  List<College> _mergeCollegeDirectories(
+    List<College> starterDirectory,
+    List<College> remoteColleges,
+  ) {
+    final mergedColleges = <College>[];
+
+    bool sameCollege(College left, College right) {
+      final leftId = left.id.trim().toLowerCase();
+      final rightId = right.id.trim().toLowerCase();
+      if (leftId.isNotEmpty && leftId == rightId) return true;
+
+      final leftDomain = left.domain.trim().toLowerCase();
+      final rightDomain = right.domain.trim().toLowerCase();
+      return leftDomain.isNotEmpty && leftDomain == rightDomain;
+    }
+
+    void addCollege(College college, {required bool replaceExisting}) {
+      if (replaceExisting) {
+        mergedColleges.removeWhere(
+          (existing) => sameCollege(existing, college),
+        );
+      } else if (mergedColleges.any(
+        (existing) => sameCollege(existing, college),
+      )) {
+        return;
+      }
+      mergedColleges.add(college);
+    }
+
+    for (final college in starterDirectory) {
+      addCollege(college, replaceExisting: false);
+    }
+    for (final college in remoteColleges) {
+      addCollege(college, replaceExisting: true);
+    }
+
+    return mergedColleges.toList(growable: false);
+  }
+
   Future<void> _loadColleges() async {
     final starterDirectory = _buildStarterCollegeDirectory();
 
@@ -135,9 +178,10 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
       final colleges = await _supabaseService.getColleges().timeout(
         _collegeFetchTimeout,
       );
-      final effectiveColleges = colleges.isNotEmpty
-          ? colleges
-          : starterDirectory;
+      final effectiveColleges = _mergeCollegeDirectories(
+        starterDirectory,
+        colleges,
+      );
 
       if (mounted) {
         setState(() {
