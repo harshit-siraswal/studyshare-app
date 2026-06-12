@@ -915,61 +915,250 @@ class _AIChatScreenState extends State<AIChatScreen>
     );
   }
 
+  // ── Conversational / meta query helpers ──────────────────────────────────
+
+  /// Returns true for greetings, identity/capability questions, or simple
+  /// acknowledgements that should NOT go through the RAG pipeline.
+  bool _isConversationalQuery(String prompt) {
+    final normalized = prompt.trim().toLowerCase();
+    if (normalized.isEmpty) return false;
+
+    const greetings = {
+      'hello', 'hi', 'hey', 'hii', 'helo', 'hola', 'hello!', 'hi!', 'hey!',
+      'hello there', 'hi there', 'hey there', 'namaste', 'good morning',
+      'good afternoon', 'good evening', 'good night',
+    };
+    const farewells = {
+      'bye', 'goodbye', 'bye bye', 'see ya', 'see you', 'thanks', 'thank you',
+      'thankyou', 'thank u', 'ty', 'thx', 'ok', 'okay', 'k', 'got it',
+      'alright', 'cool', 'nice',
+    };
+    if (greetings.contains(normalized)) return true;
+    if (farewells.contains(normalized)) return true;
+
+    const metaPhrases = [
+      'which model', 'what model', 'which ai', 'what ai',
+      'who are you', 'what are you', 'who made you', 'who created you',
+      'what can you do', 'what do you do', 'how can you help',
+      'how are you', 'how r u', 'how do you do',
+      'what is studyshare', 'what is studyai', 'what is study share',
+      'are you gpt', 'are you gemini', 'are you claude', 'are you chatgpt',
+      'are you perplexity', 'are you openai', 'are you bard', 'are you google',
+      'are you anthropic', 'are you llm', 'are you a bot', 'are you an ai',
+      'are you human', 'are you real',
+      'tell me about yourself', 'introduce yourself',
+      'which llm', 'what llm', 'which language model',
+    ];
+    for (final phrase in metaPhrases) {
+      if (normalized == phrase || normalized.startsWith('$phrase ') ||
+          normalized.endsWith(' $phrase') || normalized.contains(' $phrase ')) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /// Builds a local response for conversational queries without hitting RAG.
+  String _buildConversationalResponse(String prompt) {
+    final normalized = prompt.trim().toLowerCase();
+
+    // Greetings
+    const greetings = {
+      'hello', 'hi', 'hey', 'hii', 'helo', 'hola', 'hello!', 'hi!', 'hey!',
+      'hello there', 'hi there', 'hey there', 'namaste',
+    };
+    if (greetings.contains(normalized)) {
+      return 'Hello! 👋 I\'m **StudyShare AI** — your personal study assistant.\n\n'
+          'Here\'s what I can do for you:\n'
+          '- 📝 **Answer questions** based on your uploaded notes and PDFs\n'
+          '- 📄 **Summarize** your study material\n'
+          '- ❓ **Generate question papers** and MCQs from your notes\n'
+          '- 💡 **Explain concepts** from your resources\n'
+          '- 🌐 **Search the web** for any topic (tap the web toggle)\n\n'
+          'What would you like help with today?';
+    }
+
+    // Good morning/afternoon/evening
+    if (normalized.startsWith('good morning') || normalized.startsWith('good afternoon') ||
+        normalized.startsWith('good evening') || normalized.startsWith('good night')) {
+      return 'Good day! 🌟 I\'m **StudyShare AI**, ready to help you study. '
+          'What topic or subject would you like to work on today?';
+    }
+
+    // Model/identity questions
+    if (normalized.contains('which model') || normalized.contains('what model') ||
+        normalized.contains('which ai') || normalized.contains('what ai') ||
+        normalized.contains('are you gpt') || normalized.contains('are you gemini') ||
+        normalized.contains('are you claude') || normalized.contains('are you chatgpt') ||
+        normalized.contains('are you perplexity') || normalized.contains('which llm') ||
+        normalized.contains('what llm') || normalized.contains('which language model')) {
+      return 'I\'m **StudyShare AI** — a study assistant built specifically for '
+          'the StudyShare platform. I use a Retrieval-Augmented Generation (RAG) '
+          'system to answer questions based on your uploaded notes, PDFs, '
+          'summaries, quizzes, and flashcards.\n\n'
+          'I don\'t disclose the underlying language model, but I\'m here to help '
+          'you study smarter! 🎓 Ask me anything about your study material.';
+    }
+
+    // Who/what are you
+    if (normalized.contains('who are you') || normalized.contains('what are you') ||
+        normalized.contains('tell me about yourself') || normalized.contains('introduce yourself') ||
+        normalized.contains('are you a bot') || normalized.contains('are you an ai') ||
+        normalized.contains('are you human') || normalized.contains('who made you') ||
+        normalized.contains('who created you')) {
+      return 'I\'m **StudyShare AI** 🤖 — an AI study assistant embedded in the '
+          'StudyShare app. I\'m designed to help students by:\n\n'
+          '- Answering questions from your uploaded notes and PDFs\n'
+          '- Generating question papers and quizzes\n'
+          '- Summarizing study material\n'
+          '- Searching the web for academic topics\n\n'
+          'I was built by the **StudyShare team** to make studying more effective. '
+          'How can I help you today?';
+    }
+
+    // Capability questions
+    if (normalized.contains('what can you do') || normalized.contains('what do you do') ||
+        normalized.contains('how can you help')) {
+      return 'Here\'s what I can do for you as **StudyShare AI**:\n\n'
+          '📚 **From your uploaded notes/PDFs:**\n'
+          '- Answer concept questions\n'
+          '- Summarize chapters or entire documents\n'
+          '- Generate MCQs and question papers\n'
+          '- Explain difficult topics in simple terms\n\n'
+          '🌐 **Web search mode (toggle it on):**\n'
+          '- Get information on any topic from multiple sources\n'
+          '- Research GD topics, current affairs, etc.\n\n'
+          '💬 **Just chat:**\n'
+          '- Ask for explanations, definitions, or examples\n\n'
+          'What would you like to start with?';
+    }
+
+    // How are you
+    if (normalized.contains('how are you') || normalized.contains('how r u') ||
+        normalized.startsWith('how do you do')) {
+      return 'I\'m doing great and ready to help you study! 😊\n\n'
+          'What topic or subject would you like to work on today?';
+    }
+
+    // Thanks / farewells
+    const farewells = {'bye', 'goodbye', 'bye bye', 'see ya', 'see you'};
+    if (farewells.contains(normalized) || normalized.startsWith('bye') ||
+        normalized.startsWith('goodbye')) {
+      return 'Goodbye! 👋 Good luck with your studies. '
+          'Come back whenever you need help! 🎓';
+    }
+    const thanks = {'thanks', 'thank you', 'thankyou', 'thank u', 'ty', 'thx'};
+    if (thanks.contains(normalized) || normalized.startsWith('thanks') ||
+        normalized.startsWith('thank you')) {
+      return 'You\'re welcome! 😊 Let me know if you need anything else. '
+          'Happy studying! 📚';
+    }
+
+    // Fallback for any other conversational match
+    return 'Hi! I\'m **StudyShare AI**. How can I help you study today? '
+        'Ask me about your notes, request a question paper, or search the web for any topic! 🎓';
+  }
+
+  /// Returns true for general-knowledge queries that benefit from web search
+  /// even when web mode is off (e.g., GD topics, current affairs, essay topics).
+  bool _isGeneralKnowledgeQuery(String prompt) {
+    final normalized = prompt.toLowerCase();
+    return normalized.contains('gd topic') ||
+        normalized.contains('group discussion topic') ||
+        normalized.contains('current affair') ||
+        normalized.contains('essay topic') ||
+        normalized.contains('debate topic') ||
+        normalized.contains('trending topic') ||
+        normalized.contains('recent news') ||
+        normalized.contains('latest news') ||
+        normalized.contains('news today') ||
+        normalized.contains('what is happening') ||
+        normalized.contains('general knowledge') ||
+        normalized.contains('gk question') ||
+        normalized.contains('interview topic') ||
+        normalized.contains('extempore topic');
+  }
+
+  // ── RAG prompt builder ────────────────────────────────────────────────────
+
   String _buildRagPrompt({
     required String userPrompt,
     required bool hasAttachments,
     bool preferLocalOnly = false,
     bool searchAllPdfs = false,
     bool preferNoticeSources = false,
+    bool isWebMode = false,
   }) {
     final cleaned = userPrompt.trim();
-    final hasVideoTranscriptContext = (widget.resourceContext?.videoUrl ?? '')
-        .trim()
-        .isNotEmpty;
-    if (cleaned.isNotEmpty && preferLocalOnly) {
+    if (cleaned.isEmpty) {
+      if (hasAttachments) return 'Please analyze the attached files and help me study.';
+      return userPrompt;
+    }
+
+    // Quality instruction appended to ALL non-trivial prompts so the LLM
+    // provides substantive answers instead of 2-3 line stubs.
+    const detailInstruction =
+        '\n\nAnswer in **comprehensive detail** — use clear headings, bullet '
+        'points, or numbered lists where helpful. Provide at least 3–5 '
+        'well-developed points or paragraphs. If answering from notes or '
+        'uploaded sources, cite the source title and relevant section. '
+        'Do NOT give a one-line or vague answer.';
+
+    final hasVideoTranscriptContext =
+        (widget.resourceContext?.videoUrl ?? '').trim().isNotEmpty;
+
+    // ── Web mode ────────────────────────────────────────────────────────────
+    if (isWebMode) {
+      return '$cleaned\n\n'
+          'Search the web comprehensively for this query using multiple '
+          'credible sources such as news sites, academic papers, Wikipedia, '
+          'official websites, and educational portals. Do NOT rely on a single '
+          'source. Synthesize information from at least 3 different sources '
+          'and cite each one at the end of your response with a clickable URL '
+          'or domain name.$detailInstruction';
+    }
+
+    // ── Local-only mode ─────────────────────────────────────────────────────
+    if (preferLocalOnly) {
       final localScope = preferNoticeSources
           ? 'the local StudyShare context, including relevant notices/announcements and uploaded or pinned study material'
-          : 'the local StudyShare context, including uploaded or pinned study material';
+          : 'the local StudyShare context, including uploaded or pinned study material (notes, PDFs, summaries, flashcards, quizzes)';
       final attachmentInstruction = hasAttachments
-          ? ' The attached files are included in this request, so acknowledge them directly and answer from their content first.'
+          ? ' The attached files are included in this request — acknowledge them directly and answer from their content first.'
           : '';
       if (searchAllPdfs) {
         return '$cleaned\n\n'
-            'Important: Search only within $localScope. Search across all '
-            'available study materials in your subject or semester instead of '
-            'staying pinned to one file when needed. Do not add outside '
-            'web/general info. If nothing relevant is found locally, say that '
-            'clearly.$attachmentInstruction';
+            'Search across ALL available study materials in your semester/branch. '
+            'Do not stay pinned to a single file — look across all uploaded notes, '
+            'PDFs, and summaries. Do not add outside web/general info. If nothing '
+            'relevant is found locally, say that clearly.$attachmentInstruction'
+            '$detailInstruction';
       }
       if (hasVideoTranscriptContext) {
         return '$cleaned\n\n'
-            'Important: Use only the currently open video transcript plus any '
-            'relevant local StudyShare context. Do not add outside web/general '
-            'info. If the local context does not contain the answer, say that '
-            'clearly.$attachmentInstruction';
+            'Use the currently open video transcript and any relevant local '
+            'StudyShare material. Do not add outside web/general info. If the '
+            'local context does not contain the answer, say that clearly.'
+            '$attachmentInstruction$detailInstruction';
       }
       return '$cleaned\n\n'
-          'Important: Use only $localScope. Do not add outside web/general '
-          'info. If the local context does not contain the answer, say that '
-          'clearly.$attachmentInstruction';
+          'Answer from $localScope. If the local context does not contain '
+          'enough information, say what you found and what is missing — '
+          'do not fabricate details.$attachmentInstruction$detailInstruction';
     }
-    if (cleaned.isNotEmpty && hasVideoTranscriptContext) {
+
+    // ── General mode (no strict local-only, no web forced) ───────────────────
+    if (hasVideoTranscriptContext) {
       return '$cleaned\n\n'
           'Primary context: the transcript of the video currently open in '
-          'StudyShare.';
-    }
-    if (cleaned.isNotEmpty && hasAttachments) {
-      return '$cleaned\n\n'
-          'Attached files are included in this request. Read them and mention them explicitly in your answer.';
-    }
-    if (cleaned.isNotEmpty) return cleaned;
-    if (hasVideoTranscriptContext) {
-      return 'Please answer using the transcript of the currently open video.';
+          'StudyShare. Supplement with your knowledge where needed.$detailInstruction';
     }
     if (hasAttachments) {
-      return 'Please analyze the attached files and help me study.';
+      return '$cleaned\n\n'
+          'Attached files are included — read them, reference them explicitly, '
+          'and base your answer primarily on their content.$detailInstruction';
     }
-    return userPrompt;
+    return '$cleaned$detailInstruction';
   }
 
   bool _promptRequiresLocalContext(String prompt) {
@@ -3236,9 +3425,11 @@ class _AIChatScreenState extends State<AIChatScreen>
   }) {
     if (allowWeb || !_responseUsesWebContent(response)) return;
 
-    throw StateError(
-      'Web research is off, so this answer was blocked because it came from '
-      'the web instead of your notes.',
+    // Previously this threw a StateError and killed the entire response.
+    // Downgraded to a debug log because the backend sometimes includes web
+    // context metadata even in local mode, and the answer is still useful.
+    debugPrint(
+      '[AiChat] Unexpected web content in local-only response (logged, not blocked).',
     );
   }
 
@@ -5145,6 +5336,27 @@ class _AIChatScreenState extends State<AIChatScreen>
         final isPdfOverviewPrompt =
             _isPdfOverviewPrompt(userPrompt) ||
             _isCurrentMaterialOverviewPrompt(userPrompt);
+        // ── Conversational query bypass ──────────────────────────────────────
+        // Handle greetings/meta questions locally without hitting the RAG API.
+        if (_isConversationalQuery(userPrompt) && !hasAttachments) {
+          final localResponse = _buildConversationalResponse(userPrompt);
+          setState(() {
+            _messages.add(AIChatMessage(isUser: true, content: userPrompt));
+            _messages.add(
+              AIChatMessage(isUser: false, content: localResponse),
+            );
+            _controller.clear();
+            _attachments.clear();
+          });
+          await _persistCurrentSession();
+          await _scrollToBottom();
+          return;
+        }
+
+        // ── Detect general-knowledge queries (auto web for this turn) ────────
+        final isGeneralKnowledgeTurn =
+            !hasAttachments && _isGeneralKnowledgeQuery(userPrompt);
+
         final localContextRequired =
             hasAttachments ||
             _promptRequiresLocalContext(userPrompt) ||
@@ -5163,13 +5375,28 @@ class _AIChatScreenState extends State<AIChatScreen>
             ? <String>[_lastPrimarySourceFileId!.trim()]
             : null;
         final attachmentPayload = _toAttachmentPayload(effectiveAttachments);
+        final mustUseGroundedLocalContext =
+            localContextRequired ||
+            noticeRequestContext.preferNoticeSources;
+        final shouldUseGeneralAcademicFallback =
+            _isStudioChat &&
+            !localContextRequired &&
+            _extractAcademicTopicHint(userPrompt).isNotEmpty;
+        // General-knowledge queries force web mode for this turn only even
+        // when the user hasn't toggled the web switch.
+        final effectiveAllowWeb =
+            (_allowWebMode || shouldUseGeneralAcademicFallback ||
+                isGeneralKnowledgeTurn) &&
+            !mustUseGroundedLocalContext;
         final sendPrompt = _buildRagPrompt(
           userPrompt: userPrompt,
           hasAttachments: hasAttachments,
           preferLocalOnly:
-              localContextRequired || noticeRequestContext.preferNoticeSources,
+              !effectiveAllowWeb &&
+              (localContextRequired || noticeRequestContext.preferNoticeSources),
           searchAllPdfs: searchAllForPrompt,
           preferNoticeSources: noticeRequestContext.preferNoticeSources,
+          isWebMode: effectiveAllowWeb,
         );
         final history = _buildStructuredHistory(pendingUserPrompt: userPrompt);
         final contextFilters = await _buildContextFiltersForRequest(
@@ -5201,18 +5428,6 @@ class _AIChatScreenState extends State<AIChatScreen>
             isQuestionPaperRequest ||
             isQuestionPaperContinuation ||
             isQuestionPaperClarificationReply;
-        final mustUseGroundedLocalContext =
-            localContextRequired ||
-            hasOcrEligibleAttachments ||
-            shouldGenerateQuestionPaper ||
-            noticeRequestContext.preferNoticeSources;
-        final shouldUseGeneralAcademicFallback =
-            _isStudioChat &&
-            !localContextRequired &&
-            _extractAcademicTopicHint(userPrompt).isNotEmpty;
-        final effectiveAllowWeb =
-            (_allowWebMode || shouldUseGeneralAcademicFallback) &&
-            !mustUseGroundedLocalContext;
         final releasePinnedResourceForNotice =
             noticeRequestContext.preferNoticeSources;
         final shouldPinStudioResource =
@@ -5239,9 +5454,12 @@ class _AIChatScreenState extends State<AIChatScreen>
             ? false
             : hasOcrEligibleAttachments;
         final effectiveForceOcr = false;
+        // Lower thresholds: previous values (0.08 / 0.16) were causing valid
+        // content to be rejected as "no match found". Reduced to 0.04 / 0.08
+        // so RAG retrieves content even with lower similarity scores.
         final minScore = localContextRequired
-            ? (isPdfOverviewPrompt ? 0.16 : 0.08)
-            : null;
+            ? (isPdfOverviewPrompt ? 0.08 : 0.04)
+            : 0.03;
         final effectiveMinScore = effectiveAllowWeb ? null : minScore;
         final effectiveSourceHint = noticeRequestContext.preferNoticeSources
             ? 'notice'

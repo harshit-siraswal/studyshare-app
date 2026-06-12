@@ -3041,7 +3041,7 @@ class BackendApiService {
         'allow_web': allowWeb == true,
         // Keep only one retrieval selector to avoid duplicated semantics.
         'retrieval_mode': allowWeb == true ? 'web' : 'local',
-        'strict_notes_mode': allowWeb != true,
+        'strict_notes_mode': false, // disabled: was over-filtering RAG chunks
         'file_id': fileId,
         'video_url': videoUrl,
         'use_ocr': useOcr,
@@ -3518,7 +3518,10 @@ class BackendApiService {
       'allow_web': allowWeb == true,
       // Keep only one retrieval selector to avoid duplicated semantics.
       'retrieval_mode': allowWeb == true ? 'web' : 'local',
-      'strict_notes_mode': allowWeb != true,
+      // strict_notes_mode was causing the backend to over-aggressively reject
+      // RAG chunks that had slightly lower similarity scores, even when the
+      // content was clearly relevant. Disabled so min_score controls filtering.
+      'strict_notes_mode': false,
       'file_id': fileId,
       'video_url': videoUrl,
       'use_ocr': useOcr,
