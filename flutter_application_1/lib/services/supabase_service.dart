@@ -3245,7 +3245,8 @@ class SupabaseService {
           }
           return q.limit(limit.clamp(1, 100));
         });
-      } else if (effectiveCollege.isNotEmpty) {
+      }
+      if (effectiveCollege.isNotEmpty) {
         await runAndMerge(() async {
           var q = _client
               .from('users_safe')
