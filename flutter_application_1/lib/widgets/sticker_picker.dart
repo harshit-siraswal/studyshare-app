@@ -930,7 +930,7 @@ class _StickerPickerState extends State<StickerPicker>
     final icons = [
       Icons.emoji_emotions_outlined,
       null, // "GIF" text instead of icon
-      Icons.sticker_outlined,
+      Icons.sticker,
     ];
     final animation = _tabController.animation;
 
