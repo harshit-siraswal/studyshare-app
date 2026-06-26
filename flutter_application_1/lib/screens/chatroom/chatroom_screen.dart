@@ -1474,7 +1474,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         ).then((_) => _loadRoomData(silent: true));
       },
       child: Container(
-        padding: const EdgeInsets.fromLTRB(10, 10, 10, 8),
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
         decoration: BoxDecoration(
           border: Border(bottom: BorderSide(color: borderColor)),
         ),
@@ -1514,14 +1514,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                     );
                   },
                   child: UserAvatar(
-                    radius: 16,
+                    radius: 18,
                     displayName: authorName,
                     photoUrl: hasPhoto ? resolvedPhoto : null,
                   ),
                 );
               },
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 10),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1541,16 +1541,24 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                         ),
                       ),
                       const SizedBox(width: 4),
-                      UserBadge(email: authorEmail, size: 14),
-                      const SizedBox(width: 8),
+                      UserBadge(email: authorEmail, size: 12),
+                      const SizedBox(width: 6),
                       Text(
-                        _formatTime(createdAt),
+                        '@${authorEmail.split('@').first}',
                         style: GoogleFonts.inter(
-                          fontSize: 12,
+                          fontSize: 13,
                           color: secondaryTextColor,
                         ),
                       ),
-                      const SizedBox(width: 4),
+                      const SizedBox(width: 6),
+                      Text(
+                        '· ${_formatTime(createdAt)}',
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          color: secondaryTextColor,
+                        ),
+                      ),
+                      const Spacer(),
                       PopupMenuButton<String>(
                         tooltip: 'Post options',
                         padding: EdgeInsets.zero,
@@ -1561,14 +1569,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                           borderRadius: BorderRadius.circular(16),
                         ),
                         child: Container(
-                          width: 30,
-                          height: 30,
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? Colors.white10
-                                : Colors.black.withValues(alpha: 0.06),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
+                          width: 28,
+                          height: 28,
+                          alignment: Alignment.center,
                           child: Icon(
                             Icons.more_horiz_rounded,
                             color: secondaryTextColor,
@@ -1699,7 +1702,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                     Text(
                       titleText,
                       style: GoogleFonts.inter(
-                        fontSize: 16,
+                        fontSize: 15,
                         fontWeight: FontWeight.w700,
                         color: textColor,
                         height: 1.3,
@@ -1742,7 +1745,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                   ],
                   if (post['image_url'] != null &&
                       post['image_url'].toString().isNotEmpty) ...[
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
                     GestureDetector(
                       onTap: () {
                         Navigator.push(
@@ -1794,10 +1797,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                       ),
                     ),
                   ],
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 14,
-                    runSpacing: 6,
+                  const SizedBox(height: 10),
+                  Row(
                     children: [
                       _buildPostAction(
                         icon: Icons.chat_bubble_outline_rounded,
@@ -1818,6 +1819,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                           ).then((_) => _loadRoomData(silent: true));
                         },
                       ),
+                      const SizedBox(width: 24),
                       _buildPostAction(
                         icon: Icons.arrow_upward_rounded,
                         label: '$upvotes',
@@ -1826,6 +1828,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                             : secondaryTextColor,
                         onTap: () => _handleVote(postId, 1),
                       ),
+                      const SizedBox(width: 24),
                       _buildPostAction(
                         icon: Icons.arrow_downward_rounded,
                         label: '$downvotes',
@@ -1834,6 +1837,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                             : secondaryTextColor,
                         onTap: () => _handleVote(postId, -1),
                       ),
+                      const SizedBox(width: 24),
                       _buildPostAction(
                         icon: isSaved
                             ? Icons.bookmark_rounded

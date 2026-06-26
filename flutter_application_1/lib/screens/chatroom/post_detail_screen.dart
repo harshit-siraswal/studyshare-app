@@ -1244,15 +1244,11 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   Widget _buildPostContent(Map<String, dynamic> post, bool isDark) {
-    // Parse title and content from full content
     final fullContent = post['content']?.toString() ?? '';
-    final dbTitle = post['title']
-        ?.toString()
-        .trim(); // Fallback if column exists
+    final dbTitle = post['title']?.toString().trim();
 
     String title;
     String content;
-
     if (dbTitle != null && dbTitle.isNotEmpty) {
       title = dbTitle;
       content = fullContent;
@@ -1271,10 +1267,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         .toString();
     final authorName =
         (post['author_name']?.toString().trim().isNotEmpty ?? false)
-        ? post['author_name'].toString().trim()
-        : authorEmail.contains('@')
-        ? authorEmail.split('@').first
-        : 'User';
+            ? post['author_name'].toString().trim()
+            : authorEmail.contains('@')
+            ? authorEmail.split('@').first
+            : 'User';
     final normalizedEmail = _normalizeEmail(authorEmail);
     final cachedPhoto = _profilePhotoCache[normalizedEmail];
     final fallbackPhoto = _resolvePhotoUrl(post, const [
@@ -1294,257 +1290,280 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         DateTime.tryParse(post['created_at']?.toString() ?? '') ??
         DateTime.now();
     final netVotes = _upvotes - _downvotes;
+    final textColor = isDark ? Colors.white : Colors.black;
+    final mutedColor = isDark ? Colors.white60 : Colors.black54;
 
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkCard : Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Author info
-          Row(
-            children: [
-              GestureDetector(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => UserProfileScreen(
-                        userEmail: authorEmail,
-                        userName: authorName,
-                        userPhotoUrl: hasAuthorPhoto ? resolvedPhoto : null,
-                      ),
-                    ),
-                  );
-                },
-                child: Row(
-                  children: [
-                    UserAvatar(
-                      radius: 18,
-                      displayName: authorName,
-                      photoUrl: hasAuthorPhoto ? resolvedPhoto : null,
-                    ),
-                    const SizedBox(width: 10),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Text(
-                              authorName,
-                              style: GoogleFonts.inter(
-                                fontWeight: FontWeight.w600,
-                                color: isDark ? Colors.white : Colors.black,
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            UserBadge(email: authorEmail, size: 14),
-                          ],
-                        ),
-                        Text(
-                          _formatTimeAgo(createdAt),
-                          style: GoogleFonts.inter(
-                            fontSize: 12,
-                            color: AppTheme.textMuted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-
-          // Title
-          if (title.isNotEmpty)
-            Text(
-              title,
-              style: GoogleFonts.inter(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : Colors.black,
-              ),
-            ),
-          if (title.isNotEmpty) const SizedBox(height: 6),
-
-          // Content
-          Text(
-            content,
-            style: GoogleFonts.inter(
-              fontSize: 15,
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.9)
-                  : Colors.black87,
-              height: 1.5,
-            ),
-          ),
-
-          // Image (Added Fix)
-          if ((post['image_url']?.toString() ?? '').isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Builder(
-              builder: (context) {
-                final imageUrl = post['image_url']!.toString();
-                return GestureDetector(
-                  onTap: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => FullScreenImageViewer(
-                          imageUrl: imageUrl,
-                          heroTag: 'post_image_${widget.post['id']}',
-                        ),
-                      ),
-                    );
-                  },
-                  child: Hero(
-                    tag: 'post_image_${widget.post['id']}',
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Image.network(
-                        imageUrl,
-                        width: double.infinity,
-                        fit: BoxFit.cover,
-                        loadingBuilder: (context, child, loadingProgress) {
-                          if (loadingProgress == null) return child;
-                          final expectedBytes =
-                              loadingProgress.expectedTotalBytes;
-                          final progress = expectedBytes != null
-                              ? loadingProgress.cumulativeBytesLoaded /
-                                    expectedBytes
-                              : null;
-                          return Container(
-                            height: 200,
-                            decoration: BoxDecoration(
-                              color: isDark
-                                  ? Colors.white.withValues(alpha: 0.05)
-                                  : const Color(0xFFF1F5F9),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Center(
-                              child: CircularProgressIndicator(
-                                value: progress,
-                                strokeWidth: 2,
-                                color: AppTheme.primary,
-                              ),
-                            ),
-                          );
-                        },
-                        errorBuilder: (context, error, stackTrace) => Container(
-                          height: 150,
-                          decoration: BoxDecoration(
-                            color: isDark
-                                ? Colors.white.withValues(alpha: 0.05)
-                                : const Color(0xFFF1F5F9),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(
-                              color: isDark
-                                  ? Colors.white10
-                                  : Colors.grey.shade200,
-                            ),
-                          ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.image_not_supported_outlined,
-                                size: 32,
-                                color: AppTheme.textMuted,
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Image unavailable',
-                                style: GoogleFonts.inter(
-                                  fontSize: 12,
-                                  color: AppTheme.textMuted,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Author row — flat Twitter style
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => UserProfileScreen(
+                      userEmail: authorEmail,
+                      userName: authorName,
+                      userPhotoUrl: hasAuthorPhoto ? resolvedPhoto : null,
                     ),
                   ),
                 );
               },
+              child: UserAvatar(
+                radius: 20,
+                displayName: authorName,
+                photoUrl: hasAuthorPhoto ? resolvedPhoto : null,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    authorName,
+                    style: GoogleFonts.inter(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: textColor,
+                    ),
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    '@${authorEmail.split('@').first}',
+                    style: GoogleFonts.inter(
+                      fontSize: 14,
+                      color: mutedColor,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
-          const SizedBox(height: 12),
+        ),
+        const SizedBox(height: 16),
 
-          // Vote buttons
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? Colors.white.withValues(alpha: 0.05)
-                      : Colors.black.withValues(alpha: 0.03),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: Icon(
-                        Icons.arrow_upward_rounded,
-                        color: _userVote == 1
-                            ? AppTheme.success
-                            : AppTheme.textMuted,
-                        size: 20,
+        // Title
+        if (title.isNotEmpty) ...[
+          Text(
+            title,
+            style: GoogleFonts.inter(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: textColor,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 8),
+        ],
+
+        // Body text — large, generous line height
+        SelectableLinkify(
+          text: content,
+          onOpen: (link) async {
+            try {
+              final launched = await openStudyShareLink(
+                context,
+                rawUrl: link.url,
+                title: 'Shared link',
+              );
+              if (!launched && mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Could not open link: ${link.url}')),
+                );
+              }
+            } catch (e) {
+              debugPrint('Error opening link: $e');
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Could not open link. Please try again.'),
+                  ),
+                );
+              }
+            }
+          },
+          style: GoogleFonts.inter(
+            fontSize: 15,
+            color: isDark
+                ? Colors.white.withValues(alpha: 0.9)
+                : Colors.black87,
+            height: 1.5,
+          ),
+          linkStyle: GoogleFonts.inter(
+            color: Colors.blueAccent,
+            decoration: TextDecoration.underline,
+          ),
+        ),
+
+        // Image
+        if ((post['image_url']?.toString() ?? '').isNotEmpty) ...[
+          const SizedBox(height: 14),
+          Builder(
+            builder: (context) {
+              final imageUrl = post['image_url']!.toString();
+              return GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => FullScreenImageViewer(
+                        imageUrl: imageUrl,
+                        heroTag: 'post_image_${widget.post['id']}',
                       ),
-                      onPressed: () => _vote(1),
-                      constraints: const BoxConstraints(),
-                      padding: const EdgeInsets.all(4),
                     ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: Text(
-                        netVotes.toString(),
-                        style: GoogleFonts.inter(
-                          fontWeight: FontWeight.w600,
-                          color: netVotes > 0
-                              ? AppTheme.success
-                              : netVotes < 0
-                              ? AppTheme.error
-                              : AppTheme.textMuted,
+                  );
+                },
+                child: Hero(
+                  tag: 'post_image_${widget.post['id']}',
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Image.network(
+                      imageUrl,
+                      width: double.infinity,
+                      fit: BoxFit.cover,
+                      loadingBuilder: (context, child, loadingProgress) {
+                        if (loadingProgress == null) return child;
+                        final expectedBytes =
+                            loadingProgress.expectedTotalBytes;
+                        final progress = expectedBytes != null
+                            ? loadingProgress.cumulativeBytesLoaded /
+                                  expectedBytes
+                            : null;
+                        return Container(
+                          height: 200,
+                          decoration: BoxDecoration(
+                            color: isDark
+                                ? Colors.white.withValues(alpha: 0.05)
+                                : const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              value: progress,
+                              strokeWidth: 2,
+                              color: AppTheme.primary,
+                            ),
+                          ),
+                        );
+                      },
+                      errorBuilder: (context, error, stackTrace) => Container(
+                        height: 150,
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.05)
+                              : const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: isDark
+                                ? Colors.white10
+                                : Colors.grey.shade200,
+                          ),
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.image_not_supported_outlined,
+                              size: 32,
+                              color: AppTheme.textMuted,
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              'Image unavailable',
+                              style: GoogleFonts.inter(
+                                fontSize: 12,
+                                color: AppTheme.textMuted,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ),
-                    IconButton(
-                      icon: Icon(
-                        Icons.arrow_downward_rounded,
-                        color: _userVote == -1
-                            ? AppTheme.error
-                            : AppTheme.textMuted,
-                        size: 20,
-                      ),
-                      onPressed: () => _vote(-1),
-                      constraints: const BoxConstraints(),
-                      padding: const EdgeInsets.all(4),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 16),
-              Icon(Icons.comment_outlined, size: 20, color: AppTheme.textMuted),
-              const SizedBox(width: 4),
-              Text(
-                '${post['comment_count'] ?? _comments.length}',
-                style: GoogleFonts.inter(color: AppTheme.textMuted),
-              ),
-            ],
+              );
+            },
           ),
         ],
-      ),
+        const SizedBox(height: 14),
+
+        // Timestamp line — Twitter style
+        Text(
+          '${_formatTimeAgo(createdAt)} · ${_formatFullDate(createdAt)}',
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            color: mutedColor,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Divider(
+          color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+          height: 1,
+        ),
+        const SizedBox(height: 12),
+
+        // Minimal action row (existing features only)
+        Row(
+          children: [
+            Icon(Icons.chat_bubble_outline, size: 18, color: mutedColor),
+            const SizedBox(width: 6),
+            Text(
+              '${post['comment_count'] ?? _comments.length}',
+              style: GoogleFonts.inter(fontSize: 14, color: mutedColor),
+            ),
+            const SizedBox(width: 24),
+            Icon(
+              Icons.arrow_upward_rounded,
+              size: 18,
+              color: _userVote == 1 ? AppTheme.success : mutedColor,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              '$_upvotes',
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                color: _userVote == 1 ? AppTheme.success : mutedColor,
+              ),
+            ),
+            const SizedBox(width: 24),
+            Icon(
+              Icons.arrow_downward_rounded,
+              size: 18,
+              color: _userVote == -1 ? AppTheme.error : mutedColor,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              '$_downvotes',
+              style: GoogleFonts.inter(
+                fontSize: 14,
+                color: _userVote == -1 ? AppTheme.error : mutedColor,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Divider(
+          color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
+          height: 1,
+        ),
+      ],
     );
+  }
+
+  String _formatFullDate(DateTime date) {
+    final months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    final hour = date.hour > 12 ? date.hour - 12 : (date.hour == 0 ? 12 : date.hour);
+    final ampm = date.hour >= 12 ? 'pm' : 'am';
+    final minute = date.minute.toString().padLeft(2, '0');
+    return '$hour:$minute $ampm · ${date.day} ${months[date.month - 1]} ${date.year % 100}';
   }
 
   Widget _buildEmptyComments(bool isDark) {
@@ -1594,6 +1613,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     int depth = 0,
   }) {
     final textColor = isDark ? Colors.white : Colors.black87;
+    final mutedColor = isDark ? Colors.white60 : Colors.black54;
     final rawAuthorName = comment['author_name']?.toString().trim();
     final authorEmail = (comment['author_email'] ?? '').toString();
     final authorName = rawAuthorName != null && rawAuthorName.isNotEmpty
@@ -1709,60 +1729,63 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         );
                       },
                       child: UserAvatar(
-                        radius: 16,
+                        radius: 18,
                         displayName: authorName,
                         photoUrl: hasAuthorPhoto ? resolvedPhoto : null,
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 10),
 
                     // Content
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Header: Name + Time
+                          // Header: Name + handle + time — flat Twitter style
                           Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
-                              Row(
-                                children: [
-                                  GestureDetector(
-                                    onTap: () {
-                                      Navigator.push(
-                                        context,
-                                        MaterialPageRoute(
-                                          builder: (context) =>
-                                              UserProfileScreen(
-                                                userEmail: authorEmail,
-                                                userName: authorName,
-                                                userPhotoUrl: hasAuthorPhoto
-                                                    ? resolvedPhoto
-                                                    : null,
-                                              ),
-                                        ),
-                                      );
-                                    },
-                                    child: Text(
-                                      authorName,
-                                      style: GoogleFonts.inter(
-                                        fontWeight: FontWeight.w700,
-                                        fontSize: 13.5,
-                                        color: isDark
-                                            ? Colors.white
-                                            : Colors.black,
-                                      ),
+                              GestureDetector(
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          UserProfileScreen(
+                                            userEmail: authorEmail,
+                                            userName: authorName,
+                                            userPhotoUrl: hasAuthorPhoto
+                                                ? resolvedPhoto
+                                                : null,
+                                          ),
                                     ),
+                                  );
+                                },
+                                child: Text(
+                                  authorName,
+                                  style: GoogleFonts.inter(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 14,
+                                    color: isDark ? Colors.white : Colors.black,
                                   ),
-                                  const SizedBox(width: 4),
-                                  UserBadge(email: authorEmail, size: 14),
-                                ],
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              UserBadge(email: authorEmail, size: 12),
+                              const SizedBox(width: 6),
+                              Text(
+                                '@${authorEmail.split('@').first}',
+                                style: GoogleFonts.inter(
+                                  fontSize: 13,
+                                  color: mutedColor,
+                                ),
                               ),
                               const SizedBox(width: 6),
                               Text(
-                                _formatTimeAgo(createdAt),
+                                '· ${_formatTimeAgo(createdAt)}',
                                 style: GoogleFonts.inter(
-                                  fontSize: 12,
-                                  color: AppTheme.textMuted,
+                                  fontSize: 13,
+                                  color: mutedColor,
                                 ),
                               ),
                               const Spacer(),
@@ -1794,7 +1817,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               ),
                             ],
                           ),
-                          const SizedBox(height: 2),
+                          const SizedBox(height: 4),
 
                           // Comment Body
                           _buildCommentContent(
@@ -1804,38 +1827,43 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                             commentId,
                           ),
 
-                          const SizedBox(height: 6),
+                          const SizedBox(height: 8),
 
-                          // Actions Row: Reactions + Reply
+                          // Minimal actions — Twitter style
                           Row(
                             children: [
-                              // Emoji Reactions
-                              Expanded(
-                                child: EmojiReactions(
-                                  key: ValueKey(
-                                    'post-$commentId-$_reactionRefreshTick',
-                                  ),
-                                  commentId: commentId,
-                                  commentType: 'post',
-                                  compact: true,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              // Reply Button
                               GestureDetector(
                                 onTap: () {
                                   _setReplyTarget(commentId, authorName);
                                 },
-                                child: Text(
-                                  'Reply',
-                                  style: GoogleFonts.inter(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w600,
-                                    color: isDark
-                                        ? Colors.white70
-                                        : Colors.black87,
-                                  ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.chat_bubble_outline,
+                                      size: 16,
+                                      color: mutedColor,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Reply',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 13,
+                                        color: mutedColor,
+                                      ),
+                                    ),
+                                  ],
                                 ),
+                              ),
+                              const SizedBox(width: 16),
+                              // Emoji Reactions — compact inline
+                              EmojiReactions(
+                                key: ValueKey(
+                                  'post-$commentId-$_reactionRefreshTick',
+                                ),
+                                commentId: commentId,
+                                commentType: 'post',
+                                compact: true,
                               ),
                             ],
                           ),
@@ -1844,7 +1872,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                           if (hasReplies) ...[
                             Padding(
                               padding: EdgeInsets.only(
-                                top: 4,
+                                top: 8,
                                 bottom: isExpanded ? 6 : 8,
                               ),
                               child: Align(
@@ -1951,7 +1979,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
                               onPressed: () {
-                                // Navigate to thread detail or expand further (not implemented)
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   const SnackBar(
                                     content: Text(

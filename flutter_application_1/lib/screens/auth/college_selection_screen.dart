@@ -299,16 +299,12 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                   ),
                   const SizedBox(height: 24),
 
-                  // Search bar - Notion style
+                  // Search bar — compact, round, pill style
                   Container(
+                    height: 44,
                     decoration: BoxDecoration(
                       color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: isDark
-                            ? AppTheme.darkBorder
-                            : AppTheme.lightBorder,
-                      ),
+                      borderRadius: BorderRadius.circular(999),
                     ),
                     child: TextField(
                       controller: _searchController,
@@ -316,18 +312,23 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
                         color: isDark
                             ? AppTheme.textOnDark
                             : AppTheme.textPrimary,
+                        fontSize: 14,
                       ),
                       decoration: InputDecoration(
                         hintText: 'Search for your college...',
-                        hintStyle: GoogleFonts.inter(color: AppTheme.textMuted),
+                        hintStyle: GoogleFonts.inter(
+                          color: AppTheme.textMuted,
+                          fontSize: 14,
+                        ),
                         prefixIcon: const Icon(
                           Icons.search_rounded,
                           color: AppTheme.textMuted,
+                          size: 20,
                         ),
                         border: InputBorder.none,
                         contentPadding: const EdgeInsets.symmetric(
                           horizontal: 16,
-                          vertical: 16,
+                          vertical: 10,
                         ),
                       ),
                     ),
@@ -444,17 +445,24 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
       );
     }
 
-    return ListView.builder(
+    return ListView.separated(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       itemCount: _filteredColleges.length,
+      separatorBuilder: (context, index) => Divider(
+        height: 1,
+        color: isDark
+            ? AppTheme.darkBorder.withValues(alpha: 0.5)
+            : AppTheme.lightBorder.withValues(alpha: 0.5),
+        indent: 64,
+      ),
       itemBuilder: (context, index) {
         final college = _filteredColleges[index];
-        return _buildCollegeCard(college, isDark, index);
+        return _buildCollegeListItem(college, isDark, index);
       },
     );
   }
 
-  Widget _buildCollegeCard(College college, bool isDark, int index) {
+  Widget _buildCollegeListItem(College college, bool isDark, int index) {
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
       duration: Duration(milliseconds: 200 + (index.clamp(0, 10) * 50)),
@@ -465,93 +473,74 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
           child: Opacity(opacity: value, child: child),
         );
       },
-      child: Padding(
-        padding: const EdgeInsets.only(bottom: 12),
-        child: Material(
-          color: isDark ? AppTheme.darkCard : AppTheme.lightCard,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => _selectCollege(college),
           borderRadius: BorderRadius.circular(12),
-          child: InkWell(
-            onTap: () => _selectCollege(college),
-            borderRadius: BorderRadius.circular(12),
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: isDark ? AppTheme.darkBorder : AppTheme.lightBorder,
-                ),
-              ),
-              child: Row(
-                children: [
-                  // College avatar
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: AppTheme.primary,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Center(
-                      child: Text(
-                        college.initial,
-                        style: GoogleFonts.inter(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 4),
+            child: Row(
+              children: [
+                // College avatar
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: AppTheme.primary,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Center(
+                    child: Text(
+                      college.initial,
+                      style: GoogleFonts.inter(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
                       ),
                     ),
                   ),
-                  const SizedBox(width: 16),
+                ),
+                const SizedBox(width: 16),
 
-                  // College info
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          college.name,
-                          style: GoogleFonts.inter(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: isDark
-                                ? AppTheme.textOnDark
-                                : AppTheme.textPrimary,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
+                // College info
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        college.name,
+                        style: GoogleFonts.inter(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: isDark
+                              ? AppTheme.textOnDark
+                              : AppTheme.textPrimary,
+                          height: 1.3,
                         ),
-                        const SizedBox(height: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primary.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            '@${college.domain}',
-                            style: GoogleFonts.inter(
-                              fontSize: 12,
-                              color: AppTheme.primary,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '@${college.domain}',
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          color: AppTheme.textMuted,
+                          fontWeight: FontWeight.w500,
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
+                ),
 
-                  // Arrow icon
-                  const Icon(
-                    Icons.arrow_forward_ios_rounded,
-                    size: 16,
-                    color: AppTheme.textMuted,
-                  ),
-                ],
-              ),
+                // Arrow icon
+                const Icon(
+                  Icons.chevron_right_rounded,
+                  size: 20,
+                  color: AppTheme.textMuted,
+                ),
+              ],
             ),
           ),
         ),
@@ -560,21 +549,69 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
   }
 
   Widget _buildLoadingSkeleton(bool isDark) {
-    return ListView.builder(
+    final baseColor = isDark ? AppTheme.darkCard : Colors.grey.shade200;
+    final highlightColor = isDark ? AppTheme.darkBorder : Colors.grey.shade100;
+    return ListView.separated(
       padding: const EdgeInsets.symmetric(horizontal: 24),
       itemCount: 5,
+      separatorBuilder: (context, index) => Divider(
+        height: 1,
+        color: isDark
+            ? AppTheme.darkBorder.withValues(alpha: 0.5)
+            : AppTheme.lightBorder.withValues(alpha: 0.5),
+        indent: 64,
+      ),
       itemBuilder: (context, index) {
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 12),
-          child: Shimmer.fromColors(
-            baseColor: isDark ? AppTheme.darkCard : Colors.grey.shade200,
-            highlightColor: isDark ? AppTheme.darkBorder : Colors.grey.shade100,
-            child: Container(
-              height: 80,
-              decoration: BoxDecoration(
-                color: isDark ? AppTheme.darkCard : Colors.grey.shade200,
-                borderRadius: BorderRadius.circular(12),
-              ),
+        return Shimmer.fromColors(
+          baseColor: baseColor,
+          highlightColor: highlightColor,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 4),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: baseColor,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        height: 16,
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: baseColor,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        height: 12,
+                        width: 120,
+                        decoration: BoxDecoration(
+                          color: baseColor,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  width: 20,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: baseColor,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ],
             ),
           ),
         );

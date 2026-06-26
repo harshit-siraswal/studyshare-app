@@ -64,7 +64,12 @@ class _StudyScreenState extends State<StudyScreen>
   final DownloadService _downloadService = DownloadService();
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final ScrollController _followingScrollController = ScrollController();
   late TabController _tabController;
+
+  // Header visibility
+  bool _showHeader = true;
+  bool _showTabBar = true;
 
   // Tab state
 
@@ -230,6 +235,7 @@ class _StudyScreenState extends State<StudyScreen>
       collegeName: widget.collegeName,
     );
     _scrollController.addListener(_onScroll);
+    _followingScrollController.addListener(_onFollowingScroll);
 
     _ensureUserProfileLoaded().whenComplete(() {
       if (!mounted) return;
@@ -327,6 +333,7 @@ class _StudyScreenState extends State<StudyScreen>
     _voteRefreshDebounce?.cancel();
     _searchController.dispose();
     _scrollController.dispose();
+    _followingScrollController.dispose();
     _tabController.dispose();
     super.dispose();
   }
@@ -928,6 +935,33 @@ class _StudyScreenState extends State<StudyScreen>
         _scrollController.position.maxScrollExtent - 200) {
       _loadMoreResources();
     }
+    _handleScrollVisibility(_scrollController);
+  }
+
+  void _onFollowingScroll() {
+    _handleScrollVisibility(_followingScrollController);
+  }
+
+  void _handleScrollVisibility(ScrollController controller) {
+    if (!controller.hasClients) return;
+    final offset = controller.position.pixels;
+    final direction = controller.position.userScrollDirection;
+
+    if (direction == ScrollDirection.reverse &&
+        offset > 20 &&
+        (_showHeader || _showTabBar)) {
+      setState(() {
+        _showHeader = false;
+        _showTabBar = false;
+      });
+    } else if (direction == ScrollDirection.forward &&
+        offset <= 10 &&
+        (!_showHeader || !_showTabBar)) {
+      setState(() {
+        _showHeader = true;
+        _showTabBar = true;
+      });
+    }
   }
 
   Future<void> _loadMoreResources() async {
@@ -1060,10 +1094,36 @@ class _StudyScreenState extends State<StudyScreen>
           child: Column(
             children: [
               // Header
-              _buildHeader(),
+              AnimatedCrossFade(
+                firstChild: KeyedSubtree(
+                  key: const ValueKey('header'),
+                  child: _buildHeader(),
+                ),
+                secondChild: const SizedBox.shrink(
+                  key: ValueKey('header_hidden'),
+                ),
+                crossFadeState: _showHeader
+                    ? CrossFadeState.showFirst
+                    : CrossFadeState.showSecond,
+                duration: const Duration(milliseconds: 220),
+                sizeCurve: Curves.fastOutSlowIn,
+              ),
 
               // Tab Bar for For You / Following
-              _buildTabBar(isDark),
+              AnimatedCrossFade(
+                firstChild: KeyedSubtree(
+                  key: const ValueKey('tabbar'),
+                  child: _buildTabBar(isDark),
+                ),
+                secondChild: const SizedBox.shrink(
+                  key: ValueKey('tabbar_hidden'),
+                ),
+                crossFadeState: _showTabBar
+                    ? CrossFadeState.showFirst
+                    : CrossFadeState.showSecond,
+                duration: const Duration(milliseconds: 220),
+                sizeCurve: Curves.fastOutSlowIn,
+              ),
 
               // Tab content
               Expanded(
@@ -1852,6 +1912,7 @@ class _StudyScreenState extends State<StudyScreen>
     final visibleResources = _filteredFollowingResources;
 
     return ListView.builder(
+      controller: _followingScrollController,
       padding: const EdgeInsets.fromLTRB(
         16,
         16,
