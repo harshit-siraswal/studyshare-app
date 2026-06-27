@@ -9,6 +9,7 @@ import 'package:custom_refresh_indicator/custom_refresh_indicator.dart';
 import 'package:lottie/lottie.dart';
 import 'package:badges/badges.dart' as badges;
 import 'package:flutter_app_badger/flutter_app_badger.dart';
+import '../viewer/pdf_viewer_screen.dart';
 import '../../config/theme.dart';
 import '../../models/resource.dart';
 import '../../services/supabase_service.dart';
@@ -25,6 +26,8 @@ import 'resource_search_screen.dart';
 import '../../services/home_widget_service.dart';
 import '../../widgets/study/department_card_3d.dart';
 import '../../data/academic_subjects_data.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../data/school_data.dart';
 import '../../data/departments_data.dart'; // Added for DepartmentData and DepartmentsProvider
 import '../../utils/admin_access.dart';
 import '../../services/attendance_service.dart';
@@ -116,6 +119,18 @@ class _StudyScreenState extends State<StudyScreen>
   String _followingSelectedSort = 'Recent';
   List<String> _followingSubjects = [];
   bool _hasLoadedUserProfile = false;
+
+  // School mode state
+  bool _isSchool = false;
+  String? _schoolClass;
+  String? _schoolSelectedSubject;
+  String? _schoolSelectedExam;
+  bool _isSchoolNotesMode = true; // true = Notes, false = Syllabus
+  List<String> _schoolAvailableSubjects = [];
+  List<Resource> _schoolResources = [];
+  bool _isSchoolLoading = true;
+  List<Map<String, dynamic>> _schoolSyllabusItems = [];
+  bool _isSchoolSyllabusLoading = false;
 
   void _invalidateFollowingFilterCache() {
     // Following filters are lightweight enough to compute on demand.
@@ -212,11 +227,31 @@ class _StudyScreenState extends State<StudyScreen>
   @override
   void initState() {
     super.initState();
+    _isSchool = isSchoolCollege(widget.collegeId, widget.collegeDomain, widget.collegeName);
     _hasAttendanceFeature = _attendanceService.isKietCollege(
       collegeId: widget.collegeId,
       collegeName: widget.collegeName,
       collegeDomain: widget.collegeDomain,
     );
+    if (_isSchool) {
+      _loadSchoolClass().whenComplete(() {
+        if (!mounted) return;
+        _loadSchoolSubjects();
+        _loadSchoolResources();
+      });
+      _tabController = TabController(
+        length: 1,
+        vsync: this,
+      );
+      _tabController.addListener(() {
+        if (_tabController.indexIsChanging) return;
+        _notifySyllabusContextChanged();
+      });
+      _notifySyllabusContextChanged();
+      _scrollController.addListener(_onScroll);
+      _loadUnreadNotificationCount();
+      return;
+    }
     _tabController = TabController(
       length: 3,
       vsync: this,
@@ -324,6 +359,123 @@ class _StudyScreenState extends State<StudyScreen>
         _hasLoadedUserProfile = true;
       });
       _notifySyllabusContextChanged();
+    }
+  }
+
+  // ─── School mode helpers ─────────────────────────────────────────────
+
+  Future<void> _loadSchoolClass() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedClass = prefs.getString('selectedSchoolClass');
+      if (!mounted) return;
+      setState(() {
+        _schoolClass = savedClass;
+      });
+    } catch (e) {
+      debugPrint('Error loading school class: $e');
+    }
+  }
+
+  void _loadSchoolSubjects() {
+    if (_schoolClass == null || _schoolClass!.isEmpty) return;
+    setState(() {
+      _schoolAvailableSubjects = getSubjectsForClass(_schoolClass);
+      _schoolSelectedSubject = null;
+      _schoolSelectedExam = null;
+    });
+  }
+
+  Future<void> _loadSchoolResources() async {
+    if (_schoolClass == null) return;
+    setState(() => _isSchoolLoading = true);
+    try {
+      final classNumber = getClassNumberForBackend(_schoolClass);
+      final resources = await _supabaseService.getResources(
+        collegeId: widget.collegeId,
+        semester: classNumber.isEmpty ? null : classNumber,
+        subject: _schoolSelectedSubject,
+        type: _isSchoolNotesMode ? 'notes' : null,
+        searchQuery: null,
+        sortBy: null,
+        limit: 50,
+        offset: 0,
+      );
+      if (!mounted) return;
+      setState(() {
+        _schoolResources = resources;
+        _isSchoolLoading = false;
+      });
+    } catch (e) {
+      debugPrint('Error loading school resources: $e');
+      if (mounted) {
+        setState(() => _isSchoolLoading = false);
+      }
+    }
+  }
+
+  Future<void> _loadSchoolSyllabus() async {
+    if (_schoolClass == null || _schoolSelectedSubject == null) return;
+    setState(() => _isSchoolSyllabusLoading = true);
+    try {
+      final normalizedDept = getClassNumberForBackend(_schoolClass);
+      final items = await _supabaseService.getSyllabus(
+        collegeId: widget.collegeId,
+        department: normalizedDept.isEmpty ? _schoolClass! : normalizedDept,
+        semester: _schoolClass,
+        subject: _schoolSelectedSubject,
+      );
+      if (mounted) {
+        setState(() {
+          _schoolSyllabusItems = items;
+          _isSchoolSyllabusLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error loading school syllabus: $e');
+      if (mounted) {
+        setState(() => _isSchoolSyllabusLoading = false);
+      }
+    }
+  }
+
+  void _onSchoolClassChanged(String? newClass) {
+    if (newClass == null || newClass == _schoolClass) return;
+    setState(() {
+      _schoolClass = newClass;
+      _schoolSelectedSubject = null;
+      _schoolSelectedExam = null;
+      _schoolAvailableSubjects = getSubjectsForClass(newClass);
+    });
+    _loadSchoolResources();
+  }
+
+  void _onSchoolSubjectChanged(String? newSubject) {
+    if (newSubject == null || newSubject == _schoolSelectedSubject) return;
+    setState(() {
+      _schoolSelectedSubject = newSubject;
+      _schoolSelectedExam = null;
+    });
+    if (_isSchoolNotesMode) {
+      _loadSchoolResources();
+    } else {
+      _loadSchoolSyllabus();
+    }
+  }
+
+  void _onSchoolExamChanged(String? newExam) {
+    if (newExam == null || newExam == _schoolSelectedExam) return;
+    setState(() => _schoolSelectedExam = newExam);
+    // Could further filter resources by exam type here
+  }
+
+  void _onSchoolNotesModeChanged(bool notesMode) {
+    if (_isSchoolNotesMode == notesMode) return;
+    setState(() => _isSchoolNotesMode = notesMode);
+    if (notesMode) {
+      _loadSchoolResources();
+    } else if (_schoolSelectedSubject != null) {
+      _loadSchoolSyllabus();
     }
   }
 
@@ -1086,6 +1238,39 @@ class _StudyScreenState extends State<StudyScreen>
     final isTeacher = _canManageAdminResources;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
+    if (_isSchool) {
+      return Scaffold(
+        backgroundColor: Colors.transparent,
+        body: SafeArea(
+          bottom: true,
+          child: Padding(
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: [
+                AnimatedCrossFade(
+                  firstChild: KeyedSubtree(
+                    key: const ValueKey('header'),
+                    child: _buildHeader(),
+                  ),
+                  secondChild: const SizedBox.shrink(
+                    key: ValueKey('header_hidden'),
+                  ),
+                  crossFadeState: _showHeader
+                      ? CrossFadeState.showFirst
+                      : CrossFadeState.showSecond,
+                  duration: const Duration(milliseconds: 220),
+                  sizeCurve: Curves.fastOutSlowIn,
+                ),
+                Expanded(
+                  child: _buildSchoolStudyBody(isDark),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: Colors.transparent,
       body: SafeArea(
@@ -1193,6 +1378,480 @@ class _StudyScreenState extends State<StudyScreen>
         ), // Padding
       ), // SafeArea
     ); // Scaffold
+  }
+
+  // ─── School study UI ─────────────────────────────────────────────────
+
+  Widget _buildSchoolStudyBody(bool isDark) {
+    final textColor = isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
+    final secondaryColor = isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary;
+    final cardColor = isDark ? AppTheme.darkCard : Colors.white;
+    final borderColor = isDark ? AppTheme.darkBorder : AppTheme.lightBorder;
+
+    return CustomRefreshIndicator(
+      onRefresh: () async {
+        if (_isSchoolNotesMode) {
+          await _loadSchoolResources();
+        } else if (_schoolSelectedSubject != null) {
+          await _loadSchoolSyllabus();
+        }
+      },
+      builder: (context, child, controller) => _buildRefreshIndicatorContent(
+        controller,
+        child,
+      ),
+      child: SingleChildScrollView(
+        controller: _scrollController,
+        physics: const BouncingScrollPhysics(
+          parent: AlwaysScrollableScrollPhysics(),
+        ),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Small Notes / Syllabus switch
+            _buildSchoolNotesSwitch(isDark),
+            const SizedBox(height: 16),
+
+            // Class dropdown
+            _buildSchoolDropdown(
+              label: 'Class',
+              value: _schoolClass,
+              items: schoolClassOptions,
+              onChanged: _onSchoolClassChanged,
+              icon: Icons.school_rounded,
+              isDark: isDark,
+              hint: 'Select Class',
+            ),
+            const SizedBox(height: 12),
+
+            // Subject dropdown
+            _buildSchoolDropdown(
+              label: 'Subject',
+              value: _schoolSelectedSubject,
+              items: _schoolAvailableSubjects,
+              onChanged: _onSchoolSubjectChanged,
+              icon: Icons.book_rounded,
+              isDark: isDark,
+              hint: _schoolClass == null
+                  ? 'Select Class First'
+                  : (_schoolAvailableSubjects.isEmpty
+                      ? 'No subjects found'
+                      : 'Select Subject'),
+              isDisabled: _schoolClass == null || _schoolAvailableSubjects.isEmpty,
+            ),
+            const SizedBox(height: 12),
+
+            // Exam type dropdown
+            _buildSchoolDropdown(
+              label: 'Exam',
+              value: _schoolSelectedExam,
+              items: schoolExamTypes,
+              onChanged: _onSchoolExamChanged,
+              icon: Icons.assignment_rounded,
+              isDark: isDark,
+              hint: _schoolSelectedSubject == null
+                  ? 'Select Subject First'
+                  : 'Select Exam',
+              isDisabled: _schoolSelectedSubject == null,
+            ),
+            const SizedBox(height: 20),
+
+            // Syllabus topics preview (when exam is selected)
+            if (_schoolSelectedExam != null &&
+                _schoolSelectedSubject != null &&
+                _schoolClass != null)
+              _buildSchoolTopicsPreview(isDark, textColor, secondaryColor, cardColor, borderColor),
+
+            const SizedBox(height: 16),
+
+            // Content list
+            _isSchoolNotesMode
+                ? _buildSchoolResourcesList(isDark, textColor, secondaryColor, cardColor)
+                : _buildSchoolSyllabusList(isDark, textColor, secondaryColor, cardColor, borderColor),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSchoolNotesSwitch(bool isDark) {
+    final background = isDark ? const Color(0xFF12151C) : const Color(0xFFF3F4F6);
+    final activeColor = isDark
+        ? AppTheme.primary.withValues(alpha: 0.32)
+        : AppTheme.primary.withValues(alpha: 0.16);
+    final border = isDark ? Colors.white10 : const Color(0xFFE5E7EB);
+
+    Widget segment({
+      required String label,
+      required bool selected,
+      required VoidCallback onTap,
+    }) {
+      return Expanded(
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(999),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
+            decoration: BoxDecoration(
+              color: selected ? activeColor : Colors.transparent,
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Center(
+              child: Text(
+                label,
+                style: GoogleFonts.inter(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: selected
+                      ? AppTheme.primary
+                      : (isDark ? Colors.white70 : const Color(0xFF6B7280)),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      width: 160,
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: border),
+      ),
+      child: Row(
+        children: [
+          segment(
+            label: 'Notes',
+            selected: _isSchoolNotesMode,
+            onTap: () => _onSchoolNotesModeChanged(true),
+          ),
+          segment(
+            label: 'Syllabus',
+            selected: !_isSchoolNotesMode,
+            onTap: () => _onSchoolNotesModeChanged(false),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSchoolDropdown({
+    required String label,
+    required String? value,
+    required List<String> items,
+    required Function(String?) onChanged,
+    required IconData icon,
+    required bool isDark,
+    String? hint,
+    bool isDisabled = false,
+  }) {
+    final borderColor = isDark ? AppTheme.darkBorder : AppTheme.lightBorder;
+    final bgColor = isDark ? AppTheme.darkBackground : Colors.grey[50];
+    final textColor = isDark ? Colors.white : Colors.black;
+    final selectedValue = (value != null && items.contains(value)) ? value : null;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: isDisabled
+            ? (isDark ? Colors.white10 : Colors.grey[100])
+            : bgColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderColor),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: selectedValue,
+          isExpanded: true,
+          hint: Row(
+            children: [
+              Icon(icon, size: 18, color: AppTheme.textMuted),
+              const SizedBox(width: 10),
+              Text(
+                hint ?? label,
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  color: AppTheme.textMuted,
+                ),
+              ),
+            ],
+          ),
+          icon: Icon(
+            Icons.arrow_drop_down_rounded,
+            color: isDisabled ? Colors.grey : AppTheme.primary,
+          ),
+          style: GoogleFonts.inter(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: textColor,
+          ),
+          dropdownColor: isDark ? AppTheme.darkCard : Colors.white,
+          onChanged: isDisabled ? null : onChanged,
+          items: items.map((String item) {
+            return DropdownMenuItem<String>(
+              value: item,
+              child: Row(
+                children: [
+                  Icon(
+                    icon,
+                    size: 18,
+                    color: selectedValue == item
+                        ? AppTheme.primary
+                        : AppTheme.textMuted,
+                  ),
+                  const SizedBox(width: 10),
+                  Text(item),
+                ],
+              ),
+            );
+          }).toList(),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSchoolTopicsPreview(
+    bool isDark,
+    Color textColor,
+    Color secondaryColor,
+    Color cardColor,
+    Color borderColor,
+  ) {
+    final topics = getTopicsForExam(
+      _schoolClass!,
+      _schoolSelectedSubject!,
+      _schoolSelectedExam!,
+    );
+    if (topics.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Syllabus till $_schoolSelectedExam',
+            style: GoogleFonts.inter(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: textColor,
+            ),
+          ),
+          const SizedBox(height: 8),
+          ...topics.map((topic) => Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      margin: const EdgeInsets.only(top: 6, right: 8),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary,
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        topic,
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          color: secondaryColor,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              )),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSchoolResourcesList(
+    bool isDark,
+    Color textColor,
+    Color secondaryColor,
+    Color cardColor,
+  ) {
+    if (_isSchoolLoading) {
+      return _buildLoadingSkeleton();
+    }
+    if (_schoolResources.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.menu_book_outlined,
+              size: 64,
+              color: AppTheme.textMuted.withValues(alpha: 0.5),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No notes found',
+              style: GoogleFonts.inter(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: textColor,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Select a class and subject to view notes',
+              style: GoogleFonts.inter(fontSize: 14, color: secondaryColor),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
+    return Column(
+      children: _schoolResources.map((resource) {
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: ResourceCard(
+            resource: resource,
+            userEmail: _effectiveUserEmail,
+            deferRemoteStateHydration: true,
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildSchoolSyllabusList(
+    bool isDark,
+    Color textColor,
+    Color secondaryColor,
+    Color cardColor,
+    Color borderColor,
+  ) {
+    if (_isSchoolSyllabusLoading) {
+      return _buildLoadingSkeleton();
+    }
+    if (_schoolSelectedSubject == null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.filter_list_rounded,
+              size: 64,
+              color: AppTheme.textMuted.withValues(alpha: 0.3),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Select a Subject',
+              style: GoogleFonts.inter(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: textColor,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Choose a subject to view syllabus documents',
+              style: GoogleFonts.inter(fontSize: 14, color: secondaryColor),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
+    if (_schoolSyllabusItems.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.menu_book_outlined,
+              size: 64,
+              color: AppTheme.textMuted.withValues(alpha: 0.5),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No syllabus found',
+              style: GoogleFonts.inter(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: textColor,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'No syllabus documents available for this subject yet',
+              style: GoogleFonts.inter(fontSize: 14, color: secondaryColor),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      );
+    }
+    return Column(
+      children: _schoolSyllabusItems.map((item) {
+        final title = item['title'] ?? item['name'] ?? 'Syllabus Document';
+        final fileUrl = item['pdf_url'] ?? item['file_url'] ?? item['url'] ?? '';
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          decoration: BoxDecoration(
+            color: cardColor,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: borderColor),
+          ),
+          child: ListTile(
+            leading: Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: AppTheme.primary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Icon(
+                Icons.picture_as_pdf_rounded,
+                color: AppTheme.primary,
+              ),
+            ),
+            title: Text(
+              title,
+              style: GoogleFonts.inter(
+                fontWeight: FontWeight.w600,
+                fontSize: 14,
+                color: textColor,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            trailing: const Icon(
+              Icons.chevron_right_rounded,
+              color: AppTheme.textMuted,
+            ),
+            onTap: () {
+              if (fileUrl.isNotEmpty) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PdfViewerScreen(pdfUrl: fileUrl, title: title),
+                  ),
+                );
+              }
+            },
+          ),
+        );
+      }).toList(),
+    );
   }
 
   Widget _buildTabBar(bool isDark) {

@@ -6,9 +6,11 @@ import '../../config/app_config.dart';
 import '../../config/theme.dart';
 import '../../models/college.dart';
 import '../../services/supabase_service.dart';
+import '../../data/school_data.dart';
 
 class CollegeSelectionScreen extends StatefulWidget {
-  final Function(String id, String name, String domain) onCollegeSelected;
+  final Function(String id, String name, String domain, {String? selectedClass})
+  onCollegeSelected;
 
   const CollegeSelectionScreen({super.key, required this.onCollegeSelected});
 
@@ -19,7 +21,7 @@ class CollegeSelectionScreen extends StatefulWidget {
 class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
   static const String _collegeRequestEmail = AppConfig.supportEmail;
   static const Duration _collegeFetchTimeout = Duration(seconds: 8);
-  static const List<Map<String, String>> _starterCollegeDirectory = [
+  static const List<Map<String, dynamic>> _starterCollegeDirectory = [
     {'id': 'kiet', 'name': 'KIET Group of Institutions', 'domain': 'kiet.edu'},
     {'id': 'iiitbh', 'name': 'IIIT Bhagalpur', 'domain': 'iiitbh.ac.in'},
     {
@@ -87,6 +89,13 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
       'name': 'University School of Automation and Robotics, GGSIPU',
       'domain': 'ipu.ac.in',
     },
+    // Indian School - Kendriya Vidyalaya, IIT Delhi
+    {
+      'id': 'kviitdelhi',
+      'name': 'Kendriya Vidyalaya, IIT Delhi',
+      'domain': 'kviitdelhi.edu.in',
+      'is_school': true,
+    },
   ];
 
   final SupabaseService _supabaseService = SupabaseService();
@@ -121,6 +130,7 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
             id: entry['id'] ?? '',
             name: entry['name'] ?? '',
             domain: entry['domain'] ?? '',
+            isSchool: entry['is_school'] == true,
           ),
         )
         .where(
@@ -225,8 +235,118 @@ class _CollegeSelectionScreenState extends State<CollegeSelectionScreen> {
     });
   }
 
-  void _selectCollege(College college) {
+  void _selectCollege(College college) async {
+    if (college.isSchool) {
+      final selectedClass = await _showClassSelectionSheet(college);
+      if (selectedClass == null || selectedClass.isEmpty) return;
+      widget.onCollegeSelected(
+        college.id,
+        college.name,
+        college.domain,
+        selectedClass: selectedClass,
+      );
+      return;
+    }
     widget.onCollegeSelected(college.id, college.name, college.domain);
+  }
+
+  Future<String?> _showClassSelectionSheet(College college) async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) {
+          final bgColor = isDark ? const Color(0xFF0F1116) : Colors.white;
+          return Container(
+            height: MediaQuery.of(context).size.height * 0.55,
+            decoration: BoxDecoration(
+              color: bgColor,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(26),
+              ),
+            ),
+            child: Column(
+              children: [
+                const SizedBox(height: 10),
+                Container(
+                  width: 44,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.white24 : Colors.black12,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+                  child: Text(
+                    'Select Your Class',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.inter(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? Colors.white : const Color(0xFF111827),
+                    ),
+                  ),
+                ),
+                Divider(
+                  height: 1,
+                  color: isDark ? Colors.white10 : const Color(0xFFE5E7EB),
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+                    itemCount: schoolClassOptions.length,
+                    itemBuilder: (context, index) {
+                      final classOption = schoolClassOptions[index];
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(
+                          classOption,
+                          style: GoogleFonts.inter(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? Colors.white : Colors.black87,
+                          ),
+                        ),
+                        trailing: const Icon(
+                          Icons.chevron_right_rounded,
+                          color: AppTheme.textMuted,
+                        ),
+                        onTap: () => Navigator.pop(context, classOption),
+                      );
+                    },
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.primary,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size(double.infinity, 52),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: Text(
+                      'Cancel',
+                      style: GoogleFonts.inter(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 
   @override

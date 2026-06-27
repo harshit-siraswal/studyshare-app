@@ -5,6 +5,7 @@ class College {
   final String? code;
   final String? logoUrl;
   final bool isActive;
+  final bool isSchool;
 
   College({
     required this.id,
@@ -13,6 +14,7 @@ class College {
     this.code,
     this.logoUrl,
     this.isActive = true,
+    this.isSchool = false,
   });
 
   static String _asString(dynamic value) {
@@ -45,6 +47,7 @@ class College {
           ? null
           : _asString(json['logo_url']),
       isActive: _asBool(json['is_active'], fallback: true),
+      isSchool: _asBool(json['is_school'], fallback: false),
     );
   }
 
@@ -56,6 +59,7 @@ class College {
       'code': code,
       'logo_url': logoUrl,
       'is_active': isActive,
+      'is_school': isSchool,
     };
   }
 

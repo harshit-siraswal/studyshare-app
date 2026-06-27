@@ -983,7 +983,7 @@ class _AppRouterState extends State<AppRouter> {
     setState(() {});
   }
 
-  void _onCollegeSelected(String id, String name, String domain) async {
+  void _onCollegeSelected(String id, String name, String domain, {String? selectedClass}) async {
     // Stash legacy keys before removal
     final legacyId = widget.prefs.getString('selectedCollegeId');
     final legacyName = widget.prefs.getString('selectedCollegeName');
@@ -993,6 +993,12 @@ class _AppRouterState extends State<AppRouter> {
     try {
       final jsonString = jsonEncode({'id': id, 'name': name, 'domain': domain});
       await widget.prefs.setString('selectedCollege', jsonString);
+      // Save or remove selected class for schools
+      if (selectedClass != null && selectedClass.isNotEmpty) {
+        await widget.prefs.setString('selectedSchoolClass', selectedClass);
+      } else {
+        await widget.prefs.remove('selectedSchoolClass');
+      }
       // Clean up old keys if they exist
       await Future.wait([
         widget.prefs.remove('selectedCollegeId'),
@@ -1004,6 +1010,7 @@ class _AppRouterState extends State<AppRouter> {
       debugPrint('Error saving college selection: $e');
       // Rollback: remove broken new key and restore legacy if needed
       await widget.prefs.remove('selectedCollege');
+      await widget.prefs.remove('selectedSchoolClass');
       if (legacyId != null) {
         await widget.prefs.setString('selectedCollegeId', legacyId);
       }
@@ -1040,6 +1047,7 @@ class _AppRouterState extends State<AppRouter> {
     // Stash legacy keys before potential removal (though here we are explicitly clearing)
     // No need to restore on cancellation since this is a user action to clear.
     await widget.prefs.remove('selectedCollege');
+    await widget.prefs.remove('selectedSchoolClass');
     // Ensure legacy keys are also cleared just in case
     await widget.prefs.remove('selectedCollegeId');
     await widget.prefs.remove('selectedCollegeName');
