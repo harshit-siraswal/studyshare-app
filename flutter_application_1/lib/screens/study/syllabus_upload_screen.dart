@@ -213,7 +213,7 @@ class _SyllabusUploadScreenState extends State<SyllabusUploadScreen> {
       if (mounted) setState(() => _uploadProgress = 0.9);
       await _supabaseService.uploadSyllabus(
         collegeId: widget.collegeId,
-        department: widget.department,
+        department: normalizeBranchCode(widget.department),
         semester: _selectedSemester!,
         subject: _selectedSubject!,
         title: _titleController.text.trim(),

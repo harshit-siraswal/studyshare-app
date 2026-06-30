@@ -71,6 +71,8 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
   String? _replyToName;
   bool _isReadOnly = true;
   bool _hasAccessOverride = false;
+  String? _currentUserPhotoUrl;
+  String? _currentUserDisplayName;
 
   bool _isKietEmail(String email) {
     final normalized = email.trim().toLowerCase();
@@ -116,6 +118,10 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
       setState(() {
         _hasAccessOverride =
             profile.isNotEmpty && isTeacherOrAdminProfile(profile);
+        _currentUserDisplayName =
+            profile['display_name']?.toString().trim() ??
+            profile['displayName']?.toString().trim();
+        _currentUserPhotoUrl = resolveProfilePhotoUrl(profile);
       });
     } catch (e, st) {
       debugPrint('NoticeDetailScreen._loadWriterRole failed: $e\n$st');
@@ -1526,6 +1532,8 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
       hintText: _replyToName != null
           ? 'Write your reply...'
           : 'Add a comment...',
+      userPhotoUrl: _currentUserPhotoUrl,
+      userDisplayName: _currentUserDisplayName ?? _authService.displayName,
     );
   }
 }

@@ -11,6 +11,7 @@ import 'backend_api_service.dart';
 import '../models/department_account.dart';
 import '../models/department_option.dart';
 import '../data/department_catalog.dart';
+import '../data/academic_subjects_data.dart';
 import '../utils/admin_access.dart';
 import '../utils/user_identity_resolver.dart';
 
@@ -1502,6 +1503,7 @@ class SupabaseService {
     String? sortBy,
     int limit = 20,
     int offset = 0,
+    List<Map<String, String?>>? scopeCandidates,
   }) async {
     try {
       final page = limit > 0 ? ((offset ~/ limit) + 1) : 1;
@@ -1515,6 +1517,7 @@ class SupabaseService {
         sortBy: sortBy,
         page: page,
         limit: limit,
+        scopeCandidates: scopeCandidates,
       );
 
       final extractedRows = _extractResourceRowsFromBackendPayload(payload);
@@ -1607,6 +1610,7 @@ class SupabaseService {
     String? sortBy,
     int limit = 20,
     int offset = 0,
+    List<Map<String, String?>>? scopeCandidates,
   }) async {
     final effectiveCollegeId = await _resolveReadableCollegeId(
       collegeId,
@@ -1638,7 +1642,7 @@ class SupabaseService {
       limit: limit,
       offset: offset,
     );
-    final shouldUseCache = offset == 0 && normalizedSearch.isEmpty;
+    final shouldUseCache = offset == 0 && normalizedSearch.isEmpty && (scopeCandidates == null || scopeCandidates.isEmpty);
 
     if (shouldUseCache) {
       final cached = _resourceListCache[cacheKey];
@@ -1654,6 +1658,20 @@ class SupabaseService {
     }
 
     final fetchFuture = () async {
+      if (scopeCandidates != null && scopeCandidates.isNotEmpty) {
+        return _fetchResourcesViaBackend(
+          collegeId: effectiveCollegeId,
+          semester: normalizedSemester,
+          branch: normalizedBranch,
+          subject: normalizedSubject,
+          type: normalizedType,
+          searchQuery: normalizedSearch,
+          sortBy: sortBy,
+          limit: limit,
+          offset: offset,
+          scopeCandidates: scopeCandidates,
+        );
+      }
       if ((sortBy?.trim().toLowerCase() ?? '') == 'teacher') {
         final backendTeacherRows = await _fetchResourcesViaBackend(
           collegeId: effectiveCollegeId,
@@ -5660,6 +5678,9 @@ class SupabaseService {
     String? semester,
     String? subject,
   }) async {
+    final normalizedBranch = normalizeBranchCode(department);
+    final branchToUse = normalizedBranch.isEmpty ? department : normalizedBranch;
+
     Future<List<Map<String, dynamic>>> queryByDepartmentColumn(
       String departmentColumn,
     ) async {
@@ -5667,7 +5688,7 @@ class SupabaseService {
           .from('syllabus')
           .select()
           .eq('college_id', collegeId)
-          .eq(departmentColumn, department);
+          .eq(departmentColumn, branchToUse);
 
       if (semester != null && semester.isNotEmpty && semester != 'All') {
         query = query.eq('semester', semester);
@@ -5726,6 +5747,9 @@ class SupabaseService {
     required String fileUrl,
     String? description,
   }) async {
+    final normalizedBranch = normalizeBranchCode(department);
+    final branchToUse = normalizedBranch.isEmpty ? department : normalizedBranch;
+
     const maxAttempts = 2;
     var attempt = 0;
     while (attempt < maxAttempts) {
@@ -5734,7 +5758,7 @@ class SupabaseService {
         await _api.uploadSyllabusAsAdmin(
           collegeId: collegeId,
           semester: semester,
-          branch: department,
+          branch: branchToUse,
           subject: subject,
           title: title,
           pdfUrl: fileUrl,
@@ -5788,7 +5812,7 @@ class SupabaseService {
 
     final payload = <String, dynamic>{
       'college_id': collegeId,
-      'branch': department,
+      'branch': branchToUse,
       'semester': semester,
       'subject': subject,
       'title': title,
@@ -5806,7 +5830,7 @@ class SupabaseService {
       // Legacy schema fallback that uses `department` and may not have `pdf_url`.
       final fallback = <String, dynamic>{
         'college_id': collegeId,
-        'department': department,
+        'department': branchToUse,
         'semester': semester,
         'subject': subject,
         'title': title,

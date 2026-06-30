@@ -1702,6 +1702,7 @@ class BackendApiService {
     String? sortBy,
     int? page,
     int? limit,
+    List<Map<String, String?>>? scopeCandidates,
   }) async {
     final query = <String, String>{};
     if (collegeId != null && collegeId.trim().isNotEmpty) {
@@ -1732,6 +1733,9 @@ class BackendApiService {
     }
     if (limit != null && limit > 0) {
       query['limit'] = limit.toString();
+    }
+    if (scopeCandidates != null && scopeCandidates.isNotEmpty) {
+      query['scopeCandidates'] = jsonEncode(scopeCandidates);
     }
 
     final uri = Uri(path: '/api/resources', queryParameters: query);

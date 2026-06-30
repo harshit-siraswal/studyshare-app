@@ -1152,6 +1152,7 @@ class _StudyScreenState extends State<StudyScreen>
     String? semester,
     String? branch,
     String? subject,
+    List<Map<String, String?>>? scopeCandidates,
   }) {
     return _supabaseService.getResources(
       collegeId: widget.collegeId,
@@ -1165,6 +1166,7 @@ class _StudyScreenState extends State<StudyScreen>
       sortBy: _mapSortOption(_selectedSort),
       limit: _resourcePageSize,
       offset: offset,
+      scopeCandidates: scopeCandidates,
     );
   }
 
@@ -1175,15 +1177,13 @@ class _StudyScreenState extends State<StudyScreen>
     final branchFilter = _resolvedResourceBranchFilter();
     final subjectFilter = _resolvedResourceSubjectFilter();
 
-    final primary = await _queryResources(
-      offset: offset,
-      semester: semesterFilter,
-      branch: branchFilter,
-      subject: subjectFilter,
-    );
-
-    if (!_resourcesRelevantOnly || primary.isNotEmpty) {
-      return primary;
+    if (!_resourcesRelevantOnly) {
+      return _queryResources(
+        offset: offset,
+        semester: semesterFilter,
+        branch: branchFilter,
+        subject: subjectFilter,
+      );
     }
 
     final hasRelevantFilters = [
@@ -1192,7 +1192,12 @@ class _StudyScreenState extends State<StudyScreen>
       subjectFilter,
     ].any((value) => value != null && value.trim().isNotEmpty);
     if (!hasRelevantFilters) {
-      return primary;
+      return _queryResources(
+        offset: offset,
+        semester: semesterFilter,
+        branch: branchFilter,
+        subject: subjectFilter,
+      );
     }
 
     final seen = <String>{
@@ -1208,30 +1213,30 @@ class _StudyScreenState extends State<StudyScreen>
           (semester: null, branch: null, subject: null),
         ];
 
+    final candidates = <Map<String, String?>>[
+      {
+        'semester': semesterFilter,
+        'branch': branchFilter,
+        'subject': subjectFilter,
+      }
+    ];
+
     for (final attempt in fallbackAttempts) {
       final key =
           '${attempt.semester ?? ''}|${attempt.branch ?? ''}|${attempt.subject ?? ''}';
       if (!seen.add(key)) continue;
-
-      final rows = await _queryResources(
-        offset: offset,
-        semester: attempt.semester,
-        branch: attempt.branch,
-        subject: attempt.subject,
-      );
-      if (rows.isNotEmpty) {
-        debugPrint(
-          'Relevant scope fallback matched resources with filters: '
-          'semester=${attempt.semester}, branch=${attempt.branch}, subject=${attempt.subject}',
-        );
-        return rows;
-      }
+      candidates.add({
+        'semester': attempt.semester,
+        'branch': attempt.branch,
+        'subject': attempt.subject,
+      });
     }
 
-    return primary;
+    return _queryResources(
+      offset: offset,
+      scopeCandidates: candidates,
+    );
   }
-
-  // Unused method removed
 
   @override
   Widget build(BuildContext context) {

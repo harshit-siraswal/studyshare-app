@@ -75,6 +75,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   int _reactionRefreshTick = 0;
   late Map<String, dynamic> _post;
   final Map<String, String> _profilePhotoCache = {};
+  final Map<String, String> _profileNameCache = {};
   final Set<String> _profilePhotoFetchInFlight = {};
   bool _didRevealInitialComment = false;
   int _initialCommentRevealAttempts = 0;
@@ -196,6 +197,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     _upvotes = _asSafeInt(_post['upvotes']);
     _downvotes = _asSafeInt(_post['downvotes']);
     _primePhotoCacheFromPost(_post);
+    _ensureProfilePhotoCached(widget.userEmail);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _supabaseService.attachContext(context);
     });
@@ -1265,13 +1267,15 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
     final authorEmail = (post['author_email'] ?? post['user_email'] ?? '')
         .toString();
-    final authorName =
-        (post['author_name']?.toString().trim().isNotEmpty ?? false)
+    final normalizedEmail = _normalizeEmail(authorEmail);
+    final cachedName = _profileNameCache[normalizedEmail];
+    final authorName = (cachedName != null && cachedName.isNotEmpty)
+        ? cachedName
+        : (post['author_name']?.toString().trim().isNotEmpty ?? false)
             ? post['author_name'].toString().trim()
             : authorEmail.contains('@')
             ? authorEmail.split('@').first
             : 'User';
-    final normalizedEmail = _normalizeEmail(authorEmail);
     final cachedPhoto = _profilePhotoCache[normalizedEmail];
     final fallbackPhoto = _resolvePhotoUrl(post, const [
       'author_photo_url',
@@ -1282,7 +1286,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final resolvedPhoto = (cachedPhoto != null && cachedPhoto.isNotEmpty)
         ? cachedPhoto
         : fallbackPhoto;
-    if (resolvedPhoto.isEmpty && normalizedEmail.isNotEmpty) {
+    if ((resolvedPhoto.isEmpty || cachedName == null) && normalizedEmail.isNotEmpty) {
       _ensureProfilePhotoCached(normalizedEmail);
     }
     final hasAuthorPhoto = resolvedPhoto.isNotEmpty;
@@ -1616,12 +1620,15 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final mutedColor = isDark ? Colors.white60 : Colors.black54;
     final rawAuthorName = comment['author_name']?.toString().trim();
     final authorEmail = (comment['author_email'] ?? '').toString();
-    final authorName = rawAuthorName != null && rawAuthorName.isNotEmpty
+    final normalizedEmail = _normalizeEmail(authorEmail);
+    final cachedName = _profileNameCache[normalizedEmail];
+    final authorName = (cachedName != null && cachedName.isNotEmpty)
+        ? cachedName
+        : (rawAuthorName != null && rawAuthorName.isNotEmpty)
         ? rawAuthorName
         : authorEmail.contains('@')
         ? authorEmail.split('@').first
         : 'User';
-    final normalizedEmail = _normalizeEmail(authorEmail);
     final cachedPhoto = _profilePhotoCache[normalizedEmail];
     final fallbackPhoto = _resolvePhotoUrl(comment, const [
       'author_photo_url',
@@ -1633,7 +1640,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final resolvedPhoto = (cachedPhoto != null && cachedPhoto.isNotEmpty)
         ? cachedPhoto
         : fallbackPhoto;
-    if (resolvedPhoto.isEmpty && normalizedEmail.isNotEmpty) {
+    if ((resolvedPhoto.isEmpty || cachedName == null) && normalizedEmail.isNotEmpty) {
       _ensureProfilePhotoCached(normalizedEmail);
     }
     final hasAuthorPhoto = resolvedPhoto.isNotEmpty;
@@ -2065,7 +2072,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   Future<void> _ensureProfilePhotoCached(String email) async {
     final normalized = _normalizeEmail(email);
     if (normalized.isEmpty ||
-        _profilePhotoCache.containsKey(normalized) ||
         _profilePhotoFetchInFlight.contains(normalized)) {
       return;
     }
@@ -2073,12 +2079,16 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     try {
       final profile = await _supabaseService.getUserInfo(normalized);
       final resolved = resolveProfilePhotoUrl(profile) ?? '';
+      final name = profile?['display_name']?.toString().trim() ?? profile?['displayName']?.toString().trim() ?? '';
       if (!mounted) return;
       setState(() {
         _profilePhotoCache[normalized] = resolved;
+        if (name.isNotEmpty) {
+          _profileNameCache[normalized] = name;
+        }
       });
     } catch (e) {
-      debugPrint('Failed to resolve profile photo for $normalized: $e');
+      debugPrint('Failed to resolve profile photo/name for $normalized: $e');
     } finally {
       _profilePhotoFetchInFlight.remove(normalized);
     }
@@ -2207,6 +2217,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
       hintText: _replyToName != null
           ? 'Write your reply...'
           : 'Add a comment...',
+      userPhotoUrl: _profilePhotoCache[_normalizeEmail(widget.userEmail)],
+      userDisplayName: _profileNameCache[_normalizeEmail(widget.userEmail)] ?? _authService.displayName,
     );
   }
 

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../config/theme.dart';
 import 'sticker_picker.dart';
+import 'user_avatar.dart';
 
 class CommentInputBox extends StatefulWidget {
   final TextEditingController controller;
@@ -15,6 +16,8 @@ class CommentInputBox extends StatefulWidget {
   final Function(File)? onStickerSelected;
   final Future<bool> Function()? onStickerAccessCheck;
   final String hintText;
+  final String? userPhotoUrl;
+  final String? userDisplayName;
 
   const CommentInputBox({
     super.key,
@@ -28,6 +31,8 @@ class CommentInputBox extends StatefulWidget {
     this.onStickerSelected,
     this.onStickerAccessCheck,
     this.hintText = 'Add a comment...',
+    this.userPhotoUrl,
+    this.userDisplayName,
   });
 
   @override
@@ -38,7 +43,6 @@ class _CommentInputBoxState extends State<CommentInputBox>
     with SingleTickerProviderStateMixin {
   bool _isExpanded = false;
   late AnimationController _expandController;
-  late Animation<double> _expandAnimation;
 
   @override
   void initState() {
@@ -49,11 +53,6 @@ class _CommentInputBoxState extends State<CommentInputBox>
     _expandController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 280),
-    );
-    _expandAnimation = CurvedAnimation(
-      parent: _expandController,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeInCubic,
     );
   }
 
@@ -75,6 +74,8 @@ class _CommentInputBoxState extends State<CommentInputBox>
     if (widget.controller.text.isNotEmpty && !_isExpanded) {
       _expand();
     }
+    // Re-render when text changes to enable/disable button
+    if (mounted) setState(() {});
   }
 
   void _expand() {
@@ -125,8 +126,7 @@ class _CommentInputBoxState extends State<CommentInputBox>
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgColor = isDark ? const Color(0xFF0B1015) : Colors.white;
-    final surfaceColor = isDark ? const Color(0xFF16181C) : const Color(0xFFF4F6F9);
+    final bgColor = isDark ? const Color(0xFF000000) : Colors.white;
     final textColor = isDark ? Colors.white : Colors.black;
     final mutedColor = isDark ? Colors.white60 : Colors.black54;
 
@@ -137,7 +137,7 @@ class _CommentInputBoxState extends State<CommentInputBox>
         color: bgColor,
         border: Border(
           top: BorderSide(
-            color: isDark ? Colors.white12 : Colors.black12,
+            color: isDark ? const Color(0xFF2E2E2E) : const Color(0xFFE2E8F0),
             width: 0.5,
           ),
         ),
@@ -158,7 +158,7 @@ class _CommentInputBoxState extends State<CommentInputBox>
                   // Reply banner
                   if (widget.replyToName != null) ...[
                     _buildReplyBanner(isDark),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 8),
                   ],
                   // Main input area
                   Row(
@@ -167,29 +167,22 @@ class _CommentInputBoxState extends State<CommentInputBox>
                         : CrossAxisAlignment.center,
                     children: [
                       // User avatar
-                      CircleAvatar(
-                        radius: 18,
-                        backgroundColor: AppTheme.primary,
-                        child: Text(
-                          'U',
-                          style: GoogleFonts.inter(
-                            fontSize: 14,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
+                      UserAvatar(
+                        radius: 16,
+                        photoUrl: widget.userPhotoUrl,
+                        displayName: widget.userDisplayName ?? 'User',
                       ),
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 10),
                       Expanded(
                         child: _isExpanded
                             ? _buildExpandedInput(isDark, textColor, mutedColor)
-                            : _buildCompactBar(mutedColor),
+                            : _buildCompactBar(mutedColor, isDark),
                       ),
                       if (!_isExpanded) ...[
                         const SizedBox(width: 8),
                         Icon(
                           Icons.open_in_full_rounded,
-                          size: 18,
+                          size: 16,
                           color: mutedColor,
                         ),
                       ],
@@ -197,8 +190,11 @@ class _CommentInputBoxState extends State<CommentInputBox>
                   ),
                   // Expanded controls
                   if (_isExpanded) ...[
-                    const SizedBox(height: 12),
-                    _buildExpandedControls(isDark, mutedColor),
+                    const SizedBox(height: 10),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 42),
+                      child: _buildExpandedControls(isDark, mutedColor),
+                    ),
                   ],
                 ],
               ),
@@ -210,24 +206,28 @@ class _CommentInputBoxState extends State<CommentInputBox>
   }
 
   Widget _buildReplyBanner(bool isDark) {
+    final handle = widget.replyToName?.contains('@') == true
+        ? '@${widget.replyToName!.split('@').first}'
+        : '@${widget.replyToName}';
     return Row(
       children: [
-        Icon(
-          Icons.reply_rounded,
-          size: 14,
-          color: AppTheme.primary,
-        ),
-        const SizedBox(width: 6),
         Text(
-          'Replying to ${widget.replyToName}',
+          'Replying to ',
+          style: GoogleFonts.inter(
+            fontSize: 13,
+            color: isDark ? Colors.white54 : Colors.black54,
+          ),
+        ),
+        Text(
+          handle,
           style: GoogleFonts.inter(
             fontSize: 13,
             color: AppTheme.primary,
-            fontWeight: FontWeight.w500,
+            fontWeight: FontWeight.w600,
           ),
         ),
         const Spacer(),
-        InkWell(
+        GestureDetector(
           onTap: () {
             widget.onCancelReply();
             if (widget.controller.text.isEmpty) {
@@ -237,23 +237,32 @@ class _CommentInputBoxState extends State<CommentInputBox>
           child: Icon(
             Icons.close_rounded,
             size: 16,
-            color: isDark ? Colors.white60 : Colors.black54,
+            color: isDark ? Colors.white54 : Colors.black38,
           ),
         ),
       ],
     );
   }
 
-  Widget _buildCompactBar(Color mutedColor) {
+  Widget _buildCompactBar(Color mutedColor, bool isDark) {
     return Container(
-      height: 40,
+      height: 38,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF16181C) : const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(19),
+        border: Border.all(
+          color: isDark ? Colors.white10 : Colors.black12,
+          width: 0.5,
+        ),
+      ),
       alignment: Alignment.centerLeft,
       child: Text(
         widget.isReadOnly
             ? 'Read-only mode'
             : (widget.replyToName != null ? 'Post your reply' : widget.hintText),
         style: GoogleFonts.inter(
-          fontSize: 15,
+          fontSize: 14,
           color: mutedColor,
         ),
       ),
@@ -267,11 +276,11 @@ class _CommentInputBoxState extends State<CommentInputBox>
       enabled: !widget.isReadOnly && !widget.isSubmitting,
       style: GoogleFonts.inter(
         color: textColor,
-        fontSize: 16,
-        height: 1.5,
+        fontSize: 15,
+        height: 1.4,
       ),
       maxLines: null,
-      minLines: 3,
+      minLines: 2,
       textCapitalization: TextCapitalization.sentences,
       decoration: InputDecoration(
         hintText: widget.isReadOnly
@@ -279,11 +288,11 @@ class _CommentInputBoxState extends State<CommentInputBox>
             : (widget.replyToName != null ? 'Post your reply' : widget.hintText),
         hintStyle: GoogleFonts.inter(
           color: mutedColor,
-          fontSize: 16,
+          fontSize: 15,
         ),
         border: InputBorder.none,
         isDense: true,
-        contentPadding: EdgeInsets.zero,
+        contentPadding: const EdgeInsets.symmetric(vertical: 4),
       ),
       onSubmitted: (_) {
         if (widget.controller.text.trim().isNotEmpty) {
@@ -294,6 +303,7 @@ class _CommentInputBoxState extends State<CommentInputBox>
   }
 
   Widget _buildExpandedControls(bool isDark, Color mutedColor) {
+    final textNotEmpty = widget.controller.text.trim().isNotEmpty;
     return Row(
       children: [
         // Sticker / image button
@@ -305,7 +315,7 @@ class _CommentInputBoxState extends State<CommentInputBox>
             icon: Icon(
               Icons.image_outlined,
               color: widget.isReadOnly ? Colors.grey : AppTheme.primary,
-              size: 22,
+              size: 20,
             ),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),
@@ -316,29 +326,33 @@ class _CommentInputBoxState extends State<CommentInputBox>
           const SizedBox(
             width: 20,
             height: 20,
-            child: CircularProgressIndicator(strokeWidth: 2),
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation(AppTheme.primary),
+            ),
           )
         else
           ElevatedButton(
-            onPressed: widget.isReadOnly ||
-                    widget.controller.text.trim().isEmpty
+            onPressed: widget.isReadOnly || !textNotEmpty
                 ? null
                 : _handleSubmit,
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.primary,
               foregroundColor: Colors.white,
+              disabledBackgroundColor: AppTheme.primary.withValues(alpha: 0.4),
+              disabledForegroundColor: Colors.white70,
               elevation: 0,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(20),
               ),
-              minimumSize: const Size(0, 36),
+              minimumSize: const Size(0, 32),
             ),
             child: Text(
               'Reply',
               style: GoogleFonts.inter(
-                fontWeight: FontWeight.w700,
-                fontSize: 14,
+                fontWeight: FontWeight.bold,
+                fontSize: 13,
               ),
             ),
           ),

@@ -163,9 +163,8 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
     }
   }
 
-  // ignore: unused_element
   Future<void> _openUploadFlow() async {
-    await Navigator.push<Map<String, String>>(
+    final result = await Navigator.push<Map<String, String>>(
       context,
       MaterialPageRoute(
         builder: (_) => SyllabusUploadScreen(
@@ -180,20 +179,43 @@ class _SyllabusScreenState extends State<SyllabusScreen> {
         ),
       ),
     );
+
+    if (result != null && result['didUpload'] == 'true') {
+      final sem = result['semester'];
+      final sub = result['subject'];
+      if (sem != null && sub != null) {
+        setState(() {
+          _selectedSemester = sem;
+          _selectedSubject = sub;
+        });
+        await _refreshAvailableSubjects();
+        _fetchSyllabus();
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    assert(() {
-      _openUploadFlow;
-      return true;
-    }());
 
     return Scaffold(
       backgroundColor: isDark
           ? AppTheme.darkBackground
           : const Color(0xFFF8FAFC),
+      floatingActionButton: widget.canUploadSyllabus
+          ? FloatingActionButton.extended(
+              onPressed: _openUploadFlow,
+              backgroundColor: widget.departmentColor,
+              icon: const Icon(Icons.upload_file_rounded, color: Colors.white),
+              label: Text(
+                'Upload Syllabus',
+                style: GoogleFonts.inter(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            )
+          : null,
       appBar: AppBar(
         backgroundColor: isDark ? AppTheme.darkSurface : Colors.white,
         elevation: 0,

@@ -100,6 +100,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   // postId -> vote direction (1, -1, 0)
   final Map<String, int> _userVotes = {};
   final Map<String, String> _profilePhotoCache = {};
+  final Map<String, String> _profileNameCache = {};
   final Set<String> _profilePhotoFetchInFlight = {};
   bool _isInteractionStateLoading = false;
 
@@ -581,14 +582,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
     }
 
     _presenceRetryCount++;
-    final anonymizedUserId = _getAnonymizedUserId();
+    final userEmailKey = widget.userEmail.trim().toLowerCase();
 
     _presenceChannel = Supabase.instance.client.channel(
-      'presence:room:${widget.roomId}',
+      'room_presence:${widget.roomId}',
       opts: RealtimeChannelConfig(
         self: true,
         enabled: true,
-        key: anonymizedUserId,
+        key: userEmailKey,
       ),
     );
 
@@ -600,7 +601,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
           if (status == RealtimeSubscribeStatus.subscribed) {
             _presenceRetryCount = 0; // Reset retry count on success
             await _presenceChannel!.track({
-              'user_id': anonymizedUserId,
+              'user_id': userEmailKey,
               'room_id': widget.roomId,
               'online_at': DateTime.now().toIso8601String(),
             });
@@ -1436,9 +1437,17 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       if (bodyText.isNotEmpty) bodyText,
     ].join('\n');
 
-    final authorName = post['author_name'] ?? 'User';
     final authorEmail = (post['author_email'] ?? post['user_email'] ?? '')
         .toString();
+    final normalizedEmail = _normalizeEmail(authorEmail);
+    final cachedName = _profileNameCache[normalizedEmail];
+    final authorName = (cachedName != null && cachedName.isNotEmpty)
+        ? cachedName
+        : (post['author_name']?.toString().trim().isNotEmpty ?? false)
+        ? post['author_name'].toString().trim()
+        : authorEmail.contains('@')
+        ? authorEmail.split('@').first
+        : 'User';
     final isAuthor =
         authorEmail.isNotEmpty &&
         authorEmail.toLowerCase() == widget.userEmail.toLowerCase();
@@ -1495,7 +1504,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                     (cachedPhoto != null && cachedPhoto.isNotEmpty)
                     ? cachedPhoto
                     : photoUrl;
-                if (resolvedPhoto.isEmpty && normalizedEmail.isNotEmpty) {
+                if ((resolvedPhoto.isEmpty || cachedName == null) && normalizedEmail.isNotEmpty) {
                   _ensureProfilePhotoCached(normalizedEmail);
                 }
                 final bool hasPhoto = resolvedPhoto.isNotEmpty;
@@ -3530,7 +3539,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
             post['user_email']?.toString() ??
             '',
       );
-      if (email.isEmpty || _profilePhotoCache.containsKey(email)) continue;
+      if (email.isEmpty) continue;
+      
+      final authorName = post['author_name']?.toString().trim();
+      if (authorName != null && authorName.isNotEmpty && !_profileNameCache.containsKey(email)) {
+        _profileNameCache[email] = authorName;
+      }
+      
+      if (_profilePhotoCache.containsKey(email)) continue;
       final resolved = _resolvePhotoUrl(post, const [
         'author_photo_url',
         'profile_photo_url',
@@ -3546,7 +3562,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   Future<void> _ensureProfilePhotoCached(String email) async {
     final normalized = _normalizeEmail(email);
     if (normalized.isEmpty ||
-        _profilePhotoCache.containsKey(normalized) ||
         _profilePhotoFetchInFlight.contains(normalized)) {
       return;
     }
@@ -3554,12 +3569,16 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
     try {
       final profile = await _supabaseService.getUserInfo(normalized);
       final resolved = resolveProfilePhotoUrl(profile) ?? '';
+      final name = profile?['display_name']?.toString().trim() ?? profile?['displayName']?.toString().trim() ?? '';
       if (!mounted) return;
       setState(() {
         _profilePhotoCache[normalized] = resolved;
+        if (name.isNotEmpty) {
+          _profileNameCache[normalized] = name;
+        }
       });
     } catch (e) {
-      debugPrint('Failed to resolve profile photo for $normalized: $e');
+      debugPrint('Failed to resolve profile photo/name for $normalized: $e');
     } finally {
       _profilePhotoFetchInFlight.remove(normalized);
     }
