@@ -932,66 +932,94 @@ class _StickerPickerState extends State<StickerPicker>
       null, // "GIF" text instead of icon
       Icons.sticky_note_2,
     ];
-    final animation = _tabController.animation;
+    final animation = _tabController.animation!;
 
     return Container(
-      height: 40,
+      height: 36,
       decoration: BoxDecoration(
         color: isDark ? const Color(0xFF2C2C2E) : const Color(0xFFF2F2F7),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(18),
       ),
-      child: Row(
-        children: labels.asMap().entries.map((entry) {
-          final index = entry.key;
-          final label = entry.value;
-          final icon = icons[index];
-          final isSelected = _tabController.index == index;
-
-          return Expanded(
-            child: GestureDetector(
-              onTap: () => _tabController.animateTo(index),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                curve: Curves.easeOut,
-                decoration: BoxDecoration(
-                  color: isSelected
-                      ? isDark
-                          ? Colors.white12
-                          : Colors.white
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(20),
-                  border: isSelected
-                      ? Border.all(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final segmentWidth = constraints.maxWidth / labels.length;
+          return AnimatedBuilder(
+            animation: animation,
+            builder: (context, _) {
+              final position = animation.value.clamp(
+                0.0,
+                (labels.length - 1).toDouble(),
+              );
+              final activeIndex = position.round();
+              return Stack(
+                children: [
+                  // Sliding pill indicator that tracks swipe progress
+                  Positioned(
+                    left: position * segmentWidth + 2,
+                    top: 2,
+                    bottom: 2,
+                    width: segmentWidth - 4,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white12 : Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
                           color: isDark
                               ? Colors.white24
                               : Colors.black.withValues(alpha: 0.08),
                           width: 0.5,
-                        )
-                      : null,
-                ),
-                alignment: Alignment.center,
-                child: icon != null
-                    ? Icon(
-                        icon,
-                        size: 20,
-                        color: isSelected
-                            ? (isDark ? Colors.white : Colors.black87)
-                            : (isDark ? Colors.white54 : Colors.black45),
-                      )
-                    : Text(
-                        label,
-                        style: GoogleFonts.inter(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: isSelected
-                              ? (isDark ? Colors.white : Colors.black87)
-                              : (isDark ? Colors.white54 : Colors.black45),
                         ),
                       ),
-              ),
-            ),
+                    ),
+                  ),
+                  Row(
+                    children: labels.asMap().entries.map((entry) {
+                      final index = entry.key;
+                      final label = entry.value;
+                      final icon = icons[index];
+                      final isSelected = activeIndex == index;
+
+                      return Expanded(
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => _tabController.animateTo(index),
+                          child: Center(
+                            child: icon != null
+                                ? Icon(
+                                    icon,
+                                    size: 18,
+                                    color: isSelected
+                                        ? (isDark
+                                              ? Colors.white
+                                              : Colors.black87)
+                                        : (isDark
+                                              ? Colors.white54
+                                              : Colors.black45),
+                                  )
+                                : Text(
+                                    label,
+                                    style: GoogleFonts.inter(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: isSelected
+                                          ? (isDark
+                                                ? Colors.white
+                                                : Colors.black87)
+                                          : (isDark
+                                                ? Colors.white54
+                                                : Colors.black45),
+                                    ),
+                                  ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              );
+            },
           );
-        }).toList(),
+        },
       ),
     );
   }
@@ -1006,12 +1034,12 @@ class _StickerPickerState extends State<StickerPicker>
       ('🔥', 'Fire'),
     ];
     return SizedBox(
-      height: 44,
+      height: 34,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         itemCount: pills.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 8),
+        separatorBuilder: (_, __) => const SizedBox(width: 6),
         itemBuilder: (context, index) {
           final (emoji, label) = pills[index];
           return GestureDetector(
@@ -1025,7 +1053,7 @@ class _StickerPickerState extends State<StickerPicker>
               );
             },
             child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
               decoration: BoxDecoration(
                 color: isDark
                     ? Colors.white.withValues(alpha: 0.08)
@@ -1040,12 +1068,12 @@ class _StickerPickerState extends State<StickerPicker>
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(emoji, style: const TextStyle(fontSize: 16)),
-                  const SizedBox(width: 6),
+                  Text(emoji, style: const TextStyle(fontSize: 13)),
+                  const SizedBox(width: 5),
                   Text(
                     label,
                     style: GoogleFonts.inter(
-                      fontSize: 13,
+                      fontSize: 11.5,
                       fontWeight: FontWeight.w600,
                       color: isDark ? Colors.white : Colors.black87,
                     ),
@@ -1064,7 +1092,7 @@ class _StickerPickerState extends State<StickerPicker>
     if (packs.isEmpty) return const SizedBox.shrink();
 
     return Container(
-      height: 56,
+      height: 46,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
         border: Border(
@@ -1144,14 +1172,14 @@ class _StickerPickerState extends State<StickerPicker>
     return GestureDetector(
       onTap: onTap ?? () => setState(() => _selectedPackId = id),
       child: Container(
-        width: 48,
-        height: 48,
-        margin: const EdgeInsets.symmetric(vertical: 4),
+        width: 40,
+        height: 40,
+        margin: const EdgeInsets.symmetric(vertical: 3),
         decoration: BoxDecoration(
           color: isSelected
               ? (isDark ? Colors.white12 : Colors.black.withValues(alpha: 0.06))
               : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(10),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -1161,23 +1189,23 @@ class _StickerPickerState extends State<StickerPicker>
                 borderRadius: BorderRadius.circular(6),
                 child: Image.asset(
                   _assetPathFromStickerUrl(imageUrl),
-                  width: 28,
-                  height: 28,
+                  width: 24,
+                  height: 24,
                   fit: BoxFit.cover,
                 ),
               )
             else if (icon != null)
               Icon(
                 icon,
-                size: 24,
+                size: 20,
                 color: isSelected
                     ? (isDark ? Colors.white : Colors.black87)
                     : (isDark ? Colors.white54 : Colors.black45),
               )
             else
               Container(
-                width: 28,
-                height: 28,
+                width: 24,
+                height: 24,
                 decoration: BoxDecoration(
                   color: AppTheme.primary.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(6),
@@ -1186,7 +1214,7 @@ class _StickerPickerState extends State<StickerPicker>
                   child: Text(
                     label.substring(0, 1).toUpperCase(),
                     style: GoogleFonts.inter(
-                      fontSize: 12,
+                      fontSize: 11,
                       fontWeight: FontWeight.w700,
                       color: AppTheme.primary,
                     ),
@@ -1277,11 +1305,11 @@ class _StickerPickerState extends State<StickerPicker>
 
     if (_stickerQuery.trim().isNotEmpty) {
       return GridView.builder(
-        padding: const EdgeInsets.only(top: 8),
+        padding: const EdgeInsets.only(top: 8, bottom: 8),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 4,
-          mainAxisSpacing: 8,
-          crossAxisSpacing: 8,
+          crossAxisCount: 5,
+          mainAxisSpacing: 6,
+          crossAxisSpacing: 6,
         ),
         itemCount: _giphyStickerResults.length,
         itemBuilder: (context, index) {
@@ -1307,11 +1335,11 @@ class _StickerPickerState extends State<StickerPicker>
     }
 
     return GridView.builder(
-      padding: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.only(top: 8, bottom: 8),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 4,
-        mainAxisSpacing: 8,
-        crossAxisSpacing: 8,
+        crossAxisCount: 5,
+        mainAxisSpacing: 6,
+        crossAxisSpacing: 6,
       ),
       itemCount: _filteredLocalStickers.length + 1,
       itemBuilder: (context, index) {
@@ -1323,8 +1351,8 @@ class _StickerPickerState extends State<StickerPicker>
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Container(
-                  width: 56,
-                  height: 56,
+                  width: 40,
+                  height: 40,
                   decoration: BoxDecoration(
                     color: const Color(0xFF00A884), // WhatsApp green
                     borderRadius: BorderRadius.circular(999),
@@ -1332,14 +1360,14 @@ class _StickerPickerState extends State<StickerPicker>
                   child: const Icon(
                     Icons.edit_rounded,
                     color: Colors.white,
-                    size: 24,
+                    size: 20,
                   ),
                 ),
-                const SizedBox(height: 6),
+                const SizedBox(height: 4),
                 Text(
                   'Create',
                   style: GoogleFonts.inter(
-                    fontSize: 12,
+                    fontSize: 10.5,
                     fontWeight: FontWeight.w600,
                     color: const Color(0xFF00A884),
                   ),
@@ -1520,9 +1548,9 @@ class _StickerPickerState extends State<StickerPicker>
 
     if (_stickerQuery.trim().isNotEmpty) {
       return GridView.builder(
-        padding: const EdgeInsets.only(top: 8),
+        padding: const EdgeInsets.only(top: 8, bottom: 8),
         gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 4,
+          crossAxisCount: 5,
           mainAxisSpacing: 6,
           crossAxisSpacing: 6,
         ),
@@ -1547,9 +1575,9 @@ class _StickerPickerState extends State<StickerPicker>
     }
 
     return GridView.builder(
-      padding: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.only(top: 8, bottom: 8),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 4,
+        crossAxisCount: 5,
         mainAxisSpacing: 6,
         crossAxisSpacing: 6,
       ),
@@ -1865,7 +1893,11 @@ class _StickerPickerState extends State<StickerPicker>
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final screenHeight = MediaQuery.of(context).size.height;
-    final sheetHeight = _isExpanded ? screenHeight * 0.92 : screenHeight * 0.58;
+    // Keep content clear of the system navigation bar (gesture/3-button).
+    final bottomSafeInset = MediaQuery.of(context).viewPadding.bottom;
+    final sheetHeight =
+        (_isExpanded ? screenHeight * 0.92 : screenHeight * 0.58) +
+        bottomSafeInset;
 
     if (_isLoading) {
       return Container(
@@ -2002,6 +2034,9 @@ class _StickerPickerState extends State<StickerPicker>
               );
             },
           ),
+
+          // Spacer so the system navigation bar never covers content
+          if (bottomSafeInset > 0) SizedBox(height: bottomSafeInset),
         ],
       ),
     );

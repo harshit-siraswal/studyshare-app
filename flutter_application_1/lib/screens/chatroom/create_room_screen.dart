@@ -99,6 +99,10 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
     setState(() => _errorMessage = message);
   }
 
+  bool get _isFormValid =>
+      _nameController.text.trim().isNotEmpty &&
+      (_selectedTags.isNotEmpty || _tagController.text.trim().isNotEmpty);
+
   void _addTag([String? rawValue]) {
     final value = (rawValue ?? _tagController.text).trim();
     if (value.isEmpty) return;
@@ -170,6 +174,15 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
       _setError('Room name is required.');
       return;
     }
+
+    final typedTag = _tagController.text.trim();
+    if (typedTag.isNotEmpty) {
+      _addTag(typedTag);
+      if (_errorMessage != null) {
+        return;
+      }
+    }
+
     if (_selectedTags.isEmpty) {
       _setError('Please add at least one tag.');
       return;
@@ -193,8 +206,9 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
 
       if (!mounted) return;
       Navigator.of(context).pop(result);
-    } catch (_) {
-      _setError('Failed to create room. Please try again.');
+    } catch (e) {
+      debugPrint('Error creating room: $e');
+      _setError('Failed to create room: ${e.toString().replaceAll('Exception: ', '')}');
     } finally {
       if (mounted) {
         setState(() => _isSubmitting = false);
@@ -243,30 +257,17 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                 ),
               ),
               const SizedBox(height: 18),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  _buildMetaChip(
-                    label: _isPrivate ? 'Private room' : 'Public room',
-                    icon: _isPrivate
-                        ? Icons.lock_rounded
-                        : Icons.public_rounded,
-                    isDark: isDark,
-                  ),
-                  _buildMetaChip(
-                    label: '$_selectedDurationDays day expiry',
-                    icon: Icons.schedule_rounded,
-                    isDark: isDark,
-                  ),
-                ],
-              ),
+              // Live preview of how the room will appear in Discover
+              _buildRoomPreviewCard(isDark),
               const SizedBox(height: 24),
               _buildLabel('Room Name', isDark),
               const SizedBox(height: 8),
               TextField(
                 controller: _nameController,
                 textCapitalization: TextCapitalization.words,
+                textInputAction: TextInputAction.next,
+                maxLength: 48,
+                onChanged: (_) => setState(() {}),
                 style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                 decoration: _fieldDecoration(
                   hintText: 'Placement Prep 2026',
@@ -275,12 +276,15 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                   borderColor: borderColor,
                 ),
               ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 10),
               _buildLabel('Description', isDark),
               const SizedBox(height: 8),
               TextField(
                 controller: _descriptionController,
                 maxLines: 4,
+                maxLength: 200,
+                textCapitalization: TextCapitalization.sentences,
+                onChanged: (_) => setState(() {}),
                 style: TextStyle(color: isDark ? Colors.white : Colors.black87),
                 decoration: _fieldDecoration(
                   hintText:
@@ -322,6 +326,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                   Expanded(
                     child: TextField(
                       controller: _tagController,
+                      onChanged: (_) => setState(() {}),
                       style: TextStyle(
                         color: isDark ? Colors.white : Colors.black87,
                       ),
@@ -355,47 +360,52 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
               Wrap(
                 spacing: 8,
                 runSpacing: 8,
-                children: _selectedTags.isEmpty
-                    ? _tagSuggestions
-                          .map(
-                            (tag) => ActionChip(
-                              label: Text(tag),
-                              onPressed: _isSubmitting
-                                  ? null
-                                  : () => _addTag(tag),
-                              labelStyle: GoogleFonts.inter(
-                                fontWeight: FontWeight.w600,
-                              ),
-                              side: BorderSide(color: borderColor),
-                              backgroundColor: pageBg,
-                            ),
-                          )
-                          .toList()
-                    : _selectedTags
-                          .map(
-                            (tag) => Chip(
-                              label: Text(tag),
-                              labelStyle: GoogleFonts.inter(
-                                fontWeight: FontWeight.w600,
-                                color: AppTheme.primary,
-                              ),
-                              deleteIconColor: AppTheme.primary,
-                              onDeleted: _isSubmitting
-                                  ? null
-                                  : () {
-                                      setState(() {
-                                        _selectedTags.remove(tag);
-                                      });
-                                    },
-                              side: BorderSide(
-                                color: AppTheme.primary.withValues(alpha: 0.24),
-                              ),
-                              backgroundColor: AppTheme.primary.withValues(
-                                alpha: isDark ? 0.18 : 0.08,
-                              ),
-                            ),
-                          )
-                          .toList(),
+                children: [
+                  // Selected tags first...
+                  ..._selectedTags.map(
+                    (tag) => Chip(
+                      label: Text(tag),
+                      labelStyle: GoogleFonts.inter(
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.primary,
+                      ),
+                      deleteIconColor: AppTheme.primary,
+                      onDeleted: _isSubmitting
+                          ? null
+                          : () {
+                              setState(() {
+                                _selectedTags.remove(tag);
+                              });
+                            },
+                      side: BorderSide(
+                        color: AppTheme.primary.withValues(alpha: 0.24),
+                      ),
+                      backgroundColor: AppTheme.primary.withValues(
+                        alpha: isDark ? 0.18 : 0.08,
+                      ),
+                    ),
+                  ),
+                  // ...then remaining one-tap suggestions
+                  ..._tagSuggestions
+                      .where((tag) => !_selectedTags.contains(tag))
+                      .map(
+                        (tag) => ActionChip(
+                          avatar: Icon(
+                            Icons.add_rounded,
+                            size: 16,
+                            color: mutedColor,
+                          ),
+                          label: Text(tag),
+                          onPressed: _isSubmitting ? null : () => _addTag(tag),
+                          labelStyle: GoogleFonts.inter(
+                            fontWeight: FontWeight.w600,
+                            color: mutedColor,
+                          ),
+                          side: BorderSide(color: borderColor),
+                          backgroundColor: pageBg,
+                        ),
+                      ),
+                ],
               ),
               const SizedBox(height: 24),
               Divider(color: dividerColor, height: 1),
@@ -487,11 +497,38 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
               ],
               if (_errorMessage != null) ...[
                 const SizedBox(height: 18),
-                Text(
-                  _errorMessage!,
-                  style: GoogleFonts.inter(
-                    color: Colors.red.shade400,
-                    fontWeight: FontWeight.w600,
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: isDark ? 0.14 : 0.06),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: Colors.red.withValues(alpha: 0.35),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.error_outline_rounded,
+                        size: 18,
+                        color: Colors.red.shade400,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _errorMessage!,
+                          style: GoogleFonts.inter(
+                            fontSize: 12.5,
+                            color: Colors.red.shade400,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -508,10 +545,14 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
               width: double.infinity,
               height: 56,
               child: ElevatedButton(
-                onPressed: _isSubmitting ? null : _submit,
+                onPressed: (_isSubmitting || !_isFormValid) ? null : _submit,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.primary,
                   foregroundColor: Colors.white,
+                  disabledBackgroundColor: AppTheme.primary.withValues(
+                    alpha: 0.35,
+                  ),
+                  disabledForegroundColor: Colors.white70,
                   elevation: 0,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(18),
@@ -537,7 +578,9 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
             ),
             const SizedBox(height: 10),
             Text(
-              _isPrivate
+              !_isFormValid
+                  ? 'Add a room name and at least one tag to continue.'
+                  : _isPrivate
                   ? 'Private rooms stay hidden and can only be joined with the room code.'
                   : 'Public rooms appear in Discover and still get a shareable room code.',
               textAlign: TextAlign.center,
@@ -575,6 +618,10 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
       hintStyle: GoogleFonts.inter(
         color: isDark ? Colors.white38 : const Color(0xFF94A3B8),
       ),
+      counterStyle: GoogleFonts.inter(
+        fontSize: 11,
+        color: isDark ? Colors.white38 : const Color(0xFF94A3B8),
+      ),
       filled: true,
       fillColor: fillColor,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
@@ -589,6 +636,181 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
       focusedBorder: const OutlineInputBorder(
         borderRadius: BorderRadius.all(Radius.circular(18)),
         borderSide: BorderSide(color: AppTheme.primary, width: 1.2),
+      ),
+    );
+  }
+
+  /// A live "Discover card" preview that updates as the user types, so they
+  /// can see exactly how the room will look before creating it.
+  Widget _buildRoomPreviewCard(bool isDark) {
+    final name = _nameController.text.trim();
+    final description = _descriptionController.text.trim();
+    final displayName = name.isEmpty ? 'Your room name' : name;
+    final avatarLetter = name.isEmpty ? '?' : name[0].toUpperCase();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: isDark
+              ? [
+                  AppTheme.primary.withValues(alpha: 0.16),
+                  Colors.white.withValues(alpha: 0.02),
+                ]
+              : [
+                  AppTheme.primary.withValues(alpha: 0.08),
+                  const Color(0xFFF8FAFC),
+                ],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: AppTheme.primary.withValues(alpha: isDark ? 0.3 : 0.18),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.visibility_outlined,
+                size: 14,
+                color: isDark ? Colors.white38 : const Color(0xFF94A3B8),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                'PREVIEW',
+                style: GoogleFonts.inter(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.2,
+                  color: isDark ? Colors.white38 : const Color(0xFF94A3B8),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: AppTheme.primary,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Center(
+                  child: Text(
+                    avatarLetter,
+                    style: GoogleFonts.inter(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.inter(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w700,
+                        color: name.isEmpty
+                            ? (isDark
+                                  ? Colors.white38
+                                  : const Color(0xFF94A3B8))
+                            : (isDark ? Colors.white : const Color(0xFF0F172A)),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Icon(
+                          _isPrivate
+                              ? Icons.lock_rounded
+                              : Icons.public_rounded,
+                          size: 12,
+                          color: isDark
+                              ? Colors.white54
+                              : const Color(0xFF64748B),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${_isPrivate ? 'Private' : 'Public'} • expires in $_selectedDurationDays days',
+                          style: GoogleFonts.inter(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: isDark
+                                ? Colors.white54
+                                : const Color(0xFF64748B),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (description.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        description,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.inter(
+                          fontSize: 12,
+                          height: 1.4,
+                          color: isDark
+                              ? Colors.white60
+                              : const Color(0xFF475569),
+                        ),
+                      ),
+                    ],
+                    if (_selectedTags.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: _selectedTags
+                            .take(4)
+                            .map(
+                              (tag) => Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: AppTheme.primary.withValues(
+                                    alpha: isDark ? 0.22 : 0.1,
+                                  ),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  tag,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppTheme.primary,
+                                  ),
+                                ),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

@@ -273,11 +273,21 @@ class _StudyScreenState extends State<StudyScreen>
     _scrollController.addListener(_onScroll);
     _followingScrollController.addListener(_onFollowingScroll);
 
-    _ensureUserProfileLoaded().whenComplete(() {
-      if (!mounted) return;
-      _loadResources();
-      _loadUnreadNotificationCount();
-    });
+    // Start resource load immediately without waiting for profile so the
+    // feed appears while the profile fetch is still in flight.
+    // After profile resolves, refresh with the user's semester/branch if set.
+    unawaited(
+      _ensureUserProfileLoaded().then((_) {
+        if (!mounted) return;
+        final hasProfileFilter =
+            _profileSemesterFilter != null || _profileBranchFilter != null;
+        if (_resourcesRelevantOnly && hasProfileFilter) {
+          _loadResources(refresh: true);
+        }
+      }),
+    );
+    _loadResources();
+    _loadUnreadNotificationCount();
   }
 
   Future<void> _ensureUserProfileLoaded({bool forceRefresh = false}) async {
@@ -977,24 +987,17 @@ class _StudyScreenState extends State<StudyScreen>
         _isLoading = false;
       });
 
-      // Retry once when first load returns empty with default filters.
+      // Retry immediately (no delay) when the first load returns empty with
+      // profile filters active — broadens scope to show all resources.
       if (!_didRetryInitialEmptyLoad &&
           !refresh &&
           resources.isEmpty &&
           !_hasActiveFilters) {
         _didRetryInitialEmptyLoad = true;
-
-        // CRITICAL FIX: Actually unset the relevancy filter so the retry queries all resources
         setState(() {
           _resourcesRelevantOnly = false;
         });
-
-        _retryTimer?.cancel();
-        _retryTimer = Timer(const Duration(milliseconds: 900), () {
-          _retryTimer = null;
-          if (!mounted) return;
-          _loadResources(refresh: true);
-        });
+        _loadResources(refresh: true);
       }
 
       // Update Home Widget by filtering syllabus resources
@@ -1014,12 +1017,7 @@ class _StudyScreenState extends State<StudyScreen>
         setState(() {
           _resourcesRelevantOnly = false;
         });
-        _retryTimer?.cancel();
-        _retryTimer = Timer(const Duration(milliseconds: 900), () {
-          _retryTimer = null;
-          if (!mounted) return;
-          _loadResources(refresh: true);
-        });
+        _loadResources(refresh: true);
       }
     }
   }

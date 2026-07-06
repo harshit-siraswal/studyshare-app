@@ -1480,7 +1480,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
               isRoomAdmin: _isAdmin,
             ),
           ),
-        ).then((_) => _loadRoomData(silent: true));
+        ).then((_) => _refreshPostsOnly(silent: true));
       },
       child: Container(
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
@@ -1535,7 +1535,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // X/Twitter-style header: name + badge + menu on top row,
+                  // @handle · time on the second row.
                   Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Flexible(
                         child: Text(
@@ -1551,22 +1554,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                       ),
                       const SizedBox(width: 4),
                       UserBadge(email: authorEmail, size: 12),
-                      const SizedBox(width: 6),
-                      Text(
-                        '@${authorEmail.split('@').first}',
-                        style: GoogleFonts.inter(
-                          fontSize: 13,
-                          color: secondaryTextColor,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        '· ${_formatTime(createdAt)}',
-                        style: GoogleFonts.inter(
-                          fontSize: 13,
-                          color: secondaryTextColor,
-                        ),
-                      ),
                       const Spacer(),
                       PopupMenuButton<String>(
                         tooltip: 'Post options',
@@ -1706,6 +1693,26 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                       ),
                     ],
                   ),
+                  // @handle · time row (muted, below display name)
+                  Row(
+                    children: [
+                      Text(
+                        '@${authorEmail.split('@').first}',
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          color: secondaryTextColor,
+                        ),
+                      ),
+                      const SizedBox(width: 5),
+                      Text(
+                        '· ${_formatTime(createdAt)}',
+                        style: GoogleFonts.inter(
+                          fontSize: 13,
+                          color: secondaryTextColor,
+                        ),
+                      ),
+                    ],
+                  ),
                   if (titleText.isNotEmpty) ...[
                     const SizedBox(height: 2),
                     Text(
@@ -1825,7 +1832,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                                 isRoomAdmin: _isAdmin,
                               ),
                             ),
-                          ).then((_) => _loadRoomData(silent: true));
+                          ).then((_) => _refreshPostsOnly(silent: true));
                         },
                       ),
                       const SizedBox(width: 24),
@@ -3533,6 +3540,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   String _normalizeEmail(String value) => value.trim().toLowerCase();
 
   void _primePhotoCacheFromPosts(List<Map<String, dynamic>> posts) {
+    final missing = <String>{};
     for (final post in posts) {
       final email = _normalizeEmail(
         post['author_email']?.toString() ??
@@ -3540,12 +3548,12 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
             '',
       );
       if (email.isEmpty) continue;
-      
+
       final authorName = post['author_name']?.toString().trim();
       if (authorName != null && authorName.isNotEmpty && !_profileNameCache.containsKey(email)) {
         _profileNameCache[email] = authorName;
       }
-      
+
       if (_profilePhotoCache.containsKey(email)) continue;
       final resolved = _resolvePhotoUrl(post, const [
         'author_photo_url',
@@ -3555,7 +3563,42 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       ]);
       if (resolved.isNotEmpty) {
         _profilePhotoCache[email] = resolved;
+      } else {
+        missing.add(email);
       }
+    }
+    // Batch-fetch any authors still missing a photo/name in one parallel burst.
+    if (missing.isNotEmpty) {
+      unawaited(_batchEnsureProfilesCached(missing));
+    }
+  }
+
+  /// Fetch profiles for [emails] all in parallel and trigger a single rebuild.
+  Future<void> _batchEnsureProfilesCached(Set<String> emails) async {
+    final toFetch = emails.where((e) => !_profilePhotoFetchInFlight.contains(e)).toSet();
+    if (toFetch.isEmpty) return;
+    for (final e in toFetch) {
+      _profilePhotoFetchInFlight.add(e);
+    }
+    try {
+      await Future.wait(toFetch.map((email) async {
+        try {
+          final profile = await _supabaseService.getUserInfo(email);
+          final photo = resolveProfilePhotoUrl(profile) ?? '';
+          final name =
+              profile?['display_name']?.toString().trim() ??
+              profile?['displayName']?.toString().trim() ??
+              '';
+          _profilePhotoCache[email] = photo;
+          if (name.isNotEmpty) _profileNameCache[email] = name;
+        } catch (e) {
+          debugPrint('Batch profile fetch failed for $email: $e');
+        } finally {
+          _profilePhotoFetchInFlight.remove(email);
+        }
+      }));
+    } finally {
+      if (mounted) setState(() {});
     }
   }
 

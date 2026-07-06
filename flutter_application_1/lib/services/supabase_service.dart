@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
@@ -7,6 +8,7 @@ import '../config/app_config.dart';
 import '../models/college.dart';
 import '../models/resource.dart';
 import '../models/user.dart';
+import 'app_cache.dart';
 import 'backend_api_service.dart';
 import '../models/department_account.dart';
 import '../models/department_option.dart';
@@ -373,11 +375,17 @@ class SupabaseService {
             _currentUserProfileCacheTtl;
   }
 
+  static const Duration _profileDiskCacheMaxAge = Duration(hours: 24);
+
+  static String _profileDiskCacheKey(String email) =>
+      'user_profile:${email.trim().toLowerCase()}';
+
   void _cacheCurrentUserProfile(String email, Map<String, dynamic> profile) {
     if (email.isEmpty || profile.isEmpty) return;
     _cachedCurrentUserProfile = Map<String, dynamic>.from(profile);
     _cachedCurrentUserProfileEmail = email;
     _cachedCurrentUserProfileAt = DateTime.now();
+    unawaited(AppCache.putJson(_profileDiskCacheKey(email), profile));
     _cacheUserInfo(
       email,
       _normalizeReadableUserRecord(<String, dynamic>{
@@ -2690,6 +2698,29 @@ class SupabaseService {
 
     if (_currentUserProfileFetchFuture != null) {
       return _currentUserProfileFetchFuture!;
+    }
+
+    // Cold start: serve the last profile from disk instantly and refresh in
+    // the background so dependent screens don't block on the network.
+    if (!forceRefresh && email.isNotEmpty) {
+      final diskProfile = AppCache.getJson(
+        _profileDiskCacheKey(email),
+        maxAge: _profileDiskCacheMaxAge,
+      );
+      if (diskProfile is Map && diskProfile.isNotEmpty) {
+        final profile = Map<String, dynamic>.from(diskProfile);
+        _cachedCurrentUserProfile = Map<String, dynamic>.from(profile);
+        _cachedCurrentUserProfileEmail = email;
+        _cachedCurrentUserProfileAt = DateTime.now();
+        unawaited(
+          getCurrentUserProfile(maxAttempts: 1, forceRefresh: true)
+              .catchError((Object e) {
+            debugPrint('Background profile refresh failed: $e');
+            return <String, dynamic>{};
+          }),
+        );
+        return profile;
+      }
     }
 
     _currentUserProfileFetchFuture = () async {
@@ -6796,16 +6827,18 @@ class SupabaseService {
           );
         }
 
-        final response = await _client
-            .from('chat_rooms')
-            .select('*, member_count:room_members(count)')
-            .eq('college_id', effectiveCollegeId)
-            .order('created_at', ascending: false);
-
-        final rooms = (response as List)
+        final fetched = await Future.wait<Object?>([
+          _client
+              .from('chat_rooms')
+              .select('*, member_count:room_members(count)')
+              .eq('college_id', effectiveCollegeId)
+              .order('created_at', ascending: false),
+          fetchJoinedRoomIds(),
+        ]);
+        final rooms = (fetched[0] as List)
             .map((e) => _normalizeChatRoomRecord(e))
             .toList();
-        final joinedRoomIds = await fetchJoinedRoomIds();
+        final joinedRoomIds = fetched[1] as Set<String>;
         return filterMembershipState(filterActiveRooms(rooms), joinedRoomIds);
       } catch (e) {
         debugPrint('Error fetching chat rooms via Supabase: $e');

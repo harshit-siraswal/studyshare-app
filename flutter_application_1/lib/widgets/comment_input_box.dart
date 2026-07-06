@@ -5,6 +5,11 @@ import '../config/theme.dart';
 import 'sticker_picker.dart';
 import 'user_avatar.dart';
 
+/// Reply/comment composer styled after X (Twitter).
+///
+/// Always shows the user's avatar + an open text field inline.
+/// The action toolbar (media button + post button) animates in
+/// when the field is focused or has text.
 class CommentInputBox extends StatefulWidget {
   final TextEditingController controller;
   final FocusNode focusNode;
@@ -41,8 +46,9 @@ class CommentInputBox extends StatefulWidget {
 
 class _CommentInputBoxState extends State<CommentInputBox>
     with SingleTickerProviderStateMixin {
-  bool _isExpanded = false;
-  late AnimationController _expandController;
+  bool _showToolbar = false;
+  late AnimationController _toolbarController;
+  late Animation<double> _toolbarFade;
 
   @override
   void initState() {
@@ -50,9 +56,13 @@ class _CommentInputBoxState extends State<CommentInputBox>
     widget.controller.addListener(_onTextChanged);
     widget.focusNode.addListener(_onFocusChanged);
 
-    _expandController = AnimationController(
+    _toolbarController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 280),
+      duration: const Duration(milliseconds: 180),
+    );
+    _toolbarFade = CurvedAnimation(
+      parent: _toolbarController,
+      curve: Curves.easeOut,
     );
   }
 
@@ -60,41 +70,34 @@ class _CommentInputBoxState extends State<CommentInputBox>
   void dispose() {
     widget.controller.removeListener(_onTextChanged);
     widget.focusNode.removeListener(_onFocusChanged);
-    _expandController.dispose();
+    _toolbarController.dispose();
     super.dispose();
   }
 
   void _onFocusChanged() {
-    if (widget.focusNode.hasFocus && !_isExpanded) {
-      _expand();
-    }
+    _updateToolbarVisibility();
   }
 
   void _onTextChanged() {
-    if (widget.controller.text.isNotEmpty && !_isExpanded) {
-      _expand();
-    }
-    // Re-render when text changes to enable/disable button
+    _updateToolbarVisibility();
     if (mounted) setState(() {});
   }
 
-  void _expand() {
-    if (widget.isReadOnly) return;
-    setState(() => _isExpanded = true);
-    _expandController.forward();
-  }
-
-  void _collapse() {
-    widget.focusNode.unfocus();
-    setState(() => _isExpanded = false);
-    _expandController.reverse();
+  void _updateToolbarVisibility() {
+    final shouldShow =
+        (widget.focusNode.hasFocus || widget.controller.text.isNotEmpty) &&
+        !widget.isReadOnly;
+    if (shouldShow == _showToolbar) return;
+    setState(() => _showToolbar = shouldShow);
+    if (shouldShow) {
+      _toolbarController.forward();
+    } else {
+      _toolbarController.reverse();
+    }
   }
 
   void _handleSubmit() {
     widget.onSubmit();
-    if (widget.replyToName == null) {
-      _collapse();
-    }
   }
 
   Future<void> _openStickerPicker() async {
@@ -126,203 +129,199 @@ class _CommentInputBoxState extends State<CommentInputBox>
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgColor = isDark ? const Color(0xFF000000) : Colors.white;
+    final dividerColor =
+        isDark ? const Color(0xFF2E2E2E) : const Color(0xFFE2E8F0);
+    final bgColor = isDark ? Colors.black : Colors.white;
     final textColor = isDark ? Colors.white : Colors.black;
-    final mutedColor = isDark ? Colors.white60 : Colors.black54;
+    final hintColor = isDark ? Colors.white38 : Colors.black38;
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeOutCubic,
+    return Container(
       decoration: BoxDecoration(
         color: bgColor,
         border: Border(
-          top: BorderSide(
-            color: isDark ? const Color(0xFF2E2E2E) : const Color(0xFFE2E8F0),
-            width: 0.5,
-          ),
+          top: BorderSide(color: dividerColor, width: 0.5),
         ),
       ),
       child: SafeArea(
         top: false,
-        child: GestureDetector(
-          onTap: _expand,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-            child: AnimatedSize(
-              duration: const Duration(milliseconds: 250),
-              curve: Curves.easeOutCubic,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // "Replying to @handle" banner — X/Twitter style
+              if (widget.replyToName != null) ...[
+                _ReplyBanner(
+                  replyToName: widget.replyToName!,
+                  isDark: isDark,
+                  onCancel: () {
+                    widget.onCancelReply();
+                    if (widget.controller.text.isEmpty) {
+                      widget.focusNode.unfocus();
+                    }
+                  },
+                ),
+                const SizedBox(height: 8),
+              ],
+
+              // Avatar + text field row
+              Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Reply banner
-                  if (widget.replyToName != null) ...[
-                    _buildReplyBanner(isDark),
-                    const SizedBox(height: 8),
-                  ],
-                  // Main input area
-                  Row(
-                    crossAxisAlignment: _isExpanded
-                        ? CrossAxisAlignment.start
-                        : CrossAxisAlignment.center,
-                    children: [
-                      // User avatar
-                      UserAvatar(
-                        radius: 16,
-                        photoUrl: widget.userPhotoUrl,
-                        displayName: widget.userDisplayName ?? 'User',
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: _isExpanded
-                            ? _buildExpandedInput(isDark, textColor, mutedColor)
-                            : _buildCompactBar(mutedColor, isDark),
-                      ),
-                      if (!_isExpanded) ...[
-                        const SizedBox(width: 8),
-                        Icon(
-                          Icons.open_in_full_rounded,
-                          size: 16,
-                          color: mutedColor,
-                        ),
-                      ],
-                    ],
-                  ),
-                  // Expanded controls
-                  if (_isExpanded) ...[
-                    const SizedBox(height: 10),
-                    Padding(
-                      padding: const EdgeInsets.only(left: 42),
-                      child: _buildExpandedControls(isDark, mutedColor),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: UserAvatar(
+                      radius: 18,
+                      photoUrl: widget.userPhotoUrl,
+                      displayName: widget.userDisplayName ?? 'User',
                     ),
-                  ],
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      controller: widget.controller,
+                      focusNode: widget.focusNode,
+                      enabled: !widget.isReadOnly && !widget.isSubmitting,
+                      style: GoogleFonts.inter(
+                        color: textColor,
+                        fontSize: 15,
+                        height: 1.45,
+                      ),
+                      maxLines: null,
+                      minLines: 1,
+                      textCapitalization: TextCapitalization.sentences,
+                      decoration: InputDecoration(
+                        hintText: widget.isReadOnly
+                            ? 'Read-only mode'
+                            : (widget.replyToName != null
+                                ? 'Post your reply'
+                                : widget.hintText),
+                        hintStyle: GoogleFonts.inter(
+                          color: hintColor,
+                          fontSize: 15,
+                        ),
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding: const EdgeInsets.only(top: 6),
+                      ),
+                    ),
+                  ),
                 ],
               ),
-            ),
+
+              // Action toolbar — fades in when focused or has text
+              FadeTransition(
+                opacity: _toolbarFade,
+                child: _showToolbar
+                    ? Padding(
+                        padding: const EdgeInsets.only(top: 8, left: 48),
+                        child: _Toolbar(
+                          isDark: isDark,
+                          hasText: widget.controller.text.trim().isNotEmpty,
+                          isSubmitting: widget.isSubmitting,
+                          showMediaButton: widget.onStickerSelected != null,
+                          onMediaTap: _openStickerPicker,
+                          onSubmit: _handleSubmit,
+                        ),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
+}
 
-  Widget _buildReplyBanner(bool isDark) {
-    final handle = widget.replyToName?.contains('@') == true
-        ? '@${widget.replyToName!.split('@').first}'
-        : '@${widget.replyToName}';
+class _ReplyBanner extends StatelessWidget {
+  const _ReplyBanner({
+    required this.replyToName,
+    required this.isDark,
+    required this.onCancel,
+  });
+
+  final String replyToName;
+  final bool isDark;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final handle = replyToName.contains('@')
+        ? '@${replyToName.split('@').first}'
+        : '@$replyToName';
     return Row(
       children: [
-        Text(
-          'Replying to ',
-          style: GoogleFonts.inter(
-            fontSize: 13,
-            color: isDark ? Colors.white54 : Colors.black54,
+        const SizedBox(width: 48),
+        Expanded(
+          child: Text.rich(
+            TextSpan(
+              children: [
+                TextSpan(
+                  text: 'Replying to ',
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    color: isDark ? Colors.white54 : Colors.black45,
+                  ),
+                ),
+                TextSpan(
+                  text: handle,
+                  style: GoogleFonts.inter(
+                    fontSize: 13,
+                    color: AppTheme.primary,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-        Text(
-          handle,
-          style: GoogleFonts.inter(
-            fontSize: 13,
-            color: AppTheme.primary,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const Spacer(),
         GestureDetector(
-          onTap: () {
-            widget.onCancelReply();
-            if (widget.controller.text.isEmpty) {
-              _collapse();
-            }
-          },
+          onTap: onCancel,
           child: Icon(
             Icons.close_rounded,
             size: 16,
-            color: isDark ? Colors.white54 : Colors.black38,
+            color: isDark ? Colors.white38 : Colors.black26,
           ),
         ),
       ],
     );
   }
+}
 
-  Widget _buildCompactBar(Color mutedColor, bool isDark) {
-    return Container(
-      height: 38,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF16181C) : const Color(0xFFF1F5F9),
-        borderRadius: BorderRadius.circular(19),
-        border: Border.all(
-          color: isDark ? Colors.white10 : Colors.black12,
-          width: 0.5,
-        ),
-      ),
-      alignment: Alignment.centerLeft,
-      child: Text(
-        widget.isReadOnly
-            ? 'Read-only mode'
-            : (widget.replyToName != null ? 'Post your reply' : widget.hintText),
-        style: GoogleFonts.inter(
-          fontSize: 14,
-          color: mutedColor,
-        ),
-      ),
-    );
-  }
+class _Toolbar extends StatelessWidget {
+  const _Toolbar({
+    required this.isDark,
+    required this.hasText,
+    required this.isSubmitting,
+    required this.showMediaButton,
+    required this.onMediaTap,
+    required this.onSubmit,
+  });
 
-  Widget _buildExpandedInput(bool isDark, Color textColor, Color mutedColor) {
-    return TextField(
-      controller: widget.controller,
-      focusNode: widget.focusNode,
-      enabled: !widget.isReadOnly && !widget.isSubmitting,
-      style: GoogleFonts.inter(
-        color: textColor,
-        fontSize: 15,
-        height: 1.4,
-      ),
-      maxLines: null,
-      minLines: 2,
-      textCapitalization: TextCapitalization.sentences,
-      decoration: InputDecoration(
-        hintText: widget.isReadOnly
-            ? 'Read-only mode'
-            : (widget.replyToName != null ? 'Post your reply' : widget.hintText),
-        hintStyle: GoogleFonts.inter(
-          color: mutedColor,
-          fontSize: 15,
-        ),
-        border: InputBorder.none,
-        isDense: true,
-        contentPadding: const EdgeInsets.symmetric(vertical: 4),
-      ),
-      onSubmitted: (_) {
-        if (widget.controller.text.trim().isNotEmpty) {
-          _handleSubmit();
-        }
-      },
-    );
-  }
+  final bool isDark;
+  final bool hasText;
+  final bool isSubmitting;
+  final bool showMediaButton;
+  final VoidCallback onMediaTap;
+  final VoidCallback onSubmit;
 
-  Widget _buildExpandedControls(bool isDark, Color mutedColor) {
-    final textNotEmpty = widget.controller.text.trim().isNotEmpty;
+  @override
+  Widget build(BuildContext context) {
     return Row(
       children: [
-        // Sticker / image button
-        if (widget.onStickerSelected != null)
-          IconButton(
-            onPressed: (widget.isReadOnly || widget.isSubmitting)
-                ? null
-                : _openStickerPicker,
-            icon: Icon(
+        if (showMediaButton)
+          GestureDetector(
+            onTap: onMediaTap,
+            child: Icon(
               Icons.image_outlined,
-              color: widget.isReadOnly ? Colors.grey : AppTheme.primary,
-              size: 20,
+              size: 22,
+              color: AppTheme.primary,
             ),
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
           ),
         const Spacer(),
-        // Submit button
-        if (widget.isSubmitting)
+        if (isSubmitting)
           const SizedBox(
             width: 20,
             height: 20,
@@ -332,31 +331,53 @@ class _CommentInputBoxState extends State<CommentInputBox>
             ),
           )
         else
-          ElevatedButton(
-            onPressed: widget.isReadOnly || !textNotEmpty
-                ? null
-                : _handleSubmit,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primary,
-              foregroundColor: Colors.white,
-              disabledBackgroundColor: AppTheme.primary.withValues(alpha: 0.4),
-              disabledForegroundColor: Colors.white70,
-              elevation: 0,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-              minimumSize: const Size(0, 32),
-            ),
-            child: Text(
-              'Reply',
-              style: GoogleFonts.inter(
-                fontWeight: FontWeight.bold,
-                fontSize: 13,
-              ),
-            ),
+          _PostButton(
+            enabled: hasText,
+            onTap: hasText ? onSubmit : null,
+            isDark: isDark,
           ),
       ],
+    );
+  }
+}
+
+class _PostButton extends StatelessWidget {
+  const _PostButton({
+    required this.enabled,
+    required this.onTap,
+    required this.isDark,
+  });
+
+  final bool enabled;
+  final VoidCallback? onTap;
+  final bool isDark;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+        decoration: BoxDecoration(
+          color: enabled
+              ? AppTheme.primary
+              : (isDark
+                  ? AppTheme.primary.withValues(alpha: 0.35)
+                  : AppTheme.primary.withValues(alpha: 0.25)),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          'Reply',
+          style: GoogleFonts.inter(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: enabled
+                ? Colors.white
+                : Colors.white.withValues(alpha: 0.55),
+          ),
+        ),
+      ),
     );
   }
 }

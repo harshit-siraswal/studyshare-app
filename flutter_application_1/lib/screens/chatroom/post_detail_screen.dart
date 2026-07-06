@@ -1779,22 +1779,6 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                               ),
                               const SizedBox(width: 4),
                               UserBadge(email: authorEmail, size: 12),
-                              const SizedBox(width: 6),
-                              Text(
-                                '@${authorEmail.split('@').first}',
-                                style: GoogleFonts.inter(
-                                  fontSize: 13,
-                                  color: mutedColor,
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                '· ${_formatTimeAgo(createdAt)}',
-                                style: GoogleFonts.inter(
-                                  fontSize: 13,
-                                  color: mutedColor,
-                                ),
-                              ),
                               const Spacer(),
                               PopupMenuButton<String>(
                                 padding: EdgeInsets.zero,
@@ -1821,6 +1805,26 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                     child: Text('Report'),
                                   ),
                                 ],
+                              ),
+                            ],
+                          ),
+                          // @handle · time row (X/Twitter style, below display name)
+                          Row(
+                            children: [
+                              Text(
+                                '@${authorEmail.split('@').first}',
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  color: mutedColor,
+                                ),
+                              ),
+                              const SizedBox(width: 5),
+                              Text(
+                                '· ${_formatTimeAgo(createdAt)}',
+                                style: GoogleFonts.inter(
+                                  fontSize: 12,
+                                  color: mutedColor,
+                                ),
                               ),
                             ],
                           ),

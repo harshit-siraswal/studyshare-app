@@ -33,6 +33,7 @@ import 'screens/chatroom/post_detail_screen.dart';
 import 'screens/home/home_screen.dart';
 import 'screens/notices/notice_detail_screen.dart';
 import 'services/analytics_service.dart';
+import 'services/app_cache.dart';
 import 'services/attendance_service.dart';
 import 'services/auth_service.dart';
 import 'services/download_service.dart';
@@ -538,9 +539,9 @@ class _AppRootState extends State<AppRoot> with WidgetsBindingObserver {
       ]);
 
       try {
-        await DownloadService().init();
+        await Future.wait([DownloadService().init(), AppCache.init()]);
       } catch (e) {
-        debugPrint('DownloadService initialization error: $e');
+        debugPrint('DownloadService/AppCache initialization error: $e');
       }
 
       if (!_firebaseInitialized) {
@@ -1040,6 +1041,7 @@ class _AppRouterState extends State<AppRouter> {
 
   void _onLogout() async {
     await _authService.signOut();
+    unawaited(AppCache.clearUserScoped());
     setState(() {});
   }
 
@@ -1069,41 +1071,57 @@ class _AppRouterState extends State<AppRouter> {
   }
 
   Future<_AuthGateResult> _checkCurrentSessionAccess(String collegeId) async {
-    final blockingReason = await _authService.getCurrentSessionBlockingReason();
+    final email = _authService.userEmail?.trim();
+
+    // The Firebase session check and the Supabase ban check are independent;
+    // run them concurrently instead of paying two network round-trips in a row.
+    final blockingReasonFuture = _authService.getCurrentSessionBlockingReason();
+    final banFuture = (email == null || email.isEmpty)
+        ? Future<Map<String, dynamic>?>.value(null)
+        : _authService.checkBanStatus(email, collegeId).catchError((Object e) {
+            debugPrint(
+              'Auth gate ban check failed for $email in college $collegeId; allowing access and relying on backend enforcement. Error: $e',
+            );
+            return <String, dynamic>{'banCheckSkipped': true};
+          });
+
+    final results = await Future.wait<Object?>([
+      blockingReasonFuture,
+      banFuture,
+    ]);
+
+    final blockingReason = results[0] as String?;
     if (blockingReason != null) {
       return _AuthGateResult.denied(blockingReason);
     }
 
-    final email = _authService.userEmail?.trim();
     if (email == null || email.isEmpty) {
       return const _AuthGateResult.denied(
         'Unable to verify account access. Please sign in again.',
       );
     }
 
-    try {
-      final banResult = await _authService.checkBanStatus(email, collegeId);
-      if (banResult?['banCheckSkipped'] == true) {
-        debugPrint(
-          'Ban check skipped for $email in college $collegeId; allowing access and relying on backend enforcement.',
-        );
-        return const _AuthGateResult.allowed();
-      }
-      if (banResult?['isBanned'] == true) {
-        final reason =
-            (banResult?['reason'] ??
-                    'Your account has been restricted by an administrator.')
-                .toString();
-        return _AuthGateResult.banned(reason);
-      }
-      return const _AuthGateResult.allowed();
-    } catch (e) {
+    final banResult = results[1] as Map<String, dynamic>?;
+    if (banResult?['banCheckSkipped'] == true) {
       debugPrint(
-        'Auth gate ban check failed for $email in college $collegeId; allowing access and relying on backend enforcement. Error: $e',
+        'Ban check skipped for $email in college $collegeId; allowing access and relying on backend enforcement.',
       );
       return const _AuthGateResult.allowed();
     }
+    if (banResult?['isBanned'] == true) {
+      final reason =
+          (banResult?['reason'] ??
+                  'Your account has been restricted by an administrator.')
+              .toString();
+      return _AuthGateResult.banned(reason);
+    }
+    return const _AuthGateResult.allowed();
   }
+
+  static const Duration _authGateCacheMaxAge = Duration(hours: 24);
+
+  String _authGateCacheStorageKey(String sessionKey) =>
+      'auth_gate_ok:$sessionKey';
 
   Future<_AuthGateResult> _getAuthGateFuture(String collegeId) {
     final sessionKey =
@@ -1113,8 +1131,60 @@ class _AppRouterState extends State<AppRouter> {
     }
 
     _authGateCacheKey = sessionKey;
-    _authGateFuture = _checkCurrentSessionAccess(collegeId);
+
+    // If this session recently passed the gate, let the user in immediately
+    // and re-verify in the background. A banned/denied verdict from the
+    // background check still lands on BannedUserScreen / forced sign-out,
+    // and the backend enforces bans on every request regardless.
+    final cachedOk = AppCache.getJson(
+      _authGateCacheStorageKey(sessionKey),
+      maxAge: _authGateCacheMaxAge,
+    );
+    if (cachedOk == true) {
+      _authGateFuture = Future.value(const _AuthGateResult.allowed());
+      unawaited(_reverifySessionAccessInBackground(collegeId, sessionKey));
+      return _authGateFuture!;
+    }
+
+    _authGateFuture = _checkCurrentSessionAccess(collegeId).then((result) {
+      if (result.allowed && !result.isBanned) {
+        unawaited(
+          AppCache.putJson(_authGateCacheStorageKey(sessionKey), true),
+        );
+      }
+      return result;
+    });
     return _authGateFuture!;
+  }
+
+  Future<void> _reverifySessionAccessInBackground(
+    String collegeId,
+    String sessionKey,
+  ) async {
+    try {
+      final result = await _checkCurrentSessionAccess(collegeId);
+      if (result.allowed && !result.isBanned) {
+        unawaited(
+          AppCache.putJson(_authGateCacheStorageKey(sessionKey), true),
+        );
+        return;
+      }
+
+      await AppCache.remove(_authGateCacheStorageKey(sessionKey));
+      if (!mounted || _authGateCacheKey != sessionKey) return;
+      if (result.isBanned) {
+        setState(() {
+          _authGateFuture = Future.value(result);
+        });
+      } else {
+        await _forceSignOutWithReason(
+          result.denialMessage ??
+              'Unable to verify account access. Please sign in again.',
+        );
+      }
+    } catch (e) {
+      debugPrint('Background auth gate re-verification failed: $e');
+    }
   }
 
   Future<void> _forceSignOutWithReason(String message) async {
@@ -1127,6 +1197,7 @@ class _AppRouterState extends State<AppRouter> {
     } catch (e) {
       debugPrint('Forced sign-out failed: $e');
     }
+    unawaited(AppCache.clearUserScoped());
 
     if (!mounted) return;
     setState(() => _resetAuthGateCache());

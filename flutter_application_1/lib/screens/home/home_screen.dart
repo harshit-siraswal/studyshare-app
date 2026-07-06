@@ -20,13 +20,14 @@ import '../chatroom/discover_rooms_screen.dart';
 import '../study/attendance_screen.dart';
 import '../../widgets/help_overlay.dart';
 import '../../providers/theme_provider.dart';
+import '../../services/app_cache.dart';
 import '../../services/supabase_service.dart';
 import '../../services/incoming_share_service.dart';
 import '../../services/sticker_service.dart';
 import '../../services/subscription_service.dart';
 import '../../services/backend_api_service.dart';
 import '../../widgets/success_overlay.dart';
-import '../../widgets/post_notice_dialog.dart';
+import '../notices/post_notice_screen.dart';
 import '../../widgets/paywall_dialog.dart';
 import '../../models/user.dart';
 import '../../utils/admin_access.dart';
@@ -69,6 +70,9 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   final SubscriptionService _subscriptionService = SubscriptionService();
   int _currentIndex = 0;
   bool _showHelpOverlay = false;
+  // True while the notices tab is scrolled into "immersive" mode — the
+  // floating bottom nav and FAB slide away so notices get the full screen.
+  bool _noticesChromeHidden = false;
   bool _canPostNotices = false;
   bool _canUploadResources = false;
   bool _roleLoading = true;
@@ -114,6 +118,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       if (mounted) _supabaseService.attachContext(context);
     });
     _checkHelpOverlay();
+    _applyCachedComposerAccess();
     _loadComposerAccess();
     _initializeIncomingShareHandling();
     _initializeHomeWidgetHandling();
@@ -181,6 +186,36 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     });
   }
 
+  void _onNoticesChromeVisibilityChanged(bool hidden) {
+    if (_noticesChromeHidden == hidden || !mounted) return;
+    setState(() => _noticesChromeHidden = hidden);
+  }
+
+  /// Bottom chrome (nav + FAB) hides only while the notices tab is in
+  /// immersive scroll mode.
+  bool get _shouldHideBottomChrome =>
+      _noticesChromeHidden && _currentIndex == 2;
+
+  static const Duration _composerAccessCacheMaxAge = Duration(hours: 24);
+
+  String get _composerAccessCacheKey =>
+      'composer_access:${_effectiveUserEmail.trim().toLowerCase()}';
+
+  /// Applies the last resolved composer access instantly on cold start so the
+  /// FAB/upload buttons are usable while the network refresh runs.
+  void _applyCachedComposerAccess() {
+    final email = _effectiveUserEmail.trim();
+    if (email.isEmpty) return;
+    final cached = AppCache.getJson(
+      _composerAccessCacheKey,
+      maxAge: _composerAccessCacheMaxAge,
+    );
+    if (cached is! Map) return;
+    _canUploadResources = cached['canUpload'] == true;
+    _canPostNotices = cached['canPost'] == true;
+    _roleLoading = false;
+  }
+
   Future<void> _loadComposerAccess() async {
     final fallbackCanUpload = _optimisticCollegeUploaderAccess;
     var canUpload = fallbackCanUpload;
@@ -200,40 +235,48 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
     applyResolvedUserType(_supabaseService.cachedResolvedUserType);
 
-    try {
-      final identity = await _supabaseService.getCurrentUserIdentity().timeout(
-        const Duration(seconds: 4),
-        onTimeout: () => <String, dynamic>{},
-      );
-
-      if (identity.isNotEmpty) {
-        applyResolvedUserType(resolveUserType(identity));
-      }
-    } catch (e) {
-      debugPrint('Failed to resolve cached identity for composer access: $e');
-    }
-
-    try {
-      final profile = await _supabaseService
+    // Identity and profile lookups are independent — fetch them together.
+    final results = await Future.wait<Map<String, dynamic>>([
+      _supabaseService
+          .getCurrentUserIdentity()
+          .timeout(
+            const Duration(seconds: 4),
+            onTimeout: () => <String, dynamic>{},
+          )
+          .catchError((Object e) {
+            debugPrint(
+              'Failed to resolve cached identity for composer access: $e',
+            );
+            return <String, dynamic>{};
+          }),
+      _supabaseService
           .getCurrentUserProfile(maxAttempts: 1)
           .timeout(
             const Duration(seconds: 5),
             onTimeout: () => <String, dynamic>{},
-          );
+          )
+          .catchError((Object e) {
+            debugPrint('Failed to resolve composer profile access: $e');
+            return <String, dynamic>{};
+          }),
+    ]);
 
-      if (profile.isNotEmpty) {
-        final resolvedRole = resolveEffectiveProfileRole(profile);
-        canUpload =
-            resolvedRole != AppRoles.readOnly ||
-            canManageAdminResourcesProfile(profile);
-        canPost =
-            resolvedRole == AppRoles.teacher ||
-            resolvedRole == AppRoles.admin ||
-            resolvedRole == AppRoles.moderator ||
-            hasAdminCapability(profile, 'upload_notice');
-      }
-    } catch (e) {
-      debugPrint('Failed to resolve composer profile access: $e');
+    final identity = results[0];
+    if (identity.isNotEmpty) {
+      applyResolvedUserType(resolveUserType(identity));
+    }
+
+    final profile = results[1];
+    if (profile.isNotEmpty) {
+      final resolvedRole = resolveEffectiveProfileRole(profile);
+      canUpload =
+          resolvedRole != AppRoles.readOnly ||
+          canManageAdminResourcesProfile(profile);
+      canPost =
+          resolvedRole == AppRoles.teacher ||
+          resolvedRole == AppRoles.admin ||
+          resolvedRole == AppRoles.moderator ||
+          hasAdminCapability(profile, 'upload_notice');
     }
 
     if (!canUpload) {
@@ -262,6 +305,15 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           debugPrint('Failed to resolve public access context: $e');
         }
       }
+    }
+
+    if (_effectiveUserEmail.trim().isNotEmpty) {
+      unawaited(
+        AppCache.putJson(_composerAccessCacheKey, <String, dynamic>{
+          'canUpload': canUpload,
+          'canPost': canPost,
+        }),
+      );
     }
 
     if (!mounted) return;
@@ -707,6 +759,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
         key: ValueKey<int>(_noticesRefreshToken),
         collegeId: widget.collegeId,
         refreshToken: _noticesRefreshToken,
+        onChromeVisibilityChanged: _onNoticesChromeVisibilityChanged,
       ),
       ProfileScreen(
         key: const ValueKey<String>('profile'),
@@ -777,12 +830,26 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           // Help Overlay (shows on first launch)
           if (_showHelpOverlay) HelpOverlay(onDismiss: _dismissHelpOverlay),
 
-          // Floating Bottom Navigation Bar
+          // Floating Bottom Navigation Bar (slides away while reading notices)
           Positioned(
             left: 16,
             right: 16,
             bottom: bottomPadding + 16,
-            child: _buildFloatingBottomNav(isDark),
+            child: AnimatedSlide(
+              offset: _shouldHideBottomChrome
+                  ? const Offset(0, 2)
+                  : Offset.zero,
+              duration: const Duration(milliseconds: 260),
+              curve: Curves.easeOutCubic,
+              child: AnimatedOpacity(
+                opacity: _shouldHideBottomChrome ? 0 : 1,
+                duration: const Duration(milliseconds: 200),
+                child: IgnorePointer(
+                  ignoring: _shouldHideBottomChrome,
+                  child: _buildFloatingBottomNav(isDark),
+                ),
+              ),
+            ),
           ),
 
           // Animated FAB
@@ -979,12 +1046,14 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       if (!_canPostNotices) {
         return;
       }
-      final posted = await showPostNoticeDialog(
-        context: context,
-        collegeId: widget.collegeId,
+      final posted = await Navigator.push<bool>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PostNoticeScreen(collegeId: widget.collegeId),
+        ),
       );
       if (!mounted) return;
-      if (posted) {
+      if (posted == true) {
         setState(() {
           _noticesRefreshToken++;
         });
@@ -1085,16 +1154,25 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     return Positioned(
       left: left,
       bottom: bottom,
-      child: IgnorePointer(
-        ignoring: isFabDisabled,
-        child: Opacity(
-          opacity: isFabDisabled ? 0.6 : 1.0,
-          child: GestureDetector(
-            onTap: () async {
-              HapticFeedback.mediumImpact();
-              await _handleFabTap();
-            },
-            child: fabChild,
+      child: AnimatedSlide(
+        offset: _shouldHideBottomChrome ? const Offset(0, 2.4) : Offset.zero,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+        child: AnimatedOpacity(
+          opacity: _shouldHideBottomChrome ? 0 : 1,
+          duration: const Duration(milliseconds: 200),
+          child: IgnorePointer(
+            ignoring: isFabDisabled || _shouldHideBottomChrome,
+            child: Opacity(
+              opacity: isFabDisabled ? 0.6 : 1.0,
+              child: GestureDetector(
+                onTap: () async {
+                  HapticFeedback.mediumImpact();
+                  await _handleFabTap();
+                },
+                child: fabChild,
+              ),
+            ),
           ),
         ),
       ),

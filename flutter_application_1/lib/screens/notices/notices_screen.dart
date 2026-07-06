@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
@@ -22,10 +23,15 @@ class NoticesScreen extends StatefulWidget {
   final String collegeId;
   final int refreshToken;
 
+  /// Reports whether the screen chrome (header, tabs, bottom nav) should be
+  /// hidden because the user is scrolling through notices. `true` = hidden.
+  final ValueChanged<bool>? onChromeVisibilityChanged;
+
   const NoticesScreen({
     super.key,
     required this.collegeId,
     this.refreshToken = 0,
+    this.onChromeVisibilityChanged,
   });
 
   @override
@@ -58,6 +64,34 @@ class _NoticesScreenState extends State<NoticesScreen>
   DateTime? _startDate;
   DateTime? _endDate;
   final Map<String, int> _departmentFollowerCounts = {};
+
+  /// While the user scrolls down through notices the header + tabs collapse
+  /// (only the search bar stays) and the parent is asked to hide bottom nav.
+  bool _chromeHidden = false;
+
+  void _setChromeHidden(bool hidden) {
+    if (_chromeHidden == hidden) return;
+    setState(() => _chromeHidden = hidden);
+    widget.onChromeVisibilityChanged?.call(hidden);
+  }
+
+  bool _handleScrollChrome(UserScrollNotification notification) {
+    if (notification.metrics.axis != Axis.vertical) return false;
+    switch (notification.direction) {
+      case ScrollDirection.reverse:
+        // Scrolling down the list → immersive reading mode.
+        if (notification.metrics.pixels > 40) _setChromeHidden(true);
+        break;
+      case ScrollDirection.forward:
+        // Scrolling back up → restore chrome.
+        _setChromeHidden(false);
+        break;
+      case ScrollDirection.idle:
+        if (notification.metrics.pixels <= 0) _setChromeHidden(false);
+        break;
+    }
+    return false;
+  }
 
   DepartmentAccount _accountForDepartment(String? rawDepartmentId) {
     final departmentId = normalizeDepartmentCode(rawDepartmentId);
@@ -587,49 +621,67 @@ class _NoticesScreenState extends State<NoticesScreen>
       body: SafeArea(
         child: Column(
           children: [
-            // Header
+            // Header — the title row collapses while scrolling, the search
+            // bar always stays visible.
             Container(
               color: bgColor,
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Notices',
-                              style: GoogleFonts.inter(
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
-                                color: isDark ? Colors.white : Colors.black,
+                  AnimatedSize(
+                    duration: const Duration(milliseconds: 240),
+                    curve: Curves.easeOutCubic,
+                    alignment: Alignment.topCenter,
+                    child: _chromeHidden
+                        ? const SizedBox(width: double.infinity)
+                        : Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Notices',
+                                          style: GoogleFonts.inter(
+                                            fontSize: 22,
+                                            fontWeight: FontWeight.bold,
+                                            color: isDark
+                                                ? Colors.white
+                                                : Colors.black,
+                                          ),
+                                        ),
+                                        Text(
+                                          'Latest updates from your departments',
+                                          style: GoogleFonts.inter(
+                                            fontSize: 12,
+                                            color: isDark
+                                                ? AppTheme.darkTextMuted
+                                                : AppTheme.lightTextMuted,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  IconButton(
+                                    icon: Icon(
+                                      Icons.calendar_today_rounded,
+                                      color: isDark
+                                          ? Colors.white
+                                          : Colors.black,
+                                    ),
+                                    onPressed: _showDateFilter,
+                                  ),
+                                ],
                               ),
-                            ),
-                            Text(
-                              'Latest updates from your departments',
-                              style: GoogleFonts.inter(
-                                fontSize: 12,
-                                color: isDark
-                                    ? AppTheme.darkTextMuted
-                                    : AppTheme.lightTextMuted,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        icon: Icon(
-                          Icons.calendar_today_rounded,
-                          color: isDark ? Colors.white : Colors.black,
-                        ),
-                        onPressed: _showDateFilter,
-                      ),
-                    ],
+                              const SizedBox(height: 12),
+                            ],
+                          ),
                   ),
-                  const SizedBox(height: 12),
                   InkWell(
                     onTap: () => _showNoticeSearch(isDark),
                     borderRadius: BorderRadius.circular(16),
@@ -670,22 +722,35 @@ class _NoticesScreenState extends State<NoticesScreen>
               ),
             ),
 
-            // Tabs
-            TabBar(
-              controller: _tabController,
-              labelColor: isDark ? Colors.white : Colors.black,
-              unselectedLabelColor: Colors.grey,
-              indicatorColor: AppTheme.primary,
-              tabs: const [
-                Tab(text: 'Latest Updates'),
-                Tab(text: 'Departments'),
-              ],
+            // Tabs + date filter — collapse while scrolling
+            AnimatedSize(
+              duration: const Duration(milliseconds: 240),
+              curve: Curves.easeOutCubic,
+              alignment: Alignment.topCenter,
+              child: _chromeHidden
+                  ? const SizedBox(width: double.infinity)
+                  : Column(
+                      children: [
+                        TabBar(
+                          controller: _tabController,
+                          labelColor: isDark ? Colors.white : Colors.black,
+                          unselectedLabelColor: Colors.grey,
+                          indicatorColor: AppTheme.primary,
+                          tabs: const [
+                            Tab(text: 'Latest Updates'),
+                            Tab(text: 'Departments'),
+                          ],
+                        ),
+                        _buildDateFilterHeader(isDark),
+                      ],
+                    ),
             ),
-            _buildDateFilterHeader(isDark),
 
             // Content
             Expanded(
-              child: TabBarView(
+              child: NotificationListener<UserScrollNotification>(
+                onNotification: _handleScrollChrome,
+                child: TabBarView(
                 controller: _tabController,
                 children: [
                   // Tab 1: Notices List
@@ -789,6 +854,7 @@ class _NoticesScreenState extends State<NoticesScreen>
                     ),
                   ),
                 ],
+                ),
               ),
             ),
           ],
