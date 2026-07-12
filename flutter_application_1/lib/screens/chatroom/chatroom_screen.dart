@@ -1,6 +1,3 @@
-import 'dart:convert';
-import 'package:crypto/crypto.dart';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -548,13 +545,6 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         .subscribe();
   }
 
-  String _getAnonymizedUserId() {
-    // Create a deterministic non-PII identifier from email hash
-    final bytes = utf8.encode("${widget.userEmail}_room_salt_${widget.roomId}");
-    final digest = sha256.convert(bytes);
-    return 'user_${digest.toString().substring(0, 12)}';
-  }
-
   Future<void> _retryPresenceSubscription() async {
     if (_presenceRetryCount >= _maxPresenceRetries) {
       debugPrint(
@@ -586,11 +576,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
 
     _presenceChannel = Supabase.instance.client.channel(
       'room_presence:${widget.roomId}',
-      opts: RealtimeChannelConfig(
-        self: true,
-        enabled: true,
-        key: userEmailKey,
-      ),
+      opts: RealtimeChannelConfig(self: true, enabled: true, key: userEmailKey),
     );
 
     _presenceChannel!
@@ -690,9 +676,38 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         _roomVoteCache[_roomVotesCacheKey] = Map<String, int>.from(_userVotes);
       }
 
-      await _supabaseService.votePost(postId, widget.userEmail, direction);
-      // Logic handled by subscription reload, or silent reload here if needed
-      // _loadRoomData(silent: true);
+      final result = await _supabaseService.votePost(
+        postId,
+        widget.userEmail,
+        direction,
+      );
+      // Reconcile with the backend's authoritative counts and action so a
+      // race (double-tap, concurrent voters) never leaves stale numbers.
+      if (mounted) {
+        final reconcileIndex = _posts.indexWhere(
+          (p) => p['id'].toString() == postId,
+        );
+        if (reconcileIndex != -1) {
+          setState(() {
+            final reconciled = Map<String, dynamic>.from(
+              _posts[reconcileIndex],
+            );
+            reconciled['upvotes'] = _asSafeInt(result['newUpvotes']);
+            reconciled['downvotes'] = _asSafeInt(result['newDownvotes']);
+            final action = result['action']?.toString();
+            if (action == 'removed') {
+              _userVotes[postId] = 0;
+            } else if (action == 'added' || action == 'changed') {
+              _userVotes[postId] = direction;
+            }
+            _posts[reconcileIndex] = _normalizePostMetrics(reconciled);
+          });
+          _roomPostsCache[_roomPostsCacheKey] = _clonePosts(_posts);
+          _roomVoteCache[_roomVotesCacheKey] = Map<String, int>.from(
+            _userVotes,
+          );
+        }
+      }
     } catch (e) {
       if (mounted) {
         _roomVoteCache[_roomVotesCacheKey] = Map<String, int>.from(_userVotes);
@@ -1480,7 +1495,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
               isRoomAdmin: _isAdmin,
             ),
           ),
-        ).then((_) => _refreshPostsOnly(silent: true));
+        ).then((_) {
+          _refreshPostsOnly(silent: true);
+          // Votes may have changed inside the detail screen.
+          _loadInteractionState(forceRefresh: true);
+        });
       },
       child: Container(
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
@@ -1504,7 +1523,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                     (cachedPhoto != null && cachedPhoto.isNotEmpty)
                     ? cachedPhoto
                     : photoUrl;
-                if ((resolvedPhoto.isEmpty || cachedName == null) && normalizedEmail.isNotEmpty) {
+                if ((resolvedPhoto.isEmpty || cachedName == null) &&
+                    normalizedEmail.isNotEmpty) {
                   _ensureProfilePhotoCached(normalizedEmail);
                 }
                 final bool hasPhoto = resolvedPhoto.isNotEmpty;
@@ -1832,7 +1852,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
                                 isRoomAdmin: _isAdmin,
                               ),
                             ),
-                          ).then((_) => _refreshPostsOnly(silent: true));
+                          ).then((_) {
+                            _refreshPostsOnly(silent: true);
+                            // Votes may have changed inside the detail screen.
+                            _loadInteractionState(forceRefresh: true);
+                          });
                         },
                       ),
                       const SizedBox(width: 24),
@@ -3550,7 +3574,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
       if (email.isEmpty) continue;
 
       final authorName = post['author_name']?.toString().trim();
-      if (authorName != null && authorName.isNotEmpty && !_profileNameCache.containsKey(email)) {
+      if (authorName != null &&
+          authorName.isNotEmpty &&
+          !_profileNameCache.containsKey(email)) {
         _profileNameCache[email] = authorName;
       }
 
@@ -3575,28 +3601,32 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
 
   /// Fetch profiles for [emails] all in parallel and trigger a single rebuild.
   Future<void> _batchEnsureProfilesCached(Set<String> emails) async {
-    final toFetch = emails.where((e) => !_profilePhotoFetchInFlight.contains(e)).toSet();
+    final toFetch = emails
+        .where((e) => !_profilePhotoFetchInFlight.contains(e))
+        .toSet();
     if (toFetch.isEmpty) return;
     for (final e in toFetch) {
       _profilePhotoFetchInFlight.add(e);
     }
     try {
-      await Future.wait(toFetch.map((email) async {
-        try {
-          final profile = await _supabaseService.getUserInfo(email);
-          final photo = resolveProfilePhotoUrl(profile) ?? '';
-          final name =
-              profile?['display_name']?.toString().trim() ??
-              profile?['displayName']?.toString().trim() ??
-              '';
-          _profilePhotoCache[email] = photo;
-          if (name.isNotEmpty) _profileNameCache[email] = name;
-        } catch (e) {
-          debugPrint('Batch profile fetch failed for $email: $e');
-        } finally {
-          _profilePhotoFetchInFlight.remove(email);
-        }
-      }));
+      await Future.wait(
+        toFetch.map((email) async {
+          try {
+            final profile = await _supabaseService.getUserInfo(email);
+            final photo = resolveProfilePhotoUrl(profile) ?? '';
+            final name =
+                profile?['display_name']?.toString().trim() ??
+                profile?['displayName']?.toString().trim() ??
+                '';
+            _profilePhotoCache[email] = photo;
+            if (name.isNotEmpty) _profileNameCache[email] = name;
+          } catch (e) {
+            debugPrint('Batch profile fetch failed for $email: $e');
+          } finally {
+            _profilePhotoFetchInFlight.remove(email);
+          }
+        }),
+      );
     } finally {
       if (mounted) setState(() {});
     }
@@ -3604,15 +3634,17 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
 
   Future<void> _ensureProfilePhotoCached(String email) async {
     final normalized = _normalizeEmail(email);
-    if (normalized.isEmpty ||
-        _profilePhotoFetchInFlight.contains(normalized)) {
+    if (normalized.isEmpty || _profilePhotoFetchInFlight.contains(normalized)) {
       return;
     }
     _profilePhotoFetchInFlight.add(normalized);
     try {
       final profile = await _supabaseService.getUserInfo(normalized);
       final resolved = resolveProfilePhotoUrl(profile) ?? '';
-      final name = profile?['display_name']?.toString().trim() ?? profile?['displayName']?.toString().trim() ?? '';
+      final name =
+          profile?['display_name']?.toString().trim() ??
+          profile?['displayName']?.toString().trim() ??
+          '';
       if (!mounted) return;
       setState(() {
         _profilePhotoCache[normalized] = resolved;

@@ -107,16 +107,16 @@ class _NoticesScreenState extends State<NoticesScreen>
   List<DepartmentAccount> _buildDepartmentAccountsWithNames(
     Iterable<String> rawCodes,
   ) {
-    final orderedCodes = <String>['general', ...rawCodes.map(normalizeDepartmentCode)];
+    final orderedCodes = <String>[
+      'general',
+      ...rawCodes.map(normalizeDepartmentCode),
+    ];
     final seen = <String>{};
     final accounts = <DepartmentAccount>[];
     for (final code in orderedCodes) {
       if (code.isEmpty || !seen.add(code)) continue;
       accounts.add(
-        departmentAccountFromCode(
-          code,
-          fallbackName: _departmentNames[code],
-        ),
+        departmentAccountFromCode(code, fallbackName: _departmentNames[code]),
       );
     }
     return accounts;
@@ -322,7 +322,7 @@ class _NoticesScreenState extends State<NoticesScreen>
       final canManage =
           isTeacherOrAdminProfile(profile) ||
           hasAdminCapability(profile, 'upload_notice');
-        if (!mounted) return canManage;
+      if (!mounted) return canManage;
       setState(() => _canManageNotices = canManage);
       return canManage;
     } catch (e) {
@@ -372,7 +372,9 @@ class _NoticesScreenState extends State<NoticesScreen>
   Future<void> _loadDepartmentFollowerCounts() async {
     try {
       final counts = await _supabaseService.getDepartmentFollowerCounts(
-        _departmentAccounts.map((account) => account.id).toList(growable: false),
+        _departmentAccounts
+            .map((account) => account.id)
+            .toList(growable: false),
         widget.collegeId,
       );
 
@@ -751,109 +753,110 @@ class _NoticesScreenState extends State<NoticesScreen>
               child: NotificationListener<UserScrollNotification>(
                 onNotification: _handleScrollChrome,
                 child: TabBarView(
-                controller: _tabController,
-                children: [
-                  // Tab 1: Notices List
-                  RefreshIndicator(
-                    onRefresh: () => _loadNotices(reset: true),
-                    child: _isLoading
-                        ? _buildLoadingSkeleton(isDark)
-                        : _filteredNotices.isEmpty
-                        ? _buildEmptyState(isDark)
-                        : AnimationLimiter(
-                            child: ListView.builder(
-                              padding: const EdgeInsets.fromLTRB(
-                                16,
-                                16,
-                                16,
-                                120,
-                              ),
-                              itemCount:
-                                  _filteredNotices.length +
-                                  ((_hasMoreNotices &&
-                                          _startDate == null &&
-                                          _endDate == null)
-                                      ? 1
-                                      : 0),
-                              itemBuilder: (context, index) {
-                                if (_hasMoreNotices &&
-                                    _startDate == null &&
-                                    _endDate == null &&
-                                    index == _filteredNotices.length) {
-                                  return Padding(
-                                    padding: const EdgeInsets.only(
-                                      top: 6,
-                                      bottom: 14,
-                                    ),
-                                    child: Center(
-                                      child: _isLoadingMoreNotices
-                                          ? const SizedBox(
-                                              width: 22,
-                                              height: 22,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
+                  controller: _tabController,
+                  children: [
+                    // Tab 1: Notices List
+                    RefreshIndicator(
+                      onRefresh: () => _loadNotices(reset: true),
+                      child: _isLoading
+                          ? _buildLoadingSkeleton(isDark)
+                          : _filteredNotices.isEmpty
+                          ? _buildEmptyState(isDark)
+                          : AnimationLimiter(
+                              child: ListView.builder(
+                                padding: const EdgeInsets.fromLTRB(
+                                  16,
+                                  16,
+                                  16,
+                                  120,
+                                ),
+                                itemCount:
+                                    _filteredNotices.length +
+                                    ((_hasMoreNotices &&
+                                            _startDate == null &&
+                                            _endDate == null)
+                                        ? 1
+                                        : 0),
+                                itemBuilder: (context, index) {
+                                  if (_hasMoreNotices &&
+                                      _startDate == null &&
+                                      _endDate == null &&
+                                      index == _filteredNotices.length) {
+                                    return Padding(
+                                      padding: const EdgeInsets.only(
+                                        top: 6,
+                                        bottom: 14,
+                                      ),
+                                      child: Center(
+                                        child: _isLoadingMoreNotices
+                                            ? const SizedBox(
+                                                width: 22,
+                                                height: 22,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                    ),
+                                              )
+                                            : OutlinedButton.icon(
+                                                onPressed: _loadMoreNotices,
+                                                icon: const Icon(
+                                                  Icons.expand_more_rounded,
+                                                ),
+                                                label: const Text('Load more'),
                                               ),
-                                            )
-                                          : OutlinedButton.icon(
-                                              onPressed: _loadMoreNotices,
-                                              icon: const Icon(
-                                                Icons.expand_more_rounded,
-                                              ),
-                                              label: const Text('Load more'),
-                                            ),
-                                    ),
+                                      ),
+                                    );
+                                  }
+
+                                  final notice = _filteredNotices[index];
+                                  final account = _accountForDepartment(
+                                    notice['department'] as String?,
                                   );
-                                }
 
-                                final notice = _filteredNotices[index];
-                                final account = _accountForDepartment(
-                                  notice['department'] as String?,
-                                );
-
-                                return AnimationConfiguration.staggeredList(
-                                  position: index,
-                                  duration: const Duration(milliseconds: 375),
-                                  child: SlideAnimation(
-                                    verticalOffset: 20.0,
-                                    child: FadeInAnimation(
-                                      child: Padding(
-                                        padding: const EdgeInsets.only(
-                                          bottom: 16,
-                                        ),
-                                        child: NoticeCard(
-                                          notice: notice,
-                                          account: account,
-                                          collegeId: widget.collegeId,
-                                          isDark: isDark,
-                                          canManage: _canManageNotices,
-                                          onNoticeUpdated: () =>
-                                              _loadNotices(reset: true),
+                                  return AnimationConfiguration.staggeredList(
+                                    position: index,
+                                    duration: const Duration(milliseconds: 375),
+                                    child: SlideAnimation(
+                                      verticalOffset: 20.0,
+                                      child: FadeInAnimation(
+                                        child: Padding(
+                                          padding: const EdgeInsets.only(
+                                            bottom: 16,
+                                          ),
+                                          child: NoticeCard(
+                                            notice: notice,
+                                            account: account,
+                                            collegeId: widget.collegeId,
+                                            isDark: isDark,
+                                            canManage: _canManageNotices,
+                                            onNoticeUpdated: () =>
+                                                _loadNotices(reset: true),
+                                          ),
                                         ),
                                       ),
                                     ),
-                                  ),
-                                );
-                              },
+                                  );
+                                },
+                              ),
                             ),
-                          ),
-                  ),
-
-                  // Tab 2: Departments List
-                  AnimationLimiter(
-                    child: ListView.builder(
-                      padding: const EdgeInsets.only(top: 12, bottom: 120),
-                      itemCount: _departmentAccounts.length,
-                      itemBuilder: (context, index) {
-                        final account = _departmentAccounts[index];
-                        return _buildDepartmentAccountTile(
-                          account,
-                          isDark,
-                          index,
-                        );
-                      },
                     ),
-                  ),
-                ],
+
+                    // Tab 2: Departments List
+                    AnimationLimiter(
+                      child: ListView.builder(
+                        padding: const EdgeInsets.only(top: 12, bottom: 120),
+                        itemCount: _departmentAccounts.length,
+                        itemBuilder: (context, index) {
+                          final account = _departmentAccounts[index];
+                          return _buildDepartmentAccountTile(
+                            account,
+                            isDark,
+                            index,
+                          );
+                        },
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),

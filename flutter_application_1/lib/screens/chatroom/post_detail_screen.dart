@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'dart:io';
@@ -248,9 +249,20 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           widget.post['id'].toString(),
           widget.userEmail,
         ),
+        if (widget.roomId.isNotEmpty)
+          _supabaseService.getUserVotes(widget.roomId).catchError((Object e) {
+            debugPrint('Failed to load user votes: $e');
+            return <String, int>{};
+          }),
       ]);
       final comments = (results[0] as List).cast<Map<String, dynamic>>();
       final isSaved = results[1] as bool;
+      int? userVote;
+      if (results.length > 2) {
+        final votes = (results[2] as Map).cast<String, int>();
+        final vote = votes[widget.post['id'].toString()];
+        userVote = (vote == 1 || vote == -1) ? vote : null;
+      }
       _primePhotoCacheFromComments(comments);
       _cacheComments(comments);
 
@@ -258,6 +270,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         setState(() {
           _comments = _cloneCommentTree(comments);
           _isSaved = isSaved;
+          if (userVote != null) _userVote = userVote;
           _isLoading = false;
         });
         _scheduleInitialCommentReveal();
@@ -500,32 +513,65 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   Future<void> _vote(int direction) async {
+    if (_isReadOnly) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Read-only users cannot vote. Use your college email to unlock.',
+          ),
+        ),
+      );
+      return;
+    }
+
     final oldVote = _userVote;
     final newVote = _userVote == direction ? null : direction;
 
     setState(() {
-      if (oldVote == 1) _upvotes--;
-      if (oldVote == -1) _downvotes--;
+      if (oldVote == 1) _upvotes = math.max(0, _upvotes - 1);
+      if (oldVote == -1) _downvotes = math.max(0, _downvotes - 1);
       if (newVote == 1) _upvotes++;
       if (newVote == -1) _downvotes++;
       _userVote = newVote;
     });
 
     try {
-      await _supabaseService.votePost(
+      // The backend toggles on its own: sending the tapped direction adds,
+      // removes (same vote), or switches (opposite vote) — so always send
+      // the direction of the button the user pressed.
+      final result = await _supabaseService.votePost(
         widget.post['id'].toString(),
         widget.userEmail,
-        newVote ?? 0,
+        direction,
       );
+      if (!mounted) return;
+      // Reconcile with the backend's authoritative counts.
+      setState(() {
+        _upvotes = _asSafeInt(result['newUpvotes']);
+        _downvotes = _asSafeInt(result['newDownvotes']);
+        final action = result['action']?.toString();
+        if (action == 'removed') {
+          _userVote = null;
+        } else if (action == 'added' || action == 'changed') {
+          _userVote = direction;
+        }
+      });
+      // Keep the post map in sync so the parent feed shows updated counts.
+      _post['upvotes'] = _upvotes;
+      _post['downvotes'] = _downvotes;
     } catch (e) {
       // Revert on error
+      if (!mounted) return;
       setState(() {
-        if (newVote == 1) _upvotes--;
-        if (newVote == -1) _downvotes--;
+        if (newVote == 1) _upvotes = math.max(0, _upvotes - 1);
+        if (newVote == -1) _downvotes = math.max(0, _downvotes - 1);
         if (oldVote == 1) _upvotes++;
         if (oldVote == -1) _downvotes++;
         _userVote = oldVote;
       });
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Could not record vote.')));
     }
   }
 
@@ -1272,10 +1318,10 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final authorName = (cachedName != null && cachedName.isNotEmpty)
         ? cachedName
         : (post['author_name']?.toString().trim().isNotEmpty ?? false)
-            ? post['author_name'].toString().trim()
-            : authorEmail.contains('@')
-            ? authorEmail.split('@').first
-            : 'User';
+        ? post['author_name'].toString().trim()
+        : authorEmail.contains('@')
+        ? authorEmail.split('@').first
+        : 'User';
     final cachedPhoto = _profilePhotoCache[normalizedEmail];
     final fallbackPhoto = _resolvePhotoUrl(post, const [
       'author_photo_url',
@@ -1286,14 +1332,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final resolvedPhoto = (cachedPhoto != null && cachedPhoto.isNotEmpty)
         ? cachedPhoto
         : fallbackPhoto;
-    if ((resolvedPhoto.isEmpty || cachedName == null) && normalizedEmail.isNotEmpty) {
+    if ((resolvedPhoto.isEmpty || cachedName == null) &&
+        normalizedEmail.isNotEmpty) {
       _ensureProfilePhotoCached(normalizedEmail);
     }
     final hasAuthorPhoto = resolvedPhoto.isNotEmpty;
     final createdAt =
         DateTime.tryParse(post['created_at']?.toString() ?? '') ??
         DateTime.now();
-    final netVotes = _upvotes - _downvotes;
     final textColor = isDark ? Colors.white : Colors.black;
     final mutedColor = isDark ? Colors.white60 : Colors.black54;
 
@@ -1339,10 +1385,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                   const SizedBox(height: 1),
                   Text(
                     '@${authorEmail.split('@').first}',
-                    style: GoogleFonts.inter(
-                      fontSize: 14,
-                      color: mutedColor,
-                    ),
+                    style: GoogleFonts.inter(fontSize: 14, color: mutedColor),
                   ),
                 ],
               ),
@@ -1499,10 +1542,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
         // Timestamp line — Twitter style
         Text(
           '${_formatTimeAgo(createdAt)} · ${_formatFullDate(createdAt)}',
-          style: GoogleFonts.inter(
-            fontSize: 14,
-            color: mutedColor,
-          ),
+          style: GoogleFonts.inter(fontSize: 14, color: mutedColor),
         ),
         const SizedBox(height: 12),
         Divider(
@@ -1521,31 +1561,55 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
               style: GoogleFonts.inter(fontSize: 14, color: mutedColor),
             ),
             const SizedBox(width: 24),
-            Icon(
-              Icons.arrow_upward_rounded,
-              size: 18,
-              color: _userVote == 1 ? AppTheme.success : mutedColor,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              '$_upvotes',
-              style: GoogleFonts.inter(
-                fontSize: 14,
-                color: _userVote == 1 ? AppTheme.success : mutedColor,
+            InkWell(
+              onTap: () => _vote(1),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.arrow_upward_rounded,
+                      size: 18,
+                      color: _userVote == 1 ? AppTheme.success : mutedColor,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '$_upvotes',
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        color: _userVote == 1 ? AppTheme.success : mutedColor,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
             const SizedBox(width: 24),
-            Icon(
-              Icons.arrow_downward_rounded,
-              size: 18,
-              color: _userVote == -1 ? AppTheme.error : mutedColor,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              '$_downvotes',
-              style: GoogleFonts.inter(
-                fontSize: 14,
-                color: _userVote == -1 ? AppTheme.error : mutedColor,
+            InkWell(
+              onTap: () => _vote(-1),
+              borderRadius: BorderRadius.circular(8),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.arrow_downward_rounded,
+                      size: 18,
+                      color: _userVote == -1 ? AppTheme.error : mutedColor,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '$_downvotes',
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        color: _userVote == -1 ? AppTheme.error : mutedColor,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
@@ -1561,10 +1625,22 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
   String _formatFullDate(DateTime date) {
     final months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
-    final hour = date.hour > 12 ? date.hour - 12 : (date.hour == 0 ? 12 : date.hour);
+    final hour = date.hour > 12
+        ? date.hour - 12
+        : (date.hour == 0 ? 12 : date.hour);
     final ampm = date.hour >= 12 ? 'pm' : 'am';
     final minute = date.minute.toString().padLeft(2, '0');
     return '$hour:$minute $ampm · ${date.day} ${months[date.month - 1]} ${date.year % 100}';
@@ -1640,7 +1716,8 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     final resolvedPhoto = (cachedPhoto != null && cachedPhoto.isNotEmpty)
         ? cachedPhoto
         : fallbackPhoto;
-    if ((resolvedPhoto.isEmpty || cachedName == null) && normalizedEmail.isNotEmpty) {
+    if ((resolvedPhoto.isEmpty || cachedName == null) &&
+        normalizedEmail.isNotEmpty) {
       _ensureProfilePhotoCached(normalizedEmail);
     }
     final hasAuthorPhoto = resolvedPhoto.isNotEmpty;
@@ -1757,14 +1834,13 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                                   Navigator.push(
                                     context,
                                     MaterialPageRoute(
-                                      builder: (context) =>
-                                          UserProfileScreen(
-                                            userEmail: authorEmail,
-                                            userName: authorName,
-                                            userPhotoUrl: hasAuthorPhoto
-                                                ? resolvedPhoto
-                                                : null,
-                                          ),
+                                      builder: (context) => UserProfileScreen(
+                                        userEmail: authorEmail,
+                                        userName: authorName,
+                                        userPhotoUrl: hasAuthorPhoto
+                                            ? resolvedPhoto
+                                            : null,
+                                      ),
                                     ),
                                   );
                                 },
@@ -2075,15 +2151,17 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
 
   Future<void> _ensureProfilePhotoCached(String email) async {
     final normalized = _normalizeEmail(email);
-    if (normalized.isEmpty ||
-        _profilePhotoFetchInFlight.contains(normalized)) {
+    if (normalized.isEmpty || _profilePhotoFetchInFlight.contains(normalized)) {
       return;
     }
     _profilePhotoFetchInFlight.add(normalized);
     try {
       final profile = await _supabaseService.getUserInfo(normalized);
       final resolved = resolveProfilePhotoUrl(profile) ?? '';
-      final name = profile?['display_name']?.toString().trim() ?? profile?['displayName']?.toString().trim() ?? '';
+      final name =
+          profile?['display_name']?.toString().trim() ??
+          profile?['displayName']?.toString().trim() ??
+          '';
       if (!mounted) return;
       setState(() {
         _profilePhotoCache[normalized] = resolved;
@@ -2222,7 +2300,9 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
           ? 'Write your reply...'
           : 'Add a comment...',
       userPhotoUrl: _profilePhotoCache[_normalizeEmail(widget.userEmail)],
-      userDisplayName: _profileNameCache[_normalizeEmail(widget.userEmail)] ?? _authService.displayName,
+      userDisplayName:
+          _profileNameCache[_normalizeEmail(widget.userEmail)] ??
+          _authService.displayName,
     );
   }
 

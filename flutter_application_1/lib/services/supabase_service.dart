@@ -39,7 +39,7 @@ class SupabaseService {
   static const Duration _filterValuesCacheTtl = Duration(minutes: 5);
   static const Duration _noticeDepartmentsCacheTtl = Duration(minutes: 10);
   static const Duration _userInfoCacheTtl = Duration(minutes: 5);
-  static const Duration _roomListCacheTtl = Duration(seconds: 30);
+  static const Duration _roomListCacheTtl = Duration(minutes: 5);
   static const int _maxResourceListCacheEntries = 24;
   static const int _maxFilterValuesCacheEntries = 24;
   static const int _maxUserInfoCacheEntries = 256;
@@ -4851,13 +4851,27 @@ class SupabaseService {
     }
   }
 
-  /// Vote on a post
-  Future<void> votePost(String postId, String userEmail, int direction) async {
+  /// Vote on a post. [direction] must be 1 (upvote) or -1 (downvote); the
+  /// backend toggles the vote off when the same direction is sent again.
+  /// Returns the backend's authoritative result:
+  /// `{action: added|removed|changed, newUpvotes: int, newDownvotes: int}`.
+  Future<Map<String, dynamic>> votePost(
+    String postId,
+    String userEmail,
+    int direction,
+  ) async {
     try {
+      if (direction != 1 && direction != -1) {
+        throw ArgumentError.value(
+          direction,
+          'direction',
+          'must be 1 (up) or -1 (down); re-send the same direction to toggle off',
+        );
+      }
       final ctx = _ctx;
       if (ctx == null) throw Exception('Security context not initialized');
 
-      await _api.voteChatMessage(
+      return await _api.voteChatMessage(
         messageId: postId,
         direction: direction == 1 ? 'up' : 'down',
         context: ctx,
@@ -6686,10 +6700,51 @@ class SupabaseService {
           .toList(growable: false);
     }
 
+    // ── Seed from disk if in-memory cache is empty (cold start) ─────────────
+    if (!_roomListCache.containsKey(cacheKey)) {
+      final diskRooms = AppCache.getJson('rooms:$cacheKey');
+      if (diskRooms is List) {
+        _roomListCache[cacheKey] = (
+          cachedAt: DateTime.fromMillisecondsSinceEpoch(0), // mark stale so bg refresh fires
+          data: diskRooms
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList(),
+        );
+      }
+    }
+
     if (!forceRefresh) {
       final cached = _roomListCache[cacheKey];
-      if (cached != null &&
-          DateTime.now().difference(cached.cachedAt) < _roomListCacheTtl) {
+      if (cached != null) {
+        final isStale =
+            DateTime.now().difference(cached.cachedAt) >= _roomListCacheTtl;
+        if (!isStale) {
+          return cloneRooms(cached.data);
+        }
+        // Stale: return immediately, kick off background refresh below
+        // (fall through to the fetch section which will set _roomListInFlight)
+        final inFlight = _roomListInFlight[cacheKey];
+        if (inFlight != null) {
+          // Already refreshing — return stale now, caller gets fresh on next call
+          return cloneRooms(cached.data);
+        }
+        // Schedule background refresh (non-awaited)
+        // We don't await here; the result will update the cache for the next caller.
+        unawaited(() async {
+          try {
+            // fetchRooms is defined below; we must trigger the full fetch path.
+            // We set forceRefresh-equivalent by removing cache entry first so
+            // the re-entrant call actually fetches.
+            _roomListCache.remove(cacheKey);
+            await getChatRooms(
+              userEmail,
+              collegeId,
+              filter: filter,
+              forceRefresh: true,
+            );
+          } catch (_) {}
+        }());
         return cloneRooms(cached.data);
       }
 
@@ -6908,6 +6963,8 @@ class SupabaseService {
       cachedAt: DateTime.now(),
       data: cloneRooms(rooms),
     );
+    // Persist to disk so cold-start renders instantly next time
+    unawaited(AppCache.putJson('rooms:$cacheKey', rooms));
     return cloneRooms(rooms);
   }
 

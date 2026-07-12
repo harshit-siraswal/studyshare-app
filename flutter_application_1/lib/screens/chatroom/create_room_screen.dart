@@ -208,7 +208,9 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
       Navigator.of(context).pop(result);
     } catch (e) {
       debugPrint('Error creating room: $e');
-      _setError('Failed to create room: ${e.toString().replaceAll('Exception: ', '')}');
+      _setError(
+        'Failed to create room: ${e.toString().replaceAll('Exception: ', '')}',
+      );
     } finally {
       if (mounted) {
         setState(() => _isSubmitting = false);
@@ -809,40 +811,6 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                 ),
               ),
             ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMetaChip({
-    required String label,
-    required IconData icon,
-    required bool isDark,
-  }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: isDark
-            ? Colors.white.withValues(alpha: 0.05)
-            : const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 15, color: AppTheme.primary),
-          const SizedBox(width: 6),
-          Text(
-            label,
-            style: GoogleFonts.inter(
-              fontSize: 11.5,
-              fontWeight: FontWeight.w700,
-              color: isDark ? Colors.white70 : const Color(0xFF334155),
-            ),
           ),
         ],
       ),

@@ -1097,7 +1097,9 @@ class _StickerPickerState extends State<StickerPicker>
       decoration: BoxDecoration(
         border: Border(
           top: BorderSide(
-            color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.06),
+            color: isDark
+                ? Colors.white10
+                : Colors.black.withValues(alpha: 0.06),
           ),
         ),
       ),
@@ -1124,7 +1126,9 @@ class _StickerPickerState extends State<StickerPicker>
             width: 1,
             height: 32,
             margin: const EdgeInsets.symmetric(horizontal: 6),
-            color: isDark ? Colors.white12 : Colors.black.withValues(alpha: 0.06),
+            color: isDark
+                ? Colors.white12
+                : Colors.black.withValues(alpha: 0.06),
           ),
           // Installed packs
           Expanded(
@@ -1391,85 +1395,6 @@ class _StickerPickerState extends State<StickerPicker>
     );
   }
 
-  Widget _buildSegmentedTabs(bool isDark) {
-    final labels = ['Stickers', 'GIFs', 'Memes'];
-    final animation = _tabController.animation;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final segmentCount = labels.length;
-        final segmentWidth = (constraints.maxWidth - 4) / segmentCount;
-
-        Widget childForValue(double value) {
-          final clampedValue = value.clamp(0.0, (segmentCount - 1).toDouble());
-          return Container(
-            decoration: BoxDecoration(
-              color: isDark ? Colors.white10 : Colors.black12,
-              borderRadius: BorderRadius.circular(18),
-            ),
-            padding: const EdgeInsets.all(2),
-            child: Stack(
-              children: [
-                Positioned(
-                  left: segmentWidth * clampedValue,
-                  top: 0,
-                  bottom: 0,
-                  width: segmentWidth,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: AppTheme.primary,
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                  ),
-                ),
-                Row(
-                  children: labels.asMap().entries.map((entry) {
-                    final selected = _tabController.index == entry.key;
-                    return Expanded(
-                      child: Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          borderRadius: BorderRadius.circular(16),
-                          onTap: () => _tabController.animateTo(entry.key),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 7),
-                            child: AnimatedDefaultTextStyle(
-                              duration: const Duration(milliseconds: 160),
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: selected
-                                    ? Colors.white
-                                    : (isDark
-                                          ? Colors.white54
-                                          : Colors.black45),
-                              ),
-                              child: Text(
-                                entry.value,
-                                textAlign: TextAlign.center,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ],
-            ),
-          );
-        }
-
-        if (animation == null) {
-          return childForValue(_tabController.index.toDouble());
-        }
-        return AnimatedBuilder(
-          animation: animation,
-          builder: (context, child) => childForValue(animation.value),
-        );
-      },
-    );
-  }
-
   Widget _buildSearchBar({
     required TextEditingController controller,
     required bool isDark,
@@ -1523,142 +1448,6 @@ class _StickerPickerState extends State<StickerPicker>
       ),
       onChanged: onChanged,
       onSubmitted: onSubmitted,
-    );
-  }
-
-  Widget _buildStickerGrid(bool isDark) {
-    final items = _stickerQuery.trim().isNotEmpty
-        ? _giphyStickerResults
-        : _filteredLocalStickers;
-
-    if (_stickerQuery.trim().isNotEmpty && _giphyLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (items.isEmpty) {
-      return Center(
-        child: Text(
-          'No stickers found',
-          style: GoogleFonts.inter(
-            color: isDark ? Colors.white54 : Colors.black45,
-          ),
-        ),
-      );
-    }
-
-    if (_stickerQuery.trim().isNotEmpty) {
-      return GridView.builder(
-        padding: const EdgeInsets.only(top: 8, bottom: 8),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 5,
-          mainAxisSpacing: 6,
-          crossAxisSpacing: 6,
-        ),
-        itemCount: _giphyStickerResults.length,
-        itemBuilder: (context, index) {
-          final item = _giphyStickerResults[index];
-          return GestureDetector(
-            onTap: () async {
-              final navigator = Navigator.of(context);
-              final file = await _stickerService.saveGiphySticker(item);
-              if (!mounted || file == null) return;
-              widget.onStickerSelected(file);
-              navigator.pop();
-            },
-            child: CachedNetworkImage(
-              imageUrl: item.previewUrl,
-              fit: BoxFit.cover,
-            ),
-          );
-        },
-      );
-    }
-
-    return GridView.builder(
-      padding: const EdgeInsets.only(top: 8, bottom: 8),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 5,
-        mainAxisSpacing: 6,
-        crossAxisSpacing: 6,
-      ),
-      itemCount: _filteredLocalStickers.length,
-      itemBuilder: (context, index) {
-        final file = _filteredLocalStickers[index];
-        return GestureDetector(
-          onTap: () {
-            widget.onStickerSelected(file);
-            Navigator.pop(context);
-          },
-          child: Image.file(file, fit: BoxFit.cover),
-        );
-      },
-    );
-  }
-
-  Widget _buildInstalledPackChips(bool isDark) {
-    final packs = _installedStickerPacks;
-    if (packs.isEmpty) {
-      return const SizedBox.shrink();
-    }
-
-    final selectedColor = AppTheme.primary;
-    final idleColor = isDark
-        ? Colors.white10
-        : Colors.black.withValues(alpha: 0.05);
-
-    Widget chip({
-      required String id,
-      required String label,
-      required bool selected,
-    }) {
-      return ChoiceChip(
-        label: Text(label),
-        selected: selected,
-        onSelected: (_) {
-          setState(() => _selectedPackId = id);
-        },
-        selectedColor: selectedColor.withValues(alpha: isDark ? 0.22 : 0.12),
-        backgroundColor: idleColor,
-        side: BorderSide(
-          color: selected
-              ? selectedColor.withValues(alpha: 0.38)
-              : (isDark ? Colors.white12 : Colors.black12),
-        ),
-        labelStyle: GoogleFonts.inter(
-          fontSize: 11.5,
-          fontWeight: FontWeight.w600,
-          color: selected
-              ? selectedColor
-              : (isDark ? Colors.white70 : Colors.black87),
-        ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-        visualDensity: VisualDensity.compact,
-      );
-    }
-
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            chip(
-              id: 'all',
-              label: 'All Packs',
-              selected: _selectedPackId == 'all',
-            ),
-            ...packs.map(
-              (pack) => chip(
-                id: pack.id,
-                label: pack.name,
-                selected: _selectedPackId == pack.id,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 
@@ -1983,9 +1772,7 @@ class _StickerPickerState extends State<StickerPicker>
                         ),
                         const SizedBox(height: 10),
                       ],
-                      Expanded(
-                        child: _buildStickerGridWithCreate(isDark),
-                      ),
+                      Expanded(child: _buildStickerGridWithCreate(isDark)),
                     ],
                   ),
                 ),

@@ -984,7 +984,12 @@ class _AppRouterState extends State<AppRouter> {
     setState(() {});
   }
 
-  void _onCollegeSelected(String id, String name, String domain, {String? selectedClass}) async {
+  void _onCollegeSelected(
+    String id,
+    String name,
+    String domain, {
+    String? selectedClass,
+  }) async {
     // Stash legacy keys before removal
     final legacyId = widget.prefs.getString('selectedCollegeId');
     final legacyName = widget.prefs.getString('selectedCollegeName');
@@ -1148,9 +1153,7 @@ class _AppRouterState extends State<AppRouter> {
 
     _authGateFuture = _checkCurrentSessionAccess(collegeId).then((result) {
       if (result.allowed && !result.isBanned) {
-        unawaited(
-          AppCache.putJson(_authGateCacheStorageKey(sessionKey), true),
-        );
+        unawaited(AppCache.putJson(_authGateCacheStorageKey(sessionKey), true));
       }
       return result;
     });
@@ -1164,9 +1167,7 @@ class _AppRouterState extends State<AppRouter> {
     try {
       final result = await _checkCurrentSessionAccess(collegeId);
       if (result.allowed && !result.isBanned) {
-        unawaited(
-          AppCache.putJson(_authGateCacheStorageKey(sessionKey), true),
-        );
+        unawaited(AppCache.putJson(_authGateCacheStorageKey(sessionKey), true));
         return;
       }
 
