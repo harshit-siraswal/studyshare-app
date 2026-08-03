@@ -1495,27 +1495,7 @@ class _NoticeDetailScreenState extends State<NoticeDetailScreen> {
   }
 
   Future<bool> _ensurePremiumStickerAccess() async {
-    final hasPremium = await _subscriptionService.isPremium();
-    if (hasPremium) return true;
-    if (!mounted) return false;
-
-    final messenger = ScaffoldMessenger.of(context);
-    await showDialog(
-      context: context,
-      builder: (_) => PaywallDialog(
-        onSuccess: () {
-          if (!mounted) return;
-          messenger.showSnackBar(
-            const SnackBar(
-              content: Text('Premium unlocked! Sticker feature enabled.'),
-            ),
-          );
-        },
-      ),
-    );
-
-    if (!mounted) return false;
-    return _subscriptionService.isPremium();
+    return true;
   }
 
   Widget _buildInputArea(bool isDark, Color textColor, Color secondaryColor) {

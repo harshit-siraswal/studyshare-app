@@ -2184,35 +2184,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   Future<bool> _ensurePremiumStickerAccess() async {
-    final hasPremium = await _subscriptionService.isPremium();
-    if (hasPremium) return true;
-    if (!mounted) return false;
-
-    final messenger = ScaffoldMessenger.of(context);
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => PaywallDialog(
-        onSuccess: () {
-          Navigator.of(dialogContext).pop(true);
-        },
-      ),
-    );
-
-    if (result == true && mounted) {
-      // Re-check premium status after successful purchase
-      final isPremium = await _subscriptionService.isPremium();
-      if (isPremium) {
-        messenger.showSnackBar(
-          const SnackBar(
-            content: Text('Premium unlocked! Sticker feature enabled.'),
-          ),
-        );
-      }
-      return isPremium;
-    }
-
-    if (!mounted) return false;
-    return false;
+    return true;
   }
 
   Future<void> _handleStickerSelection(File stickerFile) async {

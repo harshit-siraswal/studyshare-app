@@ -39,7 +39,7 @@ class _PaywallDialogState extends State<PaywallDialog> {
       priceLabel: '\u20b949/month',
       subtitle: '30-day access with all premium tools',
       benefits: [
-        'Offline PDF downloads',
+        '10x AI Token Allowance',
         '1-year chat room validity',
         'Premium profile badge',
       ],
@@ -51,7 +51,7 @@ class _PaywallDialogState extends State<PaywallDialog> {
       subtitle: '90-day access with best value pricing',
       badgeText: 'BEST VALUE',
       benefits: [
-        'Offline PDF downloads',
+        '10x AI Token Allowance',
         '1-year chat room validity',
         'Premium profile badge',
       ],

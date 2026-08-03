@@ -2369,27 +2369,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
   }
 
   Future<bool> _ensurePremiumGifAccess() async {
-    final hasPremium = await _subscriptionService.isPremium();
-    if (hasPremium) return true;
-    if (!mounted) return false;
-
-    final messenger = ScaffoldMessenger.of(context);
-    await showDialog(
-      context: context,
-      builder: (_) => PaywallDialog(
-        onSuccess: () {
-          if (!mounted) return;
-          messenger.showSnackBar(
-            const SnackBar(
-              content: Text('Premium unlocked! GIF feature enabled.'),
-            ),
-          );
-        },
-      ),
-    );
-
-    if (!mounted) return false;
-    return _subscriptionService.isPremium();
+    return true;
   }
 
   Future<void> _showEditPostSheet(Map<String, dynamic> post) async {

@@ -11,11 +11,9 @@ import '../models/resource.dart';
 import '../screens/profile/user_profile_screen.dart';
 import '../screens/viewer/pdf_viewer_screen.dart';
 import '../services/download_service.dart';
-import '../services/subscription_service.dart';
 import '../services/supabase_service.dart';
 import '../utils/link_navigation_utils.dart';
 import '../utils/youtube_link_utils.dart';
-import '../widgets/paywall_dialog.dart';
 import 'user_badge.dart';
 
 class ResourceCard extends StatefulWidget {
@@ -252,22 +250,7 @@ class ResourceCardState extends State<ResourceCard> {
       return;
     }
 
-    final subService = SubscriptionService();
-    final isPremium = await subService.isPremium();
     if (!context.mounted) return;
-    if (!isPremium) {
-      showDialog(
-        context: context,
-        builder: (_) => PaywallDialog(
-          onSuccess: () {
-            if (!mounted) return;
-            setState(() {});
-            _handleDownload(context);
-          },
-        ),
-      );
-      return;
-    }
 
     if (widget.resource.fileUrl.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(

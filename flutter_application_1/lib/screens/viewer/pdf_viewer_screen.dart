@@ -434,26 +434,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   }
 
   Future<void> _handleDownload() async {
-    final isPremium = await _subscriptionService.isPremium();
     if (!mounted) return;
-
-    if (!isPremium) {
-      final messenger = ScaffoldMessenger.of(context);
-      showDialog(
-        context: context,
-        builder: (context) => PaywallDialog(
-          onSuccess: () {
-            if (!mounted) return;
-            messenger.showSnackBar(
-              const SnackBar(content: Text('Premium unlocked! Downloading…')),
-            );
-            _performDownloadOrLaunch();
-          },
-        ),
-      );
-      return;
-    }
-
     await _performDownloadOrLaunch();
   }
 
