@@ -563,7 +563,9 @@ class _StickerPickerState extends State<StickerPicker>
 
   Future<File?> _downloadToTempFile(String url, String prefix) async {
     try {
-      final res = await http.get(Uri.parse(url));
+      final res = await http
+          .get(Uri.parse(url))
+          .timeout(const Duration(seconds: 15));
       if (res.statusCode != 200 || res.bodyBytes.isEmpty) return null;
       final tempDir = await getTemporaryDirectory();
       final ext = path.extension(Uri.parse(url).path);
@@ -575,14 +577,25 @@ class _StickerPickerState extends State<StickerPicker>
       final file = File(filePath);
       await file.writeAsBytes(res.bodyBytes, flush: true);
       return file;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('Failed to download media ($prefix): $e');
       return null;
     }
   }
 
   Future<void> _sendRemoteMedia(String url, {String prefix = 'remote'}) async {
     final file = await _downloadToTempFile(url, prefix);
-    if (file == null) return;
+    if (file == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to download media. Check your connection and try again.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
     widget.onStickerSelected(file);
   }
 
@@ -917,7 +930,17 @@ class _StickerPickerState extends State<StickerPicker>
 
   Future<void> _openMemeEditor(ImgflipTemplate template) async {
     final file = await _downloadToTempFile(template.url, 'imgflip_template');
-    if (file == null) return;
+    if (file == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to download meme template. Check your connection.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
     await _openStickerEditorFromFile(
       file,
       startWithMemeLayout: true,
@@ -1629,7 +1652,16 @@ class _StickerPickerState extends State<StickerPicker>
             return GestureDetector(
               onTap: () async {
                 final file = await _downloadToTempFile(item.url, 'tenor_meme');
-                if (!mounted || file == null) return;
+                if (!mounted) return;
+                if (file == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Failed to download meme. Check your connection.'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                  return;
+                }
                 await _openStickerEditorFromFile(
                   file,
                   startWithMemeLayout: true,

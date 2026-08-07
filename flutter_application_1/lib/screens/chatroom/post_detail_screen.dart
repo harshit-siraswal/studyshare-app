@@ -57,7 +57,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   final TextEditingController _commentController = TextEditingController();
   final FocusNode _commentFocusNode = FocusNode();
 
-  static const int kMaxStickerSizeBytes = 5 * 1024 * 1024;
+  static const int kMaxStickerSizeBytes = 10 * 1024 * 1024;
 
   // Reply state
   String? _replyToId;
@@ -2198,7 +2198,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     try {
       final length = await stickerFile.length();
       if (length > kMaxStickerSizeBytes) {
-        throw Exception('Sticker is too large (max 5MB).');
+        throw Exception('Sticker is too large (max 10MB).');
       }
       final bytes = await stickerFile.readAsBytes();
       final rawExt = p.extension(stickerFile.path).toLowerCase();
