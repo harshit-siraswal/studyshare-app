@@ -11,6 +11,11 @@ if (-not (Test-Path $JavaHome)) {
 
 $env:JAVA_HOME = $JavaHome
 
+# Short Gradle User Home to avoid Windows 260-character MAX_PATH limit in transform caches
+$env:GRADLE_USER_HOME = "C:\g"
+if (-not (Test-Path "C:\g")) { New-Item -ItemType Directory -Path "C:\g" -Force | Out-Null }
+Write-Host "Gradle User Home set to: $env:GRADLE_USER_HOME" -ForegroundColor Cyan
+
 Write-Host "Java Home set to: $env:JAVA_HOME" -ForegroundColor Cyan
 # Clean
 Write-Host "Cleaning project..." -ForegroundColor Green
@@ -53,7 +58,7 @@ if (Test-Path "$badgerDir\build.gradle") {
     Write-Host "flutter_app_badger patched successfully." -ForegroundColor Green
 }
 
-$buildArgs = @("build", "apk", "--release")
+$buildArgs = @("build", "apk", "--release", "-PdisableMinify=true")
 
 $targetPlatforms = [Environment]::GetEnvironmentVariable("APP_TARGET_PLATFORMS")
 if (-not [string]::IsNullOrWhiteSpace($targetPlatforms)) {
