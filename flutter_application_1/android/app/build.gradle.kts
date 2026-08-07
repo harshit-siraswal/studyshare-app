@@ -52,7 +52,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
-        isCoreLibraryDesugaringEnabled = false
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -158,7 +158,7 @@ dependencies {
     implementation("com.google.firebase:firebase-messaging")
     // Required for OAuth/Google Sign-In on modern Android
     implementation("androidx.browser:browser:1.8.0")
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
     // Required for UCropActivity (Image Cropper)
     implementation("androidx.appcompat:appcompat:1.7.0")
 }
