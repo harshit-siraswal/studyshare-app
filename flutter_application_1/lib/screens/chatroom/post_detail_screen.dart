@@ -885,12 +885,14 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
   }
 
   Widget _buildStickerImage(String url, bool isDark, Color textColor) {
+    const double maxStickerWidth = 160.0;
+    const double maxStickerHeight = 160.0;
     if (url.startsWith('asset://')) {
       final assetPath = url.replaceFirst('asset://', '');
       return Image.asset(
         assetPath,
-        width: 120,
-        height: 120,
+        width: maxStickerWidth,
+        height: maxStickerHeight,
         fit: BoxFit.contain,
         errorBuilder: (context, error, stackTrace) =>
             Text(url, style: GoogleFonts.inter(color: textColor)),
@@ -898,13 +900,25 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
     }
     return CachedNetworkImage(
       imageUrl: url,
-      width: 120,
-      height: 120,
-      fit: BoxFit.contain,
-      placeholder: (context, imageUrl) => SizedBox(
+      maxWidthDiskCache: 400,
+      maxHeightDiskCache: 400,
+      imageBuilder: (context, imageProvider) => Container(
+        constraints: const BoxConstraints(
+          maxWidth: maxStickerWidth,
+          maxHeight: maxStickerHeight,
+        ),
+        child: Image(
+          image: imageProvider,
+          fit: BoxFit.contain,
+        ),
+      ),
+      placeholder: (context, imageUrl) => Container(
         width: 120,
         height: 120,
-        child: Container(color: isDark ? Colors.white10 : Colors.grey.shade200),
+        decoration: BoxDecoration(
+          color: isDark ? Colors.white10 : Colors.grey.shade200,
+          borderRadius: BorderRadius.circular(12),
+        ),
       ),
       errorWidget: (context, imageUrl, error) =>
           const Icon(Icons.broken_image_outlined),
@@ -1789,7 +1803,7 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                 : null,
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -1818,88 +1832,98 @@ class _PostDetailScreenState extends State<PostDetailScreen> {
                         photoUrl: hasAuthorPhoto ? resolvedPhoto : null,
                       ),
                     ),
-                    const SizedBox(width: 10),
+                    const SizedBox(width: 12),
 
                     // Content
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Header: Name + handle + time — flat Twitter style
+                          // Header: Name + handle + time
                           Row(
                             crossAxisAlignment: CrossAxisAlignment.center,
                             children: [
-                              GestureDetector(
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) => UserProfileScreen(
-                                        userEmail: authorEmail,
-                                        userName: authorName,
-                                        userPhotoUrl: hasAuthorPhoto
-                                            ? resolvedPhoto
-                                            : null,
+                              Flexible(
+                                flex: 3,
+                                child: GestureDetector(
+                                  onTap: () {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => UserProfileScreen(
+                                          userEmail: authorEmail,
+                                          userName: authorName,
+                                          userPhotoUrl: hasAuthorPhoto
+                                              ? resolvedPhoto
+                                              : null,
+                                        ),
                                       ),
+                                    );
+                                  },
+                                  child: Text(
+                                    authorName,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: GoogleFonts.inter(
+                                      fontWeight: FontWeight.w700,
+                                      fontSize: 14,
+                                      color: isDark ? Colors.white : Colors.black,
                                     ),
-                                  );
-                                },
-                                child: Text(
-                                  authorName,
-                                  style: GoogleFonts.inter(
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 14,
-                                    color: isDark ? Colors.white : Colors.black,
                                   ),
                                 ),
                               ),
                               const SizedBox(width: 4),
                               UserBadge(email: authorEmail, size: 12),
-                              const Spacer(),
-                              PopupMenuButton<String>(
-                                padding: EdgeInsets.zero,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
-                                ),
-                                icon: Icon(
-                                  Icons.more_horiz_rounded,
-                                  size: 18,
-                                  color: AppTheme.textMuted,
-                                ),
-                                onSelected: (value) {
-                                  if (value == 'report') {
-                                    _showReportDialog(
-                                      context,
-                                      commentId,
-                                      isComment: true,
-                                    );
-                                  }
-                                },
-                                itemBuilder: (context) => [
-                                  const PopupMenuItem(
-                                    value: 'report',
-                                    child: Text('Report'),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                flex: 2,
+                                child: Text(
+                                  '@${authorEmail.split('@').first}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.inter(
+                                    fontSize: 12,
+                                    color: mutedColor,
                                   ),
-                                ],
-                              ),
-                            ],
-                          ),
-                          // @handle · time row (X/Twitter style, below display name)
-                          Row(
-                            children: [
-                              Text(
-                                '@${authorEmail.split('@').first}',
-                                style: GoogleFonts.inter(
-                                  fontSize: 12,
-                                  color: mutedColor,
                                 ),
                               ),
-                              const SizedBox(width: 5),
+                              const SizedBox(width: 4),
                               Text(
                                 '· ${_formatTimeAgo(createdAt)}',
                                 style: GoogleFonts.inter(
                                   fontSize: 12,
                                   color: mutedColor,
+                                ),
+                              ),
+                              const Spacer(),
+                              SizedBox(
+                                width: 24,
+                                height: 24,
+                                child: PopupMenuButton<String>(
+                                  padding: EdgeInsets.zero,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  icon: Icon(
+                                    Icons.more_horiz_rounded,
+                                    size: 18,
+                                    color: AppTheme.textMuted,
+                                  ),
+                                  onSelected: (value) {
+                                    if (value == 'report') {
+                                      _showReportDialog(
+                                        context,
+                                        commentId,
+                                        isComment: true,
+                                      );
+                                    }
+                                  },
+                                  itemBuilder: (context) => [
+                                    const PopupMenuItem(
+                                      value: 'report',
+                                      child: Text('Report'),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ],
