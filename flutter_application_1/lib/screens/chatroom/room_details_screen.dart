@@ -380,15 +380,22 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                         _buildRoleBadge(
                           'Founder',
                           isDark: isDark,
-                          background: const Color(0x268B5CF6),
-                          foreground: const Color(0xFF8B5CF6),
+                          background: isDark ? const Color(0xFF2C223A) : const Color(0xFFF3E8FF),
+                          foreground: isDark ? const Color(0xFFC084FC) : const Color(0xFF9333EA),
                         )
                       else if (role == 'admin')
                         _buildRoleBadge(
                           'Admin',
                           isDark: isDark,
-                          background: const Color(0x261EAEDB),
-                          foreground: const Color(0xFF1EAEDB),
+                          background: isDark ? const Color(0xFF1E293B) : const Color(0xFFE0F2FE),
+                          foreground: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7),
+                        )
+                      else
+                        _buildRoleBadge(
+                          'Member',
+                          isDark: isDark,
+                          background: isDark ? const Color(0xFF27272A) : const Color(0xFFF1F5F9),
+                          foreground: isDark ? const Color(0xFFA1A1AA) : const Color(0xFF475569),
                         ),
                     ],
                   ),
@@ -420,16 +427,17 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
     required Color foreground,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      margin: const EdgeInsets.only(left: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
         color: background,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
         label,
         style: GoogleFonts.inter(
-          fontSize: 10.5,
-          fontWeight: FontWeight.w700,
+          fontSize: 11,
+          fontWeight: FontWeight.w500,
           color: foreground,
         ),
       ),
@@ -566,13 +574,10 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
   Widget _buildSectionBlock({required bool isDark, required Widget child}) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF111827) : Colors.transparent,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: isDark ? Colors.white10 : const Color(0xFFE2E8F0),
-        ),
+        color: isDark ? const Color(0xFF16161A) : const Color(0xFFF9F9FB),
+        borderRadius: BorderRadius.circular(16),
       ),
       child: child,
     );
@@ -582,8 +587,8 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
     return Text(
       title,
       style: GoogleFonts.inter(
-        fontSize: 13.5,
-        fontWeight: FontWeight.w700,
+        fontSize: 14,
+        fontWeight: FontWeight.w600,
         color: isDark ? Colors.white70 : const Color(0xFF64748B),
       ),
     );
@@ -622,17 +627,17 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
               Text(
                 label,
                 style: GoogleFonts.inter(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white54 : const Color(0xFF64748B),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? Colors.white70 : const Color(0xFF64748B),
                 ),
               ),
-              const SizedBox(height: 3),
+              const SizedBox(height: 2),
               Text(
                 value,
                 style: GoogleFonts.inter(
                   fontSize: 14,
-                  fontWeight: FontWeight.w700,
+                  fontWeight: FontWeight.w600,
                   color: valueColor,
                 ),
               ),
@@ -651,22 +656,31 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
     required String subtitle,
     required VoidCallback? onTap,
     Color? foreground,
+    bool isDanger = false,
   }) {
     final resolvedForeground =
         foreground ?? (isDark ? Colors.white : const Color(0xFF0F172A));
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+        decoration: BoxDecoration(
+          color: isDanger
+              ? resolvedForeground.withValues(alpha: 0.06)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
         child: Row(
           children: [
             Container(
               width: 36,
               height: 36,
               decoration: BoxDecoration(
-                color: resolvedForeground.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(12),
+                color: isDanger
+                    ? Colors.transparent
+                    : resolvedForeground.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
               ),
               child: Icon(icon, color: resolvedForeground, size: 20),
             ),
@@ -678,8 +692,8 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                   Text(
                     title,
                     style: GoogleFonts.inter(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
                       color: resolvedForeground,
                     ),
                   ),
@@ -695,10 +709,11 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                 ],
               ),
             ),
-            Icon(
-              Icons.chevron_right_rounded,
-              color: isDark ? Colors.white30 : const Color(0xFF94A3B8),
-            ),
+            if (!isDanger)
+              Icon(
+                Icons.chevron_right_rounded,
+                color: isDark ? Colors.white30 : const Color(0xFF94A3B8),
+              ),
           ],
         ),
       ),
@@ -805,27 +820,26 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
             Column(
               children: [
                 Container(
-                  width: 78,
-                  height: 78,
+                  width: 64,
+                  height: 64,
                   decoration: BoxDecoration(
-                    color: AppTheme.primary.withValues(
-                      alpha: isDark ? 0.18 : 0.1,
-                    ),
-                    shape: BoxShape.circle,
+                    color: isDark ? const Color(0xFF16161A) : const Color(0xFFF9F9FB),
+                    borderRadius: BorderRadius.circular(16),
                   ),
                   child: const Icon(
-                    Icons.groups_rounded,
+                    Icons.tag_rounded,
                     color: AppTheme.primary,
-                    size: 38,
+                    size: 32,
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 16),
                 Text(
                   widget.roomName,
                   textAlign: TextAlign.center,
                   style: GoogleFonts.inter(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 24,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: -0.5,
                     color: isDark ? Colors.white : const Color(0xFF0F172A),
                   ),
                 ),
@@ -835,18 +849,18 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                     roomDescription,
                     textAlign: TextAlign.center,
                     style: GoogleFonts.inter(
-                      fontSize: 13.5,
-                      height: 1.45,
+                      fontSize: 14,
+                      height: 1.5,
                       color: isDark ? Colors.white70 : const Color(0xFF64748B),
                     ),
                   ),
                 ],
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
                 Text(
                   _formatMemberCount(memberCount),
                   style: GoogleFonts.inter(
                     fontSize: 13,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w500,
                     color: isDark ? Colors.white60 : const Color(0xFF64748B),
                   ),
                 ),
@@ -924,7 +938,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                                 'Show room code on this page',
                                 style: GoogleFonts.inter(
                                   fontSize: 14,
-                                  fontWeight: FontWeight.w700,
+                                  fontWeight: FontWeight.w600,
                                   color: isDark
                                       ? Colors.white
                                       : const Color(0xFF0F172A),
@@ -961,7 +975,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                       'Who can invite',
                       style: GoogleFonts.inter(
                         fontSize: 14,
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w600,
                         color: isDark ? Colors.white : const Color(0xFF0F172A),
                       ),
                     ),
@@ -1032,8 +1046,8 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                   Text(
                     'Admins',
                     style: GoogleFonts.inter(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
                       color: isDark ? Colors.white60 : const Color(0xFF64748B),
                     ),
                   ),
@@ -1070,8 +1084,8 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                     Text(
                       'Members',
                       style: GoogleFonts.inter(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
                         color: isDark
                             ? Colors.white60
                             : const Color(0xFF64748B),
@@ -1115,7 +1129,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                       },
                       foreground: AppTheme.primary,
                     ),
-                    Divider(color: dividerColor, height: 1),
+                    const SizedBox(height: 4),
                   ],
                   if (_isMember) ...[
                     _buildActionRow(
@@ -1126,8 +1140,9 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                           'You will stop receiving updates from this room.',
                       onTap: _isLeaving ? null : _handleLeaveRoom,
                       foreground: Colors.redAccent,
+                      isDanger: true,
                     ),
-                    if (_isAdmin) Divider(color: dividerColor, height: 1),
+                    const SizedBox(height: 8),
                   ],
                   if (_isAdmin)
                     _buildActionRow(
@@ -1137,6 +1152,7 @@ class _RoomDetailsScreenState extends State<RoomDetailsScreen> {
                       subtitle: 'Remove the room and all posts permanently.',
                       onTap: _handleDeleteRoom,
                       foreground: Colors.redAccent,
+                      isDanger: true,
                     ),
                 ],
               ),
