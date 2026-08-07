@@ -286,6 +286,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen>
         _isLoadingMorePosts = false;
       });
       unawaited(_loadInteractionState());
+      
+      // Allow frame to render cached UI before hitting network
+      if (!silent) await Future.delayed(const Duration(milliseconds: 50));
     }
 
     try {
