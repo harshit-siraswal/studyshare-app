@@ -25,6 +25,7 @@ class _AppUpdateGateState extends State<AppUpdateGate>
   AndroidReleaseInfo? _availableRelease;
   bool _checkInFlight = false;
   bool _dialogVisible = false;
+  bool _bannerDismissed = false;
 
   @override
   void initState() {
@@ -58,16 +59,27 @@ class _AppUpdateGateState extends State<AppUpdateGate>
     _lastCheckAt = DateTime.now();
 
     try {
-      final release = await _service.checkForUpdate(includeDismissed: true);
+      final release = await _service.checkForUpdate(includeDismissed: false);
       if (!mounted || release == null) return;
-      setState(() => _availableRelease = release);
-      if (!await _service.isReleaseDismissed(release)) {
-        await _showUpdateDialog(release);
-      }
+      setState(() {
+        _availableRelease = release;
+        _bannerDismissed = false;
+      });
+      await _showUpdateDialog(release);
     } catch (error) {
       debugPrint('App update prompt failed: $error');
     } finally {
       _checkInFlight = false;
+    }
+  }
+
+  void _dismissBanner() {
+    final release = _availableRelease;
+    if (release != null) {
+      unawaited(_service.dismissRelease(release));
+    }
+    if (mounted) {
+      setState(() => _bannerDismissed = true);
     }
   }
 
@@ -118,6 +130,11 @@ class _AppUpdateGateState extends State<AppUpdateGate>
       );
     } finally {
       _dialogVisible = false;
+      // After dialog is closed (either "Later" or "Download"),
+      // also dismiss the persistent banner so it doesn't linger.
+      if (mounted) {
+        setState(() => _bannerDismissed = true);
+      }
     }
   }
 
@@ -135,7 +152,7 @@ class _AppUpdateGateState extends State<AppUpdateGate>
   @override
   Widget build(BuildContext context) {
     final release = _availableRelease;
-    if (release == null) return widget.child;
+    if (release == null || _bannerDismissed) return widget.child;
 
     return Stack(
       children: [
@@ -144,9 +161,15 @@ class _AppUpdateGateState extends State<AppUpdateGate>
           left: 12,
           right: 12,
           top: MediaQuery.paddingOf(context).top + 10,
-          child: _UpdateBanner(
-            release: release,
-            onDownload: () => unawaited(_openDownload(release)),
+          child: Dismissible(
+            key: ValueKey('update_banner_${release.releaseKey}'),
+            direction: DismissDirection.horizontal,
+            onDismissed: (_) => _dismissBanner(),
+            child: _UpdateBanner(
+              release: release,
+              onDownload: () => unawaited(_openDownload(release)),
+              onDismiss: _dismissBanner,
+            ),
           ),
         ),
       ],
@@ -154,73 +177,134 @@ class _AppUpdateGateState extends State<AppUpdateGate>
   }
 }
 
-class _UpdateBanner extends StatelessWidget {
-  const _UpdateBanner({required this.release, required this.onDownload});
+class _UpdateBanner extends StatefulWidget {
+  const _UpdateBanner({
+    required this.release,
+    required this.onDownload,
+    required this.onDismiss,
+  });
 
   final AndroidReleaseInfo release;
   final VoidCallback onDownload;
+  final VoidCallback onDismiss;
+
+  @override
+  State<_UpdateBanner> createState() => _UpdateBannerState();
+}
+
+class _UpdateBannerState extends State<_UpdateBanner>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _slideController;
+  late final Animation<Offset> _slideAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _slideController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, -1.5),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _slideController,
+      curve: Curves.easeOutCubic,
+    ));
+    _slideController.forward();
+  }
+
+  @override
+  void dispose() {
+    _slideController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
-    return SafeArea(
-      bottom: false,
-      child: Material(
-        color: Colors.transparent,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: colors.surface,
-            border: Border.all(color: colors.primary.withValues(alpha: 0.22)),
-            borderRadius: BorderRadius.circular(18),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.16),
-                blurRadius: 22,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 18,
-                  backgroundColor: colors.primary.withValues(alpha: 0.12),
-                  foregroundColor: colors.primary,
-                  child: const Icon(Icons.system_update_rounded, size: 19),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'New version ${release.version} available',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      Text(
-                        'Download the latest StudyShare APK.',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                FilledButton.tonalIcon(
-                  onPressed: onDownload,
-                  icon: const Icon(Icons.download_rounded, size: 18),
-                  label: const Text('Download'),
+    return SlideTransition(
+      position: _slideAnimation,
+      child: SafeArea(
+        bottom: false,
+        child: Material(
+          color: Colors.transparent,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: colors.surface,
+              border:
+                  Border.all(color: colors.primary.withValues(alpha: 0.22)),
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.16),
+                  blurRadius: 22,
+                  offset: const Offset(0, 10),
                 ),
               ],
+            ),
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    radius: 18,
+                    backgroundColor:
+                        colors.primary.withValues(alpha: 0.12),
+                    foregroundColor: colors.primary,
+                    child: const Icon(Icons.system_update_rounded,
+                        size: 19),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'New version ${widget.release.version} available',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        Text(
+                          'Download the latest StudyShare APK.',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  FilledButton.tonalIcon(
+                    onPressed: widget.onDownload,
+                    icon:
+                        const Icon(Icons.download_rounded, size: 18),
+                    label: const Text('Download'),
+                  ),
+                  const SizedBox(width: 2),
+                  SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: IconButton(
+                      onPressed: widget.onDismiss,
+                      icon: Icon(
+                        Icons.close_rounded,
+                        size: 16,
+                        color: colors.onSurfaceVariant
+                            .withValues(alpha: 0.6),
+                      ),
+                      padding: EdgeInsets.zero,
+                      tooltip: 'Dismiss',
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
