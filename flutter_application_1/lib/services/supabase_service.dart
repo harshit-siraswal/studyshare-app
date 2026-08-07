@@ -4455,7 +4455,7 @@ class SupabaseService {
         limit: limit,
         offset: safeOffset,
         sortBy: sortBy,
-      );
+      ).timeout(const Duration(milliseconds: 3500));
       return normalizePosts(backendPosts);
     } catch (backendError) {
       debugPrint(
