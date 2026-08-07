@@ -35,3 +35,15 @@ flutter_application_1/lib/config/app_config.dart
 
 # Generated/derived build metadata
 **/flutter_build.d
+
+# External dependencies and large media output folders
+node_modules/
+**/node_modules/
+output/
+**/output/
+launch-video/node_modules/
+launch-video/out/
+*.json
+!google-services.json
+!skills-lock.json
+

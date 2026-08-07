@@ -26,7 +26,7 @@ class _AiRechargeDialogState extends State<AiRechargeDialog> {
   final AuthService _auth = AuthService();
   final SupabaseService _supabaseService = SupabaseService();
   bool _isLoading = false;
-  int _baseMonthlyTokens = 40000;
+  int _baseMonthlyTokens = 200000;
   int _selectedRechargeRupees = 49;
   final TextEditingController _customRechargeController =
       TextEditingController();

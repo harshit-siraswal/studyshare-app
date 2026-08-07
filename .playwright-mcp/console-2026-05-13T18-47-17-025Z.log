@@ -1,0 +1,2 @@
+[    2204ms] [ERROR] [Firebase] Missing env config entries: apiKey, authDomain, projectId, storageBucket, messagingSenderId, appId. Falling back to DEFAULT_FIREBASE_CONFIG. @ https://studyshare.in/assets/index-C3XEY0di.js:35
+[    2213ms] [ERROR] [Supabase] Missing env config entries: VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY. Falling back to configured defaults. @ https://studyshare.in/assets/index-C3XEY0di.js:35

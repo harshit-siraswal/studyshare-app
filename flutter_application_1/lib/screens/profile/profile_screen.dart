@@ -71,7 +71,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   int _aiTokenBudget = 0;
   int _aiTokenUsed = 0;
   int _aiTokenRemaining = 0;
-  int _aiTokenBaseBudget = 40000;
+  int _aiTokenBaseBudget = 200000;
   int _aiTokenBudgetMultiplier = 1;
   int _aiTokenPremiumMultiplier = 10;
   int _aiTokenCycleDays = 30;
@@ -1552,7 +1552,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 _buildAiTokenMetric(
                   'Total',
-                  _formatCreditCompact(budget > 0 ? budget : 40000),
+                  _formatCreditCompact(budget > 0 ? budget : 200000),
                   textColor,
                   subTextColor,
                 ),

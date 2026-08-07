@@ -8,7 +8,6 @@ import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import 'package:custom_refresh_indicator/custom_refresh_indicator.dart';
 import 'package:lottie/lottie.dart';
 import 'package:badges/badges.dart' as badges;
-import 'package:flutter_app_badger/flutter_app_badger.dart';
 import '../viewer/pdf_viewer_screen.dart';
 import '../../config/theme.dart';
 import '../../models/resource.dart';
@@ -209,16 +208,8 @@ class _StudyScreenState extends State<StudyScreen>
         });
       }
 
-      // Update OS level app badge
-      final isSupported = await FlutterAppBadger.isAppBadgeSupported();
-      if (!mounted) return;
-      if (isSupported) {
-        if (unread > 0) {
-          FlutterAppBadger.updateBadgeCount(unread);
-        } else {
-          FlutterAppBadger.removeBadge();
-        }
-      }
+      // Update OS level app badge (disabled: flutter_app_badger plugin discontinued)
+      // if (await FlutterAppBadger.isAppBadgeSupported()) { ... }
     } catch (e) {
       debugPrint('Error loading unread notification count: $e');
     }

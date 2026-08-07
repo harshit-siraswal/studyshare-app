@@ -26,7 +26,7 @@ class _PaywallDialogState extends State<PaywallDialog> {
   bool _isRechargeLoading = false;
   String _selectedPlan = 'quarterly';
   String? _expandedPlanId = 'quarterly';
-  int _baseMonthlyTokens = 40000;
+  int _baseMonthlyTokens = 200000;
   int _premiumTokenMultiplier = 10;
   int _selectedRechargeRupees = 49;
   final TextEditingController _customRechargeController =

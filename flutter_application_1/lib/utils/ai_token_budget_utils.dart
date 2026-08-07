@@ -124,7 +124,7 @@ class AiTokenBudgetSnapshot {
   /// Builds a resilient token snapshot from a backend profile payload.
   factory AiTokenBudgetSnapshot.fromProfile(
     Map<String, dynamic> profile, {
-    int defaultBudget = 40000,
+    int defaultBudget = 200000,
   }) {
     final budgetFromApi = _toSafeInt(profile['ai_token_budget']);
     final baseBudgetFromApi = _toSafeInt(profile['ai_token_base_budget']);
@@ -208,7 +208,7 @@ class AiTokenBudgetSnapshot {
   /// purchase state when the backend profile has not caught up yet.
   static Future<AiTokenBudgetSnapshot> fromProfileWithLocalPremium(
     Map<String, dynamic> profile, {
-    int defaultBudget = 40000,
+    int defaultBudget = 200000,
   }) async {
     final serverSnapshot = AiTokenBudgetSnapshot.fromProfile(
       profile,

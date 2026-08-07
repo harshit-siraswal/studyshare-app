@@ -1,0 +1,152 @@
+- generic [ref=e2]:
+  - region "Notifications (F8)":
+    - list
+  - region "Notifications alt+T"
+  - generic [ref=e20]:
+    - generic [ref=e21]:
+      - button "App Gallery" [ref=e22] [cursor=pointer]:
+        - img
+        - text: App Gallery
+      - button "Light" [ref=e23] [cursor=pointer]:
+        - img
+        - text: Light
+      - button "Download v1.0.23" [ref=e24] [cursor=pointer]:
+        - img
+        - text: Download v1.0.23
+    - banner [ref=e25]:
+      - generic [ref=e26]:
+        - img "StudyShare" [ref=e27]
+        - heading "StudyShare" [level=1] [ref=e28]
+      - paragraph [ref=e29]: AI-powered college learning for notes, PYQs, notices, and campus communities. Join your college, find semester-wise resources, and study faster.
+    - generic [ref=e30]:
+      - generic [ref=e31]:
+        - img [ref=e33]
+        - generic [ref=e35]:
+          - paragraph [ref=e36]: Curated Resources
+          - paragraph [ref=e37]: Notes, videos & PYQs
+      - generic [ref=e38]:
+        - img [ref=e40]
+        - generic [ref=e45]:
+          - paragraph [ref=e46]: Community Driven
+          - paragraph [ref=e47]: Upvote the best content
+      - generic [ref=e48]:
+        - img [ref=e50]
+        - generic [ref=e52]:
+          - paragraph [ref=e53]: Smart Study
+          - paragraph [ref=e54]: AI Buddy & Timer integration
+    - generic [ref=e56]:
+      - img [ref=e57]
+      - textbox "Search for your college or university..." [ref=e60]
+    - generic [ref=e61]:
+      - heading "Select your institution" [level=2] [ref=e62]
+      - generic [ref=e63]:
+        - generic [ref=e65] [cursor=pointer]:
+          - generic [ref=e66]:
+            - heading "Krishna Institute of Engineering and Technology" [level=3] [ref=e67]
+            - paragraph [ref=e68]: Ghaziabad
+          - generic [ref=e69]:
+            - img [ref=e70]
+            - generic [ref=e75]: ...
+        - generic [ref=e77] [cursor=pointer]:
+          - generic [ref=e78]:
+            - heading "IIIT Bhagalpur" [level=3] [ref=e79]
+            - paragraph [ref=e80]: Bhagalpur, Bihar
+          - generic [ref=e81]:
+            - img [ref=e82]
+            - generic [ref=e87]: ...
+        - generic [ref=e89] [cursor=pointer]:
+          - generic [ref=e90]:
+            - heading "IIIT Sonepat" [level=3] [ref=e91]
+            - paragraph [ref=e92]: Sonepat, Haryana
+          - generic [ref=e93]:
+            - img [ref=e94]
+            - generic [ref=e99]: ...
+        - generic [ref=e101] [cursor=pointer]:
+          - generic [ref=e102]:
+            - heading "ABES Engineering College" [level=3] [ref=e103]
+            - paragraph [ref=e104]: Ghaziabad
+          - generic [ref=e105]:
+            - img [ref=e106]
+            - generic [ref=e111]: ...
+        - generic [ref=e113] [cursor=pointer]:
+          - generic [ref=e114]:
+            - heading "Delhi University" [level=3] [ref=e115]
+            - paragraph [ref=e116]: New Delhi
+          - generic [ref=e117]:
+            - img [ref=e118]
+            - generic [ref=e123]: ...
+        - generic [ref=e125] [cursor=pointer]:
+          - generic [ref=e126]:
+            - heading "Indian Institute of Technology Delhi" [level=3] [ref=e127]
+            - paragraph [ref=e128]: New Delhi
+          - generic [ref=e129]:
+            - img [ref=e130]
+            - generic [ref=e135]: ...
+        - generic [ref=e137] [cursor=pointer]:
+          - generic [ref=e138]:
+            - heading "Indian Institute of Technology Bombay" [level=3] [ref=e139]
+            - paragraph [ref=e140]: Mumbai
+          - generic [ref=e141]:
+            - img [ref=e142]
+            - generic [ref=e147]: ...
+        - generic [ref=e149] [cursor=pointer]:
+          - generic [ref=e150]:
+            - heading "Indian Institute of Technology Madras" [level=3] [ref=e151]
+            - paragraph [ref=e152]: Chennai
+          - generic [ref=e153]:
+            - img [ref=e154]
+            - generic [ref=e159]: ...
+        - generic [ref=e161] [cursor=pointer]:
+          - generic [ref=e162]:
+            - heading "Birla Institute of Technology and Science, Pilani" [level=3] [ref=e163]
+            - paragraph [ref=e164]: Pilani
+          - generic [ref=e165]:
+            - img [ref=e166]
+            - generic [ref=e171]: ...
+        - generic [ref=e173] [cursor=pointer]:
+          - generic [ref=e174]:
+            - heading "Vellore Institute of Technology" [level=3] [ref=e175]
+            - paragraph [ref=e176]: Vellore
+          - generic [ref=e177]:
+            - img [ref=e178]
+            - generic [ref=e183]: ...
+        - generic [ref=e185] [cursor=pointer]:
+          - generic [ref=e186]:
+            - heading "National Institute of Technology Tiruchirappalli" [level=3] [ref=e187]
+            - paragraph [ref=e188]: Tiruchirappalli
+          - generic [ref=e189]:
+            - img [ref=e190]
+            - generic [ref=e195]: ...
+        - generic [ref=e197] [cursor=pointer]:
+          - generic [ref=e198]:
+            - heading "Anna University" [level=3] [ref=e199]
+            - paragraph [ref=e200]: Chennai
+          - generic [ref=e201]:
+            - img [ref=e202]
+            - generic [ref=e207]: ...
+        - generic [ref=e209] [cursor=pointer]:
+          - generic [ref=e210]:
+            - heading "Amity University" [level=3] [ref=e211]
+            - paragraph [ref=e212]: Noida
+          - generic [ref=e213]:
+            - img [ref=e214]
+            - generic [ref=e219]: ...
+        - generic [ref=e221] [cursor=pointer]:
+          - generic [ref=e222]:
+            - heading "SRM Institute of Science and Technology" [level=3] [ref=e223]
+            - paragraph [ref=e224]: Chennai
+          - generic [ref=e225]:
+            - img [ref=e226]
+            - generic [ref=e231]: ...
+        - generic [ref=e233] [cursor=pointer]:
+          - generic [ref=e234]:
+            - heading "Manipal Institute of Technology" [level=3] [ref=e235]
+            - paragraph [ref=e236]: Manipal
+          - generic [ref=e237]:
+            - img [ref=e238]
+            - generic [ref=e243]: ...
+    - contentinfo [ref=e244]:
+      - paragraph [ref=e245]: Can't find your college?
+      - button "Request to add it" [ref=e246] [cursor=pointer]:
+        - img
+        - text: Request to add it
