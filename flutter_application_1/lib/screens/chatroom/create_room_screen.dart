@@ -221,742 +221,365 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final pageBg = isDark ? const Color(0xFF070B12) : Colors.white;
-    final dividerColor = isDark ? Colors.white10 : const Color(0xFFE2E8F0);
-    final mutedColor = isDark ? Colors.white60 : const Color(0xFF64748B);
-    final fieldFill = isDark
-        ? Colors.white.withValues(alpha: 0.04)
-        : const Color(0xFFF8FAFC);
-    final borderColor = isDark ? Colors.white10 : const Color(0xFFE2E8F0);
+    final pageBg = isDark ? const Color(0xFF191919) : Colors.white; 
+    final textColor = isDark ? const Color(0xFFD4D4D4) : const Color(0xFF37352F);
+    final mutedColor = isDark ? const Color(0xFF9B9A97) : const Color(0xFF9B9A97);
 
     return Scaffold(
       backgroundColor: pageBg,
       appBar: AppBar(
         backgroundColor: pageBg,
         elevation: 0,
-        titleSpacing: 0,
-        title: Text(
-          'Create Room',
-          style: GoogleFonts.inter(
-            fontWeight: FontWeight.w700,
-            fontSize: 22,
-            color: isDark ? Colors.white : const Color(0xFF0F172A),
+        iconTheme: IconThemeData(color: textColor),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            child: TextButton(
+              onPressed: (_isSubmitting || !_isFormValid) ? null : _submit,
+              style: TextButton.styleFrom(
+                foregroundColor: isDark ? Colors.white : Colors.black,
+                disabledForegroundColor: mutedColor,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                backgroundColor: (_isSubmitting || !_isFormValid) 
+                    ? Colors.transparent 
+                    : (isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05)),
+              ),
+              child: _isSubmitting
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text(
+                      'Create Room',
+                      style: GoogleFonts.inter(fontWeight: FontWeight.w500),
+                    ),
+            ),
           ),
-        ),
+        ],
       ),
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 132),
+          padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                'Keep it focused: one clear topic, a few sharp tags, and the right visibility.',
-                style: GoogleFonts.inter(
-                  fontSize: 13.5,
-                  height: 1.5,
-                  color: mutedColor,
-                ),
-              ),
-              const SizedBox(height: 18),
-              // Live preview of how the room will appear in Discover
-              _buildRoomPreviewCard(isDark),
-              const SizedBox(height: 24),
-              _buildLabel('Room Name', isDark),
-              const SizedBox(height: 8),
               TextField(
                 controller: _nameController,
                 textCapitalization: TextCapitalization.words,
-                textInputAction: TextInputAction.next,
-                maxLength: 48,
+                style: GoogleFonts.inter(
+                  fontSize: 32,
+                  fontWeight: FontWeight.w700,
+                  color: textColor,
+                ),
                 onChanged: (_) => setState(() {}),
-                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-                decoration: _fieldDecoration(
-                  hintText: 'Placement Prep 2026',
-                  isDark: isDark,
-                  fillColor: fieldFill,
-                  borderColor: borderColor,
+                decoration: InputDecoration(
+                  hintText: 'Untitled Room',
+                  hintStyle: GoogleFonts.inter(
+                    fontSize: 32,
+                    fontWeight: FontWeight.w700,
+                    color: mutedColor.withValues(alpha: 0.4),
+                  ),
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.zero,
                 ),
               ),
-              const SizedBox(height: 10),
-              _buildLabel('Description', isDark),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _descriptionController,
-                maxLines: 4,
-                maxLength: 200,
-                textCapitalization: TextCapitalization.sentences,
-                onChanged: (_) => setState(() {}),
-                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
-                decoration: _fieldDecoration(
-                  hintText:
-                      'What should members expect, and who is this room for?',
-                  isDark: isDark,
-                  fillColor: fieldFill,
-                  borderColor: borderColor,
-                ),
-              ),
-              const SizedBox(height: 24),
-              Divider(color: dividerColor, height: 1),
-              const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(child: _buildLabel('Tags', isDark)),
-                  Text(
-                    'Required',
-                    style: GoogleFonts.inter(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.primary,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Use a few tags students would actually search for.',
-                style: GoogleFonts.inter(
-                  fontSize: 12.5,
-                  height: 1.45,
-                  color: mutedColor,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _tagController,
-                      onChanged: (_) => setState(() {}),
-                      style: TextStyle(
-                        color: isDark ? Colors.white : Colors.black87,
-                      ),
-                      decoration: _fieldDecoration(
-                        hintText: 'Add a tag like #dsa',
-                        isDark: isDark,
-                        fillColor: fieldFill,
-                        borderColor: borderColor,
-                      ),
-                      onSubmitted: _addTag,
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  SizedBox(
-                    height: 54,
-                    width: 54,
-                    child: FilledButton(
-                      onPressed: _isSubmitting ? null : _addTag,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppTheme.primary,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                      ),
-                      child: const Icon(Icons.add_rounded, size: 22),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  // Selected tags first...
-                  ..._selectedTags.map(
-                    (tag) => Chip(
-                      label: Text(tag),
-                      labelStyle: GoogleFonts.inter(
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.primary,
-                      ),
-                      deleteIconColor: AppTheme.primary,
-                      onDeleted: _isSubmitting
-                          ? null
-                          : () {
-                              setState(() {
-                                _selectedTags.remove(tag);
-                              });
-                            },
-                      side: BorderSide(
-                        color: AppTheme.primary.withValues(alpha: 0.24),
-                      ),
-                      backgroundColor: AppTheme.primary.withValues(
-                        alpha: isDark ? 0.18 : 0.08,
-                      ),
-                    ),
-                  ),
-                  // ...then remaining one-tap suggestions
-                  ..._tagSuggestions
-                      .where((tag) => !_selectedTags.contains(tag))
-                      .map(
-                        (tag) => ActionChip(
-                          avatar: Icon(
-                            Icons.add_rounded,
-                            size: 16,
-                            color: mutedColor,
-                          ),
-                          label: Text(tag),
-                          onPressed: _isSubmitting ? null : () => _addTag(tag),
-                          labelStyle: GoogleFonts.inter(
-                            fontWeight: FontWeight.w600,
-                            color: mutedColor,
-                          ),
-                          side: BorderSide(color: borderColor),
-                          backgroundColor: pageBg,
-                        ),
-                      ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              Divider(color: dividerColor, height: 1),
-              const SizedBox(height: 24),
-              _buildLabel('Visibility', isDark),
-              const SizedBox(height: 8),
-              Text(
-                'Private rooms stay hidden from Discover and join by room code only.',
-                style: GoogleFonts.inter(
-                  fontSize: 12.5,
-                  height: 1.45,
-                  color: mutedColor,
-                ),
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  Expanded(
-                    child: _buildSegmentOption(
-                      title: 'Public',
-                      subtitle: 'Visible in Discover',
-                      icon: Icons.public_rounded,
-                      selected: !_isPrivate,
-                      isDark: isDark,
-                      onTap: _isSubmitting
-                          ? null
-                          : () => setState(() => _isPrivate = false),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _buildSegmentOption(
-                      title: 'Private',
-                      subtitle: 'Join with code',
-                      icon: Icons.lock_rounded,
-                      selected: _isPrivate,
-                      isDark: isDark,
-                      onTap: _isSubmitting
-                          ? null
-                          : () => setState(() => _isPrivate = true),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
-              Divider(color: dividerColor, height: 1),
-              const SizedBox(height: 24),
-              _buildLabel('Room Duration', isDark),
-              const SizedBox(height: 8),
-              Text(
-                'Rooms expire automatically. Paid plans simply unlock longer fixed windows.',
-                style: GoogleFonts.inter(
-                  fontSize: 12.5,
-                  height: 1.45,
-                  color: mutedColor,
-                ),
-              ),
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
-                children: _durationOptions
-                    .map(
-                      (option) =>
-                          _buildDurationOption(option: option, isDark: isDark),
-                    )
-                    .toList(),
-              ),
-              if (!_isPremium) ...[
-                const SizedBox(height: 10),
-                Text(
-                  'Free accounts can create 7-day rooms. Upgrade to unlock longer expiry windows.',
-                  style: GoogleFonts.inter(
-                    fontSize: 11.8,
-                    height: 1.45,
-                    color: mutedColor,
-                  ),
-                ),
-              ] else if (_isTier2) ...[
-                const SizedBox(height: 10),
-                Text(
-                  'Max plan rooms can stay active for up to 90 days before they expire automatically.',
-                  style: GoogleFonts.inter(
-                    fontSize: 11.8,
-                    height: 1.45,
-                    color: mutedColor,
-                  ),
-                ),
-              ],
-              if (_errorMessage != null) ...[
-                const SizedBox(height: 18),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 12,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.red.withValues(alpha: isDark ? 0.14 : 0.06),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: Colors.red.withValues(alpha: 0.35),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.error_outline_rounded,
-                        size: 18,
-                        color: Colors.red.shade400,
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _errorMessage!,
-                          style: GoogleFonts.inter(
-                            fontSize: 12.5,
-                            color: Colors.red.shade400,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ),
-      bottomNavigationBar: SafeArea(
-        minimum: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              width: double.infinity,
-              height: 56,
-              child: ElevatedButton(
-                onPressed: (_isSubmitting || !_isFormValid) ? null : _submit,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primary,
-                  foregroundColor: Colors.white,
-                  disabledBackgroundColor: AppTheme.primary.withValues(
-                    alpha: 0.35,
-                  ),
-                  disabledForegroundColor: Colors.white70,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                ),
-                child: _isSubmitting
-                    ? const SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
-                    : Text(
-                        'Create Room',
-                        style: GoogleFonts.inter(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 16,
-                        ),
-                      ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              !_isFormValid
-                  ? 'Add a room name and at least one tag to continue.'
-                  : _isPrivate
-                  ? 'Private rooms stay hidden and can only be joined with the room code.'
-                  : 'Public rooms appear in Discover and still get a shareable room code.',
-              textAlign: TextAlign.center,
-              style: GoogleFonts.inter(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w600,
-                color: isDark ? Colors.white54 : const Color(0xFF64748B),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildLabel(String title, bool isDark) {
-    return Text(
-      title,
-      style: GoogleFonts.inter(
-        fontSize: 13,
-        fontWeight: FontWeight.w700,
-        color: isDark ? Colors.white70 : const Color(0xFF334155),
-      ),
-    );
-  }
-
-  InputDecoration _fieldDecoration({
-    required String hintText,
-    required bool isDark,
-    required Color fillColor,
-    required Color borderColor,
-  }) {
-    return InputDecoration(
-      hintText: hintText,
-      hintStyle: GoogleFonts.inter(
-        color: isDark ? Colors.white38 : const Color(0xFF94A3B8),
-      ),
-      counterStyle: GoogleFonts.inter(
-        fontSize: 11,
-        color: isDark ? Colors.white38 : const Color(0xFF94A3B8),
-      ),
-      filled: true,
-      fillColor: fillColor,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(18),
-        borderSide: BorderSide(color: borderColor),
-      ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(18),
-        borderSide: BorderSide(color: borderColor),
-      ),
-      focusedBorder: const OutlineInputBorder(
-        borderRadius: BorderRadius.all(Radius.circular(18)),
-        borderSide: BorderSide(color: AppTheme.primary, width: 1.2),
-      ),
-    );
-  }
-
-  /// A live "Discover card" preview that updates as the user types, so they
-  /// can see exactly how the room will look before creating it.
-  Widget _buildRoomPreviewCard(bool isDark) {
-    final name = _nameController.text.trim();
-    final description = _descriptionController.text.trim();
-    final displayName = name.isEmpty ? 'Your room name' : name;
-    final avatarLetter = name.isEmpty ? '?' : name[0].toUpperCase();
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: isDark
-              ? [
-                  AppTheme.primary.withValues(alpha: 0.16),
-                  Colors.white.withValues(alpha: 0.02),
-                ]
-              : [
-                  AppTheme.primary.withValues(alpha: 0.08),
-                  const Color(0xFFF8FAFC),
-                ],
-        ),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: AppTheme.primary.withValues(alpha: isDark ? 0.3 : 0.18),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                Icons.visibility_outlined,
-                size: 14,
-                color: isDark ? Colors.white38 : const Color(0xFF94A3B8),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                'PREVIEW',
-                style: GoogleFonts.inter(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 1.2,
-                  color: isDark ? Colors.white38 : const Color(0xFF94A3B8),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(
-                  color: AppTheme.primary,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Center(
-                  child: Text(
-                    avatarLetter,
-                    style: GoogleFonts.inter(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: Colors.white,
-                    ),
+              const SizedBox(height: 32),
+              
+              _buildPropertyRow(
+                icon: Icons.notes_rounded,
+                label: 'Description',
+                isDark: isDark,
+                mutedColor: mutedColor,
+                child: TextField(
+                  controller: _descriptionController,
+                  maxLines: null,
+                  textCapitalization: TextCapitalization.sentences,
+                  style: GoogleFonts.inter(fontSize: 14, color: textColor),
+                  decoration: InputDecoration(
+                    hintText: 'Empty',
+                    hintStyle: GoogleFonts.inter(fontSize: 14, color: mutedColor.withValues(alpha: 0.6)),
+                    border: InputBorder.none,
+                    isDense: true,
+                    contentPadding: const EdgeInsets.only(top: 2, bottom: 2),
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
+              Divider(color: isDark ? Colors.white10 : Colors.black12, height: 24),
+              
+              _buildPropertyRow(
+                icon: Icons.tag_rounded,
+                label: 'Tags',
+                isDark: isDark,
+                mutedColor: mutedColor,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      displayName,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.inter(
-                        fontSize: 15.5,
-                        fontWeight: FontWeight.w700,
-                        color: name.isEmpty
-                            ? (isDark
-                                  ? Colors.white38
-                                  : const Color(0xFF94A3B8))
-                            : (isDark ? Colors.white : const Color(0xFF0F172A)),
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Row(
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Icon(
-                          _isPrivate
-                              ? Icons.lock_rounded
-                              : Icons.public_rounded,
-                          size: 12,
-                          color: isDark
-                              ? Colors.white54
-                              : const Color(0xFF64748B),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${_isPrivate ? 'Private' : 'Public'} • expires in $_selectedDurationDays days',
-                          style: GoogleFonts.inter(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w600,
-                            color: isDark
-                                ? Colors.white54
-                                : const Color(0xFF64748B),
+                        ..._selectedTags.map((tag) => _buildTagPill(tag, isDark, true)),
+                        SizedBox(
+                          width: 120,
+                          child: TextField(
+                            controller: _tagController,
+                            style: GoogleFonts.inter(fontSize: 14, color: textColor),
+                            onChanged: (_) => setState(() {}),
+                            decoration: InputDecoration(
+                              hintText: _selectedTags.isEmpty ? 'Empty' : 'Add...',
+                              hintStyle: GoogleFonts.inter(fontSize: 14, color: mutedColor.withValues(alpha: 0.6)),
+                              border: InputBorder.none,
+                              isDense: true,
+                              contentPadding: const EdgeInsets.only(top: 2, bottom: 2),
+                            ),
+                            onSubmitted: _addTag,
                           ),
                         ),
                       ],
                     ),
-                    if (description.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      Text(
-                        description,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: GoogleFonts.inter(
-                          fontSize: 12,
-                          height: 1.4,
-                          color: isDark
-                              ? Colors.white60
-                              : const Color(0xFF475569),
-                        ),
-                      ),
-                    ],
-                    if (_selectedTags.isNotEmpty) ...[
-                      const SizedBox(height: 8),
+                    if (_tagSuggestions.where((t) => !_selectedTags.contains(t)).isNotEmpty) ...[
+                      const SizedBox(height: 12),
                       Wrap(
                         spacing: 6,
                         runSpacing: 6,
-                        children: _selectedTags
-                            .take(4)
-                            .map(
-                              (tag) => Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 3,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: AppTheme.primary.withValues(
-                                    alpha: isDark ? 0.22 : 0.1,
-                                  ),
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                                child: Text(
-                                  tag,
-                                  style: GoogleFonts.inter(
-                                    fontSize: 10.5,
-                                    fontWeight: FontWeight.w700,
-                                    color: AppTheme.primary,
-                                  ),
-                                ),
-                              ),
-                            )
+                        children: _tagSuggestions
+                            .where((t) => !_selectedTags.contains(t))
+                            .map((tag) => GestureDetector(
+                                  onTap: () => _addTag(tag),
+                                  child: _buildTagPill(tag, isDark, false),
+                                ))
                             .toList(),
                       ),
                     ],
                   ],
                 ),
               ),
+              Divider(color: isDark ? Colors.white10 : Colors.black12, height: 24),
+              
+              _buildPropertyRow(
+                icon: Icons.timer_outlined,
+                label: 'Expiry',
+                isDark: isDark,
+                mutedColor: mutedColor,
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _durationOptions.map((opt) => _buildDurationPill(opt, isDark, textColor, mutedColor)).toList(),
+                ),
+              ),
+              Divider(color: isDark ? Colors.white10 : Colors.black12, height: 24),
+              
+              _buildPropertyRow(
+                icon: _isPrivate ? Icons.lock_outline : Icons.public,
+                label: 'Privacy',
+                isDark: isDark,
+                mutedColor: mutedColor,
+                child: Row(
+                  children: [
+                    GestureDetector(
+                      onTap: () => setState(() => _isPrivate = false),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: !_isPrivate 
+                              ? (isDark ? Colors.white12 : Colors.black.withValues(alpha: 0.05)) 
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          'Public',
+                          style: GoogleFonts.inter(
+                            fontSize: 14,
+                            color: !_isPrivate ? textColor : mutedColor,
+                            fontWeight: !_isPrivate ? FontWeight.w500 : FontWeight.normal,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: () => setState(() => _isPrivate = true),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: _isPrivate 
+                              ? (isDark ? Colors.white12 : Colors.black.withValues(alpha: 0.05)) 
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          'Private',
+                          style: GoogleFonts.inter(
+                            fontSize: 14,
+                            color: _isPrivate ? textColor : mutedColor,
+                            fontWeight: _isPrivate ? FontWeight.w500 : FontWeight.normal,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              
+              if (_errorMessage != null) ...[
+                const SizedBox(height: 32),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.error_outline, size: 16, color: Colors.red.shade400),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _errorMessage!,
+                          style: GoogleFonts.inter(color: Colors.red.shade400, fontSize: 13),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPropertyRow({
+    required IconData icon,
+    required String label,
+    required bool isDark,
+    required Color mutedColor,
+    required Widget child,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 120,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Row(
+              children: [
+                Icon(icon, size: 16, color: mutedColor),
+                const SizedBox(width: 8),
+                Text(
+                  label,
+                  style: GoogleFonts.inter(
+                    fontSize: 14,
+                    color: mutedColor,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        Expanded(child: child),
+      ],
+    );
+  }
+
+  Widget _buildTagPill(String tag, bool isDark, bool isSelected) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: isSelected 
+            ? (isDark ? Colors.white12 : Colors.black.withValues(alpha: 0.05))
+            : Colors.transparent,
+        border: Border.all(
+          color: isSelected 
+              ? Colors.transparent 
+              : (isDark ? Colors.white24 : Colors.black26),
+        ),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            tag,
+            style: GoogleFonts.inter(
+              fontSize: 13,
+              color: isDark ? Colors.white70 : Colors.black87,
+            ),
+          ),
+          if (isSelected) ...[
+            const SizedBox(width: 4),
+            GestureDetector(
+              onTap: () => setState(() => _selectedTags.remove(tag)),
+              child: Icon(
+                Icons.close,
+                size: 12,
+                color: isDark ? Colors.white54 : Colors.black54,
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
 
-  Widget _buildSegmentOption({
-    required String title,
-    required String subtitle,
-    required IconData icon,
-    required bool selected,
-    required bool isDark,
-    required VoidCallback? onTap,
-  }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(18),
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(18),
-            color: selected
-                ? AppTheme.primary.withValues(alpha: isDark ? 0.18 : 0.08)
-                : (isDark
-                      ? Colors.white.withValues(alpha: 0.03)
-                      : const Color(0xFFF8FAFC)),
-            border: Border.all(
-              color: selected
-                  ? AppTheme.primary
-                  : (isDark ? Colors.white10 : const Color(0xFFE2E8F0)),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Icon(
-                    icon,
-                    size: 18,
-                    color: selected
-                        ? AppTheme.primary
-                        : (isDark ? Colors.white70 : const Color(0xFF475569)),
-                  ),
-                  const Spacer(),
-                  Icon(
-                    selected
-                        ? Icons.check_circle_rounded
-                        : Icons.radio_button_unchecked_rounded,
-                    size: 18,
-                    color: selected
-                        ? AppTheme.primary
-                        : (isDark ? Colors.white30 : const Color(0xFF94A3B8)),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text(
-                title,
-                style: GoogleFonts.inter(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: isDark ? Colors.white : const Color(0xFF0F172A),
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                subtitle,
-                style: GoogleFonts.inter(
-                  fontSize: 12,
-                  height: 1.35,
-                  color: isDark ? Colors.white54 : const Color(0xFF64748B),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDurationOption({
-    required _RoomDurationOption option,
-    required bool isDark,
-  }) {
-    final selected = _selectedDurationDays == option.days;
-    return InkWell(
-      onTap: _isSubmitting ? null : () => _selectDuration(option),
-      borderRadius: BorderRadius.circular(18),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+  Widget _buildDurationPill(_RoomDurationOption option, bool isDark, Color textColor, Color mutedColor) {
+    final isSelected = _selectedDurationDays == option.days;
+    return GestureDetector(
+      onTap: () => _selectDuration(option),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(18),
-          color: selected
-              ? AppTheme.primary.withValues(alpha: isDark ? 0.18 : 0.08)
-              : (isDark
-                    ? Colors.white.withValues(alpha: 0.03)
-                    : const Color(0xFFF8FAFC)),
+          color: isSelected 
+              ? (isDark ? Colors.white12 : Colors.black.withValues(alpha: 0.05))
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(6),
           border: Border.all(
-            color: selected
-                ? AppTheme.primary
-                : (isDark ? Colors.white10 : const Color(0xFFE2E8F0)),
+            color: isSelected 
+                ? Colors.transparent 
+                : (isDark ? Colors.white10 : Colors.black12),
           ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (option.locked)
-              Icon(
-                Icons.lock_rounded,
-                size: 16,
-                color: isDark ? Colors.white60 : const Color(0xFF64748B),
-              )
-            else
-              Icon(
-                selected ? Icons.check_circle_rounded : Icons.schedule_rounded,
-                size: 16,
-                color: selected
-                    ? AppTheme.primary
-                    : (isDark ? Colors.white70 : const Color(0xFF475569)),
+            Text(
+              option.title,
+              style: GoogleFonts.inter(
+                fontSize: 13,
+                color: isSelected ? textColor : mutedColor,
+                fontWeight: isSelected ? FontWeight.w500 : FontWeight.normal,
               ),
-            const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  option.title,
-                  style: GoogleFonts.inter(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
-                    color: isDark ? Colors.white : const Color(0xFF0F172A),
-                  ),
+            ),
+            if (option.locked) ...[
+              const SizedBox(width: 4),
+              Icon(
+                Icons.lock_outline,
+                size: 12,
+                color: mutedColor,
+              ),
+            ] else ...[
+              const SizedBox(width: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(4),
                 ),
-                Text(
+                child: Text(
                   option.subtitle,
                   style: GoogleFonts.inter(
-                    fontSize: 11.5,
-                    color: isDark ? Colors.white54 : const Color(0xFF64748B),
+                    fontSize: 9,
+                    color: mutedColor,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ],
         ),
       ),
