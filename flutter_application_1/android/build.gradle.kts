@@ -16,13 +16,13 @@ subprojects {
     project.layout.buildDirectory.set(newSubprojectBuildDir)
 
     tasks.withType<org.gradle.api.tasks.compile.JavaCompile>().configureEach {
-        sourceCompatibility = "1.8"
-        targetCompatibility = "1.8"
+        sourceCompatibility = "17"
+        targetCompatibility = "17"
     }
 
     tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
         kotlinOptions {
-            jvmTarget = "1.8"
+            jvmTarget = "17"
         }
     }
 
