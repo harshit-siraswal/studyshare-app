@@ -29,6 +29,8 @@ import '../../services/backend_api_service.dart';
 import '../../widgets/success_overlay.dart';
 import '../notices/post_notice_screen.dart';
 import '../../widgets/paywall_dialog.dart';
+import '../../widgets/premium_prompt_banner.dart';
+import '../../services/premium_prompt_service.dart';
 import '../../models/user.dart';
 import '../../utils/admin_access.dart';
 import '../../utils/user_identity_resolver.dart';
@@ -68,6 +70,8 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       IncomingShareService.instance;
   final StickerService _stickerService = StickerService();
   final SubscriptionService _subscriptionService = SubscriptionService();
+  late final PremiumPromptService _premiumPromptService;
+  bool _showPremiumBanner = false;
   int _currentIndex = 0;
   bool _showHelpOverlay = false;
   // True while the notices tab is scrolled into "immersive" mode — the
@@ -122,6 +126,13 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _loadComposerAccess();
     _initializeIncomingShareHandling();
     _initializeHomeWidgetHandling();
+
+    // Premium prompt — fires once per session after 5 min usage.
+    _premiumPromptService = PremiumPromptService(
+      subscriptionService: _subscriptionService,
+    );
+    _premiumPromptService.shouldShowPrompt.addListener(_onPremiumPromptChanged);
+    _premiumPromptService.startTracking();
   }
 
   @override
@@ -139,9 +150,17 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    _premiumPromptService.shouldShowPrompt.removeListener(_onPremiumPromptChanged);
+    _premiumPromptService.dispose();
     _shareSubscription?.cancel();
     _homeWidgetSubscription?.cancel();
     super.dispose();
+  }
+
+  void _onPremiumPromptChanged() {
+    if (_premiumPromptService.shouldShowPrompt.value && mounted) {
+      setState(() => _showPremiumBanner = true);
+    }
   }
 
   Future<void> _checkHelpOverlay() async {
@@ -801,6 +820,20 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
 
           // Help Overlay (shows on first launch)
           if (_showHelpOverlay) HelpOverlay(onDismiss: _dismissHelpOverlay),
+
+          // Premium upgrade prompt (non-blocking bottom banner)
+          if (_showPremiumBanner)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: bottomPadding + 100,
+              child: PremiumPromptBanner(
+                onDismiss: () {
+                  setState(() => _showPremiumBanner = false);
+                  _premiumPromptService.markPromptShown();
+                },
+              ),
+            ),
 
           // Floating Bottom Navigation Bar (slides away while reading notices)
           Positioned(
