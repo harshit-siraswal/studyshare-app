@@ -12,7 +12,7 @@ import '../../models/attendance_models.dart';
 import '../../services/attendance_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/home_widget_service.dart';
-import 'attendance_web_login_screen.dart';
+import 'attendance_onboarding_screen.dart';
 
 class AttendanceScreen extends StatefulWidget {
   final String collegeId;
@@ -176,16 +176,18 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     if (!mounted) return;
 
     final navigator = Navigator.of(context);
-    final token = await navigator.push<String>(
-      MaterialPageRoute(builder: (_) => const AttendanceWebLoginScreen()),
+    final result = await navigator.push<bool>(
+      MaterialPageRoute(
+        builder: (_) => AttendanceOnboardingScreen(
+          collegeId: widget.collegeId,
+          collegeName: widget.collegeName,
+          userEmail: _currentUserEmail,
+        ),
+      ),
     );
-    if (!mounted || token == null || token.trim().isEmpty) return;
+    if (!mounted || result != true) return;
 
-    try {
-      await _syncWithToken(token.trim(), isManualSync: true);
-    } catch (error) {
-      _showSyncError(error);
-    }
+    await _loadInitialData();
   }
 
   bool _isLikelyExpiredSessionError(Object error) {

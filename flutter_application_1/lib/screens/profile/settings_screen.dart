@@ -18,6 +18,7 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import '../../services/push_notification_service.dart';
 import '../../services/subscription_service.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import '../settings/attendance_settings_tile.dart';
 import '../../widgets/paywall_dialog.dart';
 import '../../utils/theme_animator.dart';
 
@@ -510,6 +511,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                                 : null,
                           ),
                         ],
+                      ),
+
+                      const SizedBox(height: 24),
+                      AttendanceSettingsTile(
+                        collegeId: 'kiet',
+                        collegeName: 'KIET Group of Institutions',
+                        userEmail: widget.userEmail,
                       ),
 
                       const SizedBox(height: 24),
