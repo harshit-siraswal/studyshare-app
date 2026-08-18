@@ -187,7 +187,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     );
     if (!mounted || result != true) return;
 
-    await _loadInitialData();
+    await _loadCachedSnapshot();
   }
 
   bool _isLikelyExpiredSessionError(Object error) {
