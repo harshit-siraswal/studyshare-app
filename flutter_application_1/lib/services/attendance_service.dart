@@ -633,4 +633,76 @@ class AttendanceService {
         '${snapshot.student.semesterName}\n\n'
         'Low attendance summary:\n$lowAttendanceLines';
   }
+
+  // --- CyberVidya Credentials & College Email Integration Extensions ---
+
+  static const String _collegeEmailConnectedKey = 'college_email_connected';
+  static const String _collegeEmailAddressKey = 'college_email_address';
+  static const String _cybervidyaCredentialsSavedKey = 'cybervidya_creds_saved';
+  static const String _cybervidyaRegNoKey = 'cybervidya_reg_no';
+  static const String _lastSyncTimeKey = 'cybervidya_last_sync_time';
+
+  Future<bool> isCollegeEmailConnected() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_collegeEmailConnectedKey) ?? false;
+  }
+
+  Future<String?> getConnectedCollegeEmail() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_collegeEmailAddressKey);
+  }
+
+  Future<void> saveCollegeEmailConnection({
+    required String emailAddress,
+    required String provider,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_collegeEmailConnectedKey, true);
+    await prefs.setString(_collegeEmailAddressKey, emailAddress);
+  }
+
+  Future<void> disconnectCollegeEmail() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_collegeEmailConnectedKey);
+    await prefs.remove(_collegeEmailAddressKey);
+  }
+
+  Future<bool> isCybervidyaAccountConnected() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_cybervidyaCredentialsSavedKey) ?? false;
+  }
+
+  Future<String?> getSavedRegistrationNumber() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_cybervidyaRegNoKey);
+  }
+
+  Future<void> markCybervidyaCredentialsSaved({
+    required String registrationNumber,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_cybervidyaCredentialsSavedKey, true);
+    await prefs.setString(_cybervidyaRegNoKey, registrationNumber);
+  }
+
+  Future<void> updateLastSyncTime() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_lastSyncTimeKey, DateTime.now().toIso8601String());
+  }
+
+  Future<DateTime?> getLastSyncTime() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_lastSyncTimeKey);
+    if (raw == null) return null;
+    return DateTime.tryParse(raw);
+  }
+
+  Future<void> disconnectCybervidyaAccount(String collegeId, {String? userEmail}) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_cybervidyaCredentialsSavedKey);
+    await prefs.remove(_cybervidyaRegNoKey);
+    await prefs.remove(_lastSyncTimeKey);
+    await clearSavedSession(collegeId, userEmail: userEmail);
+  }
 }
+
