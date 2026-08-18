@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../config/theme.dart';
-import '../../models/attendance_models.dart';
 import '../../services/attendance_service.dart';
 
 class AttendanceOnboardingScreen extends StatefulWidget {
@@ -176,7 +175,7 @@ class _AttendanceOnboardingScreenState
           child: LinearProgressIndicator(
             value: (_currentStep + 1) / 4.0,
             backgroundColor: isDark ? Colors.grey[800] : Colors.grey[300],
-            valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primaryAccent),
+            valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.primary),
           ),
         ),
       ),
@@ -211,7 +210,7 @@ class _AttendanceOnboardingScreenState
       children: [
         Row(
           children: [
-            Icon(Icons.shield_outlined, color: AppTheme.primaryAccent, size: 28),
+            const Icon(Icons.shield_outlined, color: AppTheme.primary, size: 28),
             const SizedBox(width: 12),
             Text(
               'Privacy & Security',
@@ -296,7 +295,7 @@ class _AttendanceOnboardingScreenState
           child: ElevatedButton(
             onPressed: _termsAccepted ? _nextStep : null,
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primaryAccent,
+              backgroundColor: AppTheme.primary,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
               ),
@@ -348,7 +347,7 @@ class _AttendanceOnboardingScreenState
               borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
+                  color: Colors.black.withValues(alpha: 0.05),
                   blurRadius: 10,
                   offset: const Offset(0, 4),
                 ),
@@ -356,10 +355,10 @@ class _AttendanceOnboardingScreenState
             ),
             child: Column(
               children: [
-                Icon(
+                const Icon(
                   Icons.alternate_email_rounded,
                   size: 48,
-                  color: AppTheme.primaryAccent,
+                  color: AppTheme.primary,
                 ),
                 const SizedBox(height: 16),
                 Text(
@@ -510,7 +509,7 @@ class _AttendanceOnboardingScreenState
                 child: ElevatedButton(
                   onPressed: _handleStartSync,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primaryAccent,
+                    backgroundColor: AppTheme.primary,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
                   child: Text(
@@ -542,7 +541,7 @@ class _AttendanceOnboardingScreenState
             child: CircularProgressIndicator(
               value: _isSyncing ? null : _syncProgress,
               strokeWidth: 6,
-              color: AppTheme.primaryAccent,
+              color: AppTheme.primary,
             ),
           ),
           const SizedBox(height: 32),
@@ -573,7 +572,7 @@ class _AttendanceOnboardingScreenState
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.red.withOpacity(0.1),
+                color: Colors.red.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
@@ -602,7 +601,7 @@ class _AttendanceOnboardingScreenState
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Icon(icon, color: AppTheme.primaryAccent, size: 22),
+        Icon(icon, color: AppTheme.primary, size: 22),
         const SizedBox(width: 12),
         Expanded(
           child: Column(

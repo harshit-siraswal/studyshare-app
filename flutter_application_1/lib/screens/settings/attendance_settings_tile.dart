@@ -143,7 +143,7 @@ class _AttendanceSettingsTileState extends State<AttendanceSettingsTile> {
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        sideBorder: BorderSide(
+        side: BorderSide(
           color: isDark ? Colors.white12 : Colors.black12,
         ),
       ),
@@ -157,7 +157,7 @@ class _AttendanceSettingsTileState extends State<AttendanceSettingsTile> {
               children: [
                 Icon(
                   Icons.school_rounded,
-                  color: AppTheme.primaryAccent,
+                  color: AppTheme.primary,
                   size: 24,
                 ),
                 const SizedBox(width: 10),
