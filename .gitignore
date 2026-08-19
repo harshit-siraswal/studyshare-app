@@ -27,6 +27,7 @@ flutter_application_1/lib/config/app_config.dart
 **/coverage/
 **/*.iml
 **/.gradle/
+**/.kotlin/
 
 # Android build artifacts
 **/intermediates/

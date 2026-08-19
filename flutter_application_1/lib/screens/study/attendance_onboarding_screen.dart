@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../config/theme.dart';
 import '../../services/attendance_service.dart';
+import '../../services/backend_api_service.dart';
+import '../../services/gmail_oauth_service.dart';
 
 class AttendanceOnboardingScreen extends StatefulWidget {
   const AttendanceOnboardingScreen({
@@ -23,6 +25,8 @@ class AttendanceOnboardingScreen extends StatefulWidget {
 class _AttendanceOnboardingScreenState
     extends State<AttendanceOnboardingScreen> {
   final AttendanceService _attendanceService = AttendanceService();
+  final BackendApiService _backendApiService = BackendApiService();
+  final GmailOAuthService _gmailOAuthService = GmailOAuthService();
   final _formKey = GlobalKey<FormState>();
 
   int _currentStep = 0; // 0: Terms, 1: College Email, 2: Credentials, 3: Syncing
@@ -65,6 +69,10 @@ class _AttendanceOnboardingScreenState
     }
   }
 
+  /// Opens the Google account picker with gmail.readonly scope.
+  /// The user can authorize **any** Gmail — it does not have to be their
+  /// StudyShare account. The serverAuthCode is sent to the backend to
+  /// exchange for an encrypted refresh token so the backend can read OTPs.
   Future<void> _handleConnectEmail() async {
     setState(() {
       _isConnectingEmail = true;
@@ -72,14 +80,40 @@ class _AttendanceOnboardingScreenState
     });
 
     try {
-      // Simulate OAuth redirect connection for college email
-      await Future.delayed(const Duration(seconds: 2));
-      final simulatedEmail = widget.userEmail?.isNotEmpty == true
-          ? widget.userEmail!
-          : 'student@kiet.edu';
+      final result = await _gmailOAuthService.signIn();
 
+      if (result == null) {
+        // User cancelled the account picker.
+        if (!mounted) return;
+        setState(() => _isConnectingEmail = false);
+        return;
+      }
+
+      // Exchange the serverAuthCode on the backend (best-effort).
+      // Even if the backend call fails we still record the email locally so
+      // the user can proceed; a warning is shown instead of a hard block.
+      String? backendWarning;
+      if (result.serverAuthCode.isNotEmpty) {
+        try {
+          await _backendApiService.connectCollegeEmail(
+            emailAddress: result.emailAddress,
+            serverAuthCode: result.serverAuthCode,
+            provider: 'google',
+          );
+        } catch (e) {
+          backendWarning =
+              'Email authorized, but the server could not store the access '
+              'token right now. OTP auto-read may not work until you reconnect.';
+        }
+      } else {
+        backendWarning =
+            'Email authorized without server token exchange (serverClientId '
+            'not configured). Automated OTP reading requires backend setup.';
+      }
+
+      // Persist the authorized email address locally (for display only).
       await _attendanceService.saveCollegeEmailConnection(
-        emailAddress: simulatedEmail,
+        emailAddress: result.emailAddress,
         provider: 'google',
       );
 
@@ -87,15 +121,19 @@ class _AttendanceOnboardingScreenState
       setState(() {
         _isConnectingEmail = false;
         _isEmailConnected = true;
-        _connectedEmail = simulatedEmail;
+        _connectedEmail = result.emailAddress;
+        _errorMessage = backendWarning;
       });
 
-      _nextStep();
+      // Only auto-advance if there's no warning.
+      if (backendWarning == null) {
+        _nextStep();
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isConnectingEmail = false;
-        _errorMessage = 'Failed to connect college email. Please try again.';
+        _errorMessage = 'Failed to authorize Gmail: ${e.toString().replaceAll('Exception: ', '')}';
       });
     }
   }
@@ -316,11 +354,12 @@ class _AttendanceOnboardingScreenState
 
   // --- Step 2: Connect College Email ---
   Widget _buildEmailStep(bool isDark) {
+    final hasWarning = _errorMessage != null && _isEmailConnected;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Connect College Email',
+          'Connect Gmail for OTP',
           style: GoogleFonts.inter(
             fontSize: 22,
             fontWeight: FontWeight.w700,
@@ -329,7 +368,9 @@ class _AttendanceOnboardingScreenState
         ),
         const SizedBox(height: 12),
         Text(
-          'CyberVidya sends login OTP verification codes to your college email address. Connect your mailbox so StudyShare can retrieve OTPs automatically.',
+          'CyberVidya sends a one-time password to your email when you log in. '
+          'Authorize a Gmail account so StudyShare can read that OTP automatically.\n\n'
+          'This can be any Gmail — it does not need to be the email you use for StudyShare.',
           style: GoogleFonts.inter(
             fontSize: 14,
             height: 1.5,
@@ -345,6 +386,14 @@ class _AttendanceOnboardingScreenState
             decoration: BoxDecoration(
               color: isDark ? const Color(0xFF1E293B) : Colors.white,
               borderRadius: BorderRadius.circular(16),
+              border: _isEmailConnected
+                  ? Border.all(
+                      color: hasWarning
+                          ? Colors.orange.withValues(alpha: 0.6)
+                          : Colors.green.withValues(alpha: 0.6),
+                      width: 1.5,
+                    )
+                  : null,
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.05),
@@ -355,30 +404,40 @@ class _AttendanceOnboardingScreenState
             ),
             child: Column(
               children: [
-                const Icon(
-                  Icons.alternate_email_rounded,
+                Icon(
+                  _isEmailConnected
+                      ? (hasWarning
+                          ? Icons.warning_amber_rounded
+                          : Icons.mark_email_read_rounded)
+                      : Icons.alternate_email_rounded,
                   size: 48,
-                  color: AppTheme.primary,
+                  color: _isEmailConnected
+                      ? (hasWarning ? Colors.orange : Colors.green)
+                      : AppTheme.primary,
                 ),
                 const SizedBox(height: 16),
                 Text(
                   _isEmailConnected
-                      ? 'Connected: $_connectedEmail'
-                      : 'No College Email Connected',
+                      ? _connectedEmail ?? 'Gmail Connected'
+                      : 'No Gmail Connected',
                   style: GoogleFonts.inter(
                     fontSize: 16,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w700,
                     color: isDark ? Colors.white : Colors.black87,
                   ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 6),
                 Text(
                   _isEmailConnected
-                      ? 'Mailbox ready for automated OTP retrieval.'
-                      : 'Click below to authorize email OAuth consent.',
+                      ? (hasWarning
+                          ? 'Authorized — server token pending'
+                          : 'Ready for automated OTP retrieval')
+                      : 'Tap below to sign in with Google',
                   style: GoogleFonts.inter(
                     fontSize: 13,
-                    color: isDark ? Colors.white70 : Colors.black54,
+                    color: _isEmailConnected
+                        ? (hasWarning ? Colors.orange : Colors.green)
+                        : (isDark ? Colors.white70 : Colors.black54),
                   ),
                 ),
               ],
@@ -387,9 +446,25 @@ class _AttendanceOnboardingScreenState
         ),
         if (_errorMessage != null) ...[
           const SizedBox(height: 16),
-          Text(
-            _errorMessage!,
-            style: GoogleFonts.inter(color: Colors.redAccent, fontSize: 13),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: (hasWarning ? Colors.orange : Colors.red)
+                  .withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(
+                color: (hasWarning ? Colors.orange : Colors.red)
+                    .withValues(alpha: 0.3),
+              ),
+            ),
+            child: Text(
+              _errorMessage!,
+              style: GoogleFonts.inter(
+                color: hasWarning ? Colors.orange[800] : Colors.redAccent,
+                fontSize: 12,
+                height: 1.4,
+              ),
+            ),
           ),
         ],
         const Spacer(),
@@ -403,6 +478,10 @@ class _AttendanceOnboardingScreenState
             Expanded(
               child: ElevatedButton.icon(
                 onPressed: _isConnectingEmail ? null : _handleConnectEmail,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
                 icon: _isConnectingEmail
                     ? const SizedBox(
                         width: 18,
@@ -412,15 +491,35 @@ class _AttendanceOnboardingScreenState
                           color: Colors.white,
                         ),
                       )
-                    : const Icon(Icons.login_rounded),
+                    : const Icon(Icons.login_rounded, color: Colors.white),
                 label: Text(
-                  _isEmailConnected ? 'Re-connect Email' : 'Connect College Email',
-                  style: GoogleFonts.inter(fontWeight: FontWeight.w600),
+                  _isEmailConnected ? 'Re-connect Gmail' : 'Sign in with Google',
+                  style: GoogleFonts.inter(
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
                 ),
               ),
             ),
           ],
         ),
+        // "Continue anyway" if email is connected but there was a backend warning.
+        if (hasWarning) ...[
+          const SizedBox(height: 8),
+          SizedBox(
+            width: double.infinity,
+            child: TextButton(
+              onPressed: _nextStep,
+              child: Text(
+                'Continue anyway',
+                style: GoogleFonts.inter(
+                  fontSize: 14,
+                  color: isDark ? Colors.white70 : Colors.black54,
+                ),
+              ),
+            ),
+          ),
+        ],
       ],
     );
   }

@@ -638,6 +638,7 @@ class AttendanceService {
 
   static const String _collegeEmailConnectedKey = 'college_email_connected';
   static const String _collegeEmailAddressKey = 'college_email_address';
+  static const String _collegeEmailProviderKey = 'college_email_provider';
   static const String _cybervidyaCredentialsSavedKey = 'cybervidya_creds_saved';
   static const String _cybervidyaRegNoKey = 'cybervidya_reg_no';
   static const String _lastSyncTimeKey = 'cybervidya_last_sync_time';
@@ -659,12 +660,22 @@ class AttendanceService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_collegeEmailConnectedKey, true);
     await prefs.setString(_collegeEmailAddressKey, emailAddress);
+    await prefs.setString(_collegeEmailProviderKey, provider);
   }
 
+  /// Clears the local college email record AND revokes the backend OAuth token.
+  /// Errors from the backend call are logged but do not block local cleanup.
   Future<void> disconnectCollegeEmail() async {
+    // Best-effort backend revocation first.
+    try {
+      await _apiService.disconnectCollegeEmail();
+    } catch (e) {
+      debugPrint('[AttendanceService] Backend college-email disconnect failed (ignored): $e');
+    }
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_collegeEmailConnectedKey);
     await prefs.remove(_collegeEmailAddressKey);
+    await prefs.remove(_collegeEmailProviderKey);
   }
 
   Future<bool> isCybervidyaAccountConnected() async {

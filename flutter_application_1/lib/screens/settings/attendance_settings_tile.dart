@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../config/theme.dart';
 import '../../services/attendance_service.dart';
+import '../../services/backend_api_service.dart';
+import '../../services/gmail_oauth_service.dart';
 
 class AttendanceSettingsTile extends StatefulWidget {
   const AttendanceSettingsTile({
@@ -23,6 +25,8 @@ class AttendanceSettingsTile extends StatefulWidget {
 
 class _AttendanceSettingsTileState extends State<AttendanceSettingsTile> {
   final AttendanceService _attendanceService = AttendanceService();
+  final BackendApiService _backendApiService = BackendApiService();
+  final GmailOAuthService _gmailOAuthService = GmailOAuthService();
 
   bool _isLoading = true;
   bool _isEmailConnected = false;
@@ -30,6 +34,7 @@ class _AttendanceSettingsTileState extends State<AttendanceSettingsTile> {
   bool _isCybervidyaConnected = false;
   String? _savedRegNo;
   DateTime? _lastSyncTime;
+  bool _isConnectingEmail = false;
 
   @override
   void initState() {
@@ -54,6 +59,58 @@ class _AttendanceSettingsTileState extends State<AttendanceSettingsTile> {
       _savedRegNo = regNo;
       _lastSyncTime = lastSync;
     });
+  }
+
+  /// Drives the real Gmail OAuth flow from the Settings page.
+  Future<void> _connectEmail() async {
+    setState(() => _isConnectingEmail = true);
+    try {
+      final result = await _gmailOAuthService.signIn();
+      if (result == null) {
+        // user cancelled
+        if (!mounted) return;
+        setState(() => _isConnectingEmail = false);
+        return;
+      }
+
+      // Best-effort backend token exchange.
+      if (result.serverAuthCode.isNotEmpty) {
+        try {
+          await _backendApiService.connectCollegeEmail(
+            emailAddress: result.emailAddress,
+            serverAuthCode: result.serverAuthCode,
+            provider: 'google',
+          );
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Email authorized but server could not store the token. '
+                  'OTP auto-read may not work until reconnected.',
+                ),
+              ),
+            );
+          }
+        }
+      }
+
+      await _attendanceService.saveCollegeEmailConnection(
+        emailAddress: result.emailAddress,
+        provider: 'google',
+      );
+
+      await _loadSettingsState();
+      widget.onSettingsChanged?.call();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gmail sign-in failed: ${e.toString().replaceAll('Exception: ', '')}')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isConnectingEmail = false);
+    }
   }
 
   Future<void> _disconnectEmail() async {
@@ -203,10 +260,14 @@ class _AttendanceSettingsTileState extends State<AttendanceSettingsTile> {
                       child: const Text('Unsync'),
                     )
                   : ElevatedButton(
-                      onPressed: () {
-                        // Launch email connection flow
-                      },
-                      child: const Text('Connect'),
+                      onPressed: _isConnectingEmail ? null : _connectEmail,
+                      child: _isConnectingEmail
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Connect'),
                     ),
             ),
             const Divider(height: 16),

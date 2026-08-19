@@ -1655,6 +1655,36 @@ class BackendApiService {
     );
   }
 
+  /// Sends the Gmail server-auth-code to the backend so it can exchange it for a
+  /// refresh token and store it encrypted. The [serverAuthCode] is a single-use
+  /// value obtained from [GmailOAuthService.signIn()]. Pass an empty string when
+  /// no serverClientId is configured (email-display-only mode).
+  Future<Map<String, dynamic>> connectCollegeEmail({
+    required String emailAddress,
+    required String serverAuthCode,
+    String provider = 'google',
+  }) async {
+    return _requestJson(
+      '/api/attendance/email/connect',
+      method: 'POST',
+      body: {
+        'emailAddress': emailAddress,
+        'serverAuthCode': serverAuthCode,
+        'provider': provider,
+      },
+      requireAuthToken: true,
+    );
+  }
+
+  /// Revokes and deletes the stored college email OAuth tokens on the backend.
+  Future<Map<String, dynamic>> disconnectCollegeEmail() async {
+    return _requestJson(
+      '/api/attendance/email/disconnect',
+      method: 'DELETE',
+      requireAuthToken: true,
+    );
+  }
+
   Future<Map<String, dynamic>> resolveResourceScopes({
     required Map<String, dynamic> selectedScope,
   }) async {
