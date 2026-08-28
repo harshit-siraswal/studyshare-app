@@ -84,6 +84,23 @@ class AppConfig {
     return effectiveValue;
   }
 
+  static const String _defaultGoogleCollegeServerClientId =
+      '28032445048-2sgl0d0v194enfqc0ddesj85ne4br8rb.apps.googleusercontent.com';
+
+  static const String _googleCollegeServerClientIdFromEnv =
+      String.fromEnvironment(
+    'GOOGLE_COLLEGE_SERVER_CLIENT_ID',
+    defaultValue: _defaultGoogleCollegeServerClientId,
+  );
+
+  static String get googleCollegeServerClientId {
+    final trimmed = _googleCollegeServerClientIdFromEnv.trim();
+    final effectiveValue = trimmed.isEmpty
+        ? _defaultGoogleCollegeServerClientId.trim()
+        : trimmed;
+    return effectiveValue;
+  }
+
   static String get googleServerClientId {
     final trimmed = _googleServerClientIdFromEnv.trim();
     final effectiveValue = trimmed.isEmpty

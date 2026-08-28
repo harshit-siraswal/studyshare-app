@@ -1,4 +1,4 @@
-﻿import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
 import '../config/app_config.dart';
@@ -38,7 +38,7 @@ class GmailOAuthService {
       'https://www.googleapis.com/auth/gmail.readonly';
 
   GoogleSignIn _buildClient() {
-    final serverClientId = AppConfig.googleServerClientId.trim();
+    final serverClientId = AppConfig.googleCollegeServerClientId.trim();
     if (serverClientId.isEmpty) {
       // Fall back to platform config if no server client ID configured.
       return GoogleSignIn(scopes: const [_gmailReadonlyScope]);
